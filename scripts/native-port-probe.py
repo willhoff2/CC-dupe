@@ -51,8 +51,10 @@ CLANG_FLAGS = [
     "-fsyntax-only",
     "-std=c++20",
     "-m64",
-    "-fms-extensions",
     "-ferror-limit=0",
+    # Keeps `__int64`, `__forceinline` and friends available; the codebase relies on them
+    # pervasively and replacing them is a separate mechanical pass.
+    "-fms-extensions",
     # Mirrors the `/FIUtility/CppMacros.h` force-include the MSVC build uses.
     "-include",
     "Utility/CppMacros.h",

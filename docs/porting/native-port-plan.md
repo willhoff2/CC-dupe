@@ -13,14 +13,18 @@ ParticleEditor), GameSpy online matchmaking, and binary/replay/save compatibilit
 `clang++ -fsyntax-only -std=c++20 -m64` (no Windows SDK, no Wine) and categorises every
 diagnostic. Baseline is in [`native-port-probe-report.md`](native-port-probe-report.md).
 
-Headline result: **96 of 147 translation units (65%) already compile clean under native
-64-bit clang**, with **125 errors** remaining in the other 51. The `Core/Libraries` slice is
-much closer to portable than the raw `windows.h` counts suggest.
+Headline result: **106 of 147 translation units (72%) compile clean under native 64-bit
+clang**, with **88 errors** remaining in the other 41. The `Core/Libraries` slice is much
+closer to portable than the raw `windows.h` counts suggest.
 
-Two findings worth recording:
+Findings worth recording:
 
 - Force-including `Utility/CppMacros.h` (as the MSVC build does via `/FIUtility/CppMacros.h`)
   is required; without it the VC6 compatibility macros are undefined everywhere.
+- Under `-fms-extensions` clang predeclares `_lrotl` and `_ReturnAddress` as builtins, which
+  collide with the shims in `Utility/intrin_compat.h`; the shims now defer to the builtins.
+  Keeping `-fms-extensions` is worth it — dropping it costs 65 new errors from `__int64` and
+  `__forceinline` alone, so replacing those keywords is its own mechanical pass.
 - `Core/Libraries/Source` must **not** be on the include path for a libstdc++ build: its
   `debug/` and `profile/` subdirectories shadow libstdc++'s internal `<debug/...>` and
   `<profile/...>` header directories and generate ~6,000 spurious errors inside the standard
@@ -33,15 +37,23 @@ unit-testable natively. Remaining work by category, from the probe:
 
 | Work item | Errors | Notes |
 |---|---:|---|
-| `windows.h` includes in otherwise-portable files | 21 | Guard behind a `platform/` header |
-| `sint64`/`__int64` typedefs not visible off-MSVC | 12 | Move to a shared fixed-width header |
-| `register` storage class (removed in C++17) | 10 | Mechanical deletion |
-| Win32 types (`HANDLE`, `CRITICAL_SECTION`, `LARGE_INTEGER`, `HKEY`, `HMODULE`) | 20 | Thread/timing/registry shims |
-| Functions differing only in return type, `_lrotl` ambiguity, misc MSVC-isms | 24 | Per-site fixes |
-| Vendored headers absent from the repo (`CompLibHeader/lzhl.h`, `d3d8types.h`, `imagehlp.h`, `oaidl.h`) | 25 | Vendor, stub, or exclude the file |
+| Win32 API calls in `mpu.cpp`, `mutex.cpp`, `thread.cpp`, `registry.cpp`, `wwdebug.cpp` | 44 | Needs the Phase 3 thread/timing/registry shims |
+| `windows.h` / vendored headers absent off-Windows (`d3d8types.h`, `imagehlp.h`, `oaidl.h`, `gnu_regex.h`, `CompLibHeader/lzhl.h`) | 29 | Vendor, stub, or exclude the file |
+| Win32 types (`LARGE_INTEGER`, `HANDLE`, `HKEY`, `HMODULE`, `HRSRC`) | 10 | Same shim layer |
+| Misc (`main` signature in the bundled `debug` test programs, `strtok_r` exception spec) | 5 | Per-site fixes |
 
-A one-line fix (`#include <wctype.h>` in `WWLib/stringex.h`) already moved this slice from
-11% to 65% clean, which is the sort of leverage to expect early in this phase.
+Already fixed in this pass, taking the slice from 11% to 72% clean:
+
+- `#include <wctype.h>` in `WWLib/stringex.h` for `towlower` (100 errors, on its own worth 54
+  percentage points).
+- `sint64` in `cpudetect.h` was typedef'd only under `WIN32` or `_UNIX`; falls back to
+  `long long` now.
+- Removed the 10 `register` storage-class specifiers in `lzo1x_c.cpp` / `lzo1x_d.cpp`, which
+  C++17 no longer allows.
+- Deferred to clang's builtin `_lrotl` / `_ReturnAddress` in `Utility/intrin_compat.h`.
+
+What is left is no longer incidental: essentially every remaining error is a real Win32 API
+dependency, so Phase 1 now converges into Phase 3 rather than standing alone.
 
 ## Phase 2 — 64-bit correctness (~600–1,200 h)
 

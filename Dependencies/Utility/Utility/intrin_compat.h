@@ -71,7 +71,9 @@ static inline __int64 _rdtsc()
 
 #include <cstdint>
 
-#if !defined(_lrotl) && !defined(_WIN32)
+// Clang predeclares the MS intrinsics below when -fms-extensions is active, so defining them
+// here would clash with the builtin declaration.
+#if !defined(_lrotl) && !defined(_WIN32) && !defined(__clang__)
 static inline uint32_t _lrotl(uint32_t value, int shift)
 {
 #if defined(__has_builtin) && __has_builtin(__builtin_rotateleft32)
@@ -107,6 +109,8 @@ static inline uint64_t _rdtsc()
 #ifdef _WIN32
 #include <intrin.h>
 #pragma intrinsic(_ReturnAddress)
+#elif defined(__clang__)
+// Provided as a builtin by clang under -fms-extensions.
 #elif defined(__has_builtin)
     #if __has_builtin(__builtin_return_address)
     static inline uintptr_t _ReturnAddress()
