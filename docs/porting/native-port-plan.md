@@ -50,7 +50,11 @@ Already fixed in this pass, taking the slice from 11% to 72% clean:
   `long long` now.
 - Removed the 10 `register` storage-class specifiers in `lzo1x_c.cpp` / `lzo1x_d.cpp`, which
   C++17 no longer allows.
-- Deferred to clang's builtin `_lrotl` / `_ReturnAddress` in `Utility/intrin_compat.h`.
+- Added a width-explicit `rotl32` in `Utility/intrin_compat.h` and moved the CRC call sites onto
+  it. The MS `_lrotl` intrinsic is declared over `unsigned long`, which is 64 bits under LP64, so
+  relying on it would silently change CRC results off Windows. The `_lrotl` and `_ReturnAddress`
+  shims are gated on `__has_builtin` rather than on `__clang__`, since clang only predeclares
+  them under `-fms-extensions`/`-fms-compatibility`.
 
 What is left is no longer incidental: essentially every remaining error is a real Win32 API
 dependency, so Phase 1 now converges into Phase 3 rather than standing alone.
