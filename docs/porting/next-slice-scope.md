@@ -28,18 +28,35 @@ Gameplay, AI, scripting, INI parsing and the WND GUI system are portable C++ alr
 Win32 and D3D dependencies are concentrated in the device layers exactly where a port wants
 them.
 
-The renderer surface is similarly contained. All Direct3D 8 traffic goes through
-`DX8CALL(...)` in `dx8wrapper`: **13,517 LOC of `dx8*` files, 45 call sites, 34 distinct D3D8
-device methods**. Retargeting that one wrapper is the whole renderer job — no engine-wide
-rewrite.
+The renderer surface is contained, but **not as contained as first stated here.** The original
+claim — "all Direct3D 8 traffic goes through `DX8CALL(...)`: 13,517 LOC of `dx8*` files, 45 call
+sites, 34 distinct D3D8 device methods" — was measured properly during the Phase 4 renderer spike
+and two thirds of it is wrong:
+
+| | Claimed | Measured |
+|---|---:|---:|
+| LOC of `dx8*` files | 13,517 | 13,517 |
+| `DX8CALL` call sites | 45 | **82** |
+| distinct D3D8 methods | 34 | **62** (52 `IDirect3DDevice8` + 10 `IDirect3D8`) |
+| total D3D8 call sites | — | **458**, of which only 82 (18%) go through the macro |
+
+The remaining **376 call sites bypass `DX8Wrapper` and talk to `IDirect3DDevice8` directly**,
+concentrated in `W3DWater.cpp` (129), `W3DShaderManager.cpp` (103), `W3DVolumetricShadow.cpp` (38)
+and `W3DProjectedShadow.cpp` (25) — effectively a second renderer beside the wrapper. So
+"retarget one wrapper" is not the whole renderer job. 62 methods is still a small, fixed-function
+slice of D3D8 and still worth retargeting rather than rewriting, but the direct call sites have to
+be routed through the wrapper first.
+
+Full enumeration, Vulkan mapping and working proof-of-concept: `docs/porting/renderer-surface.md`
+and `spikes/renderer/`.
 
 ## Revised estimates
 
 | Phase | Was | Now | Why |
 |---|---:|---:|---|
 | 3 Platform abstraction | 400–800 h | **250–450 h** | ~20 `HWND` files in scope, not 287 |
-| 4 Renderer | 600–1,200 h | **500–900 h** | 34 distinct D3D8 entry points behind one wrapper |
-| Total (cut scope, skirmish + campaign) | 3,000–6,000 h | **2,600–5,200 h** | |
+| 4 Renderer | 600–1,200 h | **700–1,300 h** | 62 D3D8 entry points, and 376 of 458 call sites bypass the wrapper — see `renderer-surface.md` |
+| Total (cut scope, skirmish + campaign) | 3,000–6,000 h | **2,800–5,600 h** | |
 
 ## Proposed next slice: Phase 3a — threading, timing, registry
 
@@ -67,5 +84,11 @@ on where settings live on macOS.
 
 1. **Phase 2, 64-bit correctness** — must land before the renderer work is worth debugging.
    Start with the save/load serialisation rewrite, since campaign depends on it.
-2. **Phase 4 renderer spike** — prove one triangle through `DX8CALL` → Vulkan → MoltenVK before
-   committing to the full backend. A spike is ~40 h and de-risks the largest line item.
+2. ~~**Phase 4 renderer spike**~~ — **done**, see `docs/porting/renderer-surface.md` and
+   `spikes/renderer/`. A textured triangle renders through a `DX8Wrapper`-shaped abstraction on
+   Vulkan; the two architectural risks (immutable pipelines, the `SetTextureStageState` cascade)
+   both have working solutions. Verified on Linux only — running it through MoltenVK on macOS is
+   the one open item.
+3. **Route the 376 direct D3D8 call sites through `DX8Wrapper`, while still on D3D8.** Highest-value
+   de-risking now available: mechanical, incremental, and verifiable against the working Windows
+   build. Do it before writing the Vulkan backend, not after.
