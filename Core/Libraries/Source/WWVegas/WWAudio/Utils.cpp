@@ -39,4 +39,6 @@
 #include "Utils.h"
 
 
+#ifdef _WIN32
 CRITICAL_SECTION MMSLockClass::_MSSLockCriticalSection;
+#endif

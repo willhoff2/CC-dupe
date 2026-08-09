@@ -63,7 +63,10 @@ class MMSLockClass
 		~MMSLockClass () { ::AIL_unlock (); }
 
 
+#ifdef _WIN32
+	// Vestigial: the lock is AIL_lock/AIL_unlock, and nothing enters this section.
 	static CRITICAL_SECTION _MSSLockCriticalSection;
+#endif
 };
 
 

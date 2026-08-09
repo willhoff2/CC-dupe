@@ -1,12 +1,24 @@
 #!/usr/bin/env python3
-"""Probe how far the platform-independent libraries are from a native 64-bit clang build.
+"""Probe how far the codebase is from a native 64-bit clang build.
 
-Runs `clang++ -fsyntax-only` over each translation unit in a set of candidate libraries and
+Runs `clang++ -fsyntax-only` over each translation unit of a set of probe targets and
 categorises the resulting diagnostics, so the effort of a native macOS/Linux port can be
 estimated from data rather than guesswork.
 
+Two modes, because they answer different questions:
+
+* **native** (default) — nothing stands in for the Windows SDK. Answers "what compiles today
+  on a machine with no Windows headers at all?"
+* **shimmed** (`--with-shims`) — `scripts/native-port-shims/` supplies declaration-only
+  stand-ins for the Win32 headers. Answers "once a platform layer exists, how much of the
+  engine's own C++ is portable?" This is the number that sizes the port; the native number
+  mostly measures how widely `windows.h` is included.
+
+Translation unit lists come from the CMake source lists, not from `rglob`, so the probe
+measures exactly what the real build compiles and does not report on dead files.
+
 Usage:
-    python3 scripts/native-port-probe.py [--report report.md] [--jobs N]
+    python3 scripts/native-port-probe.py [--with-shims] [--report report.md] [--jobs N]
 """
 
 import argparse
@@ -20,31 +32,114 @@ import subprocess
 import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+SHIM_DIR = REPO_ROOT / "scripts" / "native-port-shims"
 
-# Libraries with no inherent dependency on Direct3D, Miles or the Win32 GUI, and therefore the
-# cheapest slice to make portable first.
-CANDIDATE_DIRS = [
-    "Core/Libraries/Source/Compression",
-    "Core/Libraries/Source/WWVegas/WWMath",
-    "Core/Libraries/Source/WWVegas/WWLib",
-    "Core/Libraries/Source/WWVegas/WWDebug",
-    "Core/Libraries/Source/WWVegas/WWSaveLoad",
-    "Core/Libraries/Source/debug",
-    "Core/Libraries/Source/profile",
+# Third-party SDKs the CMake build fetches at configure time (min-dx8-sdk, gamespy, miles,
+# lzhl). They are not in the repo, so the probe picks them up from a build tree when one
+# exists and reports how many diagnostics are attributable to their absence when it does not.
+DEFAULT_DEPS_DIR = REPO_ROOT / "build" / "docker" / "_deps"
+FETCHED_DEP_INCLUDES = [
+    "dx8-src",
+    "gamespy-src/include",
+    "lzhl-src",
+    "miles-src",
 ]
 
-# NOTE: `Core/Libraries/Source` is deliberately absent. It contains `debug/` and `profile/`
-# subdirectories, which shadow libstdc++'s internal `<debug/...>` and `<profile/...>` header
-# directories and produce thousands of spurious errors inside the standard library.
-INCLUDE_DIRS = [
+# Include dirs shared by every target.
+COMMON_INCLUDES = [
     "Dependencies/Utility",
     "Core/Libraries/Include",
+    "resources/gitinfo",
+]
+
+# NOTE: `Core/Libraries/Source` is deliberately absent from every include list. It contains
+# `debug/` and `profile/` subdirectories, which shadow libstdc++'s internal `<debug/...>` and
+# `<profile/...>` header directories and produce thousands of spurious errors inside the
+# standard library. Per-library include paths, never a blanket one.
+WWVEGAS_INCLUDES = [
     "Core/Libraries/Source/WWVegas",
     "Core/Libraries/Source/WWVegas/WWMath",
     "Core/Libraries/Source/WWVegas/WWLib",
     "Core/Libraries/Source/WWVegas/WWDebug",
     "Core/Libraries/Source/WWVegas/WWSaveLoad",
     "Core/Libraries/Source/Compression",
+]
+
+# The two GameEngine libraries are one logical library split across two directories: every
+# translation unit of either is compiled with both include trees on the path and with
+# `Include/Precompiled/PreRTS.h` reachable, exactly as the CMake targets arrange it.
+GAMEENGINE_INCLUDES = WWVEGAS_INCLUDES + [
+    "Core/GameEngine/Include",
+    "GeneralsMD/Code/GameEngine/Include",
+    "GeneralsMD/Code/GameEngine/Include/Precompiled",
+    "GeneralsMD/Code/Libraries/Source/WWVegas",
+]
+
+
+@dataclasses.dataclass(frozen=True)
+class Target:
+    """A probe target: a set of translation units plus the include paths they need."""
+
+    name: str
+    includes: tuple
+    # Either a CMake list to read the translation units from...
+    cmake_lists: str = None
+    cmake_root: str = None
+    # ...or directories to walk.
+    source_dirs: tuple = ()
+    defines: tuple = ()
+
+
+TARGETS = [
+    Target(
+        name="Core/Libraries/Source/Compression",
+        includes=tuple(WWVEGAS_INCLUDES),
+        source_dirs=("Core/Libraries/Source/Compression",),
+    ),
+    Target(
+        name="Core/Libraries/Source/WWVegas/WWMath",
+        includes=tuple(WWVEGAS_INCLUDES),
+        source_dirs=("Core/Libraries/Source/WWVegas/WWMath",),
+    ),
+    Target(
+        name="Core/Libraries/Source/WWVegas/WWLib",
+        includes=tuple(WWVEGAS_INCLUDES),
+        source_dirs=("Core/Libraries/Source/WWVegas/WWLib",),
+    ),
+    Target(
+        name="Core/Libraries/Source/WWVegas/WWDebug",
+        includes=tuple(WWVEGAS_INCLUDES),
+        source_dirs=("Core/Libraries/Source/WWVegas/WWDebug",),
+    ),
+    Target(
+        name="Core/Libraries/Source/WWVegas/WWSaveLoad",
+        includes=tuple(WWVEGAS_INCLUDES),
+        source_dirs=("Core/Libraries/Source/WWVegas/WWSaveLoad",),
+    ),
+    Target(
+        name="Core/Libraries/Source/debug",
+        includes=tuple(WWVEGAS_INCLUDES),
+        source_dirs=("Core/Libraries/Source/debug",),
+    ),
+    Target(
+        name="Core/Libraries/Source/profile",
+        includes=tuple(WWVEGAS_INCLUDES),
+        source_dirs=("Core/Libraries/Source/profile",),
+    ),
+    Target(
+        name="Core/GameEngine",
+        includes=tuple(GAMEENGINE_INCLUDES),
+        cmake_lists="Core/GameEngine/CMakeLists.txt",
+        cmake_root="Core/GameEngine",
+        defines=("RTS_ZEROHOUR=1",),
+    ),
+    Target(
+        name="GeneralsMD/Code/GameEngine",
+        includes=tuple(GAMEENGINE_INCLUDES),
+        cmake_lists="GeneralsMD/Code/GameEngine/CMakeLists.txt",
+        cmake_root="GeneralsMD/Code/GameEngine",
+        defines=("RTS_ZEROHOUR=1",),
+    ),
 ]
 
 CLANG_FLAGS = [
@@ -65,20 +160,29 @@ CLANG_FLAGS = [
 # Ordered: the first pattern that matches a diagnostic wins.
 CATEGORIES = [
     ("Missing Win32 headers", re.compile(
-        r"'(windows|windef|winbase|winsock2?|wtypes|objbase|mmsystem|tchar|io|direct|excpt|"
-        r"process|crtdbg|dbghelp|shlobj|winreg|wingdi|winuser|imagehlp|ddraw|d3d\w*|dinput|"
-        r"dsound|mss\w*|basetsd|intrin|malloc)\.h' file not found", re.I)),
+        r"'(windows|windef|winbase|winsock2?|wtypes|objbase|ocidl|oleauto|mmsystem|tchar|io|"
+        r"direct|excpt|process|crtdbg|dbghelp|shlobj|shlguid|shellapi|snmp|winreg|wingdi|"
+        r"winuser|winerror|wininet|winsvc|imagehlp|lmcons|ddraw|dinput|dsound|vfw|atlbase|"
+        r"new|basetsd|intrin|malloc)\.h' file not found", re.I)),
+    ("Missing fetched SDK headers (dx8 / gamespy / miles / lzhl)", re.compile(
+        r"'(d3d\w*|dx\w*|mss\w*|gamespy/[\w/]+|CompLibHeader/\w+)\.h' file not found", re.I)),
+    ("Missing generated headers (IDL / build-time)", re.compile(
+        r"'(EABrowserDispatch/\w+|BrowserEngine/\w+|gitinfo)\.h' file not found", re.I)),
     ("Missing project/vendor headers", re.compile(r"file not found")),
     ("Inline x86 assembly", re.compile(r"__asm|inline assembly|asm-specifier|expected \(")),
     ("MSVC calling conventions / declspec", re.compile(
         r"__stdcall|__cdecl|__fastcall|__declspec|__forceinline|calling convention")),
-    ("64-bit pointer/int assumptions", re.compile(
+    ("64-bit size/layout assumptions", re.compile(
         r"cast (to|from) .*pointer .*(different|smaller) size|"
         r"loses precision|"
+        r"static_assert failed.*(size|SIZE)|"
         r"'(int|long|unsigned int|DWORD)' (to|from) '[^']*\*'")),
     ("Win32 types undeclared", re.compile(
         r"unknown type name '(HWND|HANDLE|DWORD|HINSTANCE|LPCSTR|LPSTR|BOOL|WORD|BYTE|UINT|"
-        r"LRESULT|WPARAM|LPARAM|HDC|HRESULT|CRITICAL_SECTION|LARGE_INTEGER|FILETIME|HMODULE)'")),
+        r"LRESULT|WPARAM|LPARAM|HDC|HRESULT|FARPROC|CRITICAL_SECTION|LARGE_INTEGER|FILETIME|"
+        r"HMODULE)'")),
+    ("Win32 / MSVC identifiers undeclared", re.compile(
+        r"use of undeclared identifier '(_|[A-Z]{2,}_)")),
     ("Non-conforming template/name lookup", re.compile(
         r"use of undeclared identifier|no template named|missing 'typename'|"
         r"dependent name|must use 'template'|no member named")),
@@ -89,13 +193,10 @@ CATEGORIES = [
 
 @dataclasses.dataclass
 class FileResult:
+    target: str
     path: str
     ok: bool
     diagnostics: list  # list of (category, message)
-
-
-def include_flags():
-    return [f"-I{REPO_ROOT / d}" for d in INCLUDE_DIRS]
 
 
 def categorise(message):
@@ -105,8 +206,28 @@ def categorise(message):
     return "Other"
 
 
-def probe(source):
-    cmd = ["clang++", *CLANG_FLAGS, *include_flags(), str(source)]
+def dep_includes(deps_dir):
+    """Include dirs for the SDKs CMake fetches, for whichever of them are present."""
+    if deps_dir is None:
+        return []
+    return [str(deps_dir / d) for d in FETCHED_DEP_INCLUDES if (deps_dir / d).is_dir()]
+
+
+def probe(job):
+    target, source, extra_includes, with_shims = job
+    # Shims first so they take precedence over anything a build tree happens to provide, and
+    # the fetched SDKs next, ahead of the repo's own trees.
+    includes = []
+    if with_shims:
+        includes.append(str(SHIM_DIR))
+    includes.extend(extra_includes)
+    includes.extend(str(REPO_ROOT / d) for d in COMMON_INCLUDES)
+    includes.extend(str(REPO_ROOT / d) for d in target.includes)
+
+    cmd = ["clang++", *CLANG_FLAGS]
+    cmd += [f"-D{d}" for d in target.defines]
+    cmd += [f"-I{d}" for d in includes]
+    cmd.append(str(source))
     proc = subprocess.run(cmd, capture_output=True, text=True)
     diagnostics = []
     for line in proc.stderr.splitlines():
@@ -115,17 +236,42 @@ def probe(source):
         message = line.split(": error:", 1)[-1].split(": fatal error:", 1)[-1].strip()
         diagnostics.append((categorise(line), message))
     rel = str(source.relative_to(REPO_ROOT))
-    return FileResult(rel, proc.returncode == 0, diagnostics)
+    return FileResult(target.name, rel, proc.returncode == 0, diagnostics)
 
 
-def collect_sources():
+CMAKE_SOURCE_RE = re.compile(r"^\s+(Source/\S+\.cpp)\s*$")
+
+
+def cmake_sources(target):
+    """Translation units CMake actually compiles, i.e. list entries that are not commented out."""
+    text = (REPO_ROOT / target.cmake_lists).read_text().splitlines()
+    root = REPO_ROOT / target.cmake_root
     sources = []
-    for directory in CANDIDATE_DIRS:
-        sources.extend(sorted((REPO_ROOT / directory).rglob("*.cpp")))
-    return sources
+    for line in text:
+        match = CMAKE_SOURCE_RE.match(line)
+        if not match:
+            continue
+        path = root / match.group(1)
+        if path.is_file():
+            sources.append(path)
+    return sorted(set(sources))
 
 
-def render_report(results):
+def collect_jobs(deps_dir, with_shims):
+    extra = tuple(dep_includes(deps_dir))
+    jobs = []
+    for target in TARGETS:
+        if target.cmake_lists:
+            sources = cmake_sources(target)
+        else:
+            sources = []
+            for directory in target.source_dirs:
+                sources.extend(sorted((REPO_ROOT / directory).rglob("*.cpp")))
+        jobs.extend((target, source, extra, with_shims) for source in sources)
+    return jobs
+
+
+def render_report(results, with_shims, deps_dir, deps_present):
     total = len(results)
     clean = [r for r in results if r.ok]
     by_category = collections.Counter()
@@ -137,13 +283,43 @@ def render_report(results):
             files_by_category[category].add(result.path)
             examples.setdefault(category, f"{result.path}: {message}")
 
+    mode = "shimmed" if with_shims else "native (no Windows SDK)"
     lines = [
-        "# Native 64-bit clang probe — platform-independent libraries",
+        f"# Native 64-bit clang probe — {mode}",
         "",
         f"Compiled {total} translation units with "
-        f"`clang++ {' '.join(CLANG_FLAGS)}` (no Windows SDK, no Wine).",
+        f"`clang++ {' '.join(CLANG_FLAGS)}` (no Windows SDK, no Wine, no MSVC).",
         "",
-        f"- Translation units that already compile clean: **{len(clean)} / {total}** "
+    ]
+    if with_shims:
+        lines += [
+            "Mode: **shimmed**. `scripts/native-port-shims/` supplies declaration-only "
+            "stand-ins for the Win32 headers `PreRTS.h` pulls into every GameEngine "
+            "translation unit, so the numbers below measure the engine's *own* C++ rather "
+            "than the absence of `windows.h`.",
+            "",
+        ]
+    else:
+        lines += [
+            "Mode: **native**. Nothing stands in for the Windows SDK.",
+            "",
+        ]
+    if deps_present:
+        lines += [
+            f"Fetched SDK headers (dx8, gamespy, miles, lzhl) taken from `{deps_dir}`: "
+            f"{', '.join(deps_present)}.",
+            "",
+        ]
+    else:
+        lines += [
+            "The SDKs CMake fetches at configure time (min-dx8-sdk, gamespy, miles, lzhl) "
+            "were not available, so diagnostics from their absence are counted separately. "
+            "Configure a build tree, or pass `--deps-dir`, to fold them in.",
+            "",
+        ]
+
+    lines += [
+        f"- Translation units that compile clean: **{len(clean)} / {total}** "
         f"({len(clean) * 100 // max(total, 1)}%)",
         f"- Translation units with errors: **{total - len(clean)}**",
         f"- Total errors: **{sum(by_category.values())}**",
@@ -157,20 +333,25 @@ def render_report(results):
         example = examples[category].replace("|", "\\|")[:110]
         lines.append(f"| {category} | {count} | {len(files_by_category[category])} | `{example}` |")
 
-    lines += ["", "## Per-library breakdown", "", "| Library | Clean | Total |", "|---|---:|---:|"]
-    per_lib = collections.defaultdict(lambda: [0, 0])
+    lines += ["", "## Per-target breakdown", "",
+              "| Target | Clean | Total | Clean % |", "|---|---:|---:|---:|"]
+    per_target = collections.OrderedDict((t.name, [0, 0]) for t in TARGETS)
     for result in results:
-        for directory in CANDIDATE_DIRS:
-            if result.path.startswith(directory):
-                per_lib[directory][1] += 1
-                if result.ok:
-                    per_lib[directory][0] += 1
-                break
-    for directory, (ok, count) in sorted(per_lib.items()):
-        lines.append(f"| {directory} | {ok} | {count} |")
+        per_target[result.target][1] += 1
+        if result.ok:
+            per_target[result.target][0] += 1
+    for name, (ok, count) in per_target.items():
+        pct = ok * 100 // count if count else 0
+        lines.append(f"| {name} | {ok} | {count} | {pct}% |")
 
-    lines += ["", "## Translation units already clean", ""]
-    lines += [f"- `{r.path}`" for r in clean] or ["- (none)"]
+    failing = [r for r in results if not r.ok]
+    if failing:
+        lines += ["", "## Translation units with errors", "",
+                  "| Translation unit | Errors | First diagnostic |", "|---|---:|---|"]
+        for result in sorted(failing, key=lambda r: (-len(r.diagnostics), r.path)):
+            first = result.diagnostics[0][1].replace("|", "\\|")[:100] if result.diagnostics else ""
+            lines.append(f"| `{result.path}` | {len(result.diagnostics)} | `{first}` |")
+
     lines.append("")
     return "\n".join(lines)
 
@@ -179,19 +360,30 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", default="native-port-probe.md")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
+    parser.add_argument("--with-shims", action="store_true",
+                        help="put scripts/native-port-shims/ on the include path")
+    parser.add_argument("--deps-dir", default=str(DEFAULT_DEPS_DIR),
+                        help="CMake FetchContent _deps directory to take dx8/gamespy/miles/lzhl "
+                             "headers from")
     args = parser.parse_args()
 
-    sources = collect_sources()
-    if not sources:
+    deps_dir = pathlib.Path(args.deps_dir) if args.deps_dir else None
+    if deps_dir and not deps_dir.is_dir():
+        deps_dir = None
+    deps_present = [d for d in FETCHED_DEP_INCLUDES if deps_dir and (deps_dir / d).is_dir()]
+
+    jobs = collect_jobs(deps_dir, args.with_shims)
+    if not jobs:
         print("No sources found", file=sys.stderr)
         return 1
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        results = list(pool.map(probe, sources))
+        results = list(pool.map(probe, jobs))
 
-    report = render_report(results)
+    report = render_report(results, args.with_shims, deps_dir, deps_present)
     pathlib.Path(args.report).write_text(report)
-    print(report)
+    clean = sum(1 for r in results if r.ok)
+    print(f"{clean} / {len(results)} translation units clean; report written to {args.report}")
     return 0
 
 

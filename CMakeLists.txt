@@ -53,6 +53,9 @@ if((WIN32 OR "${CMAKE_SYSTEM}" MATCHES "Windows") AND ${CMAKE_SIZEOF_VOID_P} EQU
     include(cmake/miles.cmake)
     include(cmake/bink.cmake)
     include(cmake/dx8.cmake)
+else()
+    # No retail Miles here: supply the `milesstub` target from an OpenAL backend instead.
+    include(cmake/openal.cmake)
 endif()
 
 # Define a dummy stlport target when not on VC6.
