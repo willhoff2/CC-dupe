@@ -20,53 +20,55 @@
 #include "WWDebug/wwdebug.h"
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include "platform/platform_mutex.h"
 #endif
 
 // ----------------------------------------------------------------------------
 
 MutexClass::MutexClass(const char* name) : handle(nullptr), locked(false)
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
+	#ifdef _WIN32
 		handle=CreateMutex(nullptr,false,name);
-		WWASSERT(handle);
+	#else
+		(void)name;	// A globally unique mutex needs an inter-process primitive we don't have.
+		handle=WWPlatform::Mutex_Create();
 	#endif
+	WWASSERT(handle);
 }
 
 MutexClass::~MutexClass()
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		WWASSERT(!locked); // Can't delete locked mutex!
+	WWASSERT(!locked); // Can't delete locked mutex!
+	#ifdef _WIN32
 		CloseHandle(handle);
+	#else
+		WWPlatform::Mutex_Destroy(handle);
 	#endif
 }
 
 bool MutexClass::Lock(int time)
 {
-	#ifdef _UNIX
-		//assert(0);
-		return true;
-	#else
+	#ifdef _WIN32
 		int res = WaitForSingleObject(handle,time==WAIT_INFINITE ? INFINITE : time);
 		if (res!=WAIT_OBJECT_0) return false;
-		locked++;
-		return true;
+	#else
+		if (!WWPlatform::Mutex_Lock(handle,time==WAIT_INFINITE ? -1 : time)) return false;
 	#endif
+	locked++;
+	return true;
 }
 
 void MutexClass::Unlock()
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		WWASSERT(locked);
-		locked--;
+	WWASSERT(locked);
+	locked--;
+	#ifdef _WIN32
 		int res=ReleaseMutex(handle);
 		res;	// silence compiler warnings
 		WWASSERT(res);
+	#else
+		WWPlatform::Mutex_Unlock(handle);
 	#endif
 }
 
@@ -92,43 +94,43 @@ MutexClass::LockClass::~LockClass()
 
 CriticalSectionClass::CriticalSectionClass() : handle(nullptr), locked(false)
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
+	#ifdef _WIN32
 		handle=W3DNEWARRAY char[sizeof(CRITICAL_SECTION)];
 		InitializeCriticalSection((CRITICAL_SECTION*)handle);
+	#else
+		handle=WWPlatform::Critical_Section_Create();
 	#endif
 }
 
 CriticalSectionClass::~CriticalSectionClass()
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		WWASSERT(!locked); // Can't delete locked mutex!
+	WWASSERT(!locked); // Can't delete locked mutex!
+	#ifdef _WIN32
 		DeleteCriticalSection((CRITICAL_SECTION*)handle);
 		delete[] handle;
+	#else
+		WWPlatform::Critical_Section_Destroy(handle);
 	#endif
 }
 
 void CriticalSectionClass::Lock()
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
+	#ifdef _WIN32
 		EnterCriticalSection((CRITICAL_SECTION*)handle);
-		locked++;
+	#else
+		WWPlatform::Critical_Section_Enter(handle);
 	#endif
+	locked++;
 }
 
 void CriticalSectionClass::Unlock()
 {
-	#ifdef _UNIX
-		//assert(0);
-	#else
-		WWASSERT(locked);
-		locked--;
+	WWASSERT(locked);
+	locked--;
+	#ifdef _WIN32
 		LeaveCriticalSection((CRITICAL_SECTION*)handle);
+	#else
+		WWPlatform::Critical_Section_Leave(handle);
 	#endif
 }
 
