@@ -364,7 +364,7 @@ public:
 	static unsigned Get_DX8_Render_State_Uncached(D3DRENDERSTATETYPE state);
 	static void Set_DX8_Texture_Stage_State_Uncached(unsigned stage, D3DTEXTURESTAGESTATETYPE state, unsigned value);
 	static void Set_DX8_Texture_Uncached(unsigned stage, IDirect3DBaseTexture8* texture);
-	static void Set_DX8_Transform_Uncached(D3DTRANSFORMSTATETYPE transform, const D3DMATRIX& m);
+	static void Set_DX8_Transform_Uncached(D3DTRANSFORMSTATETYPE transform, CONST D3DMATRIX* m);
 	static void Set_DX8_Vertex_Shader_Uncached(DWORD vertex_shader);
 	static void Set_DX8_Pixel_Shader_Uncached(DWORD pixel_shader);
 	static void Set_DX8_Vertex_Shader_Constant_Uncached(int reg, const void* data, int count);
@@ -1077,9 +1077,9 @@ WWINLINE void DX8Wrapper::Set_DX8_Texture_Uncached(unsigned stage, IDirect3DBase
 	DX8CALL_RAW(SetTexture(stage,texture));
 }
 
-WWINLINE void DX8Wrapper::Set_DX8_Transform_Uncached(D3DTRANSFORMSTATETYPE transform, const D3DMATRIX& m)
+WWINLINE void DX8Wrapper::Set_DX8_Transform_Uncached(D3DTRANSFORMSTATETYPE transform, CONST D3DMATRIX* m)
 {
-	DX8CALL_RAW(SetTransform(transform,&m));
+	DX8CALL_RAW(SetTransform(transform,m));
 }
 
 WWINLINE void DX8Wrapper::Set_DX8_Vertex_Shader_Uncached(DWORD vertex_shader)
