@@ -43,7 +43,7 @@
 
 #ifdef WIN32
 typedef signed __int64 sint64;
-#elif defined (_UNIX)
+#else
 typedef signed long long sint64;
 #endif
 

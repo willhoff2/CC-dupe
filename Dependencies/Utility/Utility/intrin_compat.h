@@ -63,6 +63,13 @@ static inline __int64 _rdtsc()
 #endif
 #endif //defined _WIN32 && (defined _M_IX86 || defined _M_AMD64)
 
+// VC6 predates <cstdint>, so the width-explicit rotate is spelled with plain types here.
+static inline unsigned int rotl32(unsigned int value, int shift)
+{
+    shift &= 31;
+    return shift == 0 ? value : ((value << shift) | (value >> (32 - shift)));
+}
+
 #endif // defined(_MSC_VER) && _MSC_VER < 1300
 
 
@@ -71,15 +78,26 @@ static inline __int64 _rdtsc()
 
 #include <cstdint>
 
-#if !defined(_lrotl) && !defined(_WIN32)
-static inline uint32_t _lrotl(uint32_t value, int shift)
+// Width-explicit rotate. Prefer this over _lrotl: the MS intrinsic is declared over
+// `unsigned long`, which is 64 bits under LP64, so callers that need 32-bit rotation
+// semantics (CRC) would silently change behaviour off Windows.
+static inline uint32_t rotl32(uint32_t value, int shift)
 {
 #if defined(__has_builtin) && __has_builtin(__builtin_rotateleft32)
     return __builtin_rotateleft32(value, shift);
 #else
     shift &= 31;
-    return ((value << shift) | (value >> (32 - shift)));
+    return shift == 0 ? value : ((value << shift) | (value >> (32 - shift)));
 #endif
+}
+
+// Only define the shim when the compiler does not already provide the intrinsic. Clang
+// predeclares it under -fms-extensions / -fms-compatibility, but not otherwise, so gate on the
+// builtin itself rather than on the compiler identity.
+#if !defined(_lrotl) && !defined(_WIN32) && !(defined(__has_builtin) && __has_builtin(_lrotl))
+static inline uint32_t _lrotl(uint32_t value, int shift)
+{
+    return rotl32(value, shift);
 }
 #endif
 
@@ -107,6 +125,8 @@ static inline uint64_t _rdtsc()
 #ifdef _WIN32
 #include <intrin.h>
 #pragma intrinsic(_ReturnAddress)
+#elif defined(__has_builtin) && __has_builtin(_ReturnAddress)
+// Already provided as a compiler builtin (clang under -fms-extensions / -fms-compatibility).
 #elif defined(__has_builtin)
     #if __has_builtin(__builtin_return_address)
     static inline uintptr_t _ReturnAddress()

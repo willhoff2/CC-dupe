@@ -76,7 +76,7 @@ class CRCEngine {
 
 		long Value() const {
 			if (Buffer_Needs_Data()) {
-				return(_lrotl(CRC, 1) + StagingBuffer.Composite);
+				return((long)rotl32((unsigned int)CRC, 1) + StagingBuffer.Composite);
 			}
 			return(CRC);
 		};

@@ -113,7 +113,7 @@ long CRCEngine::operator() (void const * buffer, int length)
 		long const * longptr = (long const *)dataptr;
 		int longcount = bytes_left / sizeof(long);		// Whole 'long' elements remaining.
 		while (longcount--) {
-			CRC = _lrotl(CRC, 1) + *longptr++;
+			CRC = (long)rotl32((unsigned int)CRC, 1) + *longptr++;
 			bytes_left -= sizeof(long);
 		}
 
