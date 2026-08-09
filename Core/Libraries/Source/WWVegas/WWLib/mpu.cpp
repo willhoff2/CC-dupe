@@ -42,13 +42,37 @@
 #include <assert.h>
 #include <Utility/intrin_compat.h>
 
-typedef union {
-	LARGE_INTEGER LargeInt;
-	struct QuadPart {
-		unsigned long LowPart;
-		unsigned long HighPart;
-	} QuadPart;
-} QuadValue;
+#ifndef _WIN32
+#include "platform/platform_time.h"
+#endif
+
+/*
+**	The high-resolution counter, in the shape of QueryPerformanceCounter() but with the two
+**	halves of the count kept together. Returns false if the platform has no such counter.
+*/
+static bool Get_Timer_Frequency(__int64 & frequency)
+{
+#ifdef _WIN32
+	LARGE_INTEGER value;
+	if (!QueryPerformanceFrequency(&value)) return(false);
+	frequency = value.QuadPart;
+	return(true);
+#else
+	frequency = WWPlatform::Get_Performance_Frequency();
+	return(frequency != 0);
+#endif
+}
+
+static __int64 Get_Timer_Count()
+{
+#ifdef _WIN32
+	LARGE_INTEGER value;
+	QueryPerformanceCounter(&value);
+	return(value.QuadPart);
+#else
+	return(WWPlatform::Get_Performance_Counter());
+#endif
+}
 
 
 /***********************************************************************************************
@@ -68,17 +92,11 @@ typedef union {
  *=============================================================================================*/
 unsigned long Get_CPU_Rate(unsigned long & high)
 {
-	union {
-		LARGE_INTEGER LargeInt;
-		struct {
-			unsigned long LowPart;
-			unsigned long HighPart;
-		} QuadPart;
-	} value;
+	__int64 frequency;
 
-	if (QueryPerformanceFrequency(&value.LargeInt)) {
-		high = value.QuadPart.HighPart;
-		return(value.QuadPart.LowPart);
+	if (Get_Timer_Frequency(frequency)) {
+		high = (unsigned long)(frequency >> 32);
+		return((unsigned long)(frequency & 0xFFFFFFFF));
 	}
 	high = 0;
 	return(0);
@@ -134,23 +152,28 @@ void RDTSC()
 
 int Get_RDTSC_CPU_Speed()
 {
-	LARGE_INTEGER t0,t1;
-	DWORD	freq=0;						// Most current freq. calc.
-	DWORD	freq2=0;						// 2nd most current freq. calc.
-	DWORD	freq3=0;						// 3rd most current freq. calc.
-	DWORD	total;						// Sum of previous three freq. calc.
+	__int64 t0,t1;
+	unsigned long	freq=0;						// Most current freq. calc.
+	unsigned long	freq2=0;						// 2nd most current freq. calc.
+	unsigned long	freq3=0;						// 3rd most current freq. calc.
+	unsigned long	total;						// Sum of previous three freq. calc.
 	int	tries=0;						// Number of times a calculation has been
 												// made on this call
-	DWORD	total_cycles=0, cycles;	// Clock cycles elapsed during test
-	DWORD	stamp0, stamp1;			// Time Stamp for beginning and end of test
-	DWORD	total_ticks=0, ticks;	// Microseconds elapsed during test
-// DWORD	current = 0;				// Elapsed time during loop
-	LARGE_INTEGER count_freq;			// Hi-Res Performance Counter frequency
+	unsigned long	total_cycles=0, cycles;	// Clock cycles elapsed during test
+	unsigned long	stamp0, stamp1;			// Time Stamp for beginning and end of test
+	unsigned long	total_ticks=0, ticks;	// Microseconds elapsed during test
+// unsigned long	current = 0;				// Elapsed time during loop
+	__int64 count_freq;			// Hi-Res Performance Counter frequency
 
 
-	if ( !QueryPerformanceFrequency(&count_freq) ) return(0);
+	if ( !Get_Timer_Frequency(count_freq) ) return(0);
 
 
+	/*
+	** Raise the priority for the duration of the sampling, so that being descheduled doesn't
+	** distort the result. There is no portable equivalent, so elsewhere we just sample as is.
+	*/
+#ifdef _WIN32
 	HANDLE process = GetCurrentProcess();
 	DWORD processPri = GetPriorityClass(process);
 	SetPriorityClass(process, REALTIME_PRIORITY_CLASS);
@@ -158,6 +181,7 @@ int Get_RDTSC_CPU_Speed()
 	HANDLE thread = GetCurrentThread();
 	int threadPri = GetThreadPriority(thread);
 	SetThreadPriority(thread, THREAD_PRIORITY_TIME_CRITICAL);
+#endif
 
 	/*
 	** On processors supporting the TSC opcode, compare elapsed time on the
@@ -181,47 +205,45 @@ int Get_RDTSC_CPU_Speed()
 		/*
 		** Get high-resolution performance counter time
 		*/
-		QueryPerformanceCounter(&t0);
+		t0 = Get_Timer_Count();
 
-		t1.LowPart = t0.LowPart;		// Set Initial time
-		t1.HighPart = t0.HighPart;
+		t1 = t0;								// Set Initial time
 
 		/*
 		** Loop until 50 ticks have passed since last read of hi-res counter.
 		** This accounts for overhead later.
 		*/
-		while ( (DWORD)t1.LowPart - (DWORD)t0.LowPart<50) {
-			QueryPerformanceCounter(&t1);
+		while ( t1 - t0 < 50) {
+			t1 = Get_Timer_Count();
 		}
 
-		stamp0 = _rdtsc();
+		stamp0 = (unsigned long)_rdtsc();
 
-		t0.LowPart = t1.LowPart;		// Reset Initial Time
-		t0.HighPart = t1.HighPart;
+		t0 = t1;								// Reset Initial Time
 
 		/*
 		** Loop until 1000 ticks have passed since last read of hi-res counter.
 		** This allows for elapsed time for sampling.
 		*/
-		while ( (DWORD)t1.LowPart - (DWORD)t0.LowPart < 1000 ) {
-			QueryPerformanceCounter(&t1);
+		while ( t1 - t0 < 1000 ) {
+			t1 = Get_Timer_Count();
 		}
 
-		stamp1 = _rdtsc();
+		stamp1 = (unsigned long)_rdtsc();
 
 		cycles = stamp1 - stamp0;					// # of cycles passed between reads
 
-		double bigticks = (double)((DWORD)t1.LowPart - (DWORD)t0.LowPart);
+		double bigticks = (double)(t1 - t0);
 		assert((bigticks * 100000.0) > bigticks);
 		bigticks = bigticks * 100000.0;						// Convert ticks to hundred
 															//   thousandths of a tick
-		ticks = (DWORD)(bigticks / (double)(count_freq.LowPart / 10));
+		ticks = (unsigned long)(bigticks / (double)(count_freq / 10));
 															// Hundred Thousandths of a
 															//   Ticks / ( 10 ticks/second )
 															//   = microseconds (us)
 		total_ticks += ticks;
 		total_cycles += cycles;
-		if ( (ticks % count_freq.LowPart) > (count_freq.LowPart/2) ) ticks++;		// Round up if necessary
+		if ( (ticks % count_freq) > (count_freq/2) ) ticks++;		// Round up if necessary
 
 		freq = cycles/ticks;							// MHz = cycles / us
 
@@ -231,8 +253,10 @@ int Get_RDTSC_CPU_Speed()
 
 	} while ( (tries < 3 ) || (tries < 20) && (((3 * freq -total) > 3*TOLERANCE )|| ((3 * freq2-total) > 3*TOLERANCE )|| ((3 * freq3-total) > 3*TOLERANCE )));
 
+#ifdef _WIN32
 	SetThreadPriority(thread, threadPri);
 	SetPriorityClass(process, processPri);
+#endif
 
 	/*
 	** Try one more significant digit.

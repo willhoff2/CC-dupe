@@ -28,6 +28,8 @@
 #ifdef _WIN32
 #include <process.h>
 #include <windows.h>
+#else
+#include "platform/platform_thread.h"
 #endif
 
 ThreadClass::ThreadClass(const char *thread_name, ExceptionHandlerType exception_handler) : handle(0), running(false), thread_priority(0)
@@ -87,34 +89,30 @@ void __cdecl ThreadClass::Internal_Thread_Function(void* params)
 void ThreadClass::Execute()
 {
 	WWASSERT(!handle);	// Only one thread at a time!
-	#ifdef _UNIX
-		// assert(0);
-		return;
-	#else
+	#ifdef _WIN32
 		handle=_beginthread(&Internal_Thread_Function,0,this);
 		SetThreadPriority((HANDLE)handle,THREAD_PRIORITY_NORMAL+thread_priority);
-		WWDEBUG_SAY(("ThreadClass::Execute: Started thread %s, thread ID is %X", ThreadName, handle));
+	#else
+		handle=WWPlatform::Thread_Create(&Internal_Thread_Function,this);
+		WWPlatform::Thread_Set_Priority(handle,thread_priority);
 	#endif
+	WWDEBUG_SAY(("ThreadClass::Execute: Started thread %s, thread ID is %X", ThreadName, handle));
 }
 
 void ThreadClass::Set_Priority(int priority)
 {
-	#ifdef _UNIX
-		// assert(0);
-		return;
-	#else
-		thread_priority=priority;
+	thread_priority=priority;
+	#ifdef _WIN32
 		if (handle) SetThreadPriority((HANDLE)handle,THREAD_PRIORITY_NORMAL+thread_priority);
+	#else
+		if (handle) WWPlatform::Thread_Set_Priority(handle,thread_priority);
 	#endif
 }
 
 void ThreadClass::Stop(unsigned ms)
 {
-	#ifdef _UNIX
-		// assert(0);
-		return;
-	#else
-		running=false;
+	running=false;
+	#ifdef _WIN32
 		unsigned time=TIMEGETTIME();
 		while (handle) {
 			if ((TIMEGETTIME()-time)>ms) {
@@ -125,6 +123,20 @@ void ThreadClass::Stop(unsigned ms)
 			}
 			Sleep(0);
 		}
+	#else
+		/*
+		** There is no portable equivalent of TerminateThread(), and returning while the thread is
+		** still touching this object would be worse than blocking, so the wait has no upper bound.
+		*/
+		unsigned time=TIMEGETTIME();
+		bool reported=false;
+		while (handle) {
+			if (!reported && (TIMEGETTIME()-time)>ms) {
+				WWDEBUG_SAY(("ThreadClass::Stop: Thread %s is not responding, still waiting", ThreadName));
+				reported=true;
+			}
+			Sleep(1);
+		}
 	#endif
 }
 
@@ -133,29 +145,27 @@ void ThreadClass::Sleep_Ms(unsigned ms)
 	Sleep(ms);
 }
 
-#ifndef _UNIX
+#ifdef _WIN32
 HANDLE test_event = ::CreateEvent (nullptr, FALSE, FALSE, "");
+#else
+static WWPlatform::EventClass test_event;
 #endif
 
 void ThreadClass::Switch_Thread()
 {
-	#ifdef _UNIX
-		return;
-	#else
+	#ifdef _WIN32
 		//	::SwitchToThread ();
 		::WaitForSingleObject (test_event, 1);
 		//	Sleep(1);	// Note! Parameter can not be 0 (or the thread switch doesn't occur)
+	#else
+		test_event.Wait (1);
 	#endif
 }
 
 // Return calling thread's unique thread id
 unsigned ThreadClass::_Get_Current_Thread_ID()
 {
-	#ifdef _UNIX
-		return 0;
-	#else
-		return GetCurrentThreadId();
-	#endif
+	return GetCurrentThreadId();
 }
 
 bool ThreadClass::Is_Running()

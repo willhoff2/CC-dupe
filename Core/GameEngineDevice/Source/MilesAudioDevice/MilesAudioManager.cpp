@@ -38,7 +38,9 @@
 /*		7/18/2002 : Initial creation                                           */
 /*---------------------------------------------------------------------------*/
 
+#ifdef _WIN32
 #include <dsound.h>
+#endif
 #include "Lib/BaseType.h"
 #include "MilesAudioDevice/MilesAudioManager.h"
 
@@ -1594,9 +1596,11 @@ void MilesAudioManager::selectProvider( UnsignedInt providerNdx )
 		unselectProvider();
 	}
 
+	Bool useDolby = FALSE;
+
+#ifdef _WIN32
 	LPDIRECTSOUND lpDirectSoundInfo;
 	AIL_get_DirectSound_info( nullptr, (void**)&lpDirectSoundInfo, nullptr );
-	Bool useDolby = FALSE;
 	if( lpDirectSoundInfo )
 	{
 		DWORD speakerConfig;
@@ -1634,6 +1638,7 @@ void MilesAudioManager::selectProvider( UnsignedInt providerNdx )
 				break;
 		}
 	}
+#endif // _WIN32
 
 	Bool success = FALSE;
 	if( useDolby )
@@ -1644,6 +1649,21 @@ void MilesAudioManager::selectProvider( UnsignedInt providerNdx )
 	{
 		providerNdx = getProviderIndex( "Miles Fast 2D Positional Audio" );
 	}
+
+	// A non-Miles backend advertises its own provider names, so the hardcoded Miles names will not
+	// be found. Fall back to whatever the backend enumerated first rather than indexing the
+	// provider array out of bounds with PROVIDER_ERROR.
+	if( providerNdx >= m_providerCount )
+	{
+		providerNdx = ( m_providerCount > 0 ) ? 0 : PROVIDER_ERROR;
+	}
+
+	if( providerNdx == PROVIDER_ERROR )
+	{
+		m_selectedProvider = PROVIDER_ERROR;
+		return;
+	}
+
 	success = AIL_open_3D_provider( m_provider3D[providerNdx].id ) == 0;
 
 	//if (providerNdx < m_providerCount)

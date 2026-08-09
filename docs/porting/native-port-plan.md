@@ -72,12 +72,23 @@ One SDL3-backed layer providing window, event pump, input, timing, threads and f
 Shim the WndProc message model so the ~287 `HWND`-touching files compile largely unchanged
 rather than being rewritten. Delete the 19 inline `__asm` blocks in favour of plain C++.
 
-## Phase 4 — Renderer (~600–1,200 h, critical path)
+## Phase 4 — Renderer (~700–1,300 h, critical path)
 
 Retarget `DX8Wrapper` — the engine's existing D3D8 abstraction — rather than writing a Metal
-backend by hand. Preferred route: D3D8→Vulkan translation running on MoltenVK. The engine is
-fixed-function-era and uses a small slice of D3D8, which is why this is a fraction of a
-from-scratch renderer.
+backend by hand. Route: D3D8→Vulkan translation running on MoltenVK. The engine is
+fixed-function-era and uses a small slice of D3D8 (62 distinct interface methods), which is why
+this is a fraction of a from-scratch renderer.
+
+Spiked, with working code: `docs/porting/renderer-surface.md` enumerates the full D3D8 surface
+with its Vulkan mapping, and `spikes/renderer/` renders a textured triangle through a
+`DX8Wrapper`-shaped abstraction on Vulkan. The two risks that could have made this a rewrite
+rather than a port — D3D8's mutable state model versus immutable `VkPipeline`s, and
+`SetTextureStageState` having no Vulkan analogue — both have working solutions. Two corrections
+came out of the spike: **376 of the 458 D3D8 call sites bypass `DX8Wrapper` entirely** (so it is
+not one wrapper to retarget, it is one wrapper plus four device-layer files that reach around it),
+and fixed-function lighting/fog/material emulation was previously uncosted. Against that,
+palettised textures turned out to be a non-issue and the 16 ps.1.1/vs.1.1 shaders are only 158
+lines of in-repo assembly. Net: up from 600–1,200 h to 700–1,300 h.
 
 ## Phase 5 — Audio and video (~250–450 h)
 
@@ -103,11 +114,11 @@ Does not parallelise. Gameplay-parity testing, performance work, packaging as a 
 | 1 Portable core libraries | 200–400 | yes, split per library |
 | 2 64-bit correctness | 600–1,200 | partly; blocks others, land early |
 | 3 Platform abstraction | 400–800 | yes, once the layer exists |
-| 4 Renderer | 600–1,200 | 2–3 people max, critical path |
+| 4 Renderer | 700–1,300 | 2–3 people max, critical path |
 | 5 Audio/video | 250–450 | yes, isolated |
 | 6 Campaign | 400–800 | yes |
 | 7 Integration/QA | 600–1,200 | no |
-| **Total** | **~3,000–6,000** | 4–6 engineers, ~12–18 months |
+| **Total** | **~3,100–6,100** | 4–6 engineers, ~12–18 months |
 
 Independently startable right now, with no dependency on the renderer: the `register`/`__asm`
 cleanups, the fixed-width typedef consolidation, the OpenAL audio layer, and filesystem/path

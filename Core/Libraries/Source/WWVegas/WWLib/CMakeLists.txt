@@ -76,6 +76,8 @@ set(WWLIB_SRC
     mempool.h
     mmsys.h
     mpsc_intrusive_queue.h
+    mpu.cpp
+    MPU.h
     multilist.cpp
     multilist.h
     mutex.cpp
@@ -103,6 +105,8 @@ set(WWLIB_SRC
     refcount.h
     #regexpr.cpp
     #regexpr.h
+    registry.cpp
+    registry.h
     #search.h
     sharebuf.h
     Signaler.h
@@ -154,16 +158,24 @@ set(WWLIB_SRC
 
 if(WIN32)
     list(APPEND WWLIB_SRC
-        mpu.cpp
-        MPU.h
         rcfile.cpp
         rcfile.h
-        registry.cpp
-        registry.h
         verchk.cpp
         verchk.h
         WWCOMUtil.cpp
         WWCOMUtil.h
+    )
+else()
+    # Stand-ins for the Win32 threading, synchronisation, timing and registry calls.
+    list(APPEND WWLIB_SRC
+        platform/platform_mutex.cpp
+        platform/platform_mutex.h
+        platform/platform_settings.cpp
+        platform/platform_settings.h
+        platform/platform_thread.cpp
+        platform/platform_thread.h
+        platform/platform_time.cpp
+        platform/platform_time.h
     )
 endif()
 
