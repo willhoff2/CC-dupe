@@ -10,6 +10,11 @@ Output of the time-boxed renderer spike. Three parts:
 
 ## 0. Corrections to the previously stated numbers
 
+> The counts in this section are the **pre-refactor** measurement (the state the spike found).
+> They have since been acted on: see [0.5](#05-post-refactor-state-after-the-dx8wrapper-consolidation)
+> for the current numbers. Everything from section 1 onward still describes the surface itself,
+> which the refactor did not change — only where it is called from.
+
 `docs/porting/next-slice-scope.md` said:
 
 > All Direct3D 8 traffic goes through `DX8CALL(...)` in `dx8wrapper`: **13,517 LOC of `dx8*`
@@ -65,6 +70,96 @@ Methodology, stated so the numbers can be argued with:
   inside a string or `//` line can swallow live code; one such case is known
   (`W3DVolumetricShadow.cpp:3362`, a real `SetVertexShader` site the scanner misses). The error
   is ~0.2% at this scale.
+
+## 0.5 Post-refactor state, after the `DX8Wrapper` consolidation
+
+Step 2 of "what to do next" (below) has been done: every `IDirect3DDevice8` / `IDirect3D8` call
+site outside `dx8wrapper.{h,cpp}` now goes through `DX8Wrapper`, still on D3D8, verified by the
+Windows build (`./scripts/docker-build.sh --game zh`).
+
+| | Before | After |
+|---|---:|---:|
+| `IDirect3DDevice8` call sites | 439 (82 macro, **357 direct**) | 129 (129 macro, **0 direct**) |
+| `IDirect3D8` call sites | 19 (0 macro, **19 direct**) | 26 (26 macro, **0 direct**) |
+| Total call sites | 458 (82 macro, **376 direct**) | 155 (155 macro, **0 direct**) |
+| Distinct methods reached | 62 | 63 |
+
+The total drops from 458 to 155 because the duplicated call sites collapse: 129 hand-written
+`SetTextureStageState`/`SetRenderState`/`Draw*` calls scattered across the water code become calls
+to the handful of wrapper entry points that issue them. The distinct-method count is one higher, at 63: `GetViewport`
+was called through a local `IDirect3DDevice8 *device` in `W3DProfilerFrameCapture.cpp`, and
+`device` is on the scanner's deny-list of too-generic aliases, so it was never counted. It is a
+`DX8Wrapper::Get_Viewport()` call now and shows up. No D3D8 method was lost or emulated away —
+the surface is unchanged, only its call graph is.
+
+Per-subsystem, direct sites eliminated:
+
+| File | Before | After |
+|---|---:|---:|
+| `.../GameClient/Water/W3DWater.cpp` | 129 | 0 |
+| `.../GameClient/W3DShaderManager.cpp` | 103 | 0 |
+| `.../GameClient/Shadow/W3DVolumetricShadow.cpp` | 38 | 0 |
+| `.../GameClient/Shadow/W3DProjectedShadow.cpp` | 25 | 0 |
+| `.../GameClient/W3DTreeBuffer.cpp` | 14 | 0 |
+| `.../GameClient/W3DMouse.cpp` | 7 | 0 |
+| `.../GameClient/HeightMap.cpp`, `W3DSmudge.cpp` | 6, 6 | 0, 0 |
+| `WW3D2/dx8caps.cpp`, `dx8vertexbuffer.cpp`, `dx8indexbuffer.cpp` | 4, 3, 2 | 0, 0, 0 |
+| `.../GameClient/W3DSnow.cpp`, `W3DScene.cpp`, `W3DProfilerFrameCapture.cpp` | 3, 3, 3 | 0, 0, 0 |
+| `BaseHeightMap.cpp`, `W3DShroud.cpp`, `W3DDisplay.cpp`, `ww3d.cpp` | 1 each | 0 |
+| `WW3D2/dx8wrapper.cpp` (the wrapper itself) | 61 (26 direct) | 61 (0 direct) |
+
+### What was added to `DX8Wrapper`
+
+The wrapper already owned the cached state setters (`Set_DX8_Render_State` and friends), which
+keep a shadow copy and skip redundant D3D8 calls. Most of the converted call sites deliberately
+*bypassed* that cache — they set state behind the wrapper's back and restored it afterwards — so
+routing them through the cached setters would have corrupted the shadow state and changed what is
+rendered. They therefore call new pass-through entry points that do the D3D8 call and nothing
+else:
+
+`Set_DX8_Render_State_Uncached`, `Get_DX8_Render_State_Uncached`,
+`Set_DX8_Texture_Stage_State_Uncached`, `Set_DX8_Texture_Uncached`, `Set_DX8_Transform_Uncached`,
+`Set_DX8_Vertex_Shader_Uncached`, `Set_DX8_Pixel_Shader_Uncached`,
+`Set_DX8_{Vertex,Pixel}_Shader_Constant_Uncached`, `Create_DX8_Texture_Uncached`.
+
+Alongside them, entry points for the parts of D3D8 the wrapper simply did not expose: resource
+creation (`Create_DX8_{Vertex,Index}_Buffer`, `Create_DX8_Image_Surface`,
+`Create_DX8_{Vertex,Pixel}_Shader` and their deletes), submission (`Set_DX8_Stream_Source`,
+`Set_DX8_Indices`, `Draw_DX8_Primitive`, `Draw_DX8_Indexed_Primitive`, `Draw_DX8_Primitive_UP`,
+`Process_DX8_Vertices`), render targets (`Get/Set_DX8_Render_Target_Surface`,
+`Get_DX8_Depth_Stencil_Surface`, `Get_Viewport`), device housekeeping
+(`Test_Cooperative_Level`, `Validate_DX8_Device`, `Present_DX8_Device`,
+`Get_DX8_Available_Texture_Mem`, `Discard_DX8_Resource_Manager_Bytes`), cursor and gamma, and the
+whole `IDirect3D8` adapter/capability enumeration (`Get_DX8_Adapter_*`, `Check_DX8_Device_*`,
+`Check_DX8_Depth_Stencil_Match`, `Get_DX8_Device_Caps`).
+
+Two macros were added next to `DX8CALL`: `DX8CALL_RAW` / `DX8CALL_RAW_HRES` (and the `_D3D`
+variants) issue the call and count it, but do **not** run `DX8_ErrorCode` on the result. They
+exist because a converted call site either ignored the `HRESULT` or tested it itself; feeding it
+to `DX8_ErrorCode` would turn a tolerated failure into an assert. The surface scanner was taught
+about them, otherwise it silently stops counting those sites.
+
+`DX8Caps` no longer takes an `IDirect3DDevice8*`: it only used it to toggle
+`D3DRS_SOFTWAREVERTEXPROCESSING` while probing, which now goes through the wrapper.
+
+### Honest exceptions — what is still not behind the wrapper
+
+1. **`dx8wrapper.{h,cpp}` itself: 61 call sites.** This is the wrapper's own implementation, i.e.
+   the chokepoint. They are all expressed through the `DX8CALL*` macros now (the 26 that still
+   poked `D3DDevice` / `D3DInterface` by hand were converted), so a backend swap has exactly one
+   file to rewrite — but they are, unavoidably, direct D3D8 calls.
+2. **`DX8Wrapper::_Get_D3D_Device8()` survives as a null test in 23 places** (`if
+   (!DX8Wrapper::_Get_D3D_Device8()) return;`, `DEBUG_ASSERTCRASH(...)`). These ask "is there a
+   device yet", not "call D3D8"; they cost nothing to keep and a `Has_Device()` predicate can
+   replace them mechanically when the backend changes. The scanner does not count them, correctly
+   — no interface method is invoked.
+3. **`dx8webbrowser.cpp:95`** hands the raw `IDirect3DDevice8*` to the embedded browser control
+   (`pBrowser->Initialize(reinterpret_cast<long*>(...))`). The pointer leaves the engine and is
+   consumed by a closed COM component, so there is nothing to abstract; this path is Windows-only
+   and does not survive the port anyway.
+4. **D3DX entry points are untouched** (`D3DXCreateTexture`, `D3DXFilterTexture`,
+   `D3DXLoadSurfaceFromSurface`, the maths helpers). They are a separate library, not
+   `IDirect3DDevice8`, and are already listed in section 3 as their own work item.
 
 ## 1. The surface, method by method
 
@@ -497,9 +592,9 @@ Reasoning for the direction of the change, stated plainly:
 1. **Run the PoC on macOS/arm64 through MoltenVK.** This is the one unverified assumption in the
    whole spike and it is a few hours of work. Until it is done, "and therefore MoltenVK" is an
    inference, not a result.
-2. **Route the 376 direct call sites through `DX8Wrapper` while still on D3D8**, verified by the
-   existing Windows build. This is the highest-value de-risking available: it is mechanical, it is
-   testable against a working reference, it can land incrementally, and it converts the renderer
-   from "two backends" to the "one wrapper" the plan assumed. Do it *before* writing the Vulkan
-   backend, not after.
+2. ~~**Route the 376 direct call sites through `DX8Wrapper` while still on D3D8**~~ — **done**,
+   see [0.5](#05-post-refactor-state-after-the-dx8wrapper-consolidation). 376 direct sites → 0,
+   verified by the Windows build. The renderer is now the "one wrapper" the plan assumed, so the
+   120–220 h line item in the estimate above is spent and the remaining Phase 4 range should be
+   read as **580–1,080 h**.
 3. Only then build the backend for real, in the order of the table above.
