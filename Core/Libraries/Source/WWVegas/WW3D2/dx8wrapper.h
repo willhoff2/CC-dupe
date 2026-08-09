@@ -395,7 +395,7 @@ public:
 	static HRESULT Validate_DX8_Device(DWORD* num_passes);
 	static HRESULT Present_DX8_Device(CONST RECT* source_rect, CONST RECT* dest_rect, HWND dest_window_override, CONST RGNDATA* dirty_region);
 	static unsigned Get_DX8_Available_Texture_Mem();
-	static void Discard_DX8_Resource_Manager_Bytes(unsigned bytes);
+	static HRESULT Discard_DX8_Resource_Manager_Bytes(unsigned bytes);
 
 	static BOOL Show_DX8_Cursor(BOOL show);
 	static HRESULT Set_DX8_Cursor_Properties(unsigned x_hotspot, unsigned y_hotspot, IDirect3DSurface8* cursor_bitmap);
@@ -1235,9 +1235,11 @@ WWINLINE unsigned DX8Wrapper::Get_DX8_Available_Texture_Mem()
 	return mem;
 }
 
-WWINLINE void DX8Wrapper::Discard_DX8_Resource_Manager_Bytes(unsigned bytes)
+WWINLINE HRESULT DX8Wrapper::Discard_DX8_Resource_Manager_Bytes(unsigned bytes)
 {
-	DX8CALL_RAW(ResourceManagerDiscardBytes(bytes));
+	HRESULT hr;
+	DX8CALL_RAW_HRES(ResourceManagerDiscardBytes(bytes),hr);
+	return hr;
 }
 
 WWINLINE BOOL DX8Wrapper::Show_DX8_Cursor(BOOL show)

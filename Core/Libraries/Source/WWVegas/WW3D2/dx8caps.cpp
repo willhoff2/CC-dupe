@@ -468,7 +468,6 @@ DX8Caps::DeviceTypeIntel DX8Caps::Get_Intel_Device(unsigned device_id)
 
 DX8Caps::DX8Caps(
 	IDirect3D8* direct3d,
-	IDirect3DDevice8* D3DDevice,
 	WW3DFormat display_format,
 	const D3DADAPTER_IDENTIFIER8& adapter_id)
 	:
@@ -476,7 +475,7 @@ DX8Caps::DX8Caps(
 	MaxDisplayWidth(0),
 	MaxDisplayHeight(0)
 {
-	Init_Caps(D3DDevice);
+	Init_Caps();
 	Compute_Caps(display_format, adapter_id);
 }
 
@@ -513,15 +512,15 @@ void DX8Caps::Shutdown()
 //
 // ----------------------------------------------------------------------------
 
-void DX8Caps::Init_Caps(IDirect3DDevice8* D3DDevice)
+void DX8Caps::Init_Caps()
 {
-	D3DDevice->SetRenderState(D3DRS_SOFTWAREVERTEXPROCESSING,TRUE);
+	DX8Wrapper::Set_DX8_Render_State_Uncached(D3DRS_SOFTWAREVERTEXPROCESSING,TRUE);
 	DX8CALL(GetDeviceCaps(&Caps));
 
 	if ((Caps.DevCaps&D3DDEVCAPS_HWTRANSFORMANDLIGHT)==D3DDEVCAPS_HWTRANSFORMANDLIGHT) {
 		SupportTnL=true;
 
-		D3DDevice->SetRenderState(D3DRS_SOFTWAREVERTEXPROCESSING,FALSE);
+		DX8Wrapper::Set_DX8_Render_State_Uncached(D3DRS_SOFTWAREVERTEXPROCESSING,FALSE);
 		DX8CALL(GetDeviceCaps(&Caps));
 	} else {
 		SupportTnL=false;
@@ -535,7 +534,7 @@ void DX8Caps::Init_Caps(IDirect3DDevice8* D3DDevice)
 // ----------------------------------------------------------------------------
 void DX8Caps::Compute_Caps(WW3DFormat display_format, const D3DADAPTER_IDENTIFIER8& adapter_id)
 {
-//	Init_Caps(D3DDevice);
+//	Init_Caps();
 
 	CanDoMultiPass=true;
 	IsFogAllowed=true;
@@ -714,7 +713,7 @@ void DX8Caps::Check_Texture_Format_Support(WW3DFormat display_format,const D3DCA
 		else {
 			WW3DFormat format=(WW3DFormat)i;
 			SupportTextureFormat[i]=SUCCEEDED(
-				Direct3D->CheckDeviceFormat(
+				DX8Wrapper::Check_DX8_Device_Format(
 					caps.AdapterOrdinal,
 					caps.DeviceType,
 					d3d_display_format,
@@ -746,7 +745,7 @@ void DX8Caps::Check_Render_To_Texture_Support(WW3DFormat display_format,const D3
 		else {
 			WW3DFormat format=(WW3DFormat)i;
 			SupportRenderToTextureFormat[i]=SUCCEEDED(
-				Direct3D->CheckDeviceFormat(
+				DX8Wrapper::Check_DX8_Device_Format(
 					caps.AdapterOrdinal,
 					caps.DeviceType,
 					d3d_display_format,
@@ -790,7 +789,7 @@ void DX8Caps::Check_Depth_Stencil_Support(WW3DFormat display_format, const D3DCA
 			WW3DZFormat format=(WW3DZFormat)i;
 			SupportDepthStencilFormat[i]=SUCCEEDED
 			(
-				Direct3D->CheckDeviceFormat
+				DX8Wrapper::Check_DX8_Device_Format
 				(
 					caps.AdapterOrdinal,
 					caps.DeviceType,
