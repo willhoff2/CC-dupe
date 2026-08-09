@@ -310,6 +310,7 @@ public:
 	static void Clear(bool clear_color, bool clear_z_stencil, const Vector3 &color, float dest_alpha=0.0f, float z=1.0f, unsigned int stencil=0);
 
 	static void	Set_Viewport(CONST D3DVIEWPORT8* pViewport);
+	static void	Get_Viewport(D3DVIEWPORT8* pViewport);
 
 	static void Set_Vertex_Buffer(const VertexBufferClass* vb, unsigned stream=0);
 	static void Set_Vertex_Buffer(const DynamicVBAccessClass& vba);
@@ -502,6 +503,15 @@ public:
 	static SurfaceClass * _Get_DX8_Back_Buffer(unsigned int num=0);
 
 	static void _Copy_DX8_Rects(
+			IDirect3DSurface8* pSourceSurface,
+			CONST RECT* pSourceRectsArray,
+			UINT cRects,
+			IDirect3DSurface8* pDestinationSurface,
+			CONST POINT* pDestPointsArray
+	);
+
+	// as above, but the caller looks at the HRESULT itself instead of asserting
+	static HRESULT _Copy_DX8_Rects_Unchecked(
 			IDirect3DSurface8* pSourceSurface,
 			CONST RECT* pSourceRectsArray,
 			UINT cRects,
@@ -1021,6 +1031,29 @@ WWINLINE void DX8Wrapper::_Copy_DX8_Rects(
 // class definition: they go straight to D3D8 and do not touch the cached state.
 //
 // ----------------------------------------------------------------------------
+
+WWINLINE HRESULT DX8Wrapper::_Copy_DX8_Rects_Unchecked(
+  IDirect3DSurface8* pSourceSurface,
+  CONST RECT* pSourceRectsArray,
+  UINT cRects,
+  IDirect3DSurface8* pDestinationSurface,
+  CONST POINT* pDestPointsArray
+)
+{
+	HRESULT hr;
+	DX8CALL_RAW_HRES(CopyRects(
+  pSourceSurface,
+  pSourceRectsArray,
+  cRects,
+  pDestinationSurface,
+  pDestPointsArray),hr);
+	return hr;
+}
+
+WWINLINE void DX8Wrapper::Get_Viewport(D3DVIEWPORT8* pViewport)
+{
+	DX8CALL_RAW(GetViewport(pViewport));
+}
 
 WWINLINE void DX8Wrapper::Set_DX8_Render_State_Uncached(D3DRENDERSTATETYPE state, unsigned value)
 {
