@@ -15,9 +15,9 @@ Methodology (deliberately conservative, so the numbers can be audited):
        vtable list below).
    The second condition is what keeps generic names like `device` from matching
    unrelated classes.
- * DX8CALL / DX8CALL_HRES / DX8CALL_D3D macro sites are counted separately from
-   direct `->` sites so the doc's original "45 call sites" claim can be compared
-   against like for like.
+ * DX8CALL / DX8CALL_HRES / DX8CALL_D3D and their DX8CALL_RAW* counterparts (the
+   non-asserting variants) are counted separately from direct `->` sites so the
+   doc's original "45 call sites" claim can be compared against like for like.
 """
 import os, re, sys, collections, json
 
@@ -67,7 +67,8 @@ def strip_comments(text):
     return re.sub(r"//[^\n]*", "", text)
 
 
-MACRO_RE = re.compile(r"\bDX8CALL(_HRES|_D3D)?\s*\(\s*(?:res\s*=\s*)?([A-Za-z_]\w*)")
+MACRO_RE = re.compile(
+    r"\bDX8CALL((?:_RAW)?(?:_D3D)?(?:_HRES)?)\s*\(\s*(?:res\s*=\s*)?([A-Za-z_]\w*)")
 CALL_RE = re.compile(r"([A-Za-z_]\w*(?:\(\))?)\s*->\s*([A-Za-z_]\w*)\s*\(")
 DECL_RE = re.compile(
     r"\b(?:IDirect3D(?P<a>Device8|8)\s*\*+|LPDIRECT3D(?P<b>DEVICE8|8))\s*(?P<name>\w+)")
@@ -116,16 +117,16 @@ for rel, text in SOURCES.items():
             if "#define DX8CALL" in line:
                 continue
             for suffix, method in MACRO_RE.findall(line):
-                if suffix == "_D3D":
+                if "_D3D" in suffix:
                     if method in D3D8_METHODS:
                         d3d[method] += 1
                         d3d_macro[method] += 1
-                        sites["IDirect3D8::" + method].append((rel, i, "DX8CALL_D3D"))
+                        sites["IDirect3D8::" + method].append((rel, i, "DX8CALL" + suffix))
                         per_file[rel] += 1
                 elif method in DEVICE8_METHODS:
                     dev[method] += 1
                     dev_macro[method] += 1
-                    sites[method].append((rel, i, "DX8CALL"))
+                    sites[method].append((rel, i, "DX8CALL" + suffix))
                     per_file[rel] += 1
             if "DX8CALL" in line:
                 continue

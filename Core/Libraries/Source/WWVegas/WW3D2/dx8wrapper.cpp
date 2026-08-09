@@ -432,7 +432,9 @@ void DX8Wrapper::Invalidate_Cached_Render_States()
 		//Need to explicitly set texture to null, otherwise app will not be able to
 		//set it to null because of redundant state checker. MW
 		if (_Get_D3D_Device8())
-			_Get_D3D_Device8()->SetTexture(a,nullptr);
+		{
+			DX8CALL_RAW(SetTexture(a,nullptr));
+		}
 		if (Textures[a] != nullptr) {
 			Textures[a]->Release();
 		}
@@ -628,7 +630,8 @@ bool DX8Wrapper::Reset_Device(bool reload_assets)
 		memset(Vertex_Shader_Constants,0,sizeof(Vector4)*MAX_VERTEX_SHADER_CONSTANTS);
 		memset(Pixel_Shader_Constants,0,sizeof(Vector4)*MAX_PIXEL_SHADER_CONSTANTS);
 
-		HRESULT hr=_Get_D3D_Device8()->TestCooperativeLevel();
+		HRESULT hr;
+		DX8CALL_RAW_HRES(TestCooperativeLevel(),hr);
 		if (hr != D3DERR_DEVICELOST )
 		{	DX8CALL_HRES(Reset(&_PresentParameters),hr)
 			if (hr != D3D_OK)
@@ -696,12 +699,14 @@ void DX8Wrapper::Enumerate_Devices()
 {
 	DX8_Assert();
 
-	int adapter_count = D3DInterface->GetAdapterCount();
+	int adapter_count;
+	DX8CALL_RAW_D3D_HRES(GetAdapterCount(),adapter_count);
 	for (int adapter_index=0; adapter_index<adapter_count; adapter_index++) {
 
 		D3DADAPTER_IDENTIFIER8 id;
 		::ZeroMemory(&id, sizeof(D3DADAPTER_IDENTIFIER8));
-		HRESULT res = D3DInterface->GetAdapterIdentifier(adapter_index,D3DENUM_NO_WHQL_LEVEL,&id);
+		HRESULT res;
+		DX8CALL_RAW_D3D_HRES(GetAdapterIdentifier(adapter_index,D3DENUM_NO_WHQL_LEVEL,&id),res);
 
 		if (res == D3D_OK) {
 
@@ -722,8 +727,8 @@ void DX8Wrapper::Enumerate_Devices()
 
 			desc.set_driver_version(buf);
 
-			D3DInterface->GetDeviceCaps(adapter_index,WW3D_DEVTYPE,&desc.Caps);
-			D3DInterface->GetAdapterIdentifier(adapter_index,D3DENUM_NO_WHQL_LEVEL,&desc.AdapterIdentifier);
+			DX8CALL_RAW_D3D(GetDeviceCaps(adapter_index,WW3D_DEVTYPE,&desc.Caps));
+			DX8CALL_RAW_D3D(GetAdapterIdentifier(adapter_index,D3DENUM_NO_WHQL_LEVEL,&desc.AdapterIdentifier));
 
 			DX8Caps dx8caps(D3DInterface,desc.Caps,WW3D_FORMAT_UNKNOWN,desc.AdapterIdentifier);
 
@@ -731,11 +736,13 @@ void DX8Wrapper::Enumerate_Devices()
 			** Enumerate the resolutions
 			*/
 			desc.reset_resolution_list();
-			int mode_count = D3DInterface->GetAdapterModeCount(adapter_index);
+			int mode_count;
+			DX8CALL_RAW_D3D_HRES(GetAdapterModeCount(adapter_index),mode_count);
 			for (int mode_index=0; mode_index<mode_count; mode_index++) {
 				D3DDISPLAYMODE d3dmode;
 				::ZeroMemory(&d3dmode, sizeof(D3DDISPLAYMODE));
-				HRESULT res = D3DInterface->EnumAdapterModes(adapter_index,mode_index,&d3dmode);
+				HRESULT res;
+				DX8CALL_RAW_D3D_HRES(EnumAdapterModes(adapter_index,mode_index,&d3dmode),res);
 
 				if (res == D3D_OK) {
 					int bits = 0;
@@ -997,7 +1004,7 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 
 		D3DDISPLAYMODE desktop_mode;
 		::ZeroMemory(&desktop_mode, sizeof(D3DDISPLAYMODE));
-		D3DInterface->GetAdapterDisplayMode( CurRenderDevice, &desktop_mode );
+		DX8CALL_RAW_D3D(GetAdapterDisplayMode( CurRenderDevice, &desktop_mode ));
 
 		DisplayFormat=_PresentParameters.BackBufferFormat = desktop_mode.Format;
 
@@ -1017,7 +1024,9 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 			return false;
 		}
 
-		if (BitDepth==32 && D3DInterface->CheckDeviceType(0,D3DDEVTYPE_HAL,desktop_mode.Format,D3DFMT_A8R8G8B8, TRUE) == D3D_OK)
+		HRESULT hrAlpha;
+		DX8CALL_RAW_D3D_HRES(CheckDeviceType(0,D3DDEVTYPE_HAL,desktop_mode.Format,D3DFMT_A8R8G8B8, TRUE),hrAlpha);
+		if (BitDepth==32 && hrAlpha == D3D_OK)
 		{	//promote 32-bit modes to include destination alpha
 			_PresentParameters.BackBufferFormat = D3DFMT_A8R8G8B8;
 		}
@@ -1066,21 +1075,23 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 	*/
 	if (MultiSampleAntiAliasing > D3DMULTISAMPLE_NONE) {
 
-		HRESULT hrBack = D3DInterface->CheckDeviceMultiSampleType(
+		HRESULT hrBack;
+		DX8CALL_RAW_D3D_HRES(CheckDeviceMultiSampleType(
 			CurRenderDevice,
 			D3DDEVTYPE_HAL,
 			_PresentParameters.BackBufferFormat,
 			IsWindowed,
 			MultiSampleAntiAliasing
-		);
+		),hrBack);
 
-		HRESULT hrDepth = D3DInterface->CheckDeviceMultiSampleType(
+		HRESULT hrDepth;
+		DX8CALL_RAW_D3D_HRES(CheckDeviceMultiSampleType(
 			CurRenderDevice,
 			D3DDEVTYPE_HAL,
 			_PresentParameters.AutoDepthStencilFormat,
 			IsWindowed,
 			MultiSampleAntiAliasing
-		);
+		),hrDepth);
 
 		if (FAILED(hrBack) || FAILED(hrDepth)) {
 			// IF we fail then disable MSAA entirely.
@@ -1482,7 +1493,9 @@ bool DX8Wrapper::Find_Color_And_Z_Mode(int resx,int resy,int bitdepth,D3DFORMAT 
 		*set_backbuffer=*set_colorbuffer = format_table[format_index];
 	}
 
-	if (bitdepth==32 && *set_colorbuffer == D3DFMT_X8R8G8B8 && D3DInterface->CheckDeviceType(0,D3DDEVTYPE_HAL,*set_colorbuffer,D3DFMT_A8R8G8B8, TRUE) == D3D_OK)
+	HRESULT hrAlpha;
+	DX8CALL_RAW_D3D_HRES(CheckDeviceType(0,D3DDEVTYPE_HAL,*set_colorbuffer,D3DFMT_A8R8G8B8, TRUE),hrAlpha);
+	if (bitdepth==32 && *set_colorbuffer == D3DFMT_X8R8G8B8 && hrAlpha == D3D_OK)
 	{	//promote 32-bit modes to include destination alpha when supported
 		*set_backbuffer = D3DFMT_A8R8G8B8;
 	}
@@ -1508,13 +1521,13 @@ bool DX8Wrapper::Find_Color_Mode(D3DFORMAT colorbuffer, int resx, int resy, UINT
 
 	bool found=false;
 
-	modemax=D3DInterface->GetAdapterModeCount(D3DADAPTER_DEFAULT);
+	DX8CALL_RAW_D3D_HRES(GetAdapterModeCount(D3DADAPTER_DEFAULT),modemax);
 
 	i=0;
 
 	while (i<modemax && !found)
 	{
-		D3DInterface->EnumAdapterModes(D3DADAPTER_DEFAULT, i, &dmode);
+		DX8CALL_RAW_D3D(EnumAdapterModes(D3DADAPTER_DEFAULT, i, &dmode));
 		if (dmode.Width==rx && dmode.Height==ry && dmode.Format==colorbuffer) {
 			WWDEBUG_SAY(("Found valid color mode.  Width = %d Height = %d Format = %d",dmode.Width,dmode.Height,dmode.Format));
 			found=true;
@@ -1536,7 +1549,7 @@ bool DX8Wrapper::Find_Color_Mode(D3DFORMAT colorbuffer, int resx, int resy, UINT
 	j=i;
 	while (j<modemax && stillok)
 	{
-		D3DInterface->EnumAdapterModes(D3DADAPTER_DEFAULT, j, &dmode);
+		DX8CALL_RAW_D3D(EnumAdapterModes(D3DADAPTER_DEFAULT, j, &dmode));
 		if (dmode.Width==rx && dmode.Height==ry && dmode.Format==colorbuffer)
 			stillok=true; else stillok=false;
 		j++;
@@ -1603,16 +1616,20 @@ bool DX8Wrapper::Find_Z_Mode(D3DFORMAT colorbuffer,D3DFORMAT backbuffer, D3DFORM
 bool DX8Wrapper::Test_Z_Mode(D3DFORMAT colorbuffer,D3DFORMAT backbuffer, D3DFORMAT zmode)
 {
 	// See if we have this mode first
-	if (FAILED(D3DInterface->CheckDeviceFormat(D3DADAPTER_DEFAULT,WW3D_DEVTYPE,
-		colorbuffer,D3DUSAGE_DEPTHSTENCIL,D3DRTYPE_SURFACE,zmode)))
+	HRESULT hrFormat;
+	DX8CALL_RAW_D3D_HRES(CheckDeviceFormat(D3DADAPTER_DEFAULT,WW3D_DEVTYPE,
+		colorbuffer,D3DUSAGE_DEPTHSTENCIL,D3DRTYPE_SURFACE,zmode),hrFormat);
+	if (FAILED(hrFormat))
 	{
 		WWDEBUG_SAY(("CheckDeviceFormat failed.  Colorbuffer format = %d  Zbufferformat = %d",colorbuffer,zmode));
 		return false;
 	}
 
 	// Then see if it matches the color buffer
-	if(FAILED(D3DInterface->CheckDepthStencilMatch(D3DADAPTER_DEFAULT, WW3D_DEVTYPE,
-		colorbuffer,backbuffer,zmode)))
+	HRESULT hrMatch;
+	DX8CALL_RAW_D3D_HRES(CheckDepthStencilMatch(D3DADAPTER_DEFAULT, WW3D_DEVTYPE,
+		colorbuffer,backbuffer,zmode),hrMatch);
+	if(FAILED(hrMatch))
 	{
 		WWDEBUG_SAY(("CheckDepthStencilMatch failed.  Colorbuffer format = %d  Backbuffer format = %d Zbufferformat = %d",colorbuffer,backbuffer,zmode));
 		return false;
@@ -1675,10 +1692,8 @@ void DX8Wrapper::End_Scene(bool flip_frames)
 		HRESULT hr;
 		{
 			WWPROFILE("DX8Device::Present()");
-			hr=_Get_D3D_Device8()->Present(nullptr, nullptr, nullptr, nullptr);
+			DX8CALL_RAW_HRES(Present(nullptr, nullptr, nullptr, nullptr),hr);
 		}
-
-		DX8_RECORD_DX8_CALLS();
 
 		if (SUCCEEDED(hr)) {
 #ifdef EXTENDED_STATS
@@ -1695,7 +1710,7 @@ void DX8Wrapper::End_Scene(bool flip_frames)
 
 		// If the device was lost we need to check for cooperative level and possibly reset the device
 		if (hr==D3DERR_DEVICELOST) {
-			hr=_Get_D3D_Device8()->TestCooperativeLevel();
+			DX8CALL_RAW_HRES(TestCooperativeLevel(),hr);
 			if (hr==D3DERR_DEVICENOTRESET) {
 				WWDEBUG_SAY(("DX8Wrapper::End_Scene is resetting the device."));
 				Reset_Device();
@@ -1732,7 +1747,8 @@ void DX8Wrapper::Flip_To_Primary()
 		int resetAttempts = 0;
 
 		while ((flipCount > 0) && (resetAttempts < 3)) {
-			HRESULT hr = _Get_D3D_Device8()->TestCooperativeLevel();
+			HRESULT hr;
+			DX8CALL_RAW_HRES(TestCooperativeLevel(),hr);
 
 			if (FAILED(hr)) {
 				WWDEBUG_SAY(("TestCooperativeLevel Failed!"));
@@ -1751,7 +1767,7 @@ void DX8Wrapper::Flip_To_Primary()
 				}
 			} else {
 				WWDEBUG_SAY(("Flipping: %ld", FrameCount));
-				hr = _Get_D3D_Device8()->Present(nullptr, nullptr, nullptr, nullptr);
+				DX8CALL_RAW_HRES(Present(nullptr, nullptr, nullptr, nullptr),hr);
 
 				if (SUCCEEDED(hr)) {
 					IsDeviceLost=false;
@@ -1786,8 +1802,7 @@ void DX8Wrapper::Clear(bool clear_color, bool clear_z_stencil, const Vector3 &co
 	bool has_stencil=false;
 	IDirect3DSurface8* depthbuffer;
 
-	_Get_D3D_Device8()->GetDepthStencilSurface(&depthbuffer);
-	DX8_RECORD_DX8_CALLS();
+	DX8CALL_RAW(GetDepthStencilSurface(&depthbuffer));
 
 	if (depthbuffer)
 	{
@@ -2027,7 +2042,8 @@ void DX8Wrapper::Draw(
 	if (WW3D::Is_Snapshot_Activated()) {
 		unsigned long passes=0;
 		SNAPSHOT_SAY(("ValidateDevice:"));
-		HRESULT res=D3DDevice->ValidateDevice(&passes);
+		HRESULT res;
+		DX8CALL_RAW_HRES(ValidateDevice(&passes),res);
 		switch (res) {
 		case D3D_OK:
 			SNAPSHOT_SAY(("OK"));
@@ -3611,8 +3627,9 @@ void DX8Wrapper::Flush_DX8_Resource_Manager(unsigned int bytes)
 unsigned int DX8Wrapper::Get_Free_Texture_RAM()
 {
 	DX8_Assert();
-	DX8_RECORD_DX8_CALLS();
-	return DX8Wrapper::_Get_D3D_Device8()->GetAvailableTextureMem();
+	unsigned int mem;
+	DX8CALL_RAW_HRES(GetAvailableTextureMem(),mem);
+	return mem;
 }
 
 // Converts a linear gamma ramp to one that is controlled by:
@@ -3656,7 +3673,7 @@ void DX8Wrapper::Set_Gamma(float gamma,float bright,float contrast,bool calibrat
 	}
 
 	if (Get_Current_Caps()->Support_Gamma())	{
-		DX8Wrapper::_Get_D3D_Device8()->SetGammaRamp(flag,&ramp);
+		DX8CALL_RAW(SetGammaRamp(flag,&ramp));
 	} else {
 		HWND hwnd = GetDesktopWindow();
 		HDC hdc = GetDC(hwnd);
