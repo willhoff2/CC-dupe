@@ -156,6 +156,17 @@ WWINLINE void DX8_ErrorCode(unsigned res)
 #define DX8_THREAD_ASSERT() ;
 #endif
 
+// The DX8CALL macros above route the result through DX8_ErrorCode, which asserts on
+// any failure.  The DX8CALL_RAW macros are for the calls that are allowed to fail -
+// device tests, capability probes and everything that used to be issued straight off
+// _Get_D3D_Device8() without ever looking at the HRESULT.  They exist so that those
+// calls can still be funnelled through DX8Wrapper without changing what happens when
+// the call fails.
+#define DX8CALL_RAW(x) DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_RAW_HRES(x,res) res = DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_RAW_D3D(x) DX8Wrapper::_Get_D3D8()->x; DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_RAW_D3D_HRES(x,res) res = DX8Wrapper::_Get_D3D8()->x; DX8Wrapper::Increment_DX8_CallCount();
+
 
 #define no_EXTENDED_STATS
 // EXTENDED_STATS collects additional timing statistics by turning off parts
@@ -336,6 +347,76 @@ public:
 	static void Set_DX8_Clip_Plane(DWORD Index, CONST float* pPlane);
 	static void Set_DX8_Texture_Stage_State(unsigned stage, D3DTEXTURESTAGESTATETYPE state, unsigned value);
 	static void Set_DX8_Texture(unsigned int stage, IDirect3DBaseTexture8* texture);
+
+	/*
+	** Unfiltered device access.
+	**
+	** The Generals renderers (water, shader manager, shadows, trees, ...) drive a
+	** number of device states behind the back of the cached Set_DX8_* functions
+	** above, and rely on the wrapper's cache not noticing.  These entry points let
+	** them keep doing exactly that without holding a device pointer of their own:
+	** they pass straight through to D3D8 and deliberately do not touch the cached
+	** state.  Use the cached Set_DX8_* functions above unless you specifically need
+	** to go around the cache.
+	*/
+	static void Set_DX8_Render_State_Uncached(D3DRENDERSTATETYPE state, unsigned value);
+	static unsigned Get_DX8_Render_State_Uncached(D3DRENDERSTATETYPE state);
+	static void Set_DX8_Texture_Stage_State_Uncached(unsigned stage, D3DTEXTURESTAGESTATETYPE state, unsigned value);
+	static void Set_DX8_Texture_Uncached(unsigned stage, IDirect3DBaseTexture8* texture);
+	static void Set_DX8_Transform_Uncached(D3DTRANSFORMSTATETYPE transform, const D3DMATRIX& m);
+	static void Set_DX8_Vertex_Shader_Uncached(DWORD vertex_shader);
+	static void Set_DX8_Pixel_Shader_Uncached(DWORD pixel_shader);
+	static void Set_DX8_Vertex_Shader_Constant_Uncached(int reg, const void* data, int count);
+	static void Set_DX8_Pixel_Shader_Constant_Uncached(int reg, const void* data, int count);
+
+	static HRESULT Create_DX8_Vertex_Shader(const DWORD* declaration, const DWORD* function, DWORD* handle, DWORD usage);
+	static void Delete_DX8_Vertex_Shader(DWORD handle);
+	static HRESULT Create_DX8_Pixel_Shader(const DWORD* function, DWORD* handle);
+	static void Delete_DX8_Pixel_Shader(DWORD handle);
+
+	static HRESULT Create_DX8_Vertex_Buffer(unsigned length, DWORD usage, DWORD fvf, D3DPOOL pool, IDirect3DVertexBuffer8** vertex_buffer);
+	static HRESULT Create_DX8_Index_Buffer(unsigned length, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DIndexBuffer8** index_buffer);
+	static HRESULT Create_DX8_Texture_Uncached(unsigned width, unsigned height, unsigned levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DTexture8** texture);
+	static HRESULT Create_DX8_Image_Surface(unsigned width, unsigned height, D3DFORMAT format, IDirect3DSurface8** surface);
+
+	static void Set_DX8_Stream_Source(unsigned stream_number, IDirect3DVertexBuffer8* vertex_buffer, unsigned stride);
+	static void Set_DX8_Indices(IDirect3DIndexBuffer8* index_buffer, unsigned base_vertex_index);
+	static void Draw_DX8_Primitive(D3DPRIMITIVETYPE primitive_type, unsigned start_vertex, unsigned primitive_count);
+	static void Draw_DX8_Indexed_Primitive(D3DPRIMITIVETYPE primitive_type, unsigned min_index, unsigned num_vertices, unsigned start_index, unsigned primitive_count);
+	static void Draw_DX8_Primitive_UP(D3DPRIMITIVETYPE primitive_type, unsigned primitive_count, const void* vertex_data, unsigned vertex_stride);
+	static HRESULT Process_DX8_Vertices(unsigned src_start_index, unsigned dest_index, unsigned vertex_count, IDirect3DVertexBuffer8* dest_buffer, DWORD flags);
+
+	static HRESULT Get_DX8_Render_Target_Surface(IDirect3DSurface8** render_target);
+	static HRESULT Get_DX8_Depth_Stencil_Surface(IDirect3DSurface8** depth_stencil);
+	static HRESULT Set_DX8_Render_Target_Surface(IDirect3DSurface8* render_target, IDirect3DSurface8* depth_stencil);
+
+	static HRESULT Test_Cooperative_Level();
+	static HRESULT Validate_DX8_Device(DWORD* num_passes);
+	static HRESULT Present_DX8_Device(CONST RECT* source_rect, CONST RECT* dest_rect, HWND dest_window_override, CONST RGNDATA* dirty_region);
+	static unsigned Get_DX8_Available_Texture_Mem();
+	static void Discard_DX8_Resource_Manager_Bytes(unsigned bytes);
+
+	static BOOL Show_DX8_Cursor(BOOL show);
+	static HRESULT Set_DX8_Cursor_Properties(unsigned x_hotspot, unsigned y_hotspot, IDirect3DSurface8* cursor_bitmap);
+	static void Set_DX8_Cursor_Position(unsigned x, unsigned y, DWORD flags);
+	static void Set_DX8_Gamma_Ramp(DWORD flags, CONST D3DGAMMARAMP* ramp);
+
+	/*
+	** IDirect3D8 (as opposed to device) access.  These are all capability probes
+	** which are expected to fail for unsupported formats, so none of them log or
+	** assert on the returned HRESULT.
+	*/
+	static unsigned Get_DX8_Adapter_Count();
+	static HRESULT Get_DX8_Adapter_Identifier(unsigned adapter, DWORD flags, D3DADAPTER_IDENTIFIER8* identifier);
+	static unsigned Get_DX8_Adapter_Mode_Count(unsigned adapter);
+	static HRESULT Enum_DX8_Adapter_Modes(unsigned adapter, unsigned mode, D3DDISPLAYMODE* display_mode);
+	static HRESULT Get_DX8_Adapter_Display_Mode(unsigned adapter, D3DDISPLAYMODE* display_mode);
+	static HRESULT Check_DX8_Device_Type(unsigned adapter, D3DDEVTYPE check_type, D3DFORMAT display_format, D3DFORMAT backbuffer_format, BOOL windowed);
+	static HRESULT Check_DX8_Device_Format(unsigned adapter, D3DDEVTYPE device_type, D3DFORMAT adapter_format, DWORD usage, D3DRESOURCETYPE resource_type, D3DFORMAT check_format);
+	static HRESULT Check_DX8_Device_Multi_Sample_Type(unsigned adapter, D3DDEVTYPE device_type, D3DFORMAT surface_format, BOOL windowed, D3DMULTISAMPLE_TYPE multi_sample_type);
+	static HRESULT Check_DX8_Depth_Stencil_Match(unsigned adapter, D3DDEVTYPE device_type, D3DFORMAT adapter_format, D3DFORMAT render_target_format, D3DFORMAT depth_stencil_format);
+	static HRESULT Get_DX8_Device_Caps(unsigned adapter, D3DDEVTYPE device_type, D3DCAPS8* caps);
+
 	static void Set_Light_Environment(LightEnvironmentClass* light_env);
 	static LightEnvironmentClass* Get_Light_Environment() { return Light_Environment; }
 	static void Set_Fog(bool enable, const Vector3 &color, float start, float end);
@@ -932,6 +1013,292 @@ WWINLINE void DX8Wrapper::_Copy_DX8_Rects(
   cRects,
   pDestinationSurface,
   pDestPointsArray));
+}
+
+// ----------------------------------------------------------------------------
+//
+// Unfiltered device access. See the comment on the declarations of these in the
+// class definition: they go straight to D3D8 and do not touch the cached state.
+//
+// ----------------------------------------------------------------------------
+
+WWINLINE void DX8Wrapper::Set_DX8_Render_State_Uncached(D3DRENDERSTATETYPE state, unsigned value)
+{
+	DX8CALL_RAW(SetRenderState(state,value));
+}
+
+WWINLINE unsigned DX8Wrapper::Get_DX8_Render_State_Uncached(D3DRENDERSTATETYPE state)
+{
+	DWORD value=0;
+	DX8CALL_RAW(GetRenderState(state,&value));
+	return value;
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Texture_Stage_State_Uncached(unsigned stage, D3DTEXTURESTAGESTATETYPE state, unsigned value)
+{
+	DX8CALL_RAW(SetTextureStageState(stage,state,value));
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Texture_Uncached(unsigned stage, IDirect3DBaseTexture8* texture)
+{
+	DX8CALL_RAW(SetTexture(stage,texture));
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Transform_Uncached(D3DTRANSFORMSTATETYPE transform, const D3DMATRIX& m)
+{
+	DX8CALL_RAW(SetTransform(transform,&m));
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Vertex_Shader_Uncached(DWORD vertex_shader)
+{
+	DX8CALL_RAW(SetVertexShader(vertex_shader));
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Pixel_Shader_Uncached(DWORD pixel_shader)
+{
+	DX8CALL_RAW(SetPixelShader(pixel_shader));
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Vertex_Shader_Constant_Uncached(int reg, const void* data, int count)
+{
+	DX8CALL_RAW(SetVertexShaderConstant(reg,data,count));
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Pixel_Shader_Constant_Uncached(int reg, const void* data, int count)
+{
+	DX8CALL_RAW(SetPixelShaderConstant(reg,data,count));
+}
+
+WWINLINE HRESULT DX8Wrapper::Create_DX8_Vertex_Shader(const DWORD* declaration, const DWORD* function, DWORD* handle, DWORD usage)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(CreateVertexShader(declaration,function,handle,usage),res);
+	return res;
+}
+
+WWINLINE void DX8Wrapper::Delete_DX8_Vertex_Shader(DWORD handle)
+{
+	DX8CALL_RAW(DeleteVertexShader(handle));
+}
+
+WWINLINE HRESULT DX8Wrapper::Create_DX8_Pixel_Shader(const DWORD* function, DWORD* handle)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(CreatePixelShader(function,handle),res);
+	return res;
+}
+
+WWINLINE void DX8Wrapper::Delete_DX8_Pixel_Shader(DWORD handle)
+{
+	DX8CALL_RAW(DeletePixelShader(handle));
+}
+
+WWINLINE HRESULT DX8Wrapper::Create_DX8_Vertex_Buffer(unsigned length, DWORD usage, DWORD fvf, D3DPOOL pool, IDirect3DVertexBuffer8** vertex_buffer)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(CreateVertexBuffer(length,usage,fvf,pool,vertex_buffer),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Create_DX8_Index_Buffer(unsigned length, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DIndexBuffer8** index_buffer)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(CreateIndexBuffer(length,usage,format,pool,index_buffer),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Create_DX8_Texture_Uncached(unsigned width, unsigned height, unsigned levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DTexture8** texture)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(CreateTexture(width,height,levels,usage,format,pool,texture),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Create_DX8_Image_Surface(unsigned width, unsigned height, D3DFORMAT format, IDirect3DSurface8** surface)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(CreateImageSurface(width,height,format,surface),res);
+	return res;
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Stream_Source(unsigned stream_number, IDirect3DVertexBuffer8* vertex_buffer, unsigned stride)
+{
+	DX8CALL_RAW(SetStreamSource(stream_number,vertex_buffer,stride));
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Indices(IDirect3DIndexBuffer8* index_buffer, unsigned base_vertex_index)
+{
+	DX8CALL_RAW(SetIndices(index_buffer,base_vertex_index));
+}
+
+WWINLINE void DX8Wrapper::Draw_DX8_Primitive(D3DPRIMITIVETYPE primitive_type, unsigned start_vertex, unsigned primitive_count)
+{
+	DX8CALL_RAW(DrawPrimitive(primitive_type,start_vertex,primitive_count));
+}
+
+WWINLINE void DX8Wrapper::Draw_DX8_Indexed_Primitive(D3DPRIMITIVETYPE primitive_type, unsigned min_index, unsigned num_vertices, unsigned start_index, unsigned primitive_count)
+{
+	DX8CALL_RAW(DrawIndexedPrimitive(primitive_type,min_index,num_vertices,start_index,primitive_count));
+}
+
+WWINLINE void DX8Wrapper::Draw_DX8_Primitive_UP(D3DPRIMITIVETYPE primitive_type, unsigned primitive_count, const void* vertex_data, unsigned vertex_stride)
+{
+	DX8CALL_RAW(DrawPrimitiveUP(primitive_type,primitive_count,vertex_data,vertex_stride));
+}
+
+WWINLINE HRESULT DX8Wrapper::Process_DX8_Vertices(unsigned src_start_index, unsigned dest_index, unsigned vertex_count, IDirect3DVertexBuffer8* dest_buffer, DWORD flags)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(ProcessVertices(src_start_index,dest_index,vertex_count,dest_buffer,flags),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Get_DX8_Render_Target_Surface(IDirect3DSurface8** render_target)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(GetRenderTarget(render_target),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Get_DX8_Depth_Stencil_Surface(IDirect3DSurface8** depth_stencil)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(GetDepthStencilSurface(depth_stencil),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Set_DX8_Render_Target_Surface(IDirect3DSurface8* render_target, IDirect3DSurface8* depth_stencil)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(SetRenderTarget(render_target,depth_stencil),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Test_Cooperative_Level()
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(TestCooperativeLevel(),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Validate_DX8_Device(DWORD* num_passes)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(ValidateDevice(num_passes),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Present_DX8_Device(CONST RECT* source_rect, CONST RECT* dest_rect, HWND dest_window_override, CONST RGNDATA* dirty_region)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(Present(source_rect,dest_rect,dest_window_override,dirty_region),res);
+	return res;
+}
+
+WWINLINE unsigned DX8Wrapper::Get_DX8_Available_Texture_Mem()
+{
+	unsigned mem;
+	DX8CALL_RAW_HRES(GetAvailableTextureMem(),mem);
+	return mem;
+}
+
+WWINLINE void DX8Wrapper::Discard_DX8_Resource_Manager_Bytes(unsigned bytes)
+{
+	DX8CALL_RAW(ResourceManagerDiscardBytes(bytes));
+}
+
+WWINLINE BOOL DX8Wrapper::Show_DX8_Cursor(BOOL show)
+{
+	BOOL was_visible;
+	DX8CALL_RAW_HRES(ShowCursor(show),was_visible);
+	return was_visible;
+}
+
+WWINLINE HRESULT DX8Wrapper::Set_DX8_Cursor_Properties(unsigned x_hotspot, unsigned y_hotspot, IDirect3DSurface8* cursor_bitmap)
+{
+	HRESULT res;
+	DX8CALL_RAW_HRES(SetCursorProperties(x_hotspot,y_hotspot,cursor_bitmap),res);
+	return res;
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Cursor_Position(unsigned x, unsigned y, DWORD flags)
+{
+	DX8CALL_RAW(SetCursorPosition(x,y,flags));
+}
+
+WWINLINE void DX8Wrapper::Set_DX8_Gamma_Ramp(DWORD flags, CONST D3DGAMMARAMP* ramp)
+{
+	DX8CALL_RAW(SetGammaRamp(flags,ramp));
+}
+
+WWINLINE unsigned DX8Wrapper::Get_DX8_Adapter_Count()
+{
+	unsigned count;
+	DX8CALL_RAW_D3D_HRES(GetAdapterCount(),count);
+	return count;
+}
+
+WWINLINE HRESULT DX8Wrapper::Get_DX8_Adapter_Identifier(unsigned adapter, DWORD flags, D3DADAPTER_IDENTIFIER8* identifier)
+{
+	HRESULT res;
+	DX8CALL_RAW_D3D_HRES(GetAdapterIdentifier(adapter,flags,identifier),res);
+	return res;
+}
+
+WWINLINE unsigned DX8Wrapper::Get_DX8_Adapter_Mode_Count(unsigned adapter)
+{
+	unsigned count;
+	DX8CALL_RAW_D3D_HRES(GetAdapterModeCount(adapter),count);
+	return count;
+}
+
+WWINLINE HRESULT DX8Wrapper::Enum_DX8_Adapter_Modes(unsigned adapter, unsigned mode, D3DDISPLAYMODE* display_mode)
+{
+	HRESULT res;
+	DX8CALL_RAW_D3D_HRES(EnumAdapterModes(adapter,mode,display_mode),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Get_DX8_Adapter_Display_Mode(unsigned adapter, D3DDISPLAYMODE* display_mode)
+{
+	HRESULT res;
+	DX8CALL_RAW_D3D_HRES(GetAdapterDisplayMode(adapter,display_mode),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Check_DX8_Device_Type(unsigned adapter, D3DDEVTYPE check_type, D3DFORMAT display_format, D3DFORMAT backbuffer_format, BOOL windowed)
+{
+	HRESULT res;
+	DX8CALL_RAW_D3D_HRES(CheckDeviceType(adapter,check_type,display_format,backbuffer_format,windowed),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Check_DX8_Device_Format(unsigned adapter, D3DDEVTYPE device_type, D3DFORMAT adapter_format, DWORD usage, D3DRESOURCETYPE resource_type, D3DFORMAT check_format)
+{
+	HRESULT res;
+	DX8CALL_RAW_D3D_HRES(CheckDeviceFormat(adapter,device_type,adapter_format,usage,resource_type,check_format),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Check_DX8_Device_Multi_Sample_Type(unsigned adapter, D3DDEVTYPE device_type, D3DFORMAT surface_format, BOOL windowed, D3DMULTISAMPLE_TYPE multi_sample_type)
+{
+	HRESULT res;
+	DX8CALL_RAW_D3D_HRES(CheckDeviceMultiSampleType(adapter,device_type,surface_format,windowed,multi_sample_type),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Check_DX8_Depth_Stencil_Match(unsigned adapter, D3DDEVTYPE device_type, D3DFORMAT adapter_format, D3DFORMAT render_target_format, D3DFORMAT depth_stencil_format)
+{
+	HRESULT res;
+	DX8CALL_RAW_D3D_HRES(CheckDepthStencilMatch(adapter,device_type,adapter_format,render_target_format,depth_stencil_format),res);
+	return res;
+}
+
+WWINLINE HRESULT DX8Wrapper::Get_DX8_Device_Caps(unsigned adapter, D3DDEVTYPE device_type, D3DCAPS8* caps)
+{
+	HRESULT res;
+	DX8CALL_RAW_D3D_HRES(GetDeviceCaps(adapter,device_type,caps),res);
+	return res;
 }
 
 WWINLINE Vector4 DX8Wrapper::Convert_Color(unsigned color)
