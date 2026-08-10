@@ -47,7 +47,7 @@ set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_OUTPUT_DIR}")
 
 set(SPIRV_OUTPUTS)
-foreach(shader fixedfunc.vert fixedfunc.frag)
+foreach(shader fixedfunc.vert fixedfunc.frag probe.vert probe.frag)
     set(shader_in "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader}")
     set(shader_out "${SHADER_OUTPUT_DIR}/${shader}.spv")
     if(GLSL_COMPILER MATCHES "glslc")
@@ -77,6 +77,17 @@ target_link_libraries(zh-renderer-spike PRIVATE Vulkan::Vulkan)
 target_compile_definitions(zh-renderer-spike PRIVATE
     SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
 
+# Capability probe: queries only, no rendering. Answers the format/feature questions
+# the two-draw spike cannot -- see docs/porting/moltenvk-findings.md.
+add_executable(zh-caps-probe src/caps_probe.cpp)
+target_link_libraries(zh-caps-probe PRIVATE Vulkan::Vulkan)
+
+# Feature probe: renders each case and checks the pixels it produced.
+add_executable(zh-feature-probe src/feature_probe.cpp)
+add_dependencies(zh-feature-probe spike-shaders)
+target_link_libraries(zh-feature-probe PRIVATE Vulkan::Vulkan)
+target_compile_definitions(zh-feature-probe PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+
 if(SPIKE_HAVE_SDL2)
     target_compile_definitions(zh-renderer-spike PRIVATE SPIKE_WITH_SDL)
     if(TARGET SDL2::SDL2)
@@ -88,5 +99,7 @@ if(SPIKE_HAVE_SDL2)
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(zh-renderer-spike PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
+    foreach(target zh-renderer-spike zh-caps-probe zh-feature-probe)
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
+    endforeach()
 endif()

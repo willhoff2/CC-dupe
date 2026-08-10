@@ -1,0 +1,16 @@
+device: Apple M1 Pro
+depth-stencil format chosen: D32_SFLOAT_S8_UINT
+
+== functional cases ==
+  depth test (D3DRS_ZENABLE/ZFUNC)           PASS near-left=(0,0,255) far-right=(255,0,0)
+  alpha blend (SRCALPHA/INVSRCALPHA)         PASS blended=(255,128,128) expected=(255,128,128)
+  BC1 / D3DFMT_DXT1 sampled                  PASS DXT1 sampled=(255,0,0,255) expected=(255,0,0,255)
+  BC3 / D3DFMT_DXT5 sampled (incl. alpha)    PASS DXT5 sampled=(0,255,0,128) expected=(0,255,0,128)
+  BC1 mip chain (explicit LOD)               PASS DXT1 mip1 sampled=(0,0,255,255) expected=(0,0,255,255)
+  two texture stages in one draw             PASS modulated=(128,0,0) expected=(128,0,0)
+  stencil write + test (shadow volumes)      PASS stencil==1=(0,255,255) stencil==0=(0,0,0)
+  render target + sample the result          PASS sampled-from-RT=(255,0,255) expected=(255,0,255)
+  dynamic buffer suballocation               PASS suballoc0=(0,255,0) suballoc1=(255,255,0)
+
+validation messages: 0
+0 case(s) failed

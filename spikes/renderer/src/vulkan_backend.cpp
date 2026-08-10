@@ -297,9 +297,45 @@ private:
 // initialisation
 // ---------------------------------------------------------------------------
 
+namespace {
+
+bool Instance_Extension_Available(const char* name) {
+	uint32_t count = 0;
+	vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+	std::vector<VkExtensionProperties> available(count);
+	vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
+	for (const auto& e : available) {
+		if (std::strcmp(e.extensionName, name) == 0) return true;
+	}
+	return false;
+}
+
+bool Device_Extension_Available(VkPhysicalDevice device, const char* name) {
+	uint32_t count = 0;
+	vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr);
+	std::vector<VkExtensionProperties> available(count);
+	vkEnumerateDeviceExtensionProperties(device, nullptr, &count, available.data());
+	for (const auto& e : available) {
+		if (std::strcmp(e.extensionName, name) == 0) return true;
+	}
+	return false;
+}
+
+} // namespace
+
 bool VulkanBackend::Create_Instance(void* window_handle) {
 	std::vector<const char*> extensions;
 	std::vector<const char*> layers;
+	VkInstanceCreateFlags instance_flags = 0;
+
+	// MoltenVK is a non-conformant "portability" driver. A current Khronos loader hides
+	// such drivers from vkEnumeratePhysicalDevices unless the instance opts in here, and
+	// vkCreateInstance itself fails with VK_ERROR_INCOMPATIBLE_DRIVER. Conditional on the
+	// extension being advertised, so the Linux path is byte-for-byte unchanged.
+	if (Instance_Extension_Available(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+		extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+		instance_flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+	}
 
 #ifdef SPIKE_WITH_SDL
 	if (!headless_ && window_handle != nullptr) {
@@ -340,6 +376,7 @@ bool VulkanBackend::Create_Instance(void* window_handle) {
 	ci.ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data();
 	ci.enabledLayerCount = static_cast<uint32_t>(layers.size());
 	ci.ppEnabledLayerNames = layers.empty() ? nullptr : layers.data();
+	ci.flags = instance_flags;
 	VK_CHECK(vkCreateInstance(&ci, nullptr, &instance_));
 
 	// Route validation output through an explicit messenger rather than relying on
@@ -415,6 +452,10 @@ bool VulkanBackend::Pick_Device() {
 	std::vector<const char*> device_extensions;
 	if (surface_ != VK_NULL_HANDLE) {
 		device_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+	}
+	// Required by spec whenever the physical device advertises it (MoltenVK always does).
+	if (Device_Extension_Available(physical_, "VK_KHR_portability_subset")) {
+		device_extensions.push_back("VK_KHR_portability_subset");
 	}
 
 	VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
