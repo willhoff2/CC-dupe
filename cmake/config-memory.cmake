@@ -94,8 +94,15 @@ else()
 endif()
 
 if(RTS_CRASHDUMP_ENABLE)
-    target_compile_definitions(core_config INTERFACE RTS_ENABLE_CRASHDUMP=1)
-    if (IS_VS6_BUILD AND NOT RTS_BUILD_OPTION_VC6_FULL_DEBUG)
-        message(STATUS "Crash Dumps will be significantly less useful in VC6 builds without full debug info enabled")
+    # TheSuperHackers @port The crash dumper is DbgHelp's MiniDumpWriteDump behind a Win32
+    # unhandled exception filter, so it is only ever enabled for Windows targets. See
+    # docs/porting/process-and-crash-seam.md.
+    if(WIN32)
+        target_compile_definitions(core_config INTERFACE RTS_ENABLE_CRASHDUMP=1)
+        if (IS_VS6_BUILD AND NOT RTS_BUILD_OPTION_VC6_FULL_DEBUG)
+            message(STATUS "Crash Dumps will be significantly less useful in VC6 builds without full debug info enabled")
+        endif()
+    else()
+        message(STATUS "Crash dumps are a Windows only feature; RTS_CRASHDUMP_ENABLE has no effect here")
     endif()
 endif()

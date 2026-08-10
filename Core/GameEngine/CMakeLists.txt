@@ -93,6 +93,7 @@ set(GAMEENGINE_SRC
 #    Include/Common/Player.h
 #    Include/Common/PlayerList.h
 #    Include/Common/PlayerTemplate.h
+    Include/Common/ProcessLaunch.h
 #    Include/Common/ProductionPrerequisite.h
 #    Include/Common/QuickmatchPreferences.h
 #    Include/Common/QuotedPrintable.h
@@ -620,6 +621,7 @@ set(GAMEENGINE_SRC
 #    Source/Common/PartitionSolver.cpp
 #    Source/Common/PerfTimer.cpp
     Source/Common/RandomValue.cpp
+    Source/Common/ProcessLaunch.cpp
 #    Source/Common/Recorder.cpp
     Source/Common/ReplaySimulation.cpp
     Source/Common/RTS/AcademyStats.cpp

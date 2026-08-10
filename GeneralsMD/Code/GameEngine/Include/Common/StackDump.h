@@ -24,8 +24,14 @@
 
 #pragma once
 
-// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+// TheSuperHackers @port The stack walk itself is portable in shape: an array of return
+// addresses, symbolised one line at a time. Only the entry points that take a Win32 CONTEXT or
+// EXCEPTION_POINTERS are Windows-only, and they are the ones the unhandled exception filter
+// uses. Off Windows the implementation is backtrace()/backtrace_symbols(), which has no line
+// numbers; see docs/porting/process-and-crash-seam.md.
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #ifndef IG_DEBUG_STACKTRACE
 #define IG_DEBUG_STACKTRACE	1
@@ -36,9 +42,11 @@
 // If callback is nullptr then will write using OuputDebugString
 void StackDump(void (*callback)(const char*));
 
+#ifdef _WIN32
 // Writes a stackdump (provide a callback : gets called per line)
 // If callback is nullptr then will write using OuputDebugString
 void StackDumpFromContext(DWORD eip,DWORD esp,DWORD ebp, void (*callback)(const char*));
+#endif
 
 // Gets count* addresses from the current stack
 void FillStackAddresses(void**addresses, unsigned int count, unsigned int skip = 0);
@@ -48,8 +56,10 @@ void StackDumpFromAddresses(void**addresses, unsigned int count, void (*callback
 
 void GetFunctionDetails(void *pointer, char*name, char*filename, unsigned int* linenumber, unsigned int* address);
 
+#ifdef _WIN32
 // Dumps out the exception info and stack trace.
 void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info );
+#endif
 
 #else
 
@@ -63,8 +73,10 @@ __inline void StackDumpFromAddresses(void**addresses, unsigned int count, void (
 
 __inline void GetFunctionDetails(void *pointer, char*name, char*filename, unsigned int* linenumber, unsigned int* address) {}
 
+#ifdef _WIN32
 // Dumps out the exception info and stack trace.
 __inline void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info ) {};
+#endif
 
 #endif
 

@@ -18,10 +18,15 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port Crash dumping is Windows only by design: it is DbgHelp's
+// MiniDumpWriteDump plus an unhandled exception filter, and neither has an equivalent that would
+// produce a .dmp a Windows debugger can read. RTS_ENABLE_CRASHDUMP is only defined for Windows
+// builds, so off Windows this file is empty. See docs/porting/process-and-crash-seam.md.
+#ifdef RTS_ENABLE_CRASHDUMP
+
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
 #include <io.h>
 
-#ifdef RTS_ENABLE_CRASHDUMP
 #include "Common/MiniDumper.h"
 #include <wctype.h>
 #include "gitinfo.h"

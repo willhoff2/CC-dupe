@@ -166,10 +166,12 @@ if(WIN32)
         WWCOMUtil.h
     )
 else()
-    # Stand-ins for the Win32 threading, synchronisation, timing and registry calls.
+    # Stand-ins for the Win32 threading, synchronisation, timing, registry and process calls.
     list(APPEND WWLIB_SRC
         platform/platform_mutex.cpp
         platform/platform_mutex.h
+        platform/platform_process.cpp
+        platform/platform_process.h
         platform/platform_settings.cpp
         platform/platform_settings.h
         platform/platform_thread.cpp
