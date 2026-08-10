@@ -5,9 +5,10 @@
     "dx8-src",
     "gamespy-src/include",
     "lzhl-src",
-    "miles-src"
+    "miles-src",
+    "miles-src/mss"
   ],
-  "clean": 115,
+  "clean": 489,
   "total": 737,
   "targets": {
     "Core/Libraries/Source/Compression": {
@@ -39,11 +40,11 @@
       "total": 6
     },
     "Core/GameEngine": {
-      "clean": 0,
+      "clean": 107,
       "total": 207
     },
     "GeneralsMD/Code/GameEngine": {
-      "clean": 0,
+      "clean": 267,
       "total": 379
     }
   }
