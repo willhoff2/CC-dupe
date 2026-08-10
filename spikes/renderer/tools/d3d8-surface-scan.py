@@ -175,6 +175,12 @@ for k, v in per_file.most_common(20):
 if "--json" in sys.argv:
     json.dump({k: v for k, v in sites.items()}, sys.stdout, indent=1)
 
+# Same payload, but to a file, so a caller can parse it without having to find the JSON
+# in the middle of the human-readable report. Used by scripts/ci/check-d3d8-surface.py.
+if "--json-out" in sys.argv:
+    with open(sys.argv[sys.argv.index("--json-out") + 1], "w") as fh:
+        json.dump({k: v for k, v in sites.items()}, fh, indent=1)
+
 
 # ---------------------------------------------------------------------------
 # Part 2: which D3D8 state tokens the engine actually uses.

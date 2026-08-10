@@ -1,0 +1,297 @@
+name: Native Port CI
+
+# Continuous verification of the native macOS/Linux 64-bit port work. Nothing else in CI touches
+# any of it: the Windows presets in ci.yml cannot see a portability regression, so every number
+# in docs/porting/ silently rots on the next upstream merge. Each job here turns one of those
+# measurements into a pass/fail signal.
+#
+# Deliberately NOT here: the Wine/VC6 Docker game build (scripts/docker-build.sh). It takes ~10
+# minutes, and it is the manual release gate, not a per-push check.
+#
+# Reproducibility notes:
+#  * The Linux jobs run in a digest-pinned ubuntu:22.04 container rather than on the runner image,
+#    because the probe's clean-TU count depends on the clang version and the spike's readback
+#    depends on the Mesa/llvmpipe version. Pinning the runner label alone would not survive
+#    GitHub retiring an image.
+#  * The probe's third-party headers (dx8, gamespy, miles, lzhl) are provisioned explicitly by
+#    scripts/ci/fetch-probe-deps.sh from the commits cmake/*.cmake pins. They are NOT taken from
+#    an untracked build/docker/_deps tree: whether that directory exists changes the probe's
+#    answer (114 vs 115 clean, see docs/porting/review-and-decisions.md 1.2), so relying on a
+#    Docker build by-product would make this job non-reproducible.
+#  * No secrets are used, so everything works on a fork.
+
+on:
+  push:
+    branches:
+      - main
+      - 'devin/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The Linux jobs all run in the same digest-pinned image: ubuntu:22.04, which gives clang 14 and
+# Mesa 22.x -- the toolchain every number in docs/porting/ was measured with. `container.image`
+# cannot read the `env` context, so the digest is repeated per job rather than named once.
+jobs:
+  # 1. The native 64-bit clang readiness probe, gated against a checked-in baseline so a
+  #    portability regression fails the build instead of printing a smaller number.
+  native-probe:
+    name: Native probe (Linux, clang 14)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
+    timeout-minutes: 30
+    steps:
+      - name: Install toolchain
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y --no-install-recommends clang-14 python3 git ca-certificates
+          clang++-14 --version
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Provision the third-party headers the probe needs
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ./scripts/ci/fetch-probe-deps.sh
+
+      - name: Probe (native, no Windows SDK)
+        env:
+          CLANGXX: clang++-14
+        run: |
+          python3 scripts/native-port-probe.py \
+            --report native-port-probe-native.md --json probe-native.json
+
+      - name: Probe (shimmed)
+        env:
+          CLANGXX: clang++-14
+        run: |
+          python3 scripts/native-port-probe.py --with-shims \
+            --report native-port-probe-shimmed.md --json probe-shimmed.json
+
+      - name: Gate against the checked-in baselines
+        run: |
+          set -o pipefail
+          {
+            echo '## Native probe'
+            echo '```'
+            python3 scripts/ci/check-probe-baseline.py --results probe-native.json
+            python3 scripts/ci/check-probe-baseline.py --results probe-shimmed.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the probe reports
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: native-port-probe-reports
+          path: |
+            native-port-probe-native.md
+            native-port-probe-shimmed.md
+            probe-native.json
+            probe-shimmed.json
+
+  # 2. Build the D3D8 -> Vulkan spike and render with it. Exit status is not the assertion:
+  #    the framebuffer is read back and compared against the committed reference image, and the
+  #    validation layer must be loaded and silent.
+  renderer-spike-linux:
+    name: Renderer spike (Linux, lavapipe)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
+    timeout-minutes: 30
+    steps:
+      - name: Install toolchain and a software Vulkan device
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            clang-14 cmake ninja-build git ca-certificates python3 \
+            libvulkan-dev vulkan-validationlayers glslang-tools mesa-vulkan-drivers
+          test -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          test -f /usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build
+        env:
+          CC: clang-14
+          CXX: clang++-14
+        run: |
+          cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/spike
+
+      - name: Render headless and compare the readback with the reference image
+        env:
+          # lavapipe: the CPU Vulkan device. Named explicitly so the job cannot accidentally
+          # pass on some other ICD that happens to be installed.
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          XDG_RUNTIME_DIR: /tmp/xdgrt
+        run: |
+          set -o pipefail
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          unset DISPLAY
+          {
+            echo '## Renderer spike (Linux, lavapipe)'
+            echo '```'
+            python3 scripts/ci/check-spike-render.py \
+              --binary build/spike/zh-renderer-spike \
+              --reference spikes/renderer/docs/spike-triangle.png \
+              --out spike-linux.png \
+              --tolerance 2 --max-differing 0
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the rendered image
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: spike-render-linux
+          path: spike-linux.png
+
+  # 3. The D3D8 surface scanner as a ratchet: direct (non-DX8Wrapper) call sites must match the
+  #    checked-in allowlist exactly, so the consolidation cannot rot one call site at a time.
+  d3d8-surface:
+    name: D3D8 surface scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Scan
+        run: python3 spikes/renderer/tools/d3d8-surface-scan.py | tee d3d8-surface-scan.txt
+
+      - name: Gate the direct call surface against the allowlist
+        run: |
+          set -o pipefail
+          {
+            echo '## D3D8 direct call surface'
+            echo '```'
+            python3 scripts/ci/check-d3d8-surface.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the scan
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: d3d8-surface-scan
+          path: d3d8-surface-scan.txt
+
+  # 4. The OpenAL replacement for Miles. It is not reachable from the top-level CMake build off
+  #    Windows yet, so this builds the real target through a minimal standalone harness and
+  #    additionally checks it defines every AIL_* entry point it declares.
+  openal-backend:
+    name: OpenAL backend build (Linux)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
+    timeout-minutes: 20
+    steps:
+      - name: Install toolchain
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            clang-14 cmake ninja-build git ca-certificates python3 binutils libopenal-dev
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build
+        env:
+          CC: clang-14
+          CXX: clang++-14
+        run: |
+          cmake -S scripts/ci/openal-standalone -B build/openal -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/openal
+
+      - name: Check every declared AIL_* entry point is defined
+        run: |
+          set -o pipefail
+          {
+            echo '## OpenAL backend'
+            echo '```'
+            python3 scripts/ci/check-openal-symbols.py \
+              --header Core/Libraries/Source/OpenALAudioDevice/mss/mss.h \
+              --archive build/openal/openalaudiodevice/libcore_openalaudiodevice.a
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # 5. The same spike on Apple Silicon through MoltenVK. This exists to guard the
+  #    VK_KHR_portability_enumeration / VK_KHR_portability_subset opt-in: without it the Khronos
+  #    loader does not report MoltenVK at all, and nothing on Linux would notice it being
+  #    deleted.
+  #
+  #    Scope, honestly: the macos-14 runner has no GPU that MoltenVK can use well -- it renders
+  #    through Metal on Apple's software/virtualised path -- and MoltenVK is a translation layer,
+  #    so the rasterisation is not bit-identical to llvmpipe's. This job therefore asserts:
+  #      * MoltenVK is enumerated and selected (i.e. the portability opt-in is present);
+  #      * the render and readback complete;
+  #      * the image is *close* to the same reference (loose tolerance, see below).
+  #    It does NOT assert pixel equality with the Linux reference, and it does not assert
+  #    validation cleanliness with the same force as Linux, because the validation layers are not
+  #    part of the Homebrew MoltenVK install; the Linux job is the one that owns that assertion.
+  renderer-spike-macos:
+    name: Renderer spike (macOS arm64, MoltenVK)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install MoltenVK, the Vulkan loader and glslang
+        run: |
+          set -eux
+          brew update > /dev/null
+          brew install molten-vk vulkan-loader vulkan-headers vulkan-tools glslang
+          command -v cmake > /dev/null || brew install cmake
+          brew list --versions molten-vk vulkan-loader glslang
+
+      - name: Build
+        run: |
+          set -eux
+          BREW=$(brew --prefix)
+          cmake -S spikes/renderer -B build/spike -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$BREW"
+          cmake --build build/spike -j3
+
+      - name: Render headless through MoltenVK and compare the readback
+        run: |
+          set -eux -o pipefail
+          BREW=$(brew --prefix)
+          export VK_ICD_FILENAMES="$BREW/share/vulkan/icd.d/MoltenVK_icd.json"
+          export DYLD_LIBRARY_PATH="$BREW/lib"
+          {
+            echo '## Renderer spike (macOS arm64, MoltenVK)'
+            echo '```'
+            python3 scripts/ci/check-spike-render.py \
+              --binary build/spike/zh-renderer-spike \
+              --reference spikes/renderer/docs/spike-triangle.png \
+              --out spike-macos.png \
+              --tolerance 8 --max-differing 0.01
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the rendered image
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: spike-render-macos
+          path: spike-macos.png

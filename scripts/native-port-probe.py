@@ -19,12 +19,14 @@ measures exactly what the real build compiles and does not report on dead files.
 
 Usage:
     python3 scripts/native-port-probe.py [--with-shims] [--report report.md] [--jobs N]
+                                        [--json results.json]
 """
 
 import argparse
 import collections
 import concurrent.futures
 import dataclasses
+import json
 import os
 import pathlib
 import re
@@ -33,6 +35,10 @@ import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SHIM_DIR = REPO_ROOT / "scripts" / "native-port-shims"
+
+# Which clang to probe with. The counts are compiler-version dependent, so CI pins this and
+# records the version alongside the results.
+CLANGXX = os.environ.get("CLANGXX", "clang++")
 
 # Third-party SDKs the CMake build fetches at configure time (min-dx8-sdk, gamespy, miles,
 # lzhl). They are not in the repo, so the probe picks them up from a build tree when one
@@ -224,7 +230,7 @@ def probe(job):
     includes.extend(str(REPO_ROOT / d) for d in COMMON_INCLUDES)
     includes.extend(str(REPO_ROOT / d) for d in target.includes)
 
-    cmd = ["clang++", *CLANG_FLAGS]
+    cmd = [CLANGXX, *CLANG_FLAGS]
     cmd += [f"-D{d}" for d in target.defines]
     cmd += [f"-I{d}" for d in includes]
     cmd.append(str(source))
@@ -356,9 +362,37 @@ def render_report(results, with_shims, deps_dir, deps_present):
     return "\n".join(lines)
 
 
+def clang_version():
+    """Major version of the clang the probe ran with, e.g. '14'."""
+    try:
+        out = subprocess.run([CLANGXX, "-dumpversion"], capture_output=True, text=True).stdout
+    except OSError:
+        return "unknown"
+    return out.strip().split(".")[0] or "unknown"
+
+
+def render_json(results, with_shims, deps_present):
+    """Machine-readable summary, for the CI baseline gate."""
+    per_target = collections.OrderedDict((t.name, {"clean": 0, "total": 0}) for t in TARGETS)
+    for result in results:
+        per_target[result.target]["total"] += 1
+        if result.ok:
+            per_target[result.target]["clean"] += 1
+    return {
+        "mode": "shimmed" if with_shims else "native",
+        "clang_major": clang_version(),
+        "deps_present": sorted(deps_present),
+        "clean": sum(1 for r in results if r.ok),
+        "total": len(results),
+        "targets": per_target,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", default="native-port-probe.md")
+    parser.add_argument("--json", dest="json_out",
+                        help="also write a machine-readable summary here (used by CI)")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--with-shims", action="store_true",
                         help="put scripts/native-port-shims/ on the include path")
@@ -382,6 +416,9 @@ def main():
 
     report = render_report(results, args.with_shims, deps_dir, deps_present)
     pathlib.Path(args.report).write_text(report)
+    if args.json_out:
+        pathlib.Path(args.json_out).write_text(
+            json.dumps(render_json(results, args.with_shims, deps_present), indent=2) + "\n")
     clean = sum(1 for r in results if r.ok)
     print(f"{clean} / {len(results)} translation units clean; report written to {args.report}")
     return 0
