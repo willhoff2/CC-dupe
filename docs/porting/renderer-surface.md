@@ -8,6 +8,13 @@ Output of the time-boxed renderer spike. Three parts:
    renders — see `spikes/renderer/`;
 3. a recommendation and a revised Phase 4 estimate.
 
+> **Follow-up measurement.** `docs/porting/fixed-function-measurements.md` measures the
+> *semantics* behind the two riskiest methods on this surface — the texture-stage cascade
+> (17 of D3D8's 26 ops, 8 argument encodings, 8 stages, 314 distinct stage0+stage1 programs)
+> and the FVF set (21 declarations) — records the pipeline-count estimate (252 for a
+> preset-only frame, 32,256 upper bound, 161 M if the cascade were compiled rather than
+> interpreted), and revises three line items of the estimate below downward by ~95–155 h.
+
 ## 0. Corrections to the previously stated numbers
 
 > The counts in this section are the **pre-refactor** measurement (the state the spike found).
