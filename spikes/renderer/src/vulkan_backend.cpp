@@ -332,10 +332,7 @@ bool VulkanBackend::Create_Instance(void* window_handle) {
 	// such drivers from vkEnumeratePhysicalDevices unless the instance opts in here, and
 	// vkCreateInstance itself fails with VK_ERROR_INCOMPATIBLE_DRIVER. Conditional on the
 	// extension being advertised, so the Linux path is byte-for-byte unchanged.
-	if (Instance_Extension_Available(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
-		extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-		instance_flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-	}
+	// NEGATIVE TEST: the portability opt-in deleted on purpose.
 
 #ifdef SPIKE_WITH_SDL
 	if (!headless_ && window_handle != nullptr) {
