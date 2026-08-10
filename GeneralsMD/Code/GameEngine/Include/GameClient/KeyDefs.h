@@ -55,11 +55,7 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <stdlib.h>
-#ifndef DIRECTINPUT_VERSION
-#	define DIRECTINPUT_VERSION	0x800
-#endif
-
-#include <dinput.h>
+#include <GameClient/KeyScanCodes.h>
 #include <Lib/BaseType.h>
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
@@ -70,34 +66,6 @@
 // TYPE DEFINES ///////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
-#ifndef DIK_OEM_102
-#define DIK_OEM_102         0x56    /* < > | on UK/Germany keyboards  */
-#endif
-
-#ifndef DIK_KANA
-#define DIK_KANA            0x70    /* (Japanese keyboard)            */
-#endif
-
-#ifndef DIK_CONVERT
-#define DIK_CONVERT         0x79    /* (Japanese keyboard)            */
-#endif
-
-#ifndef DIK_NOCONVERT
-#define DIK_NOCONVERT       0x7B    /* (Japanese keyboard)            */
-#endif
-
-#ifndef DIK_YEN
-#define DIK_YEN             0x7D    /* (Japanese keyboard)            */
-#endif
-
-#ifndef DIK_CIRCUMFLEX
-#define DIK_CIRCUMFLEX      0x90    /* (Japanese keyboard)            */
-#endif
-
-#ifndef DIK_KANJI
-#define DIK_KANJI           0x94    /* (Japanese keyboard)            */
-#endif
-
 //=============================================================================
 /** The key tables */
 //=============================================================================
@@ -105,122 +73,122 @@
 enum KeyDefType CPP_11(: UnsignedByte)
 {
 	// keypad keys ----------------------------------------------------------------
-	KEY_KP0 								= DIK_NUMPAD0,
-	KEY_KP1 								= DIK_NUMPAD1,
-	KEY_KP2 								= DIK_NUMPAD2,
-	KEY_KP3 								= DIK_NUMPAD3,
-	KEY_KP4 								= DIK_NUMPAD4,
-	KEY_KP5 								= DIK_NUMPAD5,
-	KEY_KP6 								= DIK_NUMPAD6,
-	KEY_KP7 								= DIK_NUMPAD7,
-	KEY_KP8 								= DIK_NUMPAD8,
-	KEY_KP9 								= DIK_NUMPAD9,
-	KEY_KPDEL 							= DIK_NUMPADPERIOD,
-	KEY_KPSTAR 							= DIK_NUMPADSTAR,
-	KEY_KPMINUS 						= DIK_NUMPADMINUS,
-	KEY_KPPLUS 							= DIK_NUMPADPLUS,
+	KEY_KP0 								= KEYSCAN_NUMPAD0,
+	KEY_KP1 								= KEYSCAN_NUMPAD1,
+	KEY_KP2 								= KEYSCAN_NUMPAD2,
+	KEY_KP3 								= KEYSCAN_NUMPAD3,
+	KEY_KP4 								= KEYSCAN_NUMPAD4,
+	KEY_KP5 								= KEYSCAN_NUMPAD5,
+	KEY_KP6 								= KEYSCAN_NUMPAD6,
+	KEY_KP7 								= KEYSCAN_NUMPAD7,
+	KEY_KP8 								= KEYSCAN_NUMPAD8,
+	KEY_KP9 								= KEYSCAN_NUMPAD9,
+	KEY_KPDEL 							= KEYSCAN_NUMPADPERIOD,
+	KEY_KPSTAR 							= KEYSCAN_NUMPADSTAR,
+	KEY_KPMINUS 						= KEYSCAN_NUMPADMINUS,
+	KEY_KPPLUS 							= KEYSCAN_NUMPADPLUS,
 
 	// regular keys ---------------------------------------------------------------
-	KEY_ESC 								= DIK_ESCAPE,
-	KEY_BACKSPACE 					= DIK_BACK,
-	KEY_ENTER 							= DIK_RETURN,
-	KEY_SPACE 							= DIK_SPACE,
-	KEY_TAB 								= DIK_TAB,
-	KEY_F1 									= DIK_F1,
-	KEY_F2 									= DIK_F2,
-	KEY_F3 									= DIK_F3,
-	KEY_F4 									= DIK_F4,
-	KEY_F5 									= DIK_F5,
-	KEY_F6 									= DIK_F6,
-	KEY_F7 									= DIK_F7,
-	KEY_F8 									= DIK_F8,
-	KEY_F9 									= DIK_F9,
-	KEY_F10 								= DIK_F10,
-	KEY_F11 								= DIK_F11,
-	KEY_F12 								= DIK_F12,
-	KEY_A 									= DIK_A,
-	KEY_B 									= DIK_B,
-	KEY_C 									= DIK_C,
-	KEY_D 									= DIK_D,
-	KEY_E 									= DIK_E,
-	KEY_F 									= DIK_F,
-	KEY_G 									= DIK_G,
-	KEY_H 									= DIK_H,
-	KEY_I 									= DIK_I,
-	KEY_J 									= DIK_J,
-	KEY_K 									= DIK_K,
-	KEY_L 									= DIK_L,
-	KEY_M 									= DIK_M,
-	KEY_N 									= DIK_N,
-	KEY_O 									= DIK_O,
-	KEY_P 									= DIK_P,
-	KEY_Q 									= DIK_Q,
-	KEY_R 									= DIK_R,
-	KEY_S 									= DIK_S,
-	KEY_T 									= DIK_T,
-	KEY_U 									= DIK_U,
-	KEY_V 									= DIK_V,
-	KEY_W 									= DIK_W,
-	KEY_X 									= DIK_X,
-	KEY_Y 									= DIK_Y,
-	KEY_Z 									= DIK_Z,
-	KEY_1 									= DIK_1,
-	KEY_2 									= DIK_2,
-	KEY_3 									= DIK_3,
-	KEY_4 									= DIK_4,
-	KEY_5 									= DIK_5,
-	KEY_6 									= DIK_6,
-	KEY_7 									= DIK_7,
-	KEY_8 									= DIK_8,
-	KEY_9 									= DIK_9,
-	KEY_0 									= DIK_0,
-	KEY_MINUS 							= DIK_MINUS,
-	KEY_EQUAL 							= DIK_EQUALS,
-	KEY_LBRACKET 						= DIK_LBRACKET,
-	KEY_RBRACKET 						= DIK_RBRACKET,
-	KEY_SEMICOLON 					= DIK_SEMICOLON,
-	KEY_APOSTROPHE 					= DIK_APOSTROPHE,
-	KEY_TICK 								= DIK_GRAVE,
-	KEY_BACKSLASH 					= DIK_BACKSLASH,
-	KEY_COMMA 							= DIK_COMMA,
-	KEY_PERIOD 							= DIK_PERIOD,
-	KEY_SLASH 							= DIK_SLASH,
+	KEY_ESC 								= KEYSCAN_ESCAPE,
+	KEY_BACKSPACE 					= KEYSCAN_BACK,
+	KEY_ENTER 							= KEYSCAN_RETURN,
+	KEY_SPACE 							= KEYSCAN_SPACE,
+	KEY_TAB 								= KEYSCAN_TAB,
+	KEY_F1 									= KEYSCAN_F1,
+	KEY_F2 									= KEYSCAN_F2,
+	KEY_F3 									= KEYSCAN_F3,
+	KEY_F4 									= KEYSCAN_F4,
+	KEY_F5 									= KEYSCAN_F5,
+	KEY_F6 									= KEYSCAN_F6,
+	KEY_F7 									= KEYSCAN_F7,
+	KEY_F8 									= KEYSCAN_F8,
+	KEY_F9 									= KEYSCAN_F9,
+	KEY_F10 								= KEYSCAN_F10,
+	KEY_F11 								= KEYSCAN_F11,
+	KEY_F12 								= KEYSCAN_F12,
+	KEY_A 									= KEYSCAN_A,
+	KEY_B 									= KEYSCAN_B,
+	KEY_C 									= KEYSCAN_C,
+	KEY_D 									= KEYSCAN_D,
+	KEY_E 									= KEYSCAN_E,
+	KEY_F 									= KEYSCAN_F,
+	KEY_G 									= KEYSCAN_G,
+	KEY_H 									= KEYSCAN_H,
+	KEY_I 									= KEYSCAN_I,
+	KEY_J 									= KEYSCAN_J,
+	KEY_K 									= KEYSCAN_K,
+	KEY_L 									= KEYSCAN_L,
+	KEY_M 									= KEYSCAN_M,
+	KEY_N 									= KEYSCAN_N,
+	KEY_O 									= KEYSCAN_O,
+	KEY_P 									= KEYSCAN_P,
+	KEY_Q 									= KEYSCAN_Q,
+	KEY_R 									= KEYSCAN_R,
+	KEY_S 									= KEYSCAN_S,
+	KEY_T 									= KEYSCAN_T,
+	KEY_U 									= KEYSCAN_U,
+	KEY_V 									= KEYSCAN_V,
+	KEY_W 									= KEYSCAN_W,
+	KEY_X 									= KEYSCAN_X,
+	KEY_Y 									= KEYSCAN_Y,
+	KEY_Z 									= KEYSCAN_Z,
+	KEY_1 									= KEYSCAN_1,
+	KEY_2 									= KEYSCAN_2,
+	KEY_3 									= KEYSCAN_3,
+	KEY_4 									= KEYSCAN_4,
+	KEY_5 									= KEYSCAN_5,
+	KEY_6 									= KEYSCAN_6,
+	KEY_7 									= KEYSCAN_7,
+	KEY_8 									= KEYSCAN_8,
+	KEY_9 									= KEYSCAN_9,
+	KEY_0 									= KEYSCAN_0,
+	KEY_MINUS 							= KEYSCAN_MINUS,
+	KEY_EQUAL 							= KEYSCAN_EQUALS,
+	KEY_LBRACKET 						= KEYSCAN_LBRACKET,
+	KEY_RBRACKET 						= KEYSCAN_RBRACKET,
+	KEY_SEMICOLON 					= KEYSCAN_SEMICOLON,
+	KEY_APOSTROPHE 					= KEYSCAN_APOSTROPHE,
+	KEY_TICK 								= KEYSCAN_GRAVE,
+	KEY_BACKSLASH 					= KEYSCAN_BACKSLASH,
+	KEY_COMMA 							= KEYSCAN_COMMA,
+	KEY_PERIOD 							= KEYSCAN_PERIOD,
+	KEY_SLASH 							= KEYSCAN_SLASH,
 
 	// special keys ---------------------------------------------------------------
-	KEY_SYSREQ 							= DIK_SYSRQ,
+	KEY_SYSREQ 							= KEYSCAN_SYSRQ,
 
-	KEY_CAPS 								= DIK_CAPSLOCK,
-	KEY_NUM 								= DIK_NUMLOCK,
-	KEY_SCROLL 							= DIK_SCROLL,
-	KEY_LCTRL 							= DIK_LCONTROL,
-	KEY_LALT 								= DIK_LALT,
-	KEY_LSHIFT 							= DIK_LSHIFT,
-	KEY_RSHIFT 							= DIK_RSHIFT,
+	KEY_CAPS 								= KEYSCAN_CAPSLOCK,
+	KEY_NUM 								= KEYSCAN_NUMLOCK,
+	KEY_SCROLL 							= KEYSCAN_SCROLL,
+	KEY_LCTRL 							= KEYSCAN_LCONTROL,
+	KEY_LALT 								= KEYSCAN_LALT,
+	KEY_LSHIFT 							= KEYSCAN_LSHIFT,
+	KEY_RSHIFT 							= KEYSCAN_RSHIFT,
 
-	KEY_UP 									= DIK_UPARROW,
-	KEY_DOWN 								= DIK_DOWNARROW,
-	KEY_LEFT 								= DIK_LEFTARROW,
-	KEY_RIGHT 							= DIK_RIGHTARROW,
-	KEY_RALT 								= DIK_RALT,
-	KEY_RCTRL 							= DIK_RCONTROL,
-	KEY_HOME 								= DIK_HOME,
-	KEY_END 								= DIK_END,
-	KEY_PGUP 								= DIK_PGUP,
-	KEY_PGDN 								= DIK_PGDN,
-	KEY_INS 								= DIK_INSERT,
-	KEY_DEL 								= DIK_DELETE,
-	KEY_KPENTER 						= DIK_NUMPADENTER,
-	KEY_KPSLASH 						= DIK_NUMPADSLASH,
+	KEY_UP 									= KEYSCAN_UPARROW,
+	KEY_DOWN 								= KEYSCAN_DOWNARROW,
+	KEY_LEFT 								= KEYSCAN_LEFTARROW,
+	KEY_RIGHT 							= KEYSCAN_RIGHTARROW,
+	KEY_RALT 								= KEYSCAN_RALT,
+	KEY_RCTRL 							= KEYSCAN_RCONTROL,
+	KEY_HOME 								= KEYSCAN_HOME,
+	KEY_END 								= KEYSCAN_END,
+	KEY_PGUP 								= KEYSCAN_PGUP,
+	KEY_PGDN 								= KEYSCAN_PGDN,
+	KEY_INS 								= KEYSCAN_INSERT,
+	KEY_DEL 								= KEYSCAN_DELETE,
+	KEY_KPENTER 						= KEYSCAN_NUMPADENTER,
+	KEY_KPSLASH 						= KEYSCAN_NUMPADSLASH,
 
-	KEY_102 								= DIK_OEM_102,
+	KEY_102 								= KEYSCAN_OEM_102,
 
 	// Japanese keyboard keys -----------------------------------------------------
-	KEY_KANA 								= DIK_KANA,
-	KEY_CONVERT 						= DIK_CONVERT,
-	KEY_NOCONVERT 					= DIK_NOCONVERT,
-	KEY_YEN 								= DIK_YEN,
-	KEY_CIRCUMFLEX 					= DIK_CIRCUMFLEX,
-	KEY_KANJI 							= DIK_KANJI,
+	KEY_KANA 								= KEYSCAN_KANA,
+	KEY_CONVERT 						= KEYSCAN_CONVERT,
+	KEY_NOCONVERT 					= KEYSCAN_NOCONVERT,
+	KEY_YEN 								= KEYSCAN_YEN,
+	KEY_CIRCUMFLEX 					= KEYSCAN_CIRCUMFLEX,
+	KEY_KANJI 							= KEYSCAN_KANJI,
 
 	// specials -------------------------------------------------------------------
 	KEY_NONE								= 0x00,		///< to report end of key stream
