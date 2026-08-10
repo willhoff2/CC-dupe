@@ -101,6 +101,29 @@ VkColorComponentFlags To_Vk_Color_Write_Mask(uint32_t m) {
 	return out;
 }
 
+VkStencilOp To_Vk_Stencil_Op(uint32_t op) {
+	switch (op) {
+	case D3DSTENCILOP_KEEP: return VK_STENCIL_OP_KEEP;
+	case D3DSTENCILOP_ZERO: return VK_STENCIL_OP_ZERO;
+	case D3DSTENCILOP_REPLACE: return VK_STENCIL_OP_REPLACE;
+	case D3DSTENCILOP_INCRSAT: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+	case D3DSTENCILOP_DECRSAT: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+	case D3DSTENCILOP_INVERT: return VK_STENCIL_OP_INVERT;
+	case D3DSTENCILOP_INCR: return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+	case D3DSTENCILOP_DECR: return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+	default: return VK_STENCIL_OP_KEEP;
+	}
+}
+
+float Z_Bias_To_Depth_Bias_Constant_Factor(uint32_t z_bias) {
+	// Negative: D3D8 pulls larger ZBIAS values towards the eye, and the engine's
+	// depth comparison is LESSEQUAL, so "closer" means a smaller depth value.
+	// Magnitude: one unit of Vulkan's constant factor is one r, the smallest
+	// resolvable depth difference for the attachment format, so ZBIAS n maps to n
+	// resolvable units. See the header for why no better-defined mapping exists.
+	return -static_cast<float>(z_bias);
+}
+
 bool PipelineKey::operator==(const PipelineKey& o) const {
 	return std::memcmp(this, &o, sizeof(PipelineKey)) == 0;
 }
@@ -115,30 +138,76 @@ uint64_t Hash_Pipeline_Key(const PipelineKey& k) {
 	return h;
 }
 
+namespace {
+
+VkFormat Texcoord_Format(uint32_t components) {
+	switch (components) {
+	case 1: return VK_FORMAT_R32_SFLOAT;
+	case 3: return VK_FORMAT_R32G32B32_SFLOAT;
+	case 4: return VK_FORMAT_R32G32B32A32_SFLOAT;
+	default: return VK_FORMAT_R32G32_SFLOAT;
+	}
+}
+
+} // namespace
+
+// The field order below is D3D8's fixed FVF ordering, which is also the order
+// dx8fvf.cpp's FVFInfoClass accumulates offsets in. Any disagreement here shows up
+// as garbled geometry, so the two must be read side by side.
 bool Decode_Fvf(uint32_t fvf, VertexLayout& out) {
 	out = VertexLayout{};
 	uint32_t offset = 0;
 
 	const uint32_t position_bits = fvf & D3DFVF_POSITION_MASK;
-	if (position_bits == D3DFVF_XYZ) {
-		// 3 floats; Vulkan fills the missing w with 1.0, which is what D3D does too.
-		out.attributes[out.attribute_count++] = {VA_POSITION, 0, VK_FORMAT_R32G32B32_SFLOAT, offset};
-		out.supplies[VA_POSITION] = true;
-		offset += 12;
-	} else if (position_bits == D3DFVF_XYZRHW) {
+	if (position_bits == D3DFVF_XYZRHW) {
 		out.attributes[out.attribute_count++] = {VA_POSITION, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offset};
 		out.supplies[VA_POSITION] = true;
 		out.pretransformed = true;
 		offset += 16;
+	} else if (position_bits >= D3DFVF_XYZ && position_bits <= D3DFVF_XYZB5) {
+		// 3 floats; Vulkan fills the missing w with 1.0, which is what D3D does too.
+		out.attributes[out.attribute_count++] = {VA_POSITION, 0, VK_FORMAT_R32G32B32_SFLOAT, offset};
+		out.supplies[VA_POSITION] = true;
+		offset += 12;
+
+		// D3DFVF_XYZBn: n DWORDs of blend data after the position. With
+		// D3DFVF_LASTBETA_UBYTE4 the final DWORD is four packed bone indices
+		// rather than a weight -- that is the pairing dx8fvf.cpp:62 emits for
+		// the engine's skinned meshes.
+		// The position bits are not evenly spaced: XYZ is 0x002 but XYZB1..XYZB5 run
+		// 0x006, 0x008, 0x00a, 0x00c, 0x00e, so n = (bits - 4) / 2 and XYZ is its own
+		// case. Treating XYZ as part of the run gives every skinned FVF one blend
+		// DWORD too many.
+		const uint32_t blend_dwords =
+		    position_bits == D3DFVF_XYZ ? 0u : (position_bits - 4u) / 2u;
+		if (blend_dwords > 0) {
+			const bool last_is_indices = (fvf & D3DFVF_LASTBETA_UBYTE4) != 0;
+			const uint32_t weights = last_is_indices ? blend_dwords - 1 : blend_dwords;
+			if (weights > 3) return false; // needs a 4th weight attribute; nothing emits it
+			if (weights > 0) {
+				out.attributes[out.attribute_count++] = {
+				    VA_BLENDWEIGHT, 0, Texcoord_Format(weights), offset};
+				out.supplies[VA_BLENDWEIGHT] = true;
+				offset += weights * 4;
+			}
+			if (last_is_indices) {
+				out.attributes[out.attribute_count++] = {
+				    VA_BLENDINDICES, 0, VK_FORMAT_R8G8B8A8_UINT, offset};
+				out.supplies[VA_BLENDINDICES] = true;
+				offset += 4;
+			}
+		}
 	} else {
-		// D3DFVF_XYZB1..B4 (skinned, 2 sites in the engine) not decoded.
-		return false;
+		return false; // no position: not a fixed-function FVF
 	}
 
 	if (fvf & D3DFVF_NORMAL) {
 		out.attributes[out.attribute_count++] = {VA_NORMAL, 0, VK_FORMAT_R32G32B32_SFLOAT, offset};
 		out.supplies[VA_NORMAL] = true;
 		offset += 12;
+	}
+	if (fvf & D3DFVF_PSIZE) {
+		offset += 4; // point size: stride only, the spike does not draw point sprites
 	}
 	if (fvf & D3DFVF_DIFFUSE) {
 		// D3DCOLOR is 0xAARRGGBB, i.e. B,G,R,A in memory on a little-endian host.
@@ -147,19 +216,20 @@ bool Decode_Fvf(uint32_t fvf, VertexLayout& out) {
 		offset += 4;
 	}
 	if (fvf & D3DFVF_SPECULAR) {
-		// Consumed for stride purposes only; the spike's shader ignores specular.
+		out.attributes[out.attribute_count++] = {VA_SPECULAR, 0, VK_FORMAT_B8G8R8A8_UNORM, offset};
+		out.supplies[VA_SPECULAR] = true;
 		offset += 4;
 	}
 
 	const uint32_t texcoord_sets = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
-	if (texcoord_sets > 2) {
-		return false; // the engine goes up to TEX8; only 2 are decoded here
-	}
+	if (texcoord_sets > kMaxTexCoordSets) return false;
+	out.texcoord_sets = texcoord_sets;
 	for (uint32_t i = 0; i < texcoord_sets; ++i) {
+		const uint32_t components = Fvf_Texcoord_Components(fvf, i);
 		const uint32_t loc = VA_TEXCOORD0 + i;
-		out.attributes[out.attribute_count++] = {loc, 0, VK_FORMAT_R32G32_SFLOAT, offset};
+		out.attributes[out.attribute_count++] = {loc, 0, Texcoord_Format(components), offset};
 		out.supplies[loc] = true;
-		offset += 8;
+		offset += components * 4;
 	}
 
 	out.stride = offset;

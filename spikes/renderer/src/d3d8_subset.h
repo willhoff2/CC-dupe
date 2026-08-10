@@ -25,6 +25,17 @@ enum D3DTRANSFORMSTATETYPE {
 	D3DTS_WORLD = 256,
 };
 
+// Number of texture stages the spike models. Measured, not guessed: literal
+// D3DTSS_* call sites in Core/ reach stage 7 (Core/.../TerrainTex.cpp programs
+// stages 0..7 for the 8-way terrain blend). See tools/texture-stage-scan.py.
+constexpr uint32_t kMaxTextureStages = 8;
+// D3D8 exposes 8 texture coordinate sets in the FVF; the engine's widest declared
+// layout is DX8_FVF_XYZNDUV1TG3 with 4 sets (dx8fvf.h).
+constexpr uint32_t kMaxTexCoordSets = 4;
+// D3D8's fixed-function pipeline supports 8 simultaneous lights; the engine's
+// LightEnvironmentClass caps itself at 4 (LightEnvironmentClass::MAX_LIGHTS).
+constexpr uint32_t kMaxLights = 4;
+
 // Only the render states the engine actually sets (53 of them; see
 // docs/porting/renderer-surface.md). The spike implements the ones needed to draw.
 enum D3DRENDERSTATETYPE {
@@ -49,6 +60,7 @@ enum D3DRENDERSTATETYPE {
 	D3DRS_FOGEND = 37,
 	D3DRS_FOGDENSITY = 38,
 	D3DRS_ZBIAS = 47,
+	D3DRS_RANGEFOGENABLE = 48,
 	D3DRS_STENCILENABLE = 52,
 	D3DRS_STENCILFAIL = 53,
 	D3DRS_STENCILZFAIL = 54,
@@ -60,7 +72,14 @@ enum D3DRENDERSTATETYPE {
 	D3DRS_TEXTUREFACTOR = 60,
 	D3DRS_LIGHTING = 137,
 	D3DRS_AMBIENT = 139,
+	D3DRS_FOGVERTEXMODE = 140,
 	D3DRS_COLORVERTEX = 141,
+	D3DRS_LOCALVIEWER = 142,
+	D3DRS_NORMALIZENORMALS = 143,
+	D3DRS_DIFFUSEMATERIALSOURCE = 145,
+	D3DRS_SPECULARMATERIALSOURCE = 146,
+	D3DRS_AMBIENTMATERIALSOURCE = 147,
+	D3DRS_EMISSIVEMATERIALSOURCE = 148,
 	D3DRS_COLORWRITEENABLE = 168,
 	D3DRS_BLENDOP = 171,
 	D3DRS_MAX = 256,
@@ -73,16 +92,47 @@ enum D3DTEXTURESTAGESTATETYPE {
 	D3DTSS_ALPHAOP = 4,
 	D3DTSS_ALPHAARG1 = 5,
 	D3DTSS_ALPHAARG2 = 6,
+	D3DTSS_BUMPENVMAT00 = 7,
+	D3DTSS_BUMPENVMAT01 = 8,
+	D3DTSS_BUMPENVMAT10 = 9,
+	D3DTSS_BUMPENVMAT11 = 10,
+	D3DTSS_TEXCOORDINDEX = 11,
 	D3DTSS_ADDRESSU = 13,
 	D3DTSS_ADDRESSV = 14,
 	D3DTSS_MAGFILTER = 16,
 	D3DTSS_MINFILTER = 17,
 	D3DTSS_MIPFILTER = 18,
-	D3DTSS_TEXCOORDINDEX = 11,
+	D3DTSS_BUMPENVLSCALE = 22,
+	D3DTSS_BUMPENVLOFFSET = 23,
 	D3DTSS_TEXTURETRANSFORMFLAGS = 24,
 	D3DTSS_COLORARG0 = 26,
+	D3DTSS_ALPHAARG0 = 27,
 	D3DTSS_RESULTARG = 28,
 	D3DTSS_MAX = 32,
+};
+
+// D3DTSS_TEXTURETRANSFORMFLAGS. The engine writes D3DTTFF_DISABLE, D3DTTFF_COUNT2
+// and 259 == D3DTTFF_COUNT3|D3DTTFF_PROJECTED (Core/.../TerrainTex.cpp,
+// Core/.../W3DShaderManager.cpp).
+enum D3DTEXTURETRANSFORMFLAGS {
+	D3DTTFF_DISABLE = 0,
+	D3DTTFF_COUNT1 = 1,
+	D3DTTFF_COUNT2 = 2,
+	D3DTTFF_COUNT3 = 3,
+	D3DTTFF_COUNT4 = 4,
+	D3DTTFF_PROJECTED = 256,
+};
+
+// D3DTSS_TEXCOORDINDEX. The low 16 bits select an FVF texture coordinate set; the
+// high bits select a generated coordinate instead. The engine uses all four
+// generators (texproject.cpp, TerrainTex.cpp, W3DShaderManager.cpp).
+enum D3DTEXCOORDINDEXFLAGS {
+	D3DTSS_TCI_PASSTHRU = 0x00000,
+	D3DTSS_TCI_CAMERASPACENORMAL = 0x10000,
+	D3DTSS_TCI_CAMERASPACEPOSITION = 0x20000,
+	D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR = 0x30000,
+	D3DTSS_TCI_SELECTMASK = 0x0ffff,
+	D3DTSS_TCI_GENERATORMASK = 0x30000,
 };
 
 enum D3DTEXTUREOP {
@@ -97,10 +147,21 @@ enum D3DTEXTUREOP {
 	D3DTOP_ADDSIGNED2X = 9,
 	D3DTOP_SUBTRACT = 10,
 	D3DTOP_ADDSMOOTH = 11,
+	D3DTOP_BLENDDIFFUSEALPHA = 12,
 	D3DTOP_BLENDTEXTUREALPHA = 13,
+	D3DTOP_BLENDFACTORALPHA = 14,
+	D3DTOP_BLENDTEXTUREALPHAPM = 15,
 	D3DTOP_BLENDCURRENTALPHA = 16,
+	D3DTOP_PREMODULATE = 17,
+	D3DTOP_MODULATEALPHA_ADDCOLOR = 18,
+	D3DTOP_MODULATECOLOR_ADDALPHA = 19,
+	D3DTOP_MODULATEINVALPHA_ADDCOLOR = 20,
+	D3DTOP_MODULATEINVCOLOR_ADDALPHA = 21,
+	D3DTOP_BUMPENVMAP = 22,
+	D3DTOP_BUMPENVMAPLUMINANCE = 23,
 	D3DTOP_DOTPRODUCT3 = 24,
 	D3DTOP_MULTIPLYADD = 25,
+	D3DTOP_LERP = 26,
 };
 
 enum D3DTEXTUREARG {
@@ -109,9 +170,45 @@ enum D3DTEXTUREARG {
 	D3DTA_TEXTURE = 2,
 	D3DTA_TFACTOR = 3,
 	D3DTA_SPECULAR = 4,
+	D3DTA_TEMP = 5,
 	D3DTA_COMPLEMENT = 0x10,
 	D3DTA_ALPHAREPLICATE = 0x20,
 	D3DTA_SELECTMASK = 0x0f,
+};
+
+// D3DRS_*MATERIALSOURCE. dx8wrapper.cpp and vertmaterial.cpp set all four.
+enum D3DMATERIALCOLORSOURCE {
+	D3DMCS_MATERIAL = 0,
+	D3DMCS_COLOR1 = 1, // vertex diffuse
+	D3DMCS_COLOR2 = 2, // vertex specular
+};
+
+// D3DLIGHTTYPE. DX8Wrapper::Set_Light maps LightClass::POINT/DIRECTIONAL/SPOT
+// onto all three.
+enum D3DLIGHTTYPE {
+	D3DLIGHT_POINT = 1,
+	D3DLIGHT_SPOT = 2,
+	D3DLIGHT_DIRECTIONAL = 3,
+};
+
+// D3DRS_FOGVERTEXMODE / D3DRS_FOGTABLEMODE. dx8wrapper.cpp:402 sets table mode to
+// NONE and vertex mode to LINEAR at device init; nothing changes them afterwards.
+enum D3DFOGMODE {
+	D3DFOG_NONE = 0,
+	D3DFOG_EXP = 1,
+	D3DFOG_EXP2 = 2,
+	D3DFOG_LINEAR = 3,
+};
+
+enum D3DSTENCILOP {
+	D3DSTENCILOP_KEEP = 1,
+	D3DSTENCILOP_ZERO = 2,
+	D3DSTENCILOP_REPLACE = 3,
+	D3DSTENCILOP_INCRSAT = 4,
+	D3DSTENCILOP_DECRSAT = 5,
+	D3DSTENCILOP_INVERT = 6,
+	D3DSTENCILOP_INCR = 7,
+	D3DSTENCILOP_DECR = 8,
 };
 
 enum D3DBLEND {
@@ -178,20 +275,71 @@ enum D3DPRIMITIVETYPE {
 // IDirect3DDevice8::SetVertexShader when it wants the fixed-function pipeline,
 // which is the single nastiest thing to retarget (see the doc).
 enum {
+	D3DFVF_RESERVED0 = 0x001,
 	D3DFVF_XYZ = 0x002,
 	D3DFVF_XYZRHW = 0x004,
 	D3DFVF_XYZB1 = 0x006,
+	D3DFVF_XYZB2 = 0x008,
+	D3DFVF_XYZB3 = 0x00a,
 	D3DFVF_XYZB4 = 0x00c,
+	D3DFVF_XYZB5 = 0x00e,
 	D3DFVF_NORMAL = 0x010,
+	D3DFVF_PSIZE = 0x020,
 	D3DFVF_DIFFUSE = 0x040,
 	D3DFVF_SPECULAR = 0x080,
+	D3DFVF_TEX0 = 0x000,
 	D3DFVF_TEX1 = 0x100,
 	D3DFVF_TEX2 = 0x200,
 	D3DFVF_TEX3 = 0x300,
 	D3DFVF_TEX4 = 0x400,
+	D3DFVF_TEX5 = 0x500,
+	D3DFVF_TEX6 = 0x600,
+	D3DFVF_TEX7 = 0x700,
+	D3DFVF_TEX8 = 0x800,
 	D3DFVF_TEXCOUNT_MASK = 0xf00,
 	D3DFVF_TEXCOUNT_SHIFT = 8,
 	D3DFVF_POSITION_MASK = 0x00e,
+	// The last blend weight is a packed ubyte4 of bone indices rather than a float.
+	// dx8fvf.cpp:62 relies on exactly this pairing with D3DFVF_XYZB4.
+	D3DFVF_LASTBETA_UBYTE4 = 0x1000,
+};
+
+// D3DFVF_TEXCOORDSIZEn(i): two bits per coordinate set, packed above the texture
+// count, saying how many floats that set has. dx8fvf.cpp decodes exactly this.
+constexpr uint32_t D3DFVF_TEXCOORDSIZE1(uint32_t index) { return 3u << (index * 2 + 16); }
+constexpr uint32_t D3DFVF_TEXCOORDSIZE2(uint32_t) { return 0u; }
+constexpr uint32_t D3DFVF_TEXCOORDSIZE3(uint32_t index) { return 1u << (index * 2 + 16); }
+constexpr uint32_t D3DFVF_TEXCOORDSIZE4(uint32_t index) { return 2u << (index * 2 + 16); }
+
+// Number of floats in texture coordinate set `index`, per the D3D8 encoding above.
+constexpr uint32_t Fvf_Texcoord_Components(uint32_t fvf, uint32_t index) {
+	switch ((fvf >> (index * 2 + 16)) & 3u) {
+	case 0: return 2;
+	case 1: return 3;
+	case 2: return 4;
+	default: return 1;
+	}
+}
+
+// The engine's named layouts (Core/Libraries/Source/WWVegas/WW3D2/dx8fvf.h). Kept
+// here so the spike's tests exercise the real bit patterns rather than invented ones.
+enum {
+	DX8_FVF_XYZ = D3DFVF_XYZ,
+	DX8_FVF_XYZN = D3DFVF_XYZ | D3DFVF_NORMAL,
+	DX8_FVF_XYZNUV1 = D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX1,
+	DX8_FVF_XYZNUV2 = D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX2,
+	DX8_FVF_XYZNDUV1 = D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX1 | D3DFVF_DIFFUSE,
+	DX8_FVF_XYZNDUV2 = D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX2 | D3DFVF_DIFFUSE,
+	DX8_FVF_XYZDUV1 = D3DFVF_XYZ | D3DFVF_TEX1 | D3DFVF_DIFFUSE,
+	DX8_FVF_XYZDUV2 = D3DFVF_XYZ | D3DFVF_TEX2 | D3DFVF_DIFFUSE,
+	DX8_FVF_XYZUV1 = D3DFVF_XYZ | D3DFVF_TEX1,
+	DX8_FVF_XYZUV2 = D3DFVF_XYZ | D3DFVF_TEX2,
+	DX8_FVF_XYZNDUV1TG3 = D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_TEX4 |
+	                      D3DFVF_TEXCOORDSIZE2(0) | D3DFVF_TEXCOORDSIZE3(1) |
+	                      D3DFVF_TEXCOORDSIZE3(2) | D3DFVF_TEXCOORDSIZE3(3),
+	DX8_FVF_XYZNUV2DMAP = D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX3 |
+	                      D3DFVF_TEXCOORDSIZE1(0) | D3DFVF_TEXCOORDSIZE4(1) |
+	                      D3DFVF_TEXCOORDSIZE2(2),
 };
 
 } // namespace spike

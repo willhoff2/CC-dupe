@@ -88,6 +88,29 @@ add_dependencies(zh-feature-probe spike-shaders)
 target_link_libraries(zh-feature-probe PRIVATE Vulkan::Vulkan)
 target_compile_definitions(zh-feature-probe PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
 
+# Fixed-function tests: drive the backend through the DX8Wrapper-shaped interface
+# and assert on read-back pixels. This is the harness the measured feature set is
+# validated in.
+add_executable(zh-fixedfunc-tests
+    src/fixedfunc_tests.cpp
+    src/state_translate.cpp
+    src/vulkan_backend.cpp)
+add_dependencies(zh-fixedfunc-tests spike-shaders)
+target_include_directories(zh-fixedfunc-tests PRIVATE src)
+target_link_libraries(zh-fixedfunc-tests PRIVATE Vulkan::Vulkan)
+target_compile_definitions(zh-fixedfunc-tests PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+
+# Throughput baseline: draw calls/sec and state changes/sec, so the Mac has a Linux
+# number to be compared against.
+add_executable(zh-throughput
+    src/throughput.cpp
+    src/state_translate.cpp
+    src/vulkan_backend.cpp)
+add_dependencies(zh-throughput spike-shaders)
+target_include_directories(zh-throughput PRIVATE src)
+target_link_libraries(zh-throughput PRIVATE Vulkan::Vulkan)
+target_compile_definitions(zh-throughput PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+
 if(SPIKE_HAVE_SDL2)
     target_compile_definitions(zh-renderer-spike PRIVATE SPIKE_WITH_SDL)
     if(TARGET SDL2::SDL2)
@@ -99,7 +122,8 @@ if(SPIKE_HAVE_SDL2)
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    foreach(target zh-renderer-spike zh-caps-probe zh-feature-probe)
+    foreach(target zh-renderer-spike zh-caps-probe zh-feature-probe zh-fixedfunc-tests
+                   zh-throughput)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
 endif()

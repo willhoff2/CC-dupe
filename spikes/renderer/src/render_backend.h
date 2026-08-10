@@ -36,6 +36,69 @@ struct SurfaceFormat {
 	uint32_t height = 0;
 };
 
+// Every surface format ww3dformat.cpp's Get_Valid_Texture_Format can return, plus
+// the two source formats targa.cpp/ddsfile.cpp decode from. Named after the
+// D3DFMT_* the engine uses so the mapping in vulkan_backend.cpp is checkable.
+enum class TextureFormat {
+	A8R8G8B8,
+	X8R8G8B8,
+	R8G8B8,
+	A4R4G4B4,
+	A1R5G5B5,
+	R5G6B5,
+	L8,
+	A8,
+	A8L8,
+	V8U8, // bump-map delta pair, D3DFMT_V8U8
+	P8,   // 8-bit palettised, needs `palette`
+	DXT1,
+	DXT2,
+	DXT3,
+	DXT4,
+	DXT5,
+};
+
+struct TextureMip {
+	const void* data = nullptr;
+	size_t bytes = 0;
+	uint32_t width = 0;
+	uint32_t height = 0;
+};
+
+struct TextureDesc {
+	TextureFormat format = TextureFormat::A8R8G8B8;
+	uint32_t mip_count = 1;
+	const TextureMip* mips = nullptr;
+	// 256 D3DCOLOR entries; required for TextureFormat::P8, ignored otherwise.
+	const uint32_t* palette = nullptr;
+};
+
+// D3DLIGHT8, minus the fields the engine never fills.
+struct LightState {
+	uint32_t type = 0; // D3DLIGHTTYPE; 0 disables the slot
+	float diffuse[4]{0.0f, 0.0f, 0.0f, 0.0f};
+	float specular[4]{0.0f, 0.0f, 0.0f, 0.0f};
+	float ambient[4]{0.0f, 0.0f, 0.0f, 0.0f};
+	float position[3]{0.0f, 0.0f, 0.0f};
+	float direction[3]{0.0f, 0.0f, 1.0f};
+	float range = 1.0e30f;
+	float falloff = 1.0f;
+	float attenuation0 = 1.0f;
+	float attenuation1 = 0.0f;
+	float attenuation2 = 0.0f;
+	float theta = 0.0f; // inner cone, full angle in radians
+	float phi = 0.0f;   // outer cone, full angle in radians
+};
+
+// D3DMATERIAL8.
+struct MaterialState {
+	float diffuse[4]{1.0f, 1.0f, 1.0f, 1.0f};
+	float ambient[4]{1.0f, 1.0f, 1.0f, 1.0f};
+	float specular[4]{0.0f, 0.0f, 0.0f, 0.0f};
+	float emissive[4]{0.0f, 0.0f, 0.0f, 0.0f};
+	float power = 0.0f;
+};
+
 class RenderBackend {
 public:
 	virtual ~RenderBackend() = default;
@@ -61,10 +124,23 @@ public:
 	virtual void Set_Transform(D3DTRANSFORMSTATETYPE transform, const Matrix4x4& m) = 0;
 	virtual void Set_Texture(uint32_t stage, TextureHandle* texture) = 0;
 
+	// --- fixed function: SetLight/LightEnable, SetMaterial, SetScissorRect ----
+	// `light` may be null, which is D3D8's LightEnable(index, FALSE).
+	virtual void Set_Light(uint32_t index, const LightState* light) = 0;
+	virtual void Set_Material(const MaterialState& material) = 0;
+	virtual void Set_Scissor(bool enable, int32_t x, int32_t y, int32_t width,
+	                         int32_t height) = 0;
+
 	// --- geometry: DX8Wrapper::Set_Vertex_Buffer / Set_Index_Buffer -----------
 	// fvf is the raw D3DFVF_* bitfield the engine feeds to SetVertexShader.
 	virtual TextureHandle* Create_Texture(uint32_t width, uint32_t height,
 	                                      const uint8_t* argb_pixels) = 0;
+	// Full form: any format the engine's loaders can produce, with a mip chain.
+	virtual TextureHandle* Create_Texture(const TextureDesc& desc) = 0;
+	// False when the device cannot sample the format at all (as opposed to the
+	// backend converting it on upload). Lets a test report a negative finding
+	// instead of asserting on a substituted format.
+	virtual bool Supports_Texture_Format(TextureFormat format) const = 0;
 	virtual VertexBufferHandle* Create_Vertex_Buffer(const void* data, size_t bytes,
 	                                                 uint32_t fvf) = 0;
 	virtual IndexBufferHandle* Create_Index_Buffer(const uint16_t* data,
