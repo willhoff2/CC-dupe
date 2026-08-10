@@ -20,6 +20,12 @@
 #pragma once
 #include <time.h>
 
+// CLOCK_BOOTTIME is Linux-only. Elsewhere (macOS, BSD) CLOCK_MONOTONIC is the closest
+// equivalent; it differs only in whether time spent suspended is counted.
+#ifndef CLOCK_BOOTTIME
+#define CLOCK_BOOTTIME CLOCK_MONOTONIC
+#endif
+
 #define TIMERR_NOERROR 0
 typedef int MMRESULT;
 static inline MMRESULT timeBeginPeriod(int) { return TIMERR_NOERROR; }

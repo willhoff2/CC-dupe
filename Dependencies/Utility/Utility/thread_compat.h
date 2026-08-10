@@ -20,10 +20,12 @@
 #pragma once
 #include <pthread.h>
 #include <unistd.h>
+#include <stdint.h>
 
 inline int GetCurrentThreadId()
 {
-  return pthread_self();
+  // pthread_t is an integer on Linux but an opaque pointer on macOS.
+  return static_cast<int>(reinterpret_cast<uintptr_t>((void *)pthread_self()));
 }
 
 inline void Sleep(int ms)
