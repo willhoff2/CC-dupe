@@ -225,9 +225,13 @@ jobs:
           name: d3d8-surface-scan
           path: d3d8-surface-scan.txt
 
-  # 4. The OpenAL replacement for Miles. It is not reachable from the top-level CMake build off
-  #    Windows yet, so this builds the real target through a minimal standalone harness and
-  #    additionally checks it defines every AIL_* entry point it declares.
+  # 4. The OpenAL replacement for Miles, built through the *real* top-level CMake build: the
+  #    non-Windows branch of the root CMakeLists supplies `milesstub` from cmake/openal.cmake, and
+  #    every audio consumer links that target, so this is the same wiring the engine gets. The job
+  #    additionally checks the backend defines every AIL_* entry point it declares, and measures
+  #    how much of the WWAudio consumer library compiles against it at 64-bit.
+  #
+  #    jammy ships CMake 3.22 and the root CMakeLists needs 3.25, hence the pip install.
   openal-backend:
     name: OpenAL backend build (Linux)
     runs-on: ubuntu-latest
@@ -241,18 +245,24 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            clang-14 cmake ninja-build git ca-certificates python3 binutils libopenal-dev
+            clang-14 ninja-build git ca-certificates python3 python3-pip binutils libopenal-dev
+          pip3 install --no-cache-dir 'cmake==4.1.2'
+          cmake --version
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Build
+      - name: Configure the top-level build off Windows
         env:
           CC: clang-14
           CXX: clang++-14
         run: |
-          cmake -S scripts/ci/openal-standalone -B build/openal -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/openal
+          set -eux
+          cmake -S . -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DRTS_BUILD_ZEROHOUR=ON -DRTS_BUILD_GENERALS=OFF
+
+      - name: Build the audio backend
+        run: cmake --build build/native --target core_openalaudiodevice
 
       - name: Check every declared AIL_* entry point is defined
         run: |
@@ -262,9 +272,38 @@ jobs:
             echo '```'
             python3 scripts/ci/check-openal-symbols.py \
               --header Core/Libraries/Source/OpenALAudioDevice/mss/mss.h \
-              --archive build/openal/openalaudiodevice/libcore_openalaudiodevice.a
+              --archive build/native/Core/Libraries/Source/OpenALAudioDevice/libcore_openalaudiodevice.a
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Measure the AIL_* surface and the backend's coverage of it
+        run: |
+          set -o pipefail
+          {
+            echo '## Miles API surface vs OpenAL coverage'
+            echo '```'
+            python3 scripts/audio-surface-scan.py --check
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Measure how much of WWAudio compiles against the backend
+        run: |
+          set -o pipefail
+          # Not a gate on zero failures: 9 of the 19 TUs are blocked by WWSaveLoad's 32-bit
+          # pointer-as-save-id (persistfactory.h:123), which is the save/load 64-bit slice, not
+          # this one. Gate on not regressing below the measured count instead.
+          expected=10
+          cmake --build build/native --target z_wwaudio -- -k 0 > /tmp/wwaudio.log 2>&1 || true
+          objdir=build/native/GeneralsMD/Code/Libraries/Source/WWVegas/WWAudio/CMakeFiles/z_wwaudio.dir
+          clean=$(find "$objdir" -name '*.cpp.o' | wc -l)
+          {
+            echo '## WWAudio consumer TUs compiling at 64-bit'
+            echo '```'
+            echo "$clean / 19 object files built (expected at least $expected)"
+            grep -oE '(fatal )?error: [^[]*' /tmp/wwaudio.log | sort | uniq -c | sort -rn || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$clean" -ge "$expected"
 
   # 5. The same spike on Apple Silicon through MoltenVK. This exists to guard the
   #    VK_KHR_portability_enumeration / VK_KHR_portability_subset opt-in: without it the Khronos

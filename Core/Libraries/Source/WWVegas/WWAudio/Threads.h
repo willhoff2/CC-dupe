@@ -32,7 +32,11 @@
 
 #pragma once
 
+#ifdef _WIN32
 #include "windows.h"
+#else
+#include "WWLib/platform/platform_thread.h"
+#endif
 #include "WWLib/Vector.h"
 #include "WWLib/mutex.h"
 
@@ -59,15 +63,31 @@ class WWAudioThreadsClass
 		~WWAudioThreadsClass ();
 
 		//////////////////////////////////////////////////////////////////////
+		//	Public data types
+		//////////////////////////////////////////////////////////////////////
+
+		//
+		//	How a running release thread is identified. On Windows this is the HANDLE
+		//	_beginthread() returns; elsewhere it is the token WWPlatform::Thread_Create()
+		//	returns. `TimeType` is DWORD spelled portably - the same type on Windows.
+		//
+#ifdef _WIN32
+		typedef HANDLE			ThreadTokenType;
+#else
+		typedef unsigned long	ThreadTokenType;
+#endif
+		typedef unsigned long	TimeType;
+
+		//////////////////////////////////////////////////////////////////////
 		//	Public methods
 		//////////////////////////////////////////////////////////////////////
 
 		//
 		//	Delayed release mechanism
 		//
-		static HANDLE		Create_Delayed_Release_Thread (LPVOID param = nullptr);
-		static void			End_Delayed_Release_Thread (DWORD timeout = 20000);
-		static void			Add_Delayed_Release_Object (RefCountClass *object, DWORD delay = 2000);
+		static ThreadTokenType	Create_Delayed_Release_Thread (void *param = nullptr);
+		static void			End_Delayed_Release_Thread (TimeType timeout = 20000);
+		static void			Add_Delayed_Release_Object (RefCountClass *object, TimeType delay = 2000);
 		static void			Flush_Delayed_Release_Objects ();
 
 	private:
@@ -75,7 +95,7 @@ class WWAudioThreadsClass
 		//////////////////////////////////////////////////////////////////////
 		//	Private methods
 		//////////////////////////////////////////////////////////////////////
-		static void	__cdecl Delayed_Release_Thread_Proc (LPVOID param);
+		static void	__cdecl Delayed_Release_Thread_Proc (void *param);
 
 		//////////////////////////////////////////////////////////////////////
 		//	Private data types
@@ -83,7 +103,7 @@ class WWAudioThreadsClass
 		typedef struct _DELAYED_RELEASE_INFO
 		{
 			RefCountClass *	object;
-			DWORD					time;
+			TimeType				time;
 
 			_DELAYED_RELEASE_INFO *next;
 
@@ -94,8 +114,18 @@ class WWAudioThreadsClass
 		//////////////////////////////////////////////////////////////////////
 		//	Private member data
 		//////////////////////////////////////////////////////////////////////
-		static HANDLE						m_hDelayedReleaseThread;
+		static ThreadTokenType			m_hDelayedReleaseThread;
+#ifdef _WIN32
 		static HANDLE						m_hDelayedReleaseEvent;
+#else
+		//
+		//	There is no portable equivalent of waiting on a thread handle, so the thread
+		//	signals m_DelayedReleaseExitEvent just before it returns and the shutdown path
+		//	waits on that instead - the same bounded wait, one indirection further out.
+		//
+		static WWPlatform::EventClass *	m_hDelayedReleaseEvent;
+		static WWPlatform::EventClass *	m_DelayedReleaseExitEvent;
+#endif
 		//static RELEASE_LIST		m_ReleaseList;
 		static CriticalSectionClass	m_CriticalSection;
 		static DELAYED_RELEASE_INFO *	m_ReleaseListHead;

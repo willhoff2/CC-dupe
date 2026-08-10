@@ -36,7 +36,9 @@
 
 
 #include "WWLib/always.h"
+#ifdef _WIN32
 #include <windows.h>
+#endif
 #include "WWAudio.h"
 #include "WWDebug/wwdebug.h"
 #include "Utils.h"
@@ -66,7 +68,7 @@
 //	Static member initialization
 ////////////////////////////////////////////////////////////////////////////////////////////////
 WWAudioClass *WWAudioClass::_theInstance = nullptr;
-HANDLE WWAudioClass::_TimerSyncEvent = nullptr;
+WWAudioClass::TimerSyncEventType WWAudioClass::_TimerSyncEvent = nullptr;
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -127,14 +129,20 @@ WWAudioClass::WWAudioClass ()
 	  m_EffectsLevel (0),
 	  m_ReverbRoomType (ENVIRONMENT_GENERIC)
 {
+#ifdef _WIN32
 	::InitializeCriticalSection (&MMSLockClass::_MSSLockCriticalSection);
+#endif
 
 	//
 	// Start Miles Sound System
 	//
 	AIL_startup ();
 	_theInstance = this;
+#ifdef _WIN32
 	_TimerSyncEvent = ::CreateEvent (nullptr, TRUE, FALSE, "WWAUDIO_TIMER_SYNC");
+#else
+	_TimerSyncEvent = W3DNEW WWPlatform::EventClass;
+#endif
 
 	//
 	// Set some default values
@@ -162,10 +170,16 @@ WWAudioClass::~WWAudioClass ()
 
 	Shutdown ();
 	_theInstance = nullptr;
+#ifdef _WIN32
 	::CloseHandle(_TimerSyncEvent);
+#else
+	delete _TimerSyncEvent;
+#endif
 	_TimerSyncEvent = nullptr;
 
+#ifdef _WIN32
 	::DeleteCriticalSection (&MMSLockClass::_MSSLockCriticalSection);
+#endif
 
 	//
 	//	Free the list of logical "types".
@@ -431,7 +445,7 @@ WWAudioClass::Find_Cached_Buffer (const char *string_id)
 			// Is this the sound buffer we were looking for?
 			//
 			CACHE_ENTRY_STRUCT &info = m_CachedBuffers[hash_index][index];
-			if (::lstrcmpi (info.string_id, string_id) == 0) {
+			if (stricmp (info.string_id, string_id) == 0) {
 				sound_buffer = info.buffer;
 				sound_buffer->Add_Ref ();
 				break;
@@ -1645,7 +1659,7 @@ WWAudioClass::Select_3D_Device (const char *device_name)
 			//
 			//	Is this the device we were looking for?
 			//
-			if (::lstrcmpi (info->name, device_name) == 0) {
+			if (stricmp (info->name, device_name) == 0) {
 				retval = Select_3D_Device (device_name, info->driver);
 				break;
 			}
@@ -2136,8 +2150,18 @@ WWAudioClass::Shutdown ()
 		m_UpdateTimer = -1;
 
 		// Wait for the timer callback function to end
+#ifdef _WIN32
 		::WaitForSingleObject (_TimerSyncEvent, 20000);
 		::CloseHandle (_TimerSyncEvent);
+#else
+		//
+		//	Nothing ever signals this event on any platform, so both branches are a bounded
+		//	20 second wait that always times out. Kept as-is rather than "fixed", because
+		//	removing it would change Windows shutdown timing.
+		//
+		_TimerSyncEvent->Wait (20000);
+		delete _TimerSyncEvent;
+#endif
 		_TimerSyncEvent = nullptr;
 	}
 

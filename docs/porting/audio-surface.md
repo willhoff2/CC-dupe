@@ -12,12 +12,20 @@ Miles handle types, and cross-checking against the API actually declared by the 
 | Distinct `AIL_*` identifiers referenced by the engine | **114** |
 | ... of which are functions | **101** |
 | ... of which are constants / compatibility macros | **13** |
-| Total `AIL_*` reference sites | **230** |
+| Total `AIL_*` reference sites | **232** |
 | Functions declared by `miles-sdk-stub`'s `mss.h` | 104 |
 | Source files that reference Miles | **10** |
 
+These are counts over the file text as written, comments included. `scripts/audio-surface-scan.py`
+reproduces them and also counts what the compiler actually sees (comments and string literals
+stripped): **105** identifiers, **94** functions, **11** constants, **217** sites. The 9-identifier
+difference is entirely names that survive only inside `Upgrades miles call from legacy …` comments,
+i.e. entry points the engine no longer calls; see `docs/porting/audio-device-seam.md` §1. The site
+total was previously given as 230 here because the per-file table below undercounted
+`WWAudio/Utils.h` by 2 (both in a comment); every other per-file figure was exact.
+
 The plan document's earlier characterisation of audio as "roughly ten call sites" is wrong by an
-order of magnitude. There are 230 call sites across 101 distinct entry points. The surface is
+order of magnitude. There are 232 call sites across 101 distinct entry points. The surface is
 still small *relative to Miles as a whole* — the engine uses no MIDI, no DLS, no ASI decoder
 plumbing beyond one filter provider — but it is not a ten-line shim.
 
@@ -33,7 +41,7 @@ plumbing beyond one filter provider — but it is not a ten-line shim.
 | `Core/Libraries/Source/WWVegas/WWAudio/Sound3D.cpp` | 8 |
 | `Core/Libraries/Source/WWVegas/WWAudio/FilteredSound.cpp` | 4 |
 | `Core/Libraries/Source/WWVegas/WWAudio/Listener.cpp` | 2 |
-| `Core/Libraries/Source/WWVegas/WWAudio/Utils.h` | 2 |
+| `Core/Libraries/Source/WWVegas/WWAudio/Utils.h` | 4 |
 | `Core/Libraries/Source/WWVegas/WWAudio/SoundBuffer.cpp` | 1 |
 
 Headers that pull in `mss.h`: `WWAudio/AudibleSound.h`, `WWAudio/SoundBuffer.h`,
@@ -185,7 +193,7 @@ Reimplement the `AIL_*` API on top of OpenAL rather than rewriting `WWAudio` and
 
 Rationale:
 
-- The 230 call sites are spread over 10 files with intertwined Miles-specific semantics (voice
+- The call sites are spread over 10 files with intertwined Miles-specific semantics (voice
   pools keyed by user data, `H3DPOBJECT` doubling as listener and sample, EOS callbacks on the
   mixer thread, stream I/O funnelled through Miles' file callbacks). Rewriting them in place means
   a several-thousand-line diff to gameplay-adjacent code with no way to test it — and would break
@@ -193,8 +201,8 @@ Rationale:
 - The seam already exists in the build system: `cmake/miles.cmake` is only included for
   32-bit Windows, and every consumer links an abstract `milesstub` target. Supplying a different
   implementation of that target on other platforms is a drop-in substitution.
-- The result is interface-complete by construction: it either provides all 101 entry points or it
-  does not link.
+- The result is interface-complete by construction: it either provides every entry point the engine
+  calls or it does not link.
 
 So the port adds `Core/Libraries/Source/OpenALAudioDevice`, which provides an API-compatible
 `mss/mss.h` and an OpenAL-backed implementation, and is wired in as `milesstub` on every
@@ -206,8 +214,8 @@ unaffected; nothing in `WWAudio` or `MilesAudioManager` changes behaviour there.
 Stated plainly, because none of this can be verified without retail game data:
 
 - **No audio output has been heard.** What was verified: every translation unit compiles clean at
-  64-bit with `clang++ -std=c++20 -Wall`, and `nm` over the resulting objects shows 100 defined
-  `AIL_*` symbols against 100 declared in the header — no missing entry points and no extras. It
+  64-bit with `clang++ -std=c++20 -Wall`, and `nm` over the resulting archive shows 101 defined
+  `AIL_*` symbols against 101 declared in the header — no missing entry points and no extras. It
   has never produced a sample of sound, because that requires the retail `.big` archives.
 - **MP2/MP3 music streaming is not decoded.** `AIL_open_stream` parses and streams WAV. For
   compressed music a decoder must be plugged in (the repo already has an optional FFmpeg

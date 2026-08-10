@@ -23,3 +23,9 @@ target_link_libraries(core_openalaudiodevice PUBLIC
 )
 
 set_target_properties(core_openalaudiodevice PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+
+# The backend is a drop-in for mss32: warnings here are portability defects, not noise. This used
+# to live in the standalone CI harness; it belongs on the target now that the real top-level build
+# is the thing CI builds.
+target_compile_options(core_openalaudiodevice PRIVATE
+    $<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-Wall -Wextra>)

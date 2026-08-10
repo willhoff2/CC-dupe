@@ -46,7 +46,10 @@
 
 /////////////////////////////////////////////////////////////////////////////////
 //	FileMappingClass
+//
+//	Unused: nothing adds to MappingList. Win32-only because of the mapping handle.
 /////////////////////////////////////////////////////////////////////////////////
+#ifdef _WIN32
 class FileMappingClass
 {
 public:
@@ -59,6 +62,7 @@ public:
 };
 
 static DynamicVectorClass<FileMappingClass> MappingList;
+#endif // _WIN32
 
 
 
@@ -307,6 +311,7 @@ StreamSoundBufferClass::Free_Buffer ()
 //	Load_From_File
 //
 /////////////////////////////////////////////////////////////////////////////////
+#ifdef _WIN32
 bool
 StreamSoundBufferClass::Load_From_File
 (
@@ -317,6 +322,7 @@ StreamSoundBufferClass::Load_From_File
 {
 	return true;
 }
+#endif // _WIN32
 
 
 /////////////////////////////////////////////////////////////////////////////////

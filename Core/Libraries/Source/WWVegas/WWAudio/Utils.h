@@ -40,6 +40,8 @@
 #include "mss.h"
 #pragma warning (pop)
 
+#include <string.h>
+
 /////////////////////////////////////////////////////////////////////////////
 //
 // Macros
@@ -74,11 +76,11 @@ class MMSLockClass
 //
 //  Get_Filename_From_Path
 //
-__inline LPCTSTR
-Get_Filename_From_Path (LPCTSTR path)
+__inline const char *
+Get_Filename_From_Path (const char *path)
 {
 	// Find the last occurrence of the directory deliminator
-	LPCTSTR filename = ::strrchr (path, '\\');
+	const char *filename = ::strrchr (path, '\\');
 	if (filename != nullptr) {
 		// Increment past the directory deliminator
 		filename ++;

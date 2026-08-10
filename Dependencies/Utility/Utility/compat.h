@@ -81,6 +81,16 @@
 #define _finite(x) isfinite(x)
 #endif
 
+// TheSuperHackers @port TRUE / FALSE. On Windows these come from <windows.h>; code that no
+// longer includes it off Windows still uses the spellings. Defined the way
+// Core/Libraries/Include/Lib/BaseTypeCore.h already defines them, so the two agree.
+#ifndef TRUE
+#define TRUE true
+#endif
+#ifndef FALSE
+#define FALSE false
+#endif
+
 #include "mem_compat.h"
 #include "string_compat.h"
 #include "tchar_compat.h"

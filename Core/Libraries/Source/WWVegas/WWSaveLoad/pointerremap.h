@@ -36,10 +36,6 @@
 
 #pragma once
 
-#ifdef _UNIX
-#include "osdep/osdep.h"
-#endif
-
 #include "WWLib/always.h"
 #include "WWLib/Vector.h"
 

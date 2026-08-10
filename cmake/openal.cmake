@@ -8,6 +8,15 @@
 
 find_package(OpenAL QUIET)
 
+# FindOpenAL only defines the OpenAL::OpenAL imported target from CMake 3.27; the backend links it
+# by name, so synthesise it when an older CMake found the library but no target.
+if(OpenAL_FOUND AND NOT TARGET OpenAL::OpenAL)
+    add_library(OpenAL::OpenAL UNKNOWN IMPORTED)
+    set_target_properties(OpenAL::OpenAL PROPERTIES
+        IMPORTED_LOCATION "${OPENAL_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${OPENAL_INCLUDE_DIR}")
+endif()
+
 if(NOT OpenAL_FOUND AND NOT TARGET OpenAL::OpenAL)
     # OpenAL Soft is the reference implementation on Linux and works on macOS too. Pinned to a tag
     # rather than a branch so builds are reproducible.

@@ -80,19 +80,11 @@
 
 #pragma once
 
-#ifdef _UNIX
-#include "osdep.h"
-#endif
-
 #include "WWLib/always.h"
 #include <assert.h>
 #include "vector2.h"
 #include "vector3.h"
 #include "vector4.h"
-#ifdef _UNIX
-#include "osdep.h"
-#endif
-
 
 class Matrix3x3;
 class Matrix4x4;
