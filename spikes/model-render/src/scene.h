@@ -55,6 +55,12 @@ struct DrawBatch
 	bool alpha_test = false;
 	bool two_sided = false;
 	bool alpha_blend = false;
+	// The W3D vertex material, handed to the backend as D3D8 material state. The CPU
+	// reference evaluates the light itself from these, so the two agree only if both
+	// implement D3D8's lighting equation.
+	float material_diffuse[3] = {1.0f, 1.0f, 1.0f};
+	float material_ambient[3] = {1.0f, 1.0f, 1.0f};
+	float opacity = 1.0f;
 	std::vector<ModelVertex> vertices;
 	std::vector<uint16_t> indices;
 	spike::Matrix4x4 world = spike::Matrix4x4::Identity();
@@ -69,8 +75,8 @@ struct Camera
 	float radius = 1.0f;
 };
 
-// Baked per-vertex lighting parameters. The spike backend has no D3D8 lighting or material
-// state, so the light has to be evaluated here; see docs/porting/native-model-render.md.
+// The single directional light. The GPU path passes it to the backend as a D3DLIGHT8; the CPU
+// reference evaluates the same equation itself into each vertex's diffuse colour.
 struct Light
 {
 	float direction[3] = {-0.5f, 0.6f, -0.62f}; // pointing *at* the model, world space

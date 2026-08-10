@@ -151,16 +151,13 @@ std::vector<DrawBatch> build_batches(const Model &model, const std::vector<Textu
 		batch.texture_index =
 		    mesh_index < mesh_texture_index.size() ? mesh_texture_index[mesh_index] : -1;
 
-		float material_diffuse[3] = {1.0f, 1.0f, 1.0f};
-		float material_ambient[3] = {1.0f, 1.0f, 1.0f};
-		float opacity = 1.0f;
 		if (!mesh.passes.empty()) {
 			const MaterialPass &pass = mesh.passes.front();
 			for (int i = 0; i < 3; ++i) {
-				material_diffuse[i] = pass.diffuse[i];
-				material_ambient[i] = pass.ambient[i];
+				batch.material_diffuse[i] = pass.diffuse[i];
+				batch.material_ambient[i] = pass.ambient[i];
 			}
-			opacity = pass.opacity;
+			batch.opacity = pass.opacity;
 			batch.alpha_test = pass.alpha_test != 0;
 			// W3D shader blend: SrcBlend 1 / DestBlend 0 is opaque (SRC_ONE / DEST_ZERO).
 			batch.alpha_blend = pass.dest_blend != 0;
@@ -202,8 +199,10 @@ std::vector<DrawBatch> build_batches(const Model &model, const std::vector<Textu
 				out.v = mesh.texcoords[v * 2 + 1];
 			}
 
-			// The light is evaluated here because the backend has no D3DLIGHT8 or material
-			// state at all; the result travels as D3DFVF_DIFFUSE.
+			// D3D8's lighting equation, evaluated here for the CPU reference only: the GPU
+			// path sets D3DRS_LIGHTING and the same light and material through the backend,
+			// which ignores the vertex colour under D3DMCS_MATERIAL. Two implementations of
+			// one equation is the point -- it is what makes the comparison a check.
 			float world_normal[3] = {normal[0], normal[1], normal[2]};
 			transform_direction(batch.world, normal, world_normal);
 			normalise(world_normal);
@@ -211,13 +210,13 @@ std::vector<DrawBatch> build_batches(const Model &model, const std::vector<Textu
 			if (lambert < 0.0f) {
 				lambert = 0.0f;
 			}
-			out.diffuse = pack_argb(material_ambient[0] * light.ambient +
-			                            material_diffuse[0] * light.intensity * lambert,
-			                        material_ambient[1] * light.ambient +
-			                            material_diffuse[1] * light.intensity * lambert,
-			                        material_ambient[2] * light.ambient +
-			                            material_diffuse[2] * light.intensity * lambert,
-			                        opacity);
+			out.diffuse = pack_argb(batch.material_ambient[0] * light.ambient +
+			                            batch.material_diffuse[0] * light.intensity * lambert,
+			                        batch.material_ambient[1] * light.ambient +
+			                            batch.material_diffuse[1] * light.intensity * lambert,
+			                        batch.material_ambient[2] * light.ambient +
+			                            batch.material_diffuse[2] * light.intensity * lambert,
+			                        batch.opacity);
 		}
 
 		batch.indices.resize(mesh.indices.size());

@@ -4,7 +4,9 @@
 
 `spikes/model-render/` loads `avcrusader.W3D` from the retail BIG archives, parses it with the engine's `ChunkLoadClass` and W3D records, uploads its retail DXT1/TGA textures, and renders it headlessly through Vulkan/MoltenVK on an Apple M1 Pro.
 
-The result is **geometrically correct and mechanically cross-checked, but not a complete engine-faithful frame**. Twelve of thirteen meshes render correctly. `TURRETFX01`, a four-triangle muzzle-effect mesh, is deliberately omitted because its `EXTnkMzl01.tga` reference does not exist in any of the 20 supplied retail archives. Drawing it white would make a plausible but wrong image. Fixed-function lighting is approximated in vertex colours, and house colour is the raw retail placeholder texture rather than the runtime player-colour treatment.
+The result is **geometrically correct and mechanically cross-checked, but not a complete engine-faithful frame**. Twelve of thirteen meshes render correctly. `TURRETFX01`, a four-triangle muzzle-effect mesh, is deliberately omitted because its `EXTnkMzl01.tga` reference does not exist in any of the 20 supplied retail archives. Drawing it white would make a plausible but wrong image. House colour is the raw retail placeholder texture rather than the runtime player-colour treatment, which is why the flat white patches are there.
+
+Lighting is the backend's own fixed-function path (PR #21): one `D3DLIGHT_DIRECTIONAL`, `D3DRS_AMBIENT`, and the W3D vertex material passed per batch as D3D8 material state with `D3DMCS_MATERIAL` sources. The CPU reference implements the same D3D8 equation independently, so the agreement below is a check on the backend's lighting against a real asset, not a comparison of one implementation with itself.
 
 Evidence:
 
@@ -50,39 +52,49 @@ UVs are finite and range from `-0.1183` to `1.0023`; the small excursion is inte
 - `Housecolor.tga` -> `W3DZH.big:Art\W3D\Housecolor.tga` (256x256 A8R8G8B8 TGA)
 - `EXTnkMzl01.tga` -> unresolved in every supplied archive; affected mesh omitted
 
-The Apple M1 Pro reports sampled-image support for BC1, BC2, BC3, and BGRA8. The retail DXT1 bytes and all nine mip levels are uploaded directly; there is no transcode in the GPU path. TGA is decoded to BGRA8.
+The Apple M1 Pro reports sampled-image support for DXT1, DXT3, DXT5, and A8R8G8B8. The retail DXT1 bytes and all nine mip levels are uploaded directly; there is no transcode in the GPU path. TGA is decoded to BGRA8.
 
 ## Coordinate and image validation
 
-W3D positions remain right-handed and Z-up. The camera uses Z as world-up, a right-handed view, and Vulkan's `[0,1]` depth range. Matrices are composed `projection * view * world` in Westwood's column-vector convention; the backend negates the clip-Y row before GLSL upload.
+The backend takes matrices in D3D8's row-vector convention and composes them `world * view * projection`, as `DX8Wrapper` does through `To_D3DMATRIX`; the tool transposes its Westwood column-vector matrices on the way in. Handing over the untransposed matrices draws the model somewhere off-target, which is how this was caught after the rebase onto #21.
+
+W3D positions remain right-handed and Z-up. The camera uses Z as world-up, a right-handed view, and Vulkan's `[0,1]` depth range. The backend negates the clip-Y row before GLSL upload.
 
 A synthetic UV gradient/checker (`--uv-test --flat-light`) made GPU and CPU images agree at 1.0000 coverage IoU and 0.03 mean channel error with culling disabled. That verifies top-origin V, wrap addressing, perspective interpolation, and the BGRA upload independently of the retail texture's appearance.
 
-That test exposed an existing cull translation bug: D3D8 `D3DCULL_CW` had been mapped to Vulkan front-face culling. With the backend's clip-Y handling, it must map to Vulkan back-face culling. Before the correction, the real model rendered its back faces and GPU/reference mean error was 58.67. After correction and equal culling rules:
+That test exposed an existing cull translation bug: D3D8 `D3DCULL_CW` had been mapped to Vulkan front-face culling. `vulkan_backend.cpp` negates clip Y and Vulkan's NDC Y points down, so the two flips cancel and a triangle's framebuffer winding equals its D3D screen winding; with `VK_FRONT_FACE_COUNTER_CLOCKWISE`, `D3DCULL_CW` must therefore cull the back face. Before the correction, the real model rendered its back faces and GPU/reference mean error was 58.67. After correction and equal culling rules:
 
 ```text
-GPU covered pixels:       135,268
+GPU covered pixels:       135,269
 CPU covered pixels:       135,291
 coverage IoU:              0.9946
-mean absolute difference:  2.99 / 255 per channel
+mean absolute difference:  3.03 / 255 per channel
 validation messages:       0
 ```
 
+None of the spike's other cases could have caught the inversion, because they all run with `D3DCULL_NONE`. `zh-fixedfunc-tests` now has a `cull mode` case that draws one screen-clockwise and one screen-counter-clockwise triangle under each of `NONE`/`CW`/`CCW`, on both the pretransformed and the transformed path, and asserts which survives. Reinstating the old mapping makes it fail with `pretransformed CULLMODE=CW: clockwise triangle got (255,255,255,255) expected (0,0,0,0)`.
+
 The final file enables trilinear mip filtering. Compared with the otherwise identical mip-0 GPU frame, its coverage IoU is 0.9948 and mean channel difference is 1.87. The independent reference intentionally uses mip 0 so the BC decoder, sampler convention, geometry, transforms, depth, culling, and shading can be compared without implementing GPU derivative/LOD selection a second time.
 
-## Backend gaps found by a real asset
+## Gaps found by a real asset
 
-- No engine fixed-function light/material API: directional light and material ambient/diffuse are baked into vertex diffuse colour.
+PR #21 closed most of what the first version of this list called a backend gap: the texture-stage cascade, the 21 FVFs, lighting and materials, fog, alpha test, ZBIAS, texture transforms, and 16 texture formats are all in the backend now, and this tool uses them rather than working around them. What remains:
+
+In the engine/tool path:
+
+- `MeshModelClass::Load_W3D` and the rest of the engine's own model runtime still do not compile natively (see the `d3d8.h` error above); the geometry here comes from this tool's own chunk parsing.
+- Skinned/animated posing is not implemented; only the base hierarchy pose is used.
 - No runtime house-colour mapper: the raw house-colour placeholder texture is shown.
 - Missing runtime/generated muzzle texture: the effect mesh is omitted.
-- Only material pass 0 and texture stage 0 are rendered.
-- Alpha test is available, but the selected model's only missing muzzle-effect material prevents exercising it in the final image.
-- Alpha blending state recorded by the W3D parser is not yet applied per batch.
-- Sampler addressing is wrap-only; mapper arguments and animated UV mappers are not implemented.
-- The renderer index path remains 16-bit; meshes above 65,535 vertices are rejected.
-- Skinned/animated posing is not implemented; only the base hierarchy pose is used.
-- Fog, specular, render-target APIs, texture transforms, and the wider D3D8 state surface remain absent.
-- BC1/2/3 and mip upload now work; uncompressed DDS variants beyond the implemented BGRA layout remain unsupported.
+- Only material pass 0 and texture stage 0 are drawn, and W3D mapper arguments (animated/environment UV mappers) are not translated, so sampler addressing is wrap-only.
+- Alpha blending state recorded by the W3D parser is not applied: the CPU reference does not blend, so applying it would silently weaken the cross-check. The Crusader has no blended pass.
+- The texture loader reads DXT1/3/5 and 32-bit uncompressed DDS plus TGA; the backend samples 16 formats, so the narrower set is this tool's, not the backend's.
+
+In the backend:
+
+- The index path is 16-bit, so meshes above 65,535 vertices are rejected.
+- No render-target/texture-render API, and no vertex or pixel shaders: the engine's shader paths have nothing to bind to.
+- Alpha test is exercised only by state, not by content, in this image: the one alpha-tested material belongs to the omitted muzzle mesh.
 
 ## Rerun
 
@@ -98,6 +110,14 @@ DYLD_LIBRARY_PATH=/opt/homebrew/lib build/model-render/zh-model-render \
   --model avcrusader.W3D \
   --out crusader.png \
   --reference-out crusader-reference.png
+```
+
+The backend's cull mapping is covered independently of the retail data:
+
+```sh
+/opt/homebrew/bin/cmake -S spikes/renderer -B build/renderer -DSPIKE_USE_SDL2=OFF
+/opt/homebrew/bin/cmake --build build/renderer -j8
+DYLD_LIBRARY_PATH=/opt/homebrew/lib build/renderer/zh-fixedfunc-tests   # `cull mode` case
 ```
 
 Optional diagnostics:

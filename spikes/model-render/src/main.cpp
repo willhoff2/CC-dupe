@@ -149,6 +149,29 @@ private:
 	std::string Path;
 };
 
+// The scene and the CPU reference work in Westwood's column-vector convention (v' = M v).
+// The backend takes matrices in D3D8's row-vector convention, because that is what
+// DX8Wrapper hands it via To_D3DMATRIX, and composes them as world * view * projection.
+// Transposing here is exactly that conversion.
+spike::Matrix4x4 to_d3d_matrix(const spike::Matrix4x4 &m)
+{
+	spike::Matrix4x4 out{};
+	for (int row = 0; row < 4; ++row) {
+		for (int column = 0; column < 4; ++column) {
+			out.m[row][column] = m.m[column][row];
+		}
+	}
+	return out;
+}
+
+// D3DRS_AMBIENT is a D3DCOLOR; the scene's ambient term is a single grey level.
+uint32_t grey_d3dcolor(float level)
+{
+	const float clamped = level < 0.0f ? 0.0f : (level > 1.0f ? 1.0f : level);
+	const uint32_t channel = static_cast<uint32_t>(clamped * 255.0f + 0.5f);
+	return 0xff000000u | (channel << 16) | (channel << 8) | channel;
+}
+
 struct CheckResults
 {
 	uint32_t failures = 0;
@@ -471,20 +494,20 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	std::printf("\ndevice: %s\n", gfx->Device_Description());
-	std::printf("sampled-image support: BC1 %s, BC2 %s, BC3 %s, BGRA8 %s\n",
-	            gfx->Supports_Texture_Format(spike::TextureFormat::Bc1) ? "yes" : "no",
-	            gfx->Supports_Texture_Format(spike::TextureFormat::Bc2) ? "yes" : "no",
-	            gfx->Supports_Texture_Format(spike::TextureFormat::Bc3) ? "yes" : "no",
-	            gfx->Supports_Texture_Format(spike::TextureFormat::Bgra8) ? "yes" : "no");
+	std::printf("sampled-image support: DXT1 %s, DXT3 %s, DXT5 %s, A8R8G8B8 %s\n",
+	            gfx->Supports_Texture_Format(spike::TextureFormat::DXT1) ? "yes" : "no",
+	            gfx->Supports_Texture_Format(spike::TextureFormat::DXT3) ? "yes" : "no",
+	            gfx->Supports_Texture_Format(spike::TextureFormat::DXT5) ? "yes" : "no",
+	            gfx->Supports_Texture_Format(spike::TextureFormat::A8R8G8B8) ? "yes" : "no");
 
 	std::vector<spike::TextureHandle *> texture_handles(textures.size(), nullptr);
 	for (size_t t = 0; t < textures.size(); ++t) {
 		const zh::TextureImage &image = textures[t];
-		spike::TextureFormat format = spike::TextureFormat::Bgra8;
+		spike::TextureFormat format = spike::TextureFormat::A8R8G8B8;
 		switch (image.format) {
-		case zh::TexFormat::Bc1: format = spike::TextureFormat::Bc1; break;
-		case zh::TexFormat::Bc2: format = spike::TextureFormat::Bc2; break;
-		case zh::TexFormat::Bc3: format = spike::TextureFormat::Bc3; break;
+		case zh::TexFormat::Bc1: format = spike::TextureFormat::DXT1; break;
+		case zh::TexFormat::Bc2: format = spike::TextureFormat::DXT3; break;
+		case zh::TexFormat::Bc3: format = spike::TextureFormat::DXT5; break;
 		default: break;
 		}
 		if (!gfx->Supports_Texture_Format(format)) {
@@ -492,7 +515,7 @@ int main(int argc, char **argv)
 			             image.requested_name.c_str());
 			return 1;
 		}
-		std::vector<spike::TextureLevelDesc> levels(image.mips.size());
+		std::vector<spike::TextureMip> levels(image.mips.size());
 		for (size_t mip = 0; mip < image.mips.size(); ++mip) {
 			levels[mip].data = image.data.data() + image.mips[mip].offset;
 			levels[mip].bytes = image.mips[mip].bytes;
@@ -501,8 +524,8 @@ int main(int argc, char **argv)
 		}
 		spike::TextureDesc desc;
 		desc.format = format;
-		desc.levels = levels.data();
-		desc.level_count = static_cast<uint32_t>(levels.size());
+		desc.mips = levels.data();
+		desc.mip_count = static_cast<uint32_t>(levels.size());
 		texture_handles[t] = gfx->Create_Texture(desc);
 		if (texture_handles[t] == nullptr) {
 			std::fprintf(stderr, "Create_Texture failed for %s\n", image.requested_name.c_str());
@@ -533,19 +556,51 @@ int main(int argc, char **argv)
 	// The frame is drawn twice: once with mip filtering off, which is the configuration the CPU
 	// reference can be held to, and once with the full mip chain, which is what the engine asks
 	// for. The difference between the two is reported rather than hidden.
+	float light_direction[3] = {light.direction[0], light.direction[1], light.direction[2]};
+	{
+		const float length = std::sqrt(light_direction[0] * light_direction[0] +
+		                               light_direction[1] * light_direction[1] +
+		                               light_direction[2] * light_direction[2]);
+		if (length > 0.0f) {
+			for (float &component : light_direction) {
+				component /= length;
+			}
+		}
+	}
+
 	spike::SurfaceFormat format;
 	std::string rgba;
 	auto draw_frame = [&](uint32_t mip_filter, std::string &out) -> bool {
 		gfx->Begin_Scene();
 		gfx->Clear(true, true, clear_rgb[0], clear_rgb[1], clear_rgb[2], 1.0f);
-		gfx->Set_Transform(D3DTS_VIEW, camera.view);
-		gfx->Set_Transform(D3DTS_PROJECTION, camera.projection);
+		gfx->Set_Transform(D3DTS_VIEW, to_d3d_matrix(camera.view));
+		gfx->Set_Transform(D3DTS_PROJECTION, to_d3d_matrix(camera.projection));
 		gfx->Set_DX8_Render_State(D3DRS_ZENABLE, 1);
 		gfx->Set_DX8_Render_State(D3DRS_ZWRITEENABLE, 1);
 		gfx->Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
 		gfx->Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE, 0);
 		gfx->Set_DX8_Render_State(D3DRS_ALPHAREF, 128);
 		gfx->Set_DX8_Render_State(D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
+		// The backend's own fixed-function lighting, not a colour baked into the vertices:
+		// one directional light plus a global ambient, with the W3D vertex material handed
+		// over per batch as D3D8 material state.
+		gfx->Set_DX8_Render_State(D3DRS_LIGHTING, 1);
+		gfx->Set_DX8_Render_State(D3DRS_SPECULARENABLE, 0);
+		// The reference normalises the transformed normal, and the pivot transforms are
+		// rigid, so asking D3D8 to renormalise keeps the two identical.
+		gfx->Set_DX8_Render_State(D3DRS_NORMALIZENORMALS, 1);
+		gfx->Set_DX8_Render_State(D3DRS_AMBIENT, grey_d3dcolor(light.ambient));
+		gfx->Set_DX8_Render_State(D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_MATERIAL);
+		gfx->Set_DX8_Render_State(D3DRS_AMBIENTMATERIALSOURCE, D3DMCS_MATERIAL);
+		gfx->Set_DX8_Render_State(D3DRS_EMISSIVEMATERIALSOURCE, D3DMCS_MATERIAL);
+		spike::LightState directional;
+		directional.type = D3DLIGHT_DIRECTIONAL;
+		for (int i = 0; i < 3; ++i) {
+			directional.diffuse[i] = light.intensity;
+			directional.direction[i] = light_direction[i];
+		}
+		directional.diffuse[3] = 1.0f;
+		gfx->Set_Light(0, &directional);
 		// texture MODULATE diffuse: what W3D's default shader does with a vertex material.
 		gfx->Set_DX8_Texture_Stage_State(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
 		gfx->Set_DX8_Texture_Stage_State(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
@@ -562,7 +617,14 @@ int main(int argc, char **argv)
 
 		for (size_t b = 0; b < batches.size(); ++b) {
 			const zh::DrawBatch &batch = batches[b];
-			gfx->Set_Transform(D3DTS_WORLD, batch.world);
+			gfx->Set_Transform(D3DTS_WORLD, to_d3d_matrix(batch.world));
+			spike::MaterialState material;
+			for (int i = 0; i < 3; ++i) {
+				material.diffuse[i] = batch.material_diffuse[i];
+				material.ambient[i] = batch.material_ambient[i];
+			}
+			material.diffuse[3] = batch.opacity;
+			gfx->Set_Material(material);
 			gfx->Set_DX8_Render_State(D3DRS_CULLMODE,
 			                          batch.two_sided ? D3DCULL_NONE : cull_mode);
 			gfx->Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, batch.alpha_test ? 1 : 0);
