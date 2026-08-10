@@ -30,8 +30,9 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"
 
-// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
-#include <windows.h>
+// TheSuperHackers @port Directory walking moved behind the platform path API;
+// see docs/porting/filesystem-and-registry.md
+#include "WWLib/platform/platform_path.h"
 
 #include "Common/file.h"
 #include "Common/FileSystem.h"
@@ -463,66 +464,37 @@ void GameStateMap::clearScratchPadMaps()
 
 	// remember the current directory
 	char currentDirectory[ _MAX_PATH ];
-	GetCurrentDirectory( _MAX_PATH, currentDirectory );
+	WWPlatform::Path::Get_Current_Directory( currentDirectory, _MAX_PATH );
 
 	// switch into the save directory
-	SetCurrentDirectory( TheGameState->getSaveDirectory().str() );
+	WWPlatform::Path::Set_Current_Directory( TheGameState->getSaveDirectory().str() );
 
-	// iterate all items in the directory
-	AsciiString fileToDelete;
-	WIN32_FIND_DATA item;  // search item
-	HANDLE hFile = INVALID_HANDLE_VALUE;  // handle for search resources
-	Bool done = FALSE;
-	Bool first = TRUE;
-	while( done == FALSE )
+	//
+	// iterate all items in the directory. The listing is taken in one go rather than deleting
+	// while a search handle is open, which is what the interleaved FindNextFile/DeleteFile below
+	// was carefully arranged to avoid needing to worry about.
+	//
+	DynamicVectorClass<WWPlatform::Path::EntryClass> entries;
+	if( WWPlatform::Path::Enumerate( ".", "*", entries ) )
 	{
 
-		// first, clear flag for deleting file
-		fileToDelete.clear();
-
-		// if our first time through we need to start the search
-		if( first )
+		for( int i = 0; i < entries.Count(); ++i )
 		{
 
-			// start search
-			hFile = FindFirstFile( "*", &item );
-			if( hFile == INVALID_HANDLE_VALUE )
-				return;
-
-			// we are no longer on our first item
-			first = FALSE;
-
-		}
-
-		// see if this is a file, and therefore a possible .map file
-		if( !(item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) )
-		{
+			// see if this is a file, and therefore a possible .map file
+			if( entries[ i ].Is_Directory )
+				continue;
 
 			// see if there is a ".map" at end of this filename
-			Char *c = strrchr( item.cFileName, '.' );
+			const Char *c = strrchr( entries[ i ].Name.str(), '.' );
 			if( c && stricmp( c, ".map" ) == 0 )
-				fileToDelete.set( item.cFileName );  // we want to delete this one
+				WWPlatform::Path::Delete_File( entries[ i ].Name.str() );
 
 		}
-
-		//
-		// find the next file before we delete this one, this is probably not necessary
-		// to structure things this way so that the find next occurs before the file
-		// delete, but it seems more correct to do so
-		//
-		if( FindNextFile( hFile, &item ) == 0 )
-			done = TRUE;
-
-		// delete file if set
-		if( fileToDelete.isEmpty() == FALSE )
-			DeleteFile( fileToDelete.str() );
 
 	}
 
-	// close search resources
-	FindClose( hFile );
-
 	// restore our directory to the current directory
-	SetCurrentDirectory( currentDirectory );
+	WWPlatform::Path::Set_Current_Directory( currentDirectory );
 
 }

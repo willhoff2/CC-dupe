@@ -33,8 +33,9 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
-#include <windows.h>
+// TheSuperHackers @port Directory enumeration moved behind the platform path API;
+// see docs/porting/filesystem-and-registry.md
+#include "WWLib/platform/platform_path.h"
 
 #define DEFINE_IMAGE_STATUS_NAMES
 #include "Lib/BaseType.h"
@@ -251,14 +252,12 @@ void ImageCollection::load( Int textureSize )
 	char buffer[ _MAX_PATH ];
 	INI ini;
 	// first load in the user created mapped image files if we have them.
-	WIN32_FIND_DATA findData;
 	AsciiString userDataPath;
 	if(TheGlobalData)
 	{
-		userDataPath.format("%sINI\\MappedImages\\*.ini",TheGlobalData->getPath_UserData().str());
-		if(FindFirstFile(userDataPath.str(), &findData) !=INVALID_HANDLE_VALUE)
+		userDataPath.format("%sINI\\MappedImages",TheGlobalData->getPath_UserData().str());
+		if(WWPlatform::Path::Has_Match(userDataPath.str(), "*.ini"))
 		{
-			userDataPath.format("%sINI\\MappedImages",TheGlobalData->getPath_UserData().str());
 			ini.loadDirectory(userDataPath, INI_LOAD_OVERWRITE, nullptr );
 		}
 	}
