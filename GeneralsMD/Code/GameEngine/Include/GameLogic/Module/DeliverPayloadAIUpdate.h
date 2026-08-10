@@ -360,7 +360,7 @@ protected:
 	Bool													m_freeToExit;
 	Bool													m_acceptingCommands;
 
-	enum DiveState	// Stored in save file as int, don't renumber!  jba.
+	enum DiveState CPP_11(: Int)	// Stored in save file as int, don't renumber!  jba.
 	{
 		DIVESTATE_PREDIVE=0,
 		DIVESTATE_DIVING=1,

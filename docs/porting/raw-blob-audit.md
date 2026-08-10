@@ -32,9 +32,18 @@ comment, which is a useful independent check that the asserted numbers are right
 
 * `Win32BIGFileSystem.cpp` / `StdBIGFileSystem.cpp` read the `.big` directory field by field with
   explicit 4-byte reads into `UnsignedInt`, never as a struct. Nothing to assert.
-* `GameEngine` serialization (`DataChunk.cpp`, `Recorder.cpp`, `XferSave/XferLoad.cpp`) writes
-  scalars one at a time, and `Lib/BaseTypeCore.h` already defines `Int`/`UnsignedInt`/`Short`/…
-  in terms of `<cstdint>`, so those widths do not move under LP64.
+* `DataChunk.cpp` and the `XferSave`/`XferLoad` *scalar* methods write one fixed-width value at a
+  time, and `Lib/BaseTypeCore.h` defines `Int`/`UnsignedInt`/`Short`/… in terms of `<cstdint>`, so
+  those widths do not move under LP64.
+
+  **Correction (see `docs/porting/xfer-64bit-audit.md`).** This section previously claimed that
+  GameEngine serialization writes scalars one at a time, full stop. That is wrong. `Xfer` also has
+  `xferUser(void*, Int)`, which writes a raw block, and it is used at **480 call sites in 146
+  files** (292 in 82 files inside the ported scope). Most of those blocks *are* fixed width, but
+  that is a fact that had to be measured rather than assumed, and before that measurement three of
+  them were not: a `SYSTEMTIME` in the replay header, `sizeof(this)` in the retail CRC path of
+  `BitFlagsIO.h`, and a `RadiusDecal` containing two pointers. `Recorder.cpp` in particular did
+  *not* write only scalars.
 
 ## Remaining unsafe sites
 

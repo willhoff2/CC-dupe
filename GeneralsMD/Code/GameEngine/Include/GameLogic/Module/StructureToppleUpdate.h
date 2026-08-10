@@ -173,7 +173,7 @@ protected:
 
 	void doPhaseStuff(StructureTopplePhaseType stphase, const Coord3D *target);
 
-	enum StructureToppleStateType {
+	enum StructureToppleStateType CPP_11(: Int) {
 		TOPPLESTATE_STANDING,
 		TOPPLESTATE_WAITINGFORTOPPLESTART,
 		TOPPLESTATE_TOPPLING,

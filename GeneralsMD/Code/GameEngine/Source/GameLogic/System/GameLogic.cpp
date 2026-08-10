@@ -29,6 +29,10 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port timeGetTime(); no longer reached through GameState.h.
+// See docs/porting/xfer-64bit-audit.md
+#include <windows.h>
+
 #include "Common/AudioAffect.h"
 #include "Common/AudioHandleSpecialValues.h"
 #include "Common/BuildAssistant.h"

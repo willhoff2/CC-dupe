@@ -684,7 +684,7 @@ private:
 	UnsignedInt m_tintStatus;				///< tint color status bits (see TintStatus enum)
 	UnsignedInt m_prevTintStatus;///< for edge testing with m_tintStatus
 
-	enum FadingMode
+	enum FadingMode CPP_11(: Int)
 	{
 		FADING_NONE,
 		FADING_IN,

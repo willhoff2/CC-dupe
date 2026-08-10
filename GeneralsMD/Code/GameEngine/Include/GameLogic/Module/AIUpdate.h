@@ -743,7 +743,7 @@ private:
 	ObjectID		m_moveOutOfWay2;
 
 	// Locomotors -------------------------------------------------------------------------------------------------
-	enum LocoGoalType	 // Note - written out in save/load xfer, don't change these numbers.  jba.
+	enum LocoGoalType CPP_11(: Int)	 // Note - written out in save/load xfer, don't change these numbers.  jba.
 	{
 		NONE = 0,
 		POSITION_ON_PATH = 1,

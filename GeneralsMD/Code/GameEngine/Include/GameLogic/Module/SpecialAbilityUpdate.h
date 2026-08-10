@@ -256,7 +256,7 @@ protected:
 
 private:
 
-	enum PackingState
+	enum PackingState CPP_11(: Int)
 	{
 		STATE_NONE,
 		STATE_PACKING,

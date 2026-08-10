@@ -76,7 +76,7 @@ class MissileAIUpdate : public AIUpdateInterface, public ProjectileUpdateInterfa
 public:
 	MissileAIUpdate( Thing *thing, const ModuleData* moduleData );
 
-	enum MissileStateType	 // Stored in save file, don't renumber.
+	enum MissileStateType CPP_11(: Int)	 // Stored in save file, don't renumber.
 	{
 		PRELAUNCH			= 0,
 		LAUNCH				= 1, ///< released from launcher, falling

@@ -33,6 +33,8 @@
 #include "Common/INI.h"
 #include "Common/Xfer.h"
 
+#include <Utility/CppMacros.h>
+
 //-------------------------------------------------------------------------------------------------
 
 /*
@@ -215,7 +217,12 @@ void BitFlags<NUMBITS, TAG>::xfer(Xfer* xfer)
 
 		// just call the xfer implementation on the data values
 #if RETAIL_COMPATIBLE_CRC
-		xfer->xferUser( this, sizeof( this ) );
+		// TheSuperHackers @port sizeof(this) is the size of a pointer, not of the object, so retail
+		// only ever fed the first four bytes of the mask into the CRC. That is the number the CRC
+		// has to keep seeing, and it must not grow to eight on a 64-bit build. The bytes are
+		// unchanged on Win32, where a pointer is four bytes anyway.
+		STATIC_ASSERT_ALWAYS(sizeof(BitFlags) >= 4, "The retail CRC would read past the end of the mask");
+		xfer->xferUser( this, 4 );
 #else
 		xfer->xferUser( this, sizeof( *this ) );
 #endif

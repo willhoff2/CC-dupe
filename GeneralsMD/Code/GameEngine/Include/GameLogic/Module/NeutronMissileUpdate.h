@@ -87,7 +87,7 @@ public:
 
 	virtual ProjectileUpdateInterface* getProjectileUpdateInterface() override { return this; }
 
-	enum MissileStateType
+	enum MissileStateType CPP_11(: Int)
 	{
 		PRELAUNCH,
 		LAUNCH,			///< released from plane, falling

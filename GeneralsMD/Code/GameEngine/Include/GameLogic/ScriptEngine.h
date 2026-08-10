@@ -29,6 +29,8 @@
 
 #pragma once
 
+#include <Utility/CppMacros.h>
+
 #include "Common/GameType.h"
 #include "Common/GameMemory.h"
 #include "Common/STLTypedefs.h"
@@ -216,7 +218,7 @@ class ScriptEngine : public SubsystemInterface,
 
 public:
 	enum {MAX_COUNTERS=256, MAX_FLAGS=256, MAX_ATTACK_PRIORITIES=256};
-	enum TFade {FADE_NONE, FADE_SUBTRACT, FADE_ADD, FADE_SATURATE, FADE_MULTIPLY};
+	enum TFade CPP_11(: Int) {FADE_NONE, FADE_SUBTRACT, FADE_ADD, FADE_SATURATE, FADE_MULTIPLY};
 	ScriptEngine();
 	virtual ~ScriptEngine() override;
 

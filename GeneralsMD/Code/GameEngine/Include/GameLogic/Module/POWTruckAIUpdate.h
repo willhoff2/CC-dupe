@@ -111,7 +111,7 @@ protected:
 
 	virtual void setTask( POWTruckTask task, Object *taskObject = nullptr );		///< set our current task
 
-	enum POWTruckAIMode	// Stored in save file, do not renumber.  jba.
+	enum POWTruckAIMode CPP_11(: Int)	// Stored in save file, do not renumber.  jba.
 	{
 		AUTOMATIC = 0,
 		MANUAL		= 1

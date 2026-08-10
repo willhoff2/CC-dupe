@@ -30,6 +30,8 @@
 #pragma once
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
+#include <Utility/CppMacros.h>
+
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/CollideModule.h"
 #include "GameLogic/Module/UpdateModule.h"
@@ -106,7 +108,7 @@ public:
 
 protected:
 
-	enum ToppleState
+	enum ToppleState CPP_11(: Int)
 	{
 		TOPPLE_UPRIGHT = 0,
 		TOPPLE_FALLING,

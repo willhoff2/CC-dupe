@@ -566,8 +566,7 @@ void RecorderClass::startRecording(GameDifficulty diff, Int originalGameMode, In
 	m_file->writeChar(L"\0");
 
 	// Date and Time
-	SYSTEMTIME systemTime;
-	GetLocalTime( &systemTime );
+	const SerializedDateTime systemTime = getLocalSerializedDateTime();
 	m_file->write(&systemTime, sizeof(systemTime));
 
 	// write out version info
@@ -715,12 +714,11 @@ void RecorderClass::stopRecording() {
  */
 void RecorderClass::archiveReplay(AsciiString fileName)
 {
-	SYSTEMTIME st;
-	GetLocalTime(&st);
+	const SerializedDateTime st = getLocalSerializedDateTime();
 
 	AsciiString archiveFileName;
 	// Use a standard YYYYMMDD_HHMMSS format for simplicity and to avoid conflicts.
-	archiveFileName.format("%04d%02d%02d_%02d%02d%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	archiveFileName.format("%04d%02d%02d_%02d%02d%02d", st.year, st.month, st.day, st.hour, st.minute, st.second);
 
 	AsciiString extension = getReplayExtention();
 	AsciiString sourcePath = getReplayDir();
