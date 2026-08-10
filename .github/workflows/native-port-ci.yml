@@ -63,7 +63,10 @@ jobs:
           set -eux
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
-          apt-get install -y --no-install-recommends clang-14 python3 git ca-certificates
+          # zlib1g-dev is not incidental: without <zlib.h> CompressionManager.cpp fails to
+          # preprocess and the clean count silently drops by one (measured: 114 instead of 115).
+          apt-get install -y --no-install-recommends \
+            clang-14 python3 git ca-certificates zlib1g-dev
           clang++-14 --version
 
       - name: Checkout
