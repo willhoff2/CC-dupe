@@ -27,6 +27,12 @@
 // Author: Michael S. Booth, October 2001
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+// Only the diagnostic code paths below use GetTickCount / QueryPerformance*.
+#if defined(DEBUG_LOGGING) || defined(RTS_DEBUG) || defined(INTENSE_DEBUG)
+#include <windows.h>
+#endif
+
 #include "GameLogic/AIPathfind.h"
 
 #include "Common/PerfTimer.h"

@@ -29,6 +29,9 @@
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
 #include <windows.h>
 #include <mmsystem.h>
+#if TELL_COMPUTER_IDENTITY_IN_LAN_LOBBY
+#include <lmcons.h>	// for UNLEN
+#endif
 
 #include "Common/crc.h"
 #include "Common/GameState.h"
