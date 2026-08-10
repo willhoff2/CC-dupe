@@ -87,6 +87,11 @@ struct W3dRingStruct
 	// variable set of keyframes for each channel
 };
 
+STATIC_ASSERT_ALWAYS(sizeof(W3dRingStruct) == 168, "W3dRingStruct must be 168 bytes on disk");
+STATIC_ASSERT_ALWAYS(offsetof(W3dRingStruct, Name) == 8, "W3dRingStruct::Name must be at offset 8");
+STATIC_ASSERT_ALWAYS(offsetof(W3dRingStruct, TextureName) == 116, "W3dRingStruct::TextureName must be at offset 116");
+STATIC_ASSERT_ALWAYS(offsetof(W3dRingStruct, TextureTileCount) == 164, "W3dRingStruct::TextureTileCount must be at offset 164");
+
 // Note: RING_NUM_LOD does not include the null LOD.
 #define RING_NUM_LOD	(20)
 #define RING_LOWEST_LOD (10)

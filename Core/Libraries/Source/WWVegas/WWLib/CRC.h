@@ -37,6 +37,7 @@
 #pragma once
 
 #include	<stdlib.h>
+#include <Utility/stdint_adapter.h>
 
 // TheSuperHackers @build feliwir 17/04/2025 include _ltrotl macros
 #include <Utility/intrin_compat.h>
@@ -48,25 +49,29 @@
 **	a method class. If it is called as a function (using the function operator), it will return
 **	the CRC value. There are other function operators to submit data for processing.
 */
+// TheSuperHackers @port The accumulator, the staging buffer and the stride of the bulk loop were
+// all `long`, which is 32 bits on Windows but 64 bits on LP64. That changes both the width of the
+// arithmetic and how many bytes each step consumes, so identical input would produce a different
+// value natively. The algorithm is 32-bit by definition, so it is spelled that way.
 class CRCEngine {
 	public:
 
 		// Constructor for CRC engine (it can have an override initial CRC value).
-		CRCEngine(long initial=0) : CRC(initial), Index(0) {
+		CRCEngine(int32_t initial=0) : CRC(initial), Index(0) {
 			StagingBuffer.Composite = 0;
 		};
 
 		// Fetches CRC value.
-		long operator() () const {return(Value());};
+		int32_t operator() () const {return(Value());};
 
 		// Submits one byte sized datum to the CRC accumulator.
 		void operator() (char datum);
 
 		// Submits an arbitrary buffer to the CRC accumulator.
-		long operator() (void const * buffer, int length);
+		int32_t operator() (void const * buffer, int length);
 
-		// Implicit conversion operator so this object appears like a 'long integer'.
-		operator long() const {return(Value());};
+		// Implicit conversion operator so this object appears like a 32 bit integer.
+		operator int32_t() const {return(Value());};
 
 	protected:
 
@@ -74,9 +79,9 @@ class CRCEngine {
 			return(Index != 0);
 		};
 
-		long Value() const {
+		int32_t Value() const {
 			if (Buffer_Needs_Data()) {
-				return((long)rotl32((unsigned int)CRC, 1) + StagingBuffer.Composite);
+				return((int32_t)(rotl32((uint32_t)CRC, 1) + (uint32_t)StagingBuffer.Composite));
 			}
 			return(CRC);
 		};
@@ -85,7 +90,7 @@ class CRCEngine {
 		**	Current accumulator of the CRC value. This value doesn't take into
 		**	consideration any pending data in the staging buffer.
 		*/
-		long CRC;
+		int32_t CRC;
 
 		/*
 		**	This is the sub index into the staging buffer used to keep track of
@@ -99,8 +104,8 @@ class CRCEngine {
 		**	in preparation for additional data.
 		*/
 		union {
-			long Composite;
-			char Buffer[sizeof(long)];
+			int32_t Composite;
+			char Buffer[sizeof(int32_t)];
 		} StagingBuffer;
 };
 
@@ -111,17 +116,17 @@ class CRCEngine {
 //
 // 12/09/97 EHC - converted from c to c++ static class and added to crc.h and crc.cpp
 //
-#define CRC32(c,crc) (CRC::_Table[((unsigned long)(crc) ^ (c)) & 0xFFL] ^ (((crc) >> 8) & 0x00FFFFFFL))
+#define CRC32(c,crc) (CRC::_Table[((uint32_t)(crc) ^ (c)) & 0xFF] ^ (((crc) >> 8) & 0x00FFFFFF))
 class CRC {
 
 	// CRC for poly 0x04C11DB7
-	static unsigned long _Table[256];
+	static uint32_t _Table[256];
 
 public:
 
 	// get the CRC of a block of memory
-	static unsigned long	Memory( unsigned char *data, unsigned long length, unsigned long crc = 0 );
+	static uint32_t	Memory( unsigned char *data, uint32_t length, uint32_t crc = 0 );
 
 	// get the CRC of a null-terminated string
-	static unsigned long	String( const char *string, unsigned long crc = 0 );
+	static uint32_t	String( const char *string, uint32_t crc = 0 );
 };

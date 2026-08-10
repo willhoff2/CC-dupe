@@ -39,6 +39,18 @@
 #define final
 #endif
 
+// TheSuperHackers @port A compile-time assertion that is enforced on every toolchain,
+// including the pre-C++11 ones where `static_assert` above is defined away to nothing.
+// Used for on-disk structure layouts, where a silently skipped assertion defeats the point.
+#if __cplusplus >= 201103L
+#define STATIC_ASSERT_ALWAYS(expr, msg) static_assert(expr, msg)
+#else
+#define STATIC_ASSERT_ALWAYS_JOIN2(a, b) a##b
+#define STATIC_ASSERT_ALWAYS_JOIN(a, b) STATIC_ASSERT_ALWAYS_JOIN2(a, b)
+#define STATIC_ASSERT_ALWAYS(expr, msg) \
+	typedef char STATIC_ASSERT_ALWAYS_JOIN(static_assertion_failed_on_line_, __LINE__)[(expr) ? 1 : -1]
+#endif
+
 #if __cplusplus >= 201703L
 #define REGISTER
 #define FALLTHROUGH [[fallthrough]]

@@ -2271,3 +2271,6 @@ struct W3dShdSubMeshHeaderStruct
 ** Include the obsolete structures and chunk ID's
 */
 #include "WW3D2/w3d_obsolete.h"
+
+// TheSuperHackers @port Asserts that the structures above still have their on-disk layout.
+#include "WW3D2/w3d_file_layout.h"
