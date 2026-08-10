@@ -467,15 +467,16 @@ def clang_version():
     return out.strip().split(".")[0] or "unknown"
 
 
-def render_json(results, with_shims, deps_present):
+def render_json(results, with_shims, deps_present, include_renderer=False):
     """Machine-readable summary, for the CI baseline gate."""
-    per_target = collections.OrderedDict((t.name, {"clean": 0, "total": 0}) for t in TARGETS)
+    per_target = collections.OrderedDict(
+        (t.name, {"clean": 0, "total": 0}) for t in targets(include_renderer))
     for result in results:
         per_target[result.target]["total"] += 1
         if result.ok:
             per_target[result.target]["clean"] += 1
     return {
-        "mode": "shimmed" if with_shims else "native",
+        "mode": ("shimmed" if with_shims else "native") + ("+renderer" if include_renderer else ""),
         "clang_major": clang_version(),
         "deps_present": sorted(deps_present),
         "clean": sum(1 for r in results if r.ok),
@@ -519,7 +520,8 @@ def main():
     pathlib.Path(args.report).write_text(report)
     if args.json_out:
         pathlib.Path(args.json_out).write_text(
-            json.dumps(render_json(results, args.with_shims, deps_present), indent=2) + "\n")
+            json.dumps(render_json(results, args.with_shims, deps_present,
+                                   args.include_renderer), indent=2) + "\n")
     clean = sum(1 for r in results if r.ok)
     print(f"{clean} / {len(results)} translation units clean; report written to {args.report}")
     return 0
