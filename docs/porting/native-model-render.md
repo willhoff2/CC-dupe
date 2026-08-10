@@ -20,7 +20,9 @@ These engine translation units compile and link natively into the tool:
 - `WW3D2/htree.cpp`, `pivot.cpp`
 - `WWStub/wwallocstub.cpp`, `wwdebugstub.cpp`
 
-`w3d_model.cpp` uses `PosixFileClass`, `ChunkLoadClass`, `W3dMeshHeader3Struct`, the other records in `w3d_file.h`, and `HTreeClass`. The two headers in `scripts/native-port-shims/` declare only `D3DMATRIX`/`D3DXMATRIX`, needed by unused conversion operators in the engine math files; they implement no D3D runtime.
+`w3d_model.cpp` uses `PosixFileClass`, `ChunkLoadClass`, `W3dMeshHeader3Struct`, the other records in `w3d_file.h`, and `HTreeClass`. The two headers in `scripts/native-port-shims/` declare only `D3DMATRIX`, `D3DXMATRIX`, `D3DXVECTOR4` and the two `D3DXVec4*` helpers; they implement no D3D runtime.
+
+Those declarations are what the WWMath conversion operators and the GameEngine's `Bezier` code name, so adding them moves the shimmed probe: `WWMath` gains `matrix3d.cpp` and `matrix4.cpp` (33 -> 35 clean), and the `GeneralsMD/Code/GameEngine` `Bezier` translation units keep compiling because `D3DXVECTOR4` resolves. The `native-port-probe-shimmed` baseline is refreshed for `WWMath` accordingly.
 
 The engine's direct model path still does not compile:
 
