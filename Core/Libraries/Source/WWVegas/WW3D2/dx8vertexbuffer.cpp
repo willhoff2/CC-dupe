@@ -442,7 +442,7 @@ void DX8VertexBufferClass::Create_Vertex_Buffer(UsageType usage)
 		usage_flags|=D3DUSAGE_SOFTWAREPROCESSING;
 	}
 
-	HRESULT ret=DX8Wrapper::_Get_D3D_Device8()->CreateVertexBuffer(
+	HRESULT ret=DX8Wrapper::Create_DX8_Vertex_Buffer(
 		FVF_Info().Get_FVF_Size()*VertexCount,
 		usage_flags,
 		FVF_Info().Get_FVF(),
@@ -463,10 +463,10 @@ void DX8VertexBufferClass::Create_Vertex_Buffer(UsageType usage)
 	WW3D::_Invalidate_Mesh_Cache();
 
 	//@todo: Find some way to invalidate the textures too
-	ret = DX8Wrapper::_Get_D3D_Device8()->ResourceManagerDiscardBytes(0);
+	ret = DX8Wrapper::Discard_DX8_Resource_Manager_Bytes(0);
 
 	// Try again...
-	ret=DX8Wrapper::_Get_D3D_Device8()->CreateVertexBuffer(
+	ret=DX8Wrapper::Create_DX8_Vertex_Buffer(
 		FVF_Info().Get_FVF_Size()*VertexCount,
 		usage_flags,
 		FVF_Info().Get_FVF(),

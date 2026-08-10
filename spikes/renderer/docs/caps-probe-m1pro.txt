@@ -1,0 +1,101 @@
+loader instance version: 1.4.357
+VK_KHR_portability_enumeration advertised: yes
+
+== device ==
+  name          Apple M1 Pro
+  api           1.1.357
+  driver        MoltenVK 1.4.2
+  type          integrated
+  VK_KHR_portability_subset advertised: yes
+
+== core features the D3D8 surface depends on ==
+  textureCompressionBC (DXT1/3/5)            yes
+  textureCompressionETC2                     yes
+  textureCompressionASTC_LDR                 yes
+  independentBlend (per-RT blend)            yes
+  dualSrcBlend (D3DBLEND_BOTHSRCALPHA)       yes
+  fillModeNonSolid (D3DRS_FILLMODE wire)     yes
+  depthClamp                                 yes
+  depthBiasClamp (D3DRS_ZBIAS)               yes
+  depthBounds                                NO
+  samplerAnisotropy (D3DTSS_MAXANISOTROPY)   yes
+  wideLines                                  NO
+  largePoints (D3DRS_POINTSIZE)              yes
+  shaderClipDistance (D3DRS_CLIPPLANEENABLE) yes
+  occlusionQueryPrecise                      yes
+  multiViewport                              yes
+  fragmentStoresAndAtomics                   yes
+
+== VK_KHR_portability_subset: what Metal does NOT give us for free ==
+  triangleFans (D3DPT_TRIANGLEFAN)           yes
+  constantAlphaColorBlendFactors             yes
+  events                                     yes
+  imageViewFormatReinterpretation            yes
+  imageViewFormatSwizzle (L8/A8 fixups)      yes
+  imageView2DOn3DImage                       yes
+  multisampleArrayImage                      yes
+  mutableComparisonSamplers                  yes
+  pointPolygons (D3DFILL_POINT)              NO
+  samplerMipLodBias (D3DTSS_MIPMAPLODBIAS)   NO
+  separateStencilMaskRef                     yes
+  shaderSampleRateInterpolationFunctions     yes
+  tessellationIsolines                       NO
+  tessellationPointMode                      NO
+  vertexAttributeAccessBeyondStride          yes
+
+== limits ==
+  maxImageDimension2D                        16384
+  maxBoundDescriptorSets                     8
+  maxPerStageDescriptorSampledImages         256
+  maxPerStageDescriptorSamplers              16
+  maxVertexInputAttributes                   31
+  maxVertexInputBindings                     31
+  maxColorAttachments                        8
+  maxPushConstantsSize                       4096
+  maxSamplerAnisotropy                       16.0
+
+== formats (D3DFMT the engine names -> Vulkan) ==
+  D3D8               Vulkan                   optimal-tiling features
+  D3DFMT_A8R8G8B8    B8G8R8A8_UNORM           sampled+linear+colour-rt+blend+blit-src+blit-dst
+  D3DFMT_X8R8G8B8    B8G8R8A8_UNORM           sampled+linear+colour-rt+blend+blit-src+blit-dst
+  D3DFMT_R5G6B5      R5G6B5_UNORM_PACK16      sampled+linear+colour-rt+blend+blit-src+blit-dst
+  D3DFMT_A1R5G5B5    A1R5G5B5_UNORM_PACK16    sampled+linear+colour-rt+blend+blit-src+blit-dst
+  D3DFMT_A4R4G4B4    B4G4R4A4_UNORM_PACK16    sampled+linear+blit-src
+  D3DFMT_L8          R8_UNORM                 sampled+linear+colour-rt+blend+blit-src+blit-dst
+  D3DFMT_A8          R8_UNORM                 sampled+linear+colour-rt+blend+blit-src+blit-dst
+  D3DFMT_A8L8        R8G8_UNORM               sampled+linear+colour-rt+blend+blit-src+blit-dst
+  D3DFMT_V8U8        R8G8_SNORM               sampled+linear+colour-rt+blend+blit-src+blit-dst
+  D3DFMT_X8L8V8U8    R8G8B8A8_SNORM           sampled+linear+colour-rt+blend+blit-src+blit-dst
+  D3DFMT_DXT1        BC1_RGBA_UNORM_BLOCK     sampled+linear+blit-src
+  D3DFMT_DXT2        BC2_UNORM_BLOCK          sampled+linear+blit-src
+  D3DFMT_DXT3        BC2_UNORM_BLOCK          sampled+linear+blit-src
+  D3DFMT_DXT4        BC3_UNORM_BLOCK          sampled+linear+blit-src
+  D3DFMT_DXT5        BC3_UNORM_BLOCK          sampled+linear+blit-src
+  D3DFMT_D16         D16_UNORM                sampled+linear+depth-rt+blit-src+blit-dst
+  D3DFMT_D24S8       D24_UNORM_S8_UINT        -
+  D3DFMT_D24X8       X8_D24_UNORM_PACK32      -
+  D3DFMT_D32         D32_SFLOAT               sampled+linear+depth-rt+blit-src+blit-dst
+  (D24S8 fallback)   D32_SFLOAT_S8_UINT       sampled+linear+depth-rt+blit-src+blit-dst
+  (Apple native)     ASTC_4x4_UNORM_BLOCK     sampled+linear+blit-src
+  (Apple native)     ETC2_R8G8B8A8_UNORM      sampled+linear+blit-src
+
+== notes ==
+  D3DFMT_A8R8G8B8    primary 32-bit texture+RT format
+  D3DFMT_X8R8G8B8    same memory layout, alpha ignored
+  D3DFMT_R5G6B5      16-bit colour path
+  D3DFMT_A1R5G5B5    16-bit with 1-bit alpha
+  D3DFMT_A4R4G4B4    16-bit with 4-bit alpha
+  D3DFMT_L8          luminance; needs a shader swizzle
+  D3DFMT_A8          alpha-only; needs a shader swizzle
+  D3DFMT_A8L8        needs a shader swizzle
+  D3DFMT_V8U8        bump map
+  D3DFMT_X8L8V8U8    bump map, mixed signedness in D3D
+  D3DFMT_DXT1        the game's bulk texture format
+  D3DFMT_DXT2        premultiplied DXT3
+  D3DFMT_DXT3        explicit alpha
+  D3DFMT_DXT4        premultiplied DXT5
+  D3DFMT_DXT5        interpolated alpha
+  D3DFMT_D24S8       engine's preferred depth-stencil
+  (D24S8 fallback)   fallback if D24S8 absent
+  (Apple native)     transcode target candidate
+  (Apple native)     transcode target candidate

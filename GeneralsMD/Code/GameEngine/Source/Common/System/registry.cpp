@@ -40,8 +40,8 @@ Bool  getStringFromRegistry(HKEY root, AsciiString path, AsciiString key, AsciiS
 {
 	HKEY handle;
 	unsigned char buffer[256];
-	unsigned long size = 256;
-	unsigned long type;
+	DWORD size = 256;
+	DWORD type;
 	int returnValue;
 
 	if ((returnValue = RegOpenKeyEx( root, path.str(), 0, KEY_READ, &handle )) == ERROR_SUCCESS)
@@ -63,8 +63,8 @@ Bool getUnsignedIntFromRegistry(HKEY root, AsciiString path, AsciiString key, Un
 {
 	HKEY handle;
 	unsigned char buffer[4];
-	unsigned long size = 4;
-	unsigned long type;
+	DWORD size = 4;
+	DWORD type;
 	int returnValue;
 
 	if ((returnValue = RegOpenKeyEx( root, path.str(), 0, KEY_READ, &handle )) == ERROR_SUCCESS)
@@ -85,7 +85,7 @@ Bool getUnsignedIntFromRegistry(HKEY root, AsciiString path, AsciiString key, Un
 Bool setStringInRegistry( HKEY root, AsciiString path, AsciiString key, AsciiString val)
 {
 	HKEY handle;
-	unsigned long type;
+	DWORD type;
 	unsigned long returnValue;
 	int size;
 	char lpClass[] = "REG_NONE";
@@ -104,7 +104,7 @@ Bool setStringInRegistry( HKEY root, AsciiString path, AsciiString key, AsciiStr
 Bool setUnsignedIntInRegistry( HKEY root, AsciiString path, AsciiString key, UnsignedInt val)
 {
 	HKEY handle;
-	unsigned long type;
+	DWORD type;
 	unsigned long returnValue;
 	int size;
 	char lpClass[] = "REG_NONE";

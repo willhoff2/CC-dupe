@@ -49,11 +49,13 @@
 typedef int                 BOOL;
 typedef unsigned char       BYTE;
 typedef unsigned short      WORD;
-typedef unsigned long       DWORD;
+// LLP64: `long` is 32-bit on Win64, so these are spelled with exact-width types rather
+// than `long`, which is 64-bit on the LP64 host running the probe.
+typedef uint32_t            DWORD;
 typedef unsigned int        UINT;
 typedef int                 INT;
-typedef long                LONG;
-typedef unsigned long       ULONG;
+typedef int32_t             LONG;
+typedef uint32_t            ULONG;
 typedef short               SHORT;
 typedef unsigned short      USHORT;
 typedef float               FLOAT;

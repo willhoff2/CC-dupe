@@ -37,27 +37,44 @@
 
 #pragma once
 
-typedef unsigned char	uint8;
-typedef unsigned short	uint16;
-typedef unsigned long	uint32;
+// TheSuperHackers @port The width of these types is part of the on-disk format of every
+// .w3d asset and of the chunk headers in chunkio. `unsigned long` is 4 bytes under both
+// ILP32 and Windows' LLP64, but 8 bytes under LP64 (macOS/Linux 64-bit), so the widths are
+// spelled explicitly here. `stdint_adapter.h` supplies the C99 exact-width types on VC6,
+// which has no <cstdint>.
+#include <Utility/stdint_adapter.h>
+#include <Utility/CppMacros.h>
+
+typedef uint8_t			uint8;
+typedef uint16_t		uint16;
+typedef uint32_t		uint32;
 typedef unsigned int    uint;
 
-typedef signed char		sint8;
-typedef signed short		sint16;
-typedef signed long		sint32;
+typedef int8_t			sint8;
+typedef int16_t			sint16;
+typedef int32_t			sint32;
 typedef signed int      sint;
 
 typedef float				float32;
 typedef double				float64;
 
+// The Win32 vocabulary types below are also declared by <windows.h>. A typedef may be
+// repeated only if it names the same type, so on Windows these must stay spelled exactly
+// as the platform SDK spells them - the SDK definitions have to keep winning. Off Windows
+// there is no SDK to agree with, and the LLP64 widths are what the file formats assume.
+#ifdef _WIN32
 typedef unsigned long   DWORD;
+typedef unsigned long   ULONG;
+#else
+typedef uint32_t        DWORD;
+typedef uint32_t        ULONG;
+#endif
 typedef unsigned short	WORD;
 typedef unsigned char   BYTE;
 typedef int             BOOL;
 typedef unsigned short	USHORT;
 typedef const char *		LPCSTR;
 typedef unsigned int    UINT;
-typedef unsigned long   ULONG;
 
 #if defined(_MSC_VER) && _MSC_VER < 1300
 #ifndef _WCHAR_T_DEFINED
@@ -65,3 +82,18 @@ typedef unsigned short wchar_t;
 #define _WCHAR_T_DEFINED
 #endif
 #endif
+
+// TheSuperHackers @port The on-disk formats depend on these widths. Enforce them here so a
+// platform whose types differ fails to build rather than silently misreading every asset.
+STATIC_ASSERT_ALWAYS(sizeof(uint8) == 1, "uint8 must be 1 byte");
+STATIC_ASSERT_ALWAYS(sizeof(sint8) == 1, "sint8 must be 1 byte");
+STATIC_ASSERT_ALWAYS(sizeof(uint16) == 2, "uint16 must be 2 bytes");
+STATIC_ASSERT_ALWAYS(sizeof(sint16) == 2, "sint16 must be 2 bytes");
+STATIC_ASSERT_ALWAYS(sizeof(uint32) == 4, "uint32 must be 4 bytes");
+STATIC_ASSERT_ALWAYS(sizeof(sint32) == 4, "sint32 must be 4 bytes");
+STATIC_ASSERT_ALWAYS(sizeof(float32) == 4, "float32 must be 4 bytes");
+STATIC_ASSERT_ALWAYS(sizeof(float64) == 8, "float64 must be 8 bytes");
+STATIC_ASSERT_ALWAYS(sizeof(DWORD) == 4, "DWORD must be 4 bytes");
+STATIC_ASSERT_ALWAYS(sizeof(ULONG) == 4, "ULONG must be 4 bytes");
+STATIC_ASSERT_ALWAYS(sizeof(WORD) == 2, "WORD must be 2 bytes");
+STATIC_ASSERT_ALWAYS(sizeof(BYTE) == 1, "BYTE must be 1 byte");

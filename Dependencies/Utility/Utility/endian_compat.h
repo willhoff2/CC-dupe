@@ -122,9 +122,12 @@ typedef uint32_t SwapType32;
 typedef uint64_t SwapType64;
 
 #elif defined(__APPLE__)
-typedef UInt16 SwapType16;
-typedef UInt32 SwapType32;
-typedef UInt64 SwapType64;
+// UInt16/UInt32/UInt64 are Carbon types from <MacTypes.h>, which this header does not include
+// and which are not available outside the Apple frameworks. <stdint.h> types match the
+// OSSwap* signatures just as well.
+typedef uint16_t SwapType16;
+typedef uint32_t SwapType32;
+typedef uint64_t SwapType64;
 
 #elif defined(__OpenBSD__)
 typedef uint16_t SwapType16;

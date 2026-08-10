@@ -39,6 +39,7 @@
 
 #include "always.h"
 #include "bittype.h"
+#include <stddef.h>
 #include "WWFILE.h"
 #include "iostruct.h"
 
@@ -108,6 +109,16 @@ struct MicroChunkHeader
 	uint8	ChunkType;
 	uint8	ChunkSize;
 };
+
+// TheSuperHackers @port These structures are read from and written to disk as raw blobs.
+// Their layout is part of the file format, so it is asserted rather than assumed.
+STATIC_ASSERT_ALWAYS(sizeof(ChunkHeader) == 8, "ChunkHeader must be 8 bytes on disk");
+STATIC_ASSERT_ALWAYS(offsetof(ChunkHeader, ChunkType) == 0, "ChunkHeader::ChunkType must be at offset 0");
+STATIC_ASSERT_ALWAYS(offsetof(ChunkHeader, ChunkSize) == 4, "ChunkHeader::ChunkSize must be at offset 4");
+
+STATIC_ASSERT_ALWAYS(sizeof(MicroChunkHeader) == 2, "MicroChunkHeader must be 2 bytes on disk");
+STATIC_ASSERT_ALWAYS(offsetof(MicroChunkHeader, ChunkType) == 0, "MicroChunkHeader::ChunkType must be at offset 0");
+STATIC_ASSERT_ALWAYS(offsetof(MicroChunkHeader, ChunkSize) == 1, "MicroChunkHeader::ChunkSize must be at offset 1");
 
 
 /**************************************************************************************
