@@ -165,14 +165,15 @@ which is enough to symbolise offline.
 | Probe | Before | After |
 | --- | --- | --- |
 | native, default targets | 489 / 737 | **496 / 739** |
-| shimmed, default targets | 638 / 737 | **641 / 739** |
+| shimmed, default targets | 640 / 737 | **643 / 739** |
 | native, `--include-renderer` | 542 / 979 | **549 / 981** |
 
 The totals rise by two because this slice adds two translation units
 (`platform_process.cpp`, `ProcessLaunch.cpp`), both clean. Before and after were measured in the
 same environment, with the fetched dx8/gamespy/miles/lzhl headers present, from a worktree of
 `main` and from this branch. The checked-in baselines in `docs/porting/ci-baselines/` are
-regenerated to 496/739 and 641/739.
+regenerated to 496/739 and 643/739. (The shimmed "before" is 640 rather than the 638 this slice
+first measured because `main` moved underneath it; the +3 delta is unchanged.)
 
 Five translation units went from failing to clean, and two of the new files are themselves clean
 translation units:
