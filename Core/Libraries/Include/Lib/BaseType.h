@@ -33,6 +33,11 @@
 #include "Lib/trig.h"
 
 //-----------------------------------------------------------------------------
+// TheSuperHackers @port WideChar is 2 bytes on Windows but 4 bytes on macOS/Linux, where the
+// on-disk .str/.csf data and every `L"..."` literal in the codebase are 16 bit units. The correct
+// type is char16_t, but converting it is not a typedef change: it also invalidates all wide string
+// literals, the wide libc calls and the Win32 W-API interop. Measured fallout is recorded in
+// docs/porting/widechar-fallout.md; it is deliberately left for its own change.
 typedef wchar_t WideChar;  ///< multi-byte character representations
 
 //-----------------------------------------------------------------------------

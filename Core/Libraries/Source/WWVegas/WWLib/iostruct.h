@@ -37,6 +37,7 @@
 #pragma once
 
 #include "bittype.h"
+#include <stddef.h>
 
 /*
 ** Some useful structures for writing/writing (safe from changes).
@@ -67,3 +68,23 @@ struct IOQuaternionStruct
 {
 	float32		Q[4];
 };
+
+// TheSuperHackers @port These structures are read from and written to disk as raw blobs.
+// Their layout is part of the file format, so it is asserted rather than assumed.
+STATIC_ASSERT_ALWAYS(sizeof(IOVector2Struct) == 8, "IOVector2Struct must be 8 bytes on disk");
+STATIC_ASSERT_ALWAYS(offsetof(IOVector2Struct, X) == 0, "IOVector2Struct::X must be at offset 0");
+STATIC_ASSERT_ALWAYS(offsetof(IOVector2Struct, Y) == 4, "IOVector2Struct::Y must be at offset 4");
+
+STATIC_ASSERT_ALWAYS(sizeof(IOVector3Struct) == 12, "IOVector3Struct must be 12 bytes on disk");
+STATIC_ASSERT_ALWAYS(offsetof(IOVector3Struct, X) == 0, "IOVector3Struct::X must be at offset 0");
+STATIC_ASSERT_ALWAYS(offsetof(IOVector3Struct, Y) == 4, "IOVector3Struct::Y must be at offset 4");
+STATIC_ASSERT_ALWAYS(offsetof(IOVector3Struct, Z) == 8, "IOVector3Struct::Z must be at offset 8");
+
+STATIC_ASSERT_ALWAYS(sizeof(IOVector4Struct) == 16, "IOVector4Struct must be 16 bytes on disk");
+STATIC_ASSERT_ALWAYS(offsetof(IOVector4Struct, X) == 0, "IOVector4Struct::X must be at offset 0");
+STATIC_ASSERT_ALWAYS(offsetof(IOVector4Struct, Y) == 4, "IOVector4Struct::Y must be at offset 4");
+STATIC_ASSERT_ALWAYS(offsetof(IOVector4Struct, Z) == 8, "IOVector4Struct::Z must be at offset 8");
+STATIC_ASSERT_ALWAYS(offsetof(IOVector4Struct, W) == 12, "IOVector4Struct::W must be at offset 12");
+
+STATIC_ASSERT_ALWAYS(sizeof(IOQuaternionStruct) == 16, "IOQuaternionStruct must be 16 bytes on disk");
+STATIC_ASSERT_ALWAYS(offsetof(IOQuaternionStruct, Q) == 0, "IOQuaternionStruct::Q must be at offset 0");

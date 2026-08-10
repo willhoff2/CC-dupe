@@ -137,6 +137,11 @@ struct W3dSphereStruct
 	//
 };
 
+STATIC_ASSERT_ALWAYS(sizeof(W3dSphereStruct) == 164, "W3dSphereStruct must be 164 bytes on disk");
+STATIC_ASSERT_ALWAYS(offsetof(W3dSphereStruct, Name) == 8, "W3dSphereStruct::Name must be at offset 8");
+STATIC_ASSERT_ALWAYS(offsetof(W3dSphereStruct, TextureName) == 116, "W3dSphereStruct::TextureName must be at offset 116");
+STATIC_ASSERT_ALWAYS(offsetof(W3dSphereStruct, Shader) == 148, "W3dSphereStruct::Shader must be at offset 148");
+
 typedef LERPAnimationChannelClass<Vector3>	SphereColorChannelClass;
 typedef LERPAnimationChannelClass<float>		SphereAlphaChannelClass;
 typedef LERPAnimationChannelClass<Vector3>	SphereScaleChannelClass;

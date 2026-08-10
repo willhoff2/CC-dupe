@@ -38,6 +38,10 @@
 *
 ****************************************************************************/
 
+#include <stddef.h>
+#include <Utility/stdint_adapter.h>
+#include <Utility/CppMacros.h>
+
 #pragma pack(push, 1)
 
 // If you wish to display loading error messages call targa functions inside of
@@ -133,8 +137,10 @@ typedef struct _TGAHeader
  */
 typedef struct _TGA2Footer
 	{
-	long Extension;
-	long Developer;
+	// TheSuperHackers @port These are file offsets stored as 32 bit values on disk, so they cannot
+	// be `long`, which is 64 bits on LP64.
+	int32_t Extension;
+	int32_t Developer;
 	char Signature[16];
 	char RsvdChar;
 	char BZST;
@@ -224,12 +230,12 @@ typedef struct _TGA2Extension
 	TGA2TimeStamp JobTime;
 	char          SoftID[41];
 	TGA2SoftVer   SoftVer;
-	long          KeyColor;
+	int32_t       KeyColor;
 	TGA2Ratio     Aspect;
 	TGA2Ratio     Gamma;
-	long          ColorCor;
-	long          PostStamp;
-	long          ScanLine;
+	int32_t       ColorCor;
+	int32_t       PostStamp;
+	int32_t       ScanLine;
 	char          Attributes;
 	} TGA2Extension;
 
@@ -239,6 +245,17 @@ typedef struct _TGA2Extension
 #define EXTA_RETAIN  2  /* Undefined alpha data, should retain */
 #define EXTA_USEFUL  3  /* Useful alpha channel */
 #define EXTA_PREMULT 4  /* Pre-Multiplied alpha data */
+
+STATIC_ASSERT_ALWAYS(sizeof(TGAHeader) == 18, "TGAHeader must be 18 bytes on disk");
+STATIC_ASSERT_ALWAYS(sizeof(TGA2Footer) == 26, "TGA2Footer must be 26 bytes on disk");
+STATIC_ASSERT_ALWAYS(sizeof(TGA2DateStamp) == 6, "TGA2DateStamp must be 6 bytes on disk");
+STATIC_ASSERT_ALWAYS(sizeof(TGA2TimeStamp) == 6, "TGA2TimeStamp must be 6 bytes on disk");
+STATIC_ASSERT_ALWAYS(sizeof(TGA2SoftVer) == 3, "TGA2SoftVer must be 3 bytes on disk");
+STATIC_ASSERT_ALWAYS(sizeof(TGA2Ratio) == 4, "TGA2Ratio must be 4 bytes on disk");
+STATIC_ASSERT_ALWAYS(sizeof(TGA2Extension) == 495, "TGA2Extension must be 495 bytes on disk");
+STATIC_ASSERT_ALWAYS(offsetof(TGAHeader, Width) == 12, "TGAHeader::Width must be at offset 12");
+STATIC_ASSERT_ALWAYS(offsetof(TGA2Footer, Signature) == 8, "TGA2Footer::Signature must be at offset 8");
+STATIC_ASSERT_ALWAYS(offsetof(TGA2Extension, KeyColor) == 470, "TGA2Extension::KeyColor must be at offset 470");
 
 #pragma pack(pop)
 
