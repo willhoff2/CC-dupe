@@ -29,12 +29,20 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+#ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
 #include <winreg.h>
+#else
+// TheSuperHackers @port There is no registry off Windows; the same key paths become sections of a
+// per user settings file. See docs/porting/filesystem-and-registry.md.
+#include "WWLib/platform/platform_settings.h"
+#endif
 
 #include "Common/Registry.h"
 
+
+#ifdef _WIN32
 
 Bool  getStringFromRegistry(HKEY root, AsciiString path, AsciiString key, AsciiString& val)
 {
@@ -120,18 +128,124 @@ Bool setUnsignedIntInRegistry( HKEY root, AsciiString path, AsciiString key, Uns
 	return (returnValue == ERROR_SUCCESS);
 }
 
+#else	// !_WIN32
+
+//
+// There is one settings store per user off Windows, so the two registry roots collapse into it:
+// a read of HKEY_CURRENT_USER goes to the store and the HKEY_LOCAL_MACHINE fallback that follows
+// every read here has nothing further to look in. That is deliberate -- HKLM held values written
+// by the retail installer (install path, language, SKU, version) and there is no installer, and
+// no machine wide store, on a native build.
+//
+static Bool getStringFromStore(AsciiString path, AsciiString key, AsciiString& val)
+{
+	int handle = WWPlatform::Settings::Open_Key(path.str(), false);
+	if (handle == 0)
+		return FALSE;
+
+	StringClass value;
+	Bool found = WWPlatform::Settings::Get_String(handle, key.str(), value) ? TRUE : FALSE;
+	WWPlatform::Settings::Close_Key(handle);
+
+	if (found)
+		val = value.str();
+
+	return found;
+}
+
+static Bool getUnsignedIntFromStore(AsciiString path, AsciiString key, UnsignedInt& val)
+{
+	int handle = WWPlatform::Settings::Open_Key(path.str(), false);
+	if (handle == 0)
+		return FALSE;
+
+	int value = 0;
+	Bool found = WWPlatform::Settings::Get_Int(handle, key.str(), value) ? TRUE : FALSE;
+	WWPlatform::Settings::Close_Key(handle);
+
+	if (found)
+		val = (UnsignedInt)value;
+
+	return found;
+}
+
+Bool setStringInStore(AsciiString path, AsciiString key, AsciiString val)
+{
+	int handle = WWPlatform::Settings::Open_Key(path.str(), true);
+	if (handle == 0)
+		return FALSE;
+
+	WWPlatform::Settings::Set_String(handle, key.str(), val.str());
+	WWPlatform::Settings::Close_Key(handle);
+	return TRUE;
+}
+
+Bool setUnsignedIntInStore(AsciiString path, AsciiString key, UnsignedInt val)
+{
+	int handle = WWPlatform::Settings::Open_Key(path.str(), true);
+	if (handle == 0)
+		return FALSE;
+
+	WWPlatform::Settings::Set_Int(handle, key.str(), (int)val);
+	WWPlatform::Settings::Close_Key(handle);
+	return TRUE;
+}
+
+#endif	// _WIN32
+
+//
+// The per root entry points the functions below are written in terms of. On Windows they are the
+// registry reads that were written inline here before; elsewhere they are the settings store.
+//
+static Bool getStringFromCurrentUser(AsciiString path, AsciiString key, AsciiString& val)
+{
+#ifdef _WIN32
+	return getStringFromRegistry(HKEY_CURRENT_USER, path, key, val);
+#else
+	return getStringFromStore(path, key, val);
+#endif
+}
+
+static Bool getStringFromLocalMachine(AsciiString path, AsciiString key, AsciiString& val)
+{
+#ifdef _WIN32
+	return getStringFromRegistry(HKEY_LOCAL_MACHINE, path, key, val);
+#else
+	// See above: no machine wide store exists, and the per user one has already been consulted.
+	return FALSE;
+#endif
+}
+
+static Bool getUnsignedIntFromCurrentUser(AsciiString path, AsciiString key, UnsignedInt& val)
+{
+#ifdef _WIN32
+	return getUnsignedIntFromRegistry(HKEY_CURRENT_USER, path, key, val);
+#else
+	return getUnsignedIntFromStore(path, key, val);
+#endif
+}
+
+static Bool getUnsignedIntFromLocalMachine(AsciiString path, AsciiString key, UnsignedInt& val)
+{
+#ifdef _WIN32
+	return getUnsignedIntFromRegistry(HKEY_LOCAL_MACHINE, path, key, val);
+#else
+	return FALSE;
+#endif
+}
+
 Bool GetStringFromGeneralsRegistry(AsciiString path, AsciiString key, AsciiString& val)
 {
 	AsciiString fullPath = "SOFTWARE\\Electronic Arts\\EA Games\\Generals";
 
 	fullPath.concat(path);
 	DEBUG_LOG(("GetStringFromRegistry - looking in %s for key %s", fullPath.str(), key.str()));
-	if (getStringFromRegistry(HKEY_CURRENT_USER, fullPath.str(), key.str(), val))
+	if (getStringFromCurrentUser(fullPath.str(), key.str(), val))
 	{
 		return TRUE;
 	}
 
-	return getStringFromRegistry(HKEY_LOCAL_MACHINE, fullPath.str(), key.str(), val);
+	return getStringFromLocalMachine(fullPath.str(), key.str(), val);
 }
 
 Bool GetStringFromRegistry(AsciiString path, AsciiString key, AsciiString& val)
@@ -144,12 +258,12 @@ Bool GetStringFromRegistry(AsciiString path, AsciiString key, AsciiString& val)
 
 	fullPath.concat(path);
 	DEBUG_LOG(("GetStringFromRegistry - looking in %s for key %s", fullPath.str(), key.str()));
-	if (getStringFromRegistry(HKEY_CURRENT_USER, fullPath.str(), key.str(), val))
+	if (getStringFromCurrentUser(fullPath.str(), key.str(), val))
 	{
 		return TRUE;
 	}
 
-	return getStringFromRegistry(HKEY_LOCAL_MACHINE, fullPath.str(), key.str(), val);
+	return getStringFromLocalMachine(fullPath.str(), key.str(), val);
 }
 
 Bool GetUnsignedIntFromRegistry(AsciiString path, AsciiString key, UnsignedInt& val)
@@ -162,12 +276,12 @@ Bool GetUnsignedIntFromRegistry(AsciiString path, AsciiString key, UnsignedInt& 
 
 	fullPath.concat(path);
 	DEBUG_LOG(("GetUnsignedIntFromRegistry - looking in %s for key %s", fullPath.str(), key.str()));
-	if (getUnsignedIntFromRegistry(HKEY_CURRENT_USER, fullPath.str(), key.str(), val))
+	if (getUnsignedIntFromCurrentUser(fullPath.str(), key.str(), val))
 	{
 		return TRUE;
 	}
 
-	return getUnsignedIntFromRegistry(HKEY_LOCAL_MACHINE, fullPath.str(), key.str(), val);
+	return getUnsignedIntFromLocalMachine(fullPath.str(), key.str(), val);
 }
 
 AsciiString GetRegistryLanguage()

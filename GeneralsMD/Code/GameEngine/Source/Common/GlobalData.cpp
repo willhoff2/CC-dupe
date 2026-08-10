@@ -33,8 +33,12 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+// Still needed for GetDoubleClickTime(), which is an input concern and not part of this slice.
 #include <windows.h>
-#include <shlobj.h>
+
+// TheSuperHackers @port Path, folder and executable lookups moved behind the platform path API;
+// see docs/porting/filesystem-and-registry.md
+#include "WWLib/platform/platform_path.h"
 
 #include "WW3D2/ww3d.h"
 #include "WW3D2/texturefilter.h"
@@ -1053,7 +1057,7 @@ GlobalData::GlobalData()
 	// Set user data directory based on registry settings instead of INI parameters.
 	// This allows us to localize the leaf name.
 	m_userDataDir = BuildUserDataPathFromRegistry();
-	CreateDirectory(m_userDataDir.str(), nullptr);
+	WWPlatform::Path::Create_Directory(m_userDataDir.str());
 
 	//-allAdvice feature
 	//m_allAdvice = FALSE;
@@ -1286,7 +1290,7 @@ UnsignedInt GlobalData::generateExeCRC()
 #else
 	{
 		Char buffer[ _MAX_PATH ];
-		GetModuleFileName( nullptr, buffer, sizeof( buffer ) );
+		WWPlatform::Path::Get_Executable_Path( buffer, sizeof( buffer ) );
 		fp = TheFileSystem->openFile(buffer, File::READ | File::BINARY);
 		if (fp != nullptr) {
 			unsigned char crcBlock[blockSize];
@@ -1342,45 +1346,21 @@ UnsignedInt GlobalData::generateExeCRC()
 
 AsciiString GlobalData::BuildUserDataPathFromRegistry()
 {
-#if defined(_MSC_VER) && (_MSC_VER < 1300)
-	// VC6 lacks FOLDERID_Documents and KF_FLAG_DEFAULT
-	const GUID FOLDERID_Documents = { 0xFDD39AD0, 0x238F, 0x46AF, 0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7 };
-	const DWORD KF_FLAG_DEFAULT = 0;
-#endif
+	// TheSuperHackers @port The Documents lookup, including the runtime probe for
+	// SHGetKnownFolderPath that handles OneDrive and Group Policy folder redirection, now lives in
+	// WWPlatform::Path::Get_User_Data_Root(). Off Windows there is no Documents folder and the root
+	// is ~/Library/Application Support (macOS) or $XDG_DATA_HOME (elsewhere); the leaf name below
+	// is appended just the same. See docs/porting/filesystem-and-registry.md.
+	StringClass userDataRoot;
+	WWPlatform::Path::Get_User_Data_Root(userDataRoot);
 
-	typedef HRESULT(WINAPI* PFN_SHGetKnownFolderPath)(const GUID& rfid, DWORD dwFlags, HANDLE hToken, PWSTR* ppszPath);
-
-	AsciiString myDocumentsDirectory;
-	HMODULE shell32module = GetModuleHandleA("shell32.dll");
-	PFN_SHGetKnownFolderPath pSHGetKnownFolderPath = nullptr;
-
-	// TheSuperHackers @bugfix Mauller 20/03/2026 Fix the handling of folder redirection
-	// OneDrive and Group Policy folder redirection is better supported by SHGetKnownFolderPath()
-	// SHGetKnownFolderPath() is only supported in windows Vista onwards so we check for it being available
-	if (shell32module) {
-		pSHGetKnownFolderPath = (PFN_SHGetKnownFolderPath)GetProcAddress(shell32module, "SHGetKnownFolderPath");
-	}
-
-	if (pSHGetKnownFolderPath) {
-		PWSTR pszPath = nullptr;
-		HRESULT hr = pSHGetKnownFolderPath(FOLDERID_Documents, KF_FLAG_DEFAULT, nullptr, &pszPath);
-
-		if (SUCCEEDED(hr) && pszPath) {
-			myDocumentsDirectory.translate(pszPath);
-			CoTaskMemFree(pszPath);
-		}
-	}
-	else {
-		char temp[_MAX_PATH + 1];
-		if (SHGetSpecialFolderPath(nullptr, temp, CSIDL_PERSONAL, true)) {
-			myDocumentsDirectory = temp;
-		}
-	}
+	AsciiString myDocumentsDirectory = userDataRoot.str();
+	const char separator[2] = { WWPlatform::Path::SEPARATOR, 0 };
 
 	if (!myDocumentsDirectory.isEmpty()) {
 		// Now build the full path string
-		if (!myDocumentsDirectory.endsWith("\\"))
-			myDocumentsDirectory.concat('\\');
+		if (!myDocumentsDirectory.endsWith(separator))
+			myDocumentsDirectory.concat(WWPlatform::Path::SEPARATOR);
 
 		AsciiString leafName;
 		if (!GetStringFromRegistry("", "UserDataLeafName", leafName))
@@ -1391,8 +1371,8 @@ AsciiString GlobalData::BuildUserDataPathFromRegistry()
 		}
 
 		myDocumentsDirectory.concat(leafName);
-		if (!myDocumentsDirectory.endsWith("\\"))
-			myDocumentsDirectory.concat('\\');
+		if (!myDocumentsDirectory.endsWith(separator))
+			myDocumentsDirectory.concat(WWPlatform::Path::SEPARATOR);
 	}
 
 	return myDocumentsDirectory;

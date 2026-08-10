@@ -30,8 +30,9 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
-#include <direct.h>
+// TheSuperHackers @port Current directory moved behind the platform path API;
+// see docs/porting/filesystem-and-registry.md
+#include "WWLib/platform/platform_path.h"
 
 #include "Common/INI.h"
 #include "Common/Registry.h"
@@ -115,10 +116,12 @@ void INI::parseWebpageURLDefinition( INI* ini )
 
 	if (url->m_url.startsWith("file://"))
 	{
-		char cwd[_MAX_PATH] = "\\";
-		getcwd(cwd, _MAX_PATH);
+		char cwd[_MAX_PATH] = { WWPlatform::Path::SEPARATOR, 0 };
+		WWPlatform::Path::Get_Current_Directory(cwd, _MAX_PATH);
 
-		url->m_url.format("file://%s\\Data\\%s\\%s", encodeURL(cwd).str(), GetRegistryLanguage().str(), url->m_url.str()+7);
+		url->m_url.format("file://%s%cData%c%s%c%s", encodeURL(cwd).str(),
+			WWPlatform::Path::SEPARATOR, WWPlatform::Path::SEPARATOR, GetRegistryLanguage().str(),
+			WWPlatform::Path::SEPARATOR, url->m_url.str()+7);
 		DEBUG_LOG(("INI::parseWebpageURLDefinition() - converted URL to [%s]", url->m_url.str()));
 	}
 }

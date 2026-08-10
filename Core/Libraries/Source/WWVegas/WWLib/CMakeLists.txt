@@ -89,6 +89,10 @@ set(WWLIB_SRC
     ntree.h
     pipe.cpp
     PIPE.h
+    # Unlike the other platform/ modules this one is built everywhere; on Windows it forwards
+    # to the same Win32 calls its call sites used to make directly.
+    platform/platform_path.cpp
+    platform/platform_path.h
     Point.h
     ramfile.cpp
     RAMFILE.h
