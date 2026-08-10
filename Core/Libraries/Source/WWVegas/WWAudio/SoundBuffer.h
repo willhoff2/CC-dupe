@@ -163,7 +163,11 @@ class StreamSoundBufferClass : public SoundBufferClass
 		//	Protected methods
 		//////////////////////////////////////////////////////////////////////
 		virtual void			Free_Buffer () override;
+#ifdef _WIN32
+		// A Win32 file-handle overload with no callers. Kept on Windows so the vtable layout
+		// is unchanged; off Windows there is no HANDLE and nothing to keep.
 		virtual bool			Load_From_File (HANDLE hfile, unsigned long size, unsigned long offset);
+#endif
 
 		//////////////////////////////////////////////////////////////////////
 		//	Protected member data

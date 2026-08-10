@@ -41,6 +41,9 @@
 #include "mss.h"
 #pragma warning (pop)
 
+#ifndef _WIN32
+#include "WWLib/platform/platform_thread.h"
+#endif
 #include "WWLib/Vector.h"
 #include "SoundBuffer.h"
 #include "AudioEvents.h"
@@ -124,6 +127,18 @@ public:
 	//////////////////////////////////////////////////////////////////////
 	//	Public data types
 	//////////////////////////////////////////////////////////////////////
+
+	//
+	//	What the timer shutdown handshake waits on. The Win32 event handle away from
+	//	Windows is a WWPlatform::EventClass, which has the same wait-with-timeout
+	//	semantics the one wait site needs.
+	//
+#ifdef _WIN32
+	typedef HANDLE								TimerSyncEventType;
+#else
+	typedef WWPlatform::EventClass *		TimerSyncEventType;
+#endif
+
 	typedef enum
 	{
 		DRIVER2D_ERROR			= 0,
@@ -491,7 +506,7 @@ private:
 	//	Static member data
 	//////////////////////////////////////////////////////////////////////
 	static WWAudioClass *						_theInstance;
-	static HANDLE									_TimerSyncEvent;
+	static TimerSyncEventType					_TimerSyncEvent;
 
 	//////////////////////////////////////////////////////////////////////
 	//	Private data types

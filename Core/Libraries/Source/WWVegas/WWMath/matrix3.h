@@ -61,9 +61,6 @@
 #include "WWLib/always.h"
 #include "vector3.h"
 #include "WWDebug/wwdebug.h"
-#ifdef _UNIX
-#include "osdep.h"
-#endif
 
 
 class Matrix3D;
