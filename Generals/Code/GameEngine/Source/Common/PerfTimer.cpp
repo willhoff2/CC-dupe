@@ -48,8 +48,12 @@ __forceinline void ProfileGetTime(__int64 &t)
 #if defined(PERF_TIMERS) || defined(DUMP_PERF_STATS)
 
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+// timeGetTime() and QueryPerformanceCounter() come from these headers on Windows and from
+// Utility/time_compat.h elsewhere. See docs/porting/timing-and-threading.md.
+#ifdef _WIN32
 #include <windows.h>
 #include <mmsystem.h>
+#endif
 
 //-------------------------------------------------------------------------------------------------
 static Int64 s_ticksPerSec = 0;

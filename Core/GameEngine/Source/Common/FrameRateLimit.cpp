@@ -19,7 +19,13 @@
 #include "PreRTS.h"
 
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+// QueryPerformanceCounter(), LARGE_INTEGER and Sleep() come from <windows.h> on Windows and from
+// Utility/time_compat.h and Utility/thread_compat.h elsewhere. The stand-in counter is monotonic
+// with a different epoch and a fixed nanosecond frequency, which this file tolerates because it
+// only ever divides a difference of two counters by the frequency it was told.
+#ifdef _WIN32
 #include <windows.h>
+#endif
 #include "Common/FrameRateLimit.h"
 
 
@@ -45,7 +51,7 @@ Real FrameRateLimit::wait(UnsignedInt maxFps)
 	if (sleepSeconds > 0.0)
 	{
 		// Non busy wait with Munkee sleep
-		DWORD dwMilliseconds = static_cast<DWORD>(sleepSeconds * 1000);
+		UnsignedInt dwMilliseconds = static_cast<UnsignedInt>(sleepSeconds * 1000);
 		Sleep(dwMilliseconds);
 	}
 

@@ -28,8 +28,20 @@
 
 #pragma once
 
-// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+// TheSuperHackers @port The Win32 CRITICAL_SECTION is recursive: the same thread may enter it
+// again while it holds it. AsciiString::set() and UnicodeString::set() both do exactly that, by
+// calling releaseBuffer() while holding the string critical section, so std::mutex would deadlock
+// on the first string assignment and std::recursive_mutex is the only correct stand-in.
+// The storage is a member rather than a handle on purpose: the five critical sections below are
+// objects with static storage duration, constructed before initMemoryManager() runs, and the
+// engine replaces global operator new with an allocator that is not usable until then. That is
+// also why WWLib/platform/platform_mutex.h is not reused here - it creates its recursive mutex
+// with new. See docs/porting/timing-and-threading.md.
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <mutex>
+#endif
 
 #include "Common/PerfTimer.h"
 
@@ -39,7 +51,11 @@ extern PerfGather TheCritSecPerfGather;
 
 class CriticalSection
 {
+#ifdef _WIN32
 	CRITICAL_SECTION m_windowsCriticalSection;
+#else
+	std::recursive_mutex m_recursiveMutex;
+#endif
 
 	public:
 		CriticalSection()
@@ -47,7 +63,9 @@ class CriticalSection
 			#ifdef PERF_TIMERS
 			AutoPerfGather a(TheCritSecPerfGather);
 			#endif
+			#ifdef _WIN32
 			InitializeCriticalSection( &m_windowsCriticalSection );
+			#endif
 		}
 
 		virtual ~CriticalSection()
@@ -55,7 +73,9 @@ class CriticalSection
 			#ifdef PERF_TIMERS
 			AutoPerfGather a(TheCritSecPerfGather);
 			#endif
+			#ifdef _WIN32
 			DeleteCriticalSection( &m_windowsCriticalSection );
+			#endif
 		}
 
 	public:	// Use these when entering/exiting a critical section.
@@ -64,7 +84,11 @@ class CriticalSection
 			#ifdef PERF_TIMERS
 			AutoPerfGather a(TheCritSecPerfGather);
 			#endif
+			#ifdef _WIN32
 			EnterCriticalSection( &m_windowsCriticalSection );
+			#else
+			m_recursiveMutex.lock();
+			#endif
 		}
 
 		void exit()
@@ -72,7 +96,11 @@ class CriticalSection
 			#ifdef PERF_TIMERS
 			AutoPerfGather a(TheCritSecPerfGather);
 			#endif
+			#ifdef _WIN32
 			LeaveCriticalSection( &m_windowsCriticalSection );
+			#else
+			m_recursiveMutex.unlock();
+			#endif
 		}
 };
 
