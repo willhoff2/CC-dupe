@@ -955,6 +955,109 @@ Outcome Case_Alpha_Test(Harness& h) {
 	return Pass("GREATEREQUAL ref=0x80 keeps 0x80, discards 0x7f");
 }
 
+// D3DRS_CULLMODE. D3D8 names its cull modes after the winding to *discard*, measured
+// in its y-down screen space, so D3DCULL_CW must remove a triangle whose vertices run
+// clockwise on screen. Both paths into the rasteriser are checked, because they reach
+// framebuffer winding differently: a pretransformed vertex goes to NDC untouched, while
+// a transformed one passes through the wvp's y negation, and only if the negation and
+// Vulkan's y-down NDC cancel do the two agree. Every other case here runs with
+// D3DCULL_NONE, so an inverted mapping -- drawing every model inside out -- would
+// otherwise go unnoticed.
+Outcome Case_Cull_Mode(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+
+	const uint32_t white = Argb(0xff, 0xff, 0xff, 0xff);
+	const float w = static_cast<float>(kWidth);
+	const float hh = static_cast<float>(kHeight);
+	// Two triangles, one in each half of the target. Left runs clockwise on screen,
+	// right counter-clockwise; the signed screen area of each is asserted below so
+	// the geometry cannot silently drift.
+	const ScreenVertex screen[6] = {
+	    {0.0625f * w, 0.0625f * hh, 0.5f, 1.0f, white, 0, 0},
+	    {0.4375f * w, 0.0625f * hh, 0.5f, 1.0f, white, 0, 0},
+	    {0.0625f * w, 0.9375f * hh, 0.5f, 1.0f, white, 0, 0},
+	    {0.9375f * w, 0.0625f * hh, 0.5f, 1.0f, white, 0, 0},
+	    {0.5625f * w, 0.0625f * hh, 0.5f, 1.0f, white, 0, 0},
+	    {0.9375f * w, 0.9375f * hh, 0.5f, 1.0f, white, 0, 0},
+	};
+	auto screen_area = [](const ScreenVertex& a, const ScreenVertex& b,
+	                      const ScreenVertex& c) {
+		return 0.5f * ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y));
+	};
+	if (!(screen_area(screen[0], screen[1], screen[2]) > 0.0f) ||
+	    !(screen_area(screen[3], screen[4], screen[5]) < 0.0f)) {
+		return Fail("test geometry is not one clockwise and one counter-clockwise triangle");
+	}
+	// The same two triangles in clip space, where y points up: the y flip in the wvp
+	// upload is what turns this winding into the screen winding above.
+	const WorldVertex world[6] = {
+	    {-0.875f, 0.875f, 0.5f, 0, 0, 1, white, 0, 0},
+	    {-0.125f, 0.875f, 0.5f, 0, 0, 1, white, 0, 0},
+	    {-0.875f, -0.875f, 0.5f, 0, 0, 1, white, 0, 0},
+	    {0.875f, 0.875f, 0.5f, 0, 0, 1, white, 0, 0},
+	    {0.125f, 0.875f, 0.5f, 0, 0, 1, white, 0, 0},
+	    {0.875f, -0.875f, 0.5f, 0, 0, 1, white, 0, 0},
+	};
+	const uint16_t indices[6] = {0, 1, 2, 3, 4, 5};
+	IndexBufferHandle* ib = g.Create_Index_Buffer(indices, 6);
+	VertexBufferHandle* screen_vb = g.Create_Vertex_Buffer(
+	    screen, sizeof(screen), D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	VertexBufferHandle* world_vb = g.Create_Vertex_Buffer(
+	    world, sizeof(world), D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	if (ib == nullptr || screen_vb == nullptr || world_vb == nullptr)
+		return Fail("buffer creation failed");
+
+	// Well inside each triangle, clear of every edge.
+	const uint32_t cw_x = kWidth / 8, cw_y = kHeight / 4;
+	const uint32_t ccw_x = kWidth - kWidth / 8, ccw_y = kHeight / 4;
+	const Rgba drawn{255, 255, 255, 255};
+	const Rgba clear{0, 0, 0, 0};
+
+	struct Expectation {
+		const char* path;
+		bool pretransformed;
+		uint32_t cull;
+		Rgba clockwise;
+		Rgba counter_clockwise;
+	};
+	const Expectation expectations[] = {
+	    {"pretransformed", true, D3DCULL_NONE, drawn, drawn},
+	    {"pretransformed", true, D3DCULL_CW, clear, drawn},
+	    {"pretransformed", true, D3DCULL_CCW, drawn, clear},
+	    {"transformed", false, D3DCULL_NONE, drawn, drawn},
+	    {"transformed", false, D3DCULL_CW, clear, drawn},
+	    {"transformed", false, D3DCULL_CCW, drawn, clear},
+	};
+	for (const Expectation& e : expectations) {
+		g.Set_DX8_Render_State(D3DRS_CULLMODE, e.cull);
+		h.Begin();
+		h.Draw(e.pretransformed ? screen_vb : world_vb, ib, 2);
+		h.End();
+		if (!h.Read_Back()) return Fail("readback failed");
+		const Rgba clockwise = h.Pixel(cw_x, cw_y);
+		const Rgba counter_clockwise = h.Pixel(ccw_x, ccw_y);
+		const std::string where =
+		    std::string(e.path) + " CULLMODE=" +
+		    (e.cull == D3DCULL_NONE ? "NONE" : (e.cull == D3DCULL_CW ? "CW" : "CCW"));
+		if (!Near(clockwise, e.clockwise)) {
+			return Fail(where + ": clockwise triangle got " + To_String(clockwise) +
+			            " expected " + To_String(e.clockwise));
+		}
+		if (!Near(counter_clockwise, e.counter_clockwise)) {
+			return Fail(where + ": counter-clockwise triangle got " +
+			            To_String(counter_clockwise) + " expected " +
+			            To_String(e.counter_clockwise));
+		}
+	}
+	return Pass("CW discards the screen-clockwise face, CCW the other, on both the"
+	            " pretransformed and the transformed path");
+}
+
 // D3DRS_ZBIAS. D3D8 leaves the magnitude of a ZBIAS unit undefined, so what is
 // asserted is the property the engine relies on: with ZFUNC=LESS a coplanar second
 // polygon is hidden without bias and visible with it, and never the other way round.
@@ -1451,6 +1554,7 @@ int main(int argc, char** argv) {
 
 	std::printf("\n== raster state ==\n");
 	report("alpha test", Case_Alpha_Test(harness));
+	report("cull mode", Case_Cull_Mode(harness));
 	report("depth bias", Case_Depth_Bias(harness));
 	report("scissor", Case_Scissor(harness));
 	report("stencil", Case_Stencil(harness));
