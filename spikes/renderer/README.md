@@ -30,6 +30,8 @@ alpha-blended screen-space quad (`D3DFVF_XYZRHW | D3DFVF_DIFFUSE`, no texture,
 | `shaders/fixedfunc.vert` | vertex stage, including the `D3DFVF_XYZRHW` pretransformed path Vulkan has no equivalent for |
 | `shaders/fixedfunc.frag` | the `SetTextureStageState` combiner cascade, interpreted at runtime from a uniform block |
 | `src/main.cpp` | driver. Issues the calls in the engine's order, then proves the result by readback |
+| `src/caps_probe.cpp` | `zh-caps-probe`: formats, features and limits, queried. No rendering |
+| `src/feature_probe.cpp` | `zh-feature-probe`: nine rendered cases (DXT, stencil, render targets, depth, blending, two stages, dynamic buffers), each asserted by reading pixels back |
 | `tools/d3d8-surface-scan.py` | the measurement behind every number in `renderer-surface.md` |
 
 The interesting parts, if you only read two: the pipeline cache in `vulkan_backend.cpp`
@@ -52,8 +54,19 @@ sudo apt-get install -y cmake ninja-build libvulkan-dev vulkan-validationlayers 
 sudo apt-get install -y mesa-vulkan-drivers
 ```
 
-On macOS: install the LunarG Vulkan SDK, which provides MoltenVK, the loader and
-`glslangValidator`. **Not yet tried — see the caveat below.**
+On macOS (verified on an M1 Pro — see `docs/porting/moltenvk-findings.md`):
+
+```sh
+brew install cmake molten-vk vulkan-headers vulkan-loader vulkan-tools glslang \
+             vulkan-validationlayers
+```
+
+The LunarG SDK works too. Two macOS quirks, neither of them a code problem:
+
+- configure with `-DSPIKE_USE_SDL2=OFF`; Homebrew's SDL2 headers pull in `immintrin.h` and do not
+  compile on arm64. Headless is the default path anyway.
+- `export DYLD_LIBRARY_PATH=/opt/homebrew/lib`, or the loader cannot find the validation layer's
+  dylib and the run proceeds *without* validation while still printing `validation messages: 0`.
 
 ## Build
 
@@ -109,6 +122,20 @@ The committed `docs/spike-triangle.png` was run through `optipng`; the program's
 same image but larger, since its built-in PNG writer uses stored (uncompressed) deflate blocks to
 avoid a zlib dependency.
 
+## The probes
+
+Two extra binaries, built by the same project, answer what the two draws above cannot:
+
+```sh
+/tmp/zh-renderer-build/zh-caps-probe      # formats, features, limits, portability subset
+/tmp/zh-renderer-build/zh-feature-probe   # nine rendered cases, each checked pixel by pixel
+```
+
+`zh-feature-probe` covers depth test, alpha blending, BC1/BC3 (with alpha and with a mip chain),
+two texture stages in one draw, stencil write + test, render-to-texture, and dynamic buffer
+suballocation. Both exit non-zero on failure. Results on Apple Silicon:
+`docs/porting/moltenvk-findings.md`.
+
 ## Reproduce the measurements
 
 ```sh
@@ -136,14 +163,18 @@ validation messages:
 - sampler cache keyed on D3D8 *stage* filter/address state, which in Vulkan is *object* state
 - correctness asserted by reading the colour target back, not by looking at it
 
-**Not verified: macOS or MoltenVK.** The code was written to stay inside what MoltenVK supports
-(Vulkan 1.1 core, no extension beyond swapchain) and contains nothing Linux-specific, but it has
-only been run on Linux. Until someone runs it through MoltenVK, "and therefore macOS" is an
-inference.
+Also verified on `Apple M1 Pro` / macOS 26.6.1 / MoltenVK 1.4.2, validation layer enabled, zero
+validation messages: the readback is pixel-identical to the Linux image above to within 1/255 on
+every one of the 480,000 pixels (`docs/spike-triangle-macos.png`). This needed the
+`VK_KHR_portability_enumeration` / `VK_KHR_portability_subset` opt-in that the first version of the
+backend lacked — without it `vkCreateInstance` returns `VK_ERROR_INCOMPATIBLE_DRIVER`. The full
+measurement, including what MoltenVK does *not* provide, is in `docs/porting/moltenvk-findings.md`.
 
-Also not implemented, and none of it should be assumed: fixed-function lighting/fog/material,
-`SetRenderTarget` and render-to-texture, ps.1.1/vs.1.1 translation, texture stages beyond the
-first two, texture transform matrices, `BUMPENVMAP`, mipmaps, DXT/cube/volume textures,
-`CopyRects`, `DrawPrimitiveUP`, `ProcessVertices`, dynamic buffer rings, `D3DPOOL_MANAGED` shadow
-copies, and device loss. There is a hard cap of 64 draws per frame. The full list, with the
+Also not implemented *in the backend*, and none of it should be assumed: fixed-function
+lighting/fog/material, `SetRenderTarget` and render-to-texture, ps.1.1/vs.1.1 translation, texture
+stages beyond the first two, texture transform matrices, `BUMPENVMAP`, mipmaps, DXT/cube/volume
+textures, `CopyRects`, `DrawPrimitiveUP`, `ProcessVertices`, dynamic buffer rings,
+`D3DPOOL_MANAGED` shadow copies, and device loss. (`zh-feature-probe` shows the *driver* handles
+render targets, DXT, mipmaps and dynamic buffers correctly — that is a different claim from the
+backend implementing them.) There is a hard cap of 64 draws per frame. The full list, with the
 reasoning, is in `docs/porting/renderer-surface.md` §2.
