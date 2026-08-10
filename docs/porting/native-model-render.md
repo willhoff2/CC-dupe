@@ -1,0 +1,111 @@
+# Native retail model render
+
+## Result
+
+`spikes/model-render/` loads `avcrusader.W3D` from the retail BIG archives, parses it with the engine's `ChunkLoadClass` and W3D records, uploads its retail DXT1/TGA textures, and renders it headlessly through Vulkan/MoltenVK on an Apple M1 Pro.
+
+The result is **geometrically correct and mechanically cross-checked, but not a complete engine-faithful frame**. Twelve of thirteen meshes render correctly. `TURRETFX01`, a four-triangle muzzle-effect mesh, is deliberately omitted because its `EXTnkMzl01.tga` reference does not exist in any of the 20 supplied retail archives. Drawing it white would make a plausible but wrong image. Fixed-function lighting is approximated in vertex colours, and house colour is the raw retail placeholder texture rather than the runtime player-colour treatment.
+
+Evidence:
+
+- [`spikes/model-render/evidence/avcrusader-moltenvk.png`](../../spikes/model-render/evidence/avcrusader-moltenvk.png): MoltenVK render with retail textures and mip chain.
+- [`spikes/model-render/evidence/avcrusader-cpu-reference.png`](../../spikes/model-render/evidence/avcrusader-cpu-reference.png): independent scalar CPU rasterisation.
+
+## Native engine-code boundary
+
+These engine translation units compile and link natively into the tool:
+
+- `WWLib/chunkio.cpp`
+- `WWMath/matrix3d.cpp`, `matrix4.cpp`, `quat.cpp`, `wwmath.cpp`
+- `WW3D2/htree.cpp`, `pivot.cpp`
+- `WWStub/wwallocstub.cpp`, `wwdebugstub.cpp`
+
+`w3d_model.cpp` uses `PosixFileClass`, `ChunkLoadClass`, `W3dMeshHeader3Struct`, the other records in `w3d_file.h`, and `HTreeClass`. The two headers in `scripts/native-port-shims/` declare only `D3DMATRIX`/`D3DXMATRIX`, needed by unused conversion operators in the engine math files; they implement no D3D runtime.
+
+The engine's direct model path still does not compile:
+
+```text
+meshmdl.cpp -> meshmdl.h -> dx8wrapper.h:46:10: fatal error: 'd3d8.h' file not found
+ww3d.cpp -> ww3d.h -> dx8wrapper.h:46:10: fatal error: 'd3d8.h' file not found
+```
+
+`hanim.cpp` compiles, but linking it pulls in WWSaveLoad persist factories, WWLib file factories/multilists, and Win32 critical sections. The tool only needs a static base pose, so `engine_link_support.cpp` narrowly supplies the animation-only symbols referenced by `htree.cpp`; those stubs abort if called. It also supplies the zero-initialised `WW3D` frame clock that normally lives in unbuildable `ww3d.cpp`. This is not a replacement for `MeshModelClass::Load_W3D` or animated-model support.
+
+## Retail Crusader cross-check
+
+Input provenance reported by the tool:
+
+```text
+W3DZH.big:Art\W3D\avcrusader.W3D, 43,382 bytes
+145 parsed chunks, 13 meshes, 20 hierarchy pivots, one HLOD array (LOD 0)
+```
+
+Every mesh's parsed vertex/triangle arrays match `W3D_CHUNK_MESH_HEADER3`, all indices are in range, every normal array matches its vertex array, and every calculated vertex bound is inside the header min/max. Totals are 676 vertices and 352 triangles; the rendered 12 meshes contain 668 vertices and 348 triangles after omitting the muzzle effect.
+
+UVs are finite and range from `-0.1183` to `1.0023`; the small excursion is intentional wrapping, not clamped corruption. Texture lookup results are:
+
+- `avcrusader.tga` -> `TexturesZH.big:Art\Textures\avcrusader.dds` (256x256 DXT1, nine mips)
+- `Housecolor.tga` -> `W3DZH.big:Art\W3D\Housecolor.tga` (256x256 A8R8G8B8 TGA)
+- `EXTnkMzl01.tga` -> unresolved in every supplied archive; affected mesh omitted
+
+The Apple M1 Pro reports sampled-image support for BC1, BC2, BC3, and BGRA8. The retail DXT1 bytes and all nine mip levels are uploaded directly; there is no transcode in the GPU path. TGA is decoded to BGRA8.
+
+## Coordinate and image validation
+
+W3D positions remain right-handed and Z-up. The camera uses Z as world-up, a right-handed view, and Vulkan's `[0,1]` depth range. Matrices are composed `projection * view * world` in Westwood's column-vector convention; the backend negates the clip-Y row before GLSL upload.
+
+A synthetic UV gradient/checker (`--uv-test --flat-light`) made GPU and CPU images agree at 1.0000 coverage IoU and 0.03 mean channel error with culling disabled. That verifies top-origin V, wrap addressing, perspective interpolation, and the BGRA upload independently of the retail texture's appearance.
+
+That test exposed an existing cull translation bug: D3D8 `D3DCULL_CW` had been mapped to Vulkan front-face culling. With the backend's clip-Y handling, it must map to Vulkan back-face culling. Before the correction, the real model rendered its back faces and GPU/reference mean error was 58.67. After correction and equal culling rules:
+
+```text
+GPU covered pixels:       135,268
+CPU covered pixels:       135,291
+coverage IoU:              0.9946
+mean absolute difference:  2.99 / 255 per channel
+validation messages:       0
+```
+
+The final file enables trilinear mip filtering. Compared with the otherwise identical mip-0 GPU frame, its coverage IoU is 0.9948 and mean channel difference is 1.87. The independent reference intentionally uses mip 0 so the BC decoder, sampler convention, geometry, transforms, depth, culling, and shading can be compared without implementing GPU derivative/LOD selection a second time.
+
+## Backend gaps found by a real asset
+
+- No engine fixed-function light/material API: directional light and material ambient/diffuse are baked into vertex diffuse colour.
+- No runtime house-colour mapper: the raw house-colour placeholder texture is shown.
+- Missing runtime/generated muzzle texture: the effect mesh is omitted.
+- Only material pass 0 and texture stage 0 are rendered.
+- Alpha test is available, but the selected model's only missing muzzle-effect material prevents exercising it in the final image.
+- Alpha blending state recorded by the W3D parser is not yet applied per batch.
+- Sampler addressing is wrap-only; mapper arguments and animated UV mappers are not implemented.
+- The renderer index path remains 16-bit; meshes above 65,535 vertices are rejected.
+- Skinned/animated posing is not implemented; only the base hierarchy pose is used.
+- Fog, specular, render-target APIs, texture transforms, and the wider D3D8 state surface remain absent.
+- BC1/2/3 and mip upload now work; uncompressed DDS variants beyond the implemented BGRA layout remain unsupported.
+
+## Rerun
+
+The data directory is a runtime argument and is not compiled into the tool:
+
+```sh
+/opt/homebrew/bin/cmake -S spikes/model-render -B build/model-render \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo
+/opt/homebrew/bin/cmake --build build/model-render -j8
+
+DYLD_LIBRARY_PATH=/opt/homebrew/lib build/model-render/zh-model-render \
+  --data /path/to/zero-hour \
+  --model avcrusader.W3D \
+  --out crusader.png \
+  --reference-out crusader-reference.png
+```
+
+Optional diagnostics:
+
+```sh
+# Remove lighting and replace retail textures with a UV gradient/checker.
+.../zh-model-render --data /path/to/zero-hour --flat-light --uv-test --out uv.png
+
+# Force a cull mode to reproduce/check the winding decision.
+.../zh-model-render --data /path/to/zero-hour --cull none|cw|ccw --out cull.png
+```
+
+A successful Crusader run ends with `PASS: 0 mechanical check(s) failed` and separately reports the one omitted unresolved texture as `PARTIAL`; that limitation must not be read as a complete game-faithful render.

@@ -68,6 +68,7 @@ add_custom_target(spike-shaders DEPENDS ${SPIRV_OUTPUTS})
 # --- executable ---------------------------------------------------------------
 add_executable(zh-renderer-spike
     src/main.cpp
+    src/png_write.cpp
     src/state_translate.cpp
     src/vulkan_backend.cpp)
 add_dependencies(zh-renderer-spike spike-shaders)

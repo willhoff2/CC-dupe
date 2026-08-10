@@ -35,17 +35,20 @@ VkCompareOp To_Vk_Compare_Op(uint32_t c) {
 	}
 }
 
-// Note the handedness flip. D3D8 defines cull order against a left-handed,
-// y-down-in-screen-space convention; Vulkan clip space is y-down with a
-// counter-clockwise front face by default. The engine's projection matrices are
-// Westwood/D3D convention, so the mapping below pairs with the y-flip applied to
-// the projection matrix in vulkan_backend.cpp. Getting this pair wrong is the
-// classic "everything is inside out" port bug.
+// D3DCULL_X names the winding to *discard*, measured in D3D's y-down screen space.
+// vulkan_backend.cpp negates clip.y, and Vulkan then maps NDC y downwards into the
+// framebuffer, so a triangle's framebuffer winding here is the same as its D3D screen
+// winding -- the flip cancels. With VK_FRONT_FACE_COUNTER_CLOCKWISE that makes a
+// clockwise triangle the back face, so D3DCULL_CW is a back-face cull.
+//
+// This is the classic "everything is inside out" port bug, and it was inverted here until
+// a real model was drawn: the spike's own triangle runs with D3DCULL_NONE, so nothing
+// exercised it. See docs/porting/native-model-render.md.
 VkCullModeFlags To_Vk_Cull_Mode(uint32_t c) {
 	switch (c) {
 	case D3DCULL_NONE: return VK_CULL_MODE_NONE;
-	case D3DCULL_CW: return VK_CULL_MODE_FRONT_BIT;
-	case D3DCULL_CCW: return VK_CULL_MODE_BACK_BIT;
+	case D3DCULL_CW: return VK_CULL_MODE_BACK_BIT;
+	case D3DCULL_CCW: return VK_CULL_MODE_FRONT_BIT;
 	default: return VK_CULL_MODE_NONE;
 	}
 }
