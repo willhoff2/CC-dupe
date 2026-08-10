@@ -64,6 +64,23 @@
 #define _MAX_PATH 260
 #endif
 
+// TheSuperHackers @port MSVC CRT spellings of standard functions and macros. On Windows these
+// come from <stdlib.h> / <float.h>; off Windows nothing declares them, and until PreRTS.h stopped
+// including <windows.h> the probe's stand-in header hid that. Spelling aliases only, no behaviour.
+#include <math.h>
+#ifndef __min
+#define __min(a, b) ((a) < (b) ? (a) : (b))
+#endif
+#ifndef __max
+#define __max(a, b) ((a) > (b) ? (a) : (b))
+#endif
+#ifndef _isnan
+#define _isnan(x) isnan(x)
+#endif
+#ifndef _finite
+#define _finite(x) isfinite(x)
+#endif
+
 #include "mem_compat.h"
 #include "string_compat.h"
 #include "tchar_compat.h"

@@ -3,6 +3,10 @@
 Produced by `scripts/native-port-probe.py`. Every number in this document is a count of real
 `clang++` diagnostics, not an estimate.
 
+> The counts below predate the `PreRTS.h` surgery and are kept as the historical baseline. For
+> current numbers, including the renderer/device/`Main` targets this report excludes, see
+> [`prerts-win32-surgery.md`](prerts-win32-surgery.md).
+
 ```
 clang++ -fsyntax-only -std=c++20 -m64 -ferror-limit=0 -fms-extensions \
         -include Utility/CppMacros.h -DWIN32_LEAN_AND_MEAN -D_REENTRANT

@@ -16,6 +16,9 @@
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "PreRTS.h"
+
+// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+#include <windows.h>
 #include "GameClient/ClientInstance.h"
 
 #define GENERALS_GUID "685EAFF2-3216-4265-B047-251C5F4B82F3"
