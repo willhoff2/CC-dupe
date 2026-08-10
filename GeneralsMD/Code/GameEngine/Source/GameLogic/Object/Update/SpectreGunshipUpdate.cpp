@@ -32,6 +32,8 @@
 #define DEFINE_DEATH_NAMES
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
+#include <Utility/CppMacros.h>
+
 #include "Common/GameAudio.h"
 #include "Common/GameUtility.h"
 #include "Common/ThingTemplate.h"
@@ -881,11 +883,18 @@ void SpectreGunshipUpdate::xfer( Xfer *xfer )
 
 	if( version < 2 )
 	{
-		xfer->xferUser( &m_attackAreaDecal, sizeof( RadiusDecal ) );
-		xfer->xferUser( &m_targetingReticleDecal, sizeof( RadiusDecal ) );
+		// TheSuperHackers @port A RadiusDecal is two pointers and a Bool, so this reads and writes
+		// raw pointer values, and it would grow from twelve bytes to twenty-four under LP64. The
+		// number of bytes in a version 1 record is fixed by the format, so spell it out instead of
+		// deriving it from a layout that changes. The bytes are unchanged on Win32.
+		const Int radiusDecalV1Size = 12;
+		STATIC_ASSERT_ALWAYS(sizeof(void*) != 4 || sizeof(RadiusDecal) == 12, "A version 1 RadiusDecal record is twelve bytes");
+
+		xfer->xferUser( &m_attackAreaDecal, radiusDecalV1Size );
+		xfer->xferUser( &m_targetingReticleDecal, radiusDecalV1Size );
 
 #if defined TRACKERS
-		xfer->xferUser( &m_howitzerTrackerDecal, sizeof( RadiusDecal ) );
+		xfer->xferUser( &m_howitzerTrackerDecal, radiusDecalV1Size );
 #endif
 	}
 

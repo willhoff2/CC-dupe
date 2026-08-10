@@ -30,6 +30,8 @@
 #pragma once
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
+#include <Utility/CppMacros.h>
+
 #include "Common/Geometry.h"
 #include "GameLogic/Module/UpdateModule.h"
 
@@ -87,7 +89,7 @@ protected:
 	Bool m_finished;
 
 	Bool m_reverseAtTransitionTime;						///< do a reverse at transition time
-	enum DynamicGeometryDirection { FORWARD = 1, BACKWARD = -1 };
+	enum DynamicGeometryDirection CPP_11(: Int) { FORWARD = 1, BACKWARD = -1 };
 	DynamicGeometryDirection m_direction;			///< direction we're growing/shrinking
 	Bool m_switchedDirections;								///< TRUE once we've switched directions
 

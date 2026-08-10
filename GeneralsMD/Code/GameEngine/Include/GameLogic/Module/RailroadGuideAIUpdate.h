@@ -240,7 +240,7 @@ public:
 protected:
 
 	//definitions
-	enum ConductorState
+	enum ConductorState CPP_11(: Int)
 	{
 		APPLY_BRAKES,
 		WAIT_AT_STATION,
@@ -248,7 +248,7 @@ protected:
 		COAST
 	};
 
-	enum StationTask
+	enum StationTask CPP_11(: Int)
 	{
 		DO_NOTHING,
 		DISEMBARK

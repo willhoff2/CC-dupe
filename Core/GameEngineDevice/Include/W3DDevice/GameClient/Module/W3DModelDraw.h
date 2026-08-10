@@ -454,7 +454,7 @@ private:
 
 	struct WeaponRecoilInfo
 	{
-		enum RecoilState
+		enum RecoilState CPP_11(: Int)
 		{
 			IDLE, RECOIL_START, RECOIL, SETTLE
 		};

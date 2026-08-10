@@ -270,14 +270,14 @@ public:
 
 	Bool m_isOneShot;														///< if true, destroy system after one burst has occurred
 
-	enum ParticleShaderType
+	enum ParticleShaderType CPP_11(: Int)
 	{
 		INVALID_SHADER=0, ADDITIVE, ALPHA, ALPHA_TEST, MULTIPLY,
 		PARTICLE_SHADER_TYPE_COUNT
 	}
 	m_shaderType;																///< how this particle is rendered
 
-	enum ParticleType
+	enum ParticleType CPP_11(: Int)
 	{
 		INVALID_TYPE=0, PARTICLE, DRAWABLE, STREAK, VOLUME_PARTICLE, SMUDGE, ///< is a particle a 2D-screen-facing particle, or a Drawable, or a Segment in a streak?
 		PARTICLE_TYPE_COUNT
@@ -342,7 +342,7 @@ public:
 
 	//-------------------------------------------------------
 	// The direction and speed at which particles are emitted
-	enum EmissionVelocityType
+	enum EmissionVelocityType CPP_11(: Int)
 	{
 		INVALID_VELOCITY=0, ORTHO, SPHERICAL, HEMISPHERICAL, CYLINDRICAL, OUTWARD,
 		EMISSION_VELOCITY_TYPE_COUNT
@@ -386,7 +386,7 @@ public:
 	//----------------------------------------------------------
 	// The volume of space where particles are initially created
 	// Note that the volume is relative to the system's position and orientation
-	enum EmissionVolumeType
+	enum EmissionVolumeType CPP_11(: Int)
 	{
 		INVALID_VOLUME=0, POINT, LINE, BOX, SPHERE, CYLINDER,
 		EMISSION_VOLUME_TYPE_COUNT
@@ -433,7 +433,7 @@ public:
 	Bool m_isEmitAboveGroundOnly;								///< if true, only emit particles when the system is above ground.
 	Bool m_isParticleUpTowardsEmitter;					///< if true, align the up direction to be towards the emitter.
 
-	enum WindMotion
+	enum WindMotion CPP_11(: Int)
 	{
 		WIND_MOTION_INVALID = 0,
 		WIND_MOTION_NOT_USED,

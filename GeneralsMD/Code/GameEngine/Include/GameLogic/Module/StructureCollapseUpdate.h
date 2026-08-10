@@ -128,7 +128,7 @@ protected:
 
 	void doPhaseStuff(StructureCollapsePhaseType scphase, const Coord3D *target);
 
-	enum StructureCollapseStateType
+	enum StructureCollapseStateType CPP_11(: Int)
 	{
 		COLLAPSESTATE_STANDING,
 		COLLAPSESTATE_WAITINGFORCOLLAPSESTART,

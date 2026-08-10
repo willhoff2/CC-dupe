@@ -30,6 +30,8 @@
 #pragma once
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
+#include <Utility/CppMacros.h>
+
 #include "Common/AudioEventRTS.h"
 #include "Common/INI.h"
 #include "GameLogic/Module/SpecialPowerUpdateModule.h"
@@ -115,7 +117,7 @@ public:
 	virtual Bool isPowerCurrentlyInUse( const CommandButton *command = nullptr ) const override;
 
 private:
-	enum DoorStateType
+	enum DoorStateType CPP_11(: Int)
 	{
 		DOOR_CLOSED,
 		DOOR_OPENING,

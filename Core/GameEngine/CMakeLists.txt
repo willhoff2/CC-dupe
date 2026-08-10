@@ -107,6 +107,7 @@ set(GAMEENGINE_SRC
 #    Include/Common/Science.h
 #    Include/Common/ScopedMutex.h
 #    Include/Common/ScoreKeeper.h
+    Include/Common/SerializedDateTime.h
     #Include/Common/simpleplayer.h # unused
 #    Include/Common/SkirmishBattleHonors.h
 #    Include/Common/SkirmishPreferences.h
@@ -673,6 +674,7 @@ set(GAMEENGINE_SRC
 #    Source/Common/System/registry.cpp
 #    Source/Common/System/SaveGame/GameState.cpp
 #    Source/Common/System/SaveGame/GameStateMap.cpp
+    Source/Common/System/SerializedDateTime.cpp
     Source/Common/System/Snapshot.cpp
 #    Source/Common/System/StackDump.cpp
     Source/Common/System/StreamingArchiveFile.cpp
