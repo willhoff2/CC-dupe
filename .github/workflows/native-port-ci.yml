@@ -33,6 +33,11 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    # Container jobs default to `sh`, which has no `pipefail`.
+    shell: bash
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -238,15 +243,17 @@ jobs:
   #    loader does not report MoltenVK at all, and nothing on Linux would notice it being
   #    deleted.
   #
-  #    Scope, honestly: the macos-14 runner has no GPU that MoltenVK can use well -- it renders
-  #    through Metal on Apple's software/virtualised path -- and MoltenVK is a translation layer,
-  #    so the rasterisation is not bit-identical to llvmpipe's. This job therefore asserts:
-  #      * MoltenVK is enumerated and selected (i.e. the portability opt-in is present);
-  #      * the render and readback complete;
-  #      * the image is *close* to the same reference (loose tolerance, see below).
-  #    It does NOT assert pixel equality with the Linux reference, and it does not assert
-  #    validation cleanliness with the same force as Linux, because the validation layers are not
-  #    part of the Homebrew MoltenVK install; the Linux job is the one that owns that assertion.
+  #    Scope, honestly: the macos-14 runner is a VM with a paravirtualised GPU, not the M1 Pro
+  #    docs/porting/moltenvk-findings.md was measured on, and MoltenVK is a translation layer, so
+  #    the rasterisation need not be bit-identical to llvmpipe's (on real hardware it was within
+  #    1/255). This job therefore asserts:
+  #      * vkCreateInstance succeeds against a portability driver, which is precisely the
+  #        VK_ERROR_INCOMPATIBLE_DRIVER failure the opt-in exists to prevent;
+  #      * the validation layer is loaded and silent (DYLD_LIBRARY_PATH below is load-bearing:
+  #        Homebrew's layer manifest names its dylib relatively, and without it the run silently
+  #        proceeds unvalidated);
+  #      * the readback is within a loose tolerance of the same reference image.
+  #    It does NOT assert pixel equality with the Linux reference: the Linux job owns that.
   renderer-spike-macos:
     name: Renderer spike (macOS arm64, MoltenVK)
     runs-on: macos-14
@@ -259,16 +266,20 @@ jobs:
         run: |
           set -eux
           brew update > /dev/null
-          brew install molten-vk vulkan-loader vulkan-headers vulkan-tools glslang
+          brew install molten-vk vulkan-loader vulkan-headers vulkan-tools glslang \
+                       vulkan-validationlayers
           command -v cmake > /dev/null || brew install cmake
-          brew list --versions molten-vk vulkan-loader glslang
+          brew list --versions molten-vk vulkan-loader glslang vulkan-validationlayers
 
       - name: Build
         run: |
           set -eux
           BREW=$(brew --prefix)
+          # SDL2 is off deliberately: Homebrew's SDL2 headers are x86-only in this install and
+          # break the arm64 build (immintrin.h). Headless is the path under test anyway.
           cmake -S spikes/renderer -B build/spike -G "Unix Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DSPIKE_USE_SDL2=OFF \
             -DCMAKE_PREFIX_PATH="$BREW"
           cmake --build build/spike -j3
 
@@ -277,7 +288,9 @@ jobs:
           set -eux -o pipefail
           BREW=$(brew --prefix)
           export VK_ICD_FILENAMES="$BREW/share/vulkan/icd.d/MoltenVK_icd.json"
+          export VK_LAYER_PATH="$BREW/share/vulkan/explicit_layer.d"
           export DYLD_LIBRARY_PATH="$BREW/lib"
+          vulkaninfo --summary | head -40 || true
           {
             echo '## Renderer spike (macOS arm64, MoltenVK)'
             echo '```'
