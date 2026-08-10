@@ -8,6 +8,7 @@ set(UTILITY_SRC
     Utility/intrin_compat.h
     Utility/iostream_adapter.h
     Utility/mem_compat.h
+    Utility/socket_compat.h
     Utility/sstream_adapter.h
     Utility/stdint_adapter.h
     Utility/stdio_adapter.h
@@ -15,6 +16,7 @@ set(UTILITY_SRC
     Utility/tchar_compat.h
     Utility/thread_compat.h
     Utility/time_compat.h
+    Utility/unicode_compat.h
     Utility/wchar_compat.h
 )
 

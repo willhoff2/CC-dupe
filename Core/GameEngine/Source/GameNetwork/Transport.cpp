@@ -26,8 +26,13 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+#ifdef _WIN32
 #include <windows.h>
-#include <winsock.h>
+#endif
+
+// TheSuperHackers @port BSD sockets behind the Winsock spellings; see
+// docs/porting/sockets-and-text-encoding.md
+#include <Utility/socket_compat.h>
 
 #include "Common/crc.h"
 #include "GameNetwork/Transport.h"
@@ -333,7 +338,7 @@ Bool Transport::doRecv()
 		}
 
 		// Something there; stick it somewhere
-//		DEBUG_LOG(("Saw %d bytes from %d:%d", len, ntohl(from.sin_addr.S_un.S_addr), ntohs(from.sin_port)));
+//		DEBUG_LOG(("Saw %d bytes from %d:%d", len, ntohl(from.sin_addr.s_addr), ntohs(from.sin_port)));
 		m_incomingPackets[m_statisticsSlot]++;
 		m_incomingBytes[m_statisticsSlot] += len;
 
@@ -353,7 +358,7 @@ Bool Transport::doRecv()
 						(Int)(TheGlobalData->m_latencyAmplitude * sin(now * TheGlobalData->m_latencyPeriod)) +
 						GameClientRandomValue(-TheGlobalData->m_latencyNoise, TheGlobalData->m_latencyNoise);
 					m_delayedInBuffer[bufferIndex].message.length = incomingMessage.length;
-					m_delayedInBuffer[bufferIndex].message.addr = ntohl(from.sin_addr.S_un.S_addr);
+					m_delayedInBuffer[bufferIndex].message.addr = ntohl(from.sin_addr.s_addr);
 					m_delayedInBuffer[bufferIndex].message.port = ntohs(from.sin_port);
 					memcpy(&m_delayedInBuffer[bufferIndex].message, buf, len);
 					++bufferIndex;
@@ -371,7 +376,7 @@ Bool Transport::doRecv()
 			{
 				// Empty slot; use it
 				m_inBuffer[bufferIndex].length = incomingMessage.length;
-				m_inBuffer[bufferIndex].addr = ntohl(from.sin_addr.S_un.S_addr);
+				m_inBuffer[bufferIndex].addr = ntohl(from.sin_addr.s_addr);
 				m_inBuffer[bufferIndex].port = ntohs(from.sin_port);
 				memcpy(&m_inBuffer[bufferIndex], buf, len);
 				++bufferIndex;
