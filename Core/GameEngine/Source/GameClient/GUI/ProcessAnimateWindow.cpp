@@ -53,8 +53,11 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+// timeGetTime() comes from <mmsystem.h> on Windows and from Utility/time_compat.h elsewhere.
+#ifdef _WIN32
 #include <windows.h>
 #include <mmsystem.h>
+#endif
 
 #include "GameClient/ProcessAnimateWindow.h"
 #include "GameClient/AnimateWindowManager.h"

@@ -182,11 +182,8 @@ typedef HANDLE HTREEITEM;
 #define INVALID_HANDLE_VALUE ((HANDLE)(LONG_PTR)-1)
 
 // ---------------------------------------------------------------------------- structures
-typedef union _LARGE_INTEGER {
-	struct { DWORD LowPart; LONG HighPart; };
-	struct { DWORD LowPart; LONG HighPart; } u;
-	LONGLONG QuadPart;
-} LARGE_INTEGER, *PLARGE_INTEGER;
+// LARGE_INTEGER, QueryPerformanceCounter and QueryPerformanceFrequency come from
+// Utility/time_compat.h, included above: the compat layer implements them for real now.
 
 typedef union _ULARGE_INTEGER {
 	struct { DWORD LowPart; DWORD HighPart; };
@@ -491,8 +488,6 @@ typedef struct _GLYPHMETRICSFLOAT {
 extern "C" {
 DWORD  GetLastError();
 void   SetLastError(DWORD);
-BOOL   QueryPerformanceCounter(LARGE_INTEGER*);
-BOOL   QueryPerformanceFrequency(LARGE_INTEGER*);
 HANDLE GetCurrentProcess();
 HANDLE GetCurrentThread();
 DWORD  GetCurrentProcessId();
