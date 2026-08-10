@@ -32,6 +32,8 @@ set(WW3D2_SRC
     coltype.h
     composite.cpp
     composite.h
+    d3d8renderbackend.cpp
+    d3d8renderbackend.h
     #dazzle.cpp
     #dazzle.h
     #ddsfile.cpp
@@ -155,6 +157,7 @@ set(WW3D2_SRC
     proto.h
     proxy.h
     rddesc.h
+    renderbackend.h
     #render2d.cpp
     #render2d.h
     render2dsentence.cpp

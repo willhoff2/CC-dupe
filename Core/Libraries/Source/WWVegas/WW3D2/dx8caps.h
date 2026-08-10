@@ -205,8 +205,10 @@ public:
 	};
 
 
-	DX8Caps(IDirect3D8* direct3d, const D3DCAPS8& caps,WW3DFormat display_format, const D3DADAPTER_IDENTIFIER8& adapter_id);
-	DX8Caps(IDirect3D8* direct3d, WW3DFormat display_format, const D3DADAPTER_IDENTIFIER8& adapter_id);
+	// Capabilities stay D3D8-shaped (a D3DCAPS8 filled in by the backend); only the
+	// IDirect3D8 pointer, which was stored and never used, moved behind the render backend.
+	DX8Caps(const D3DCAPS8& caps,WW3DFormat display_format, const D3DADAPTER_IDENTIFIER8& adapter_id);
+	DX8Caps(WW3DFormat display_format, const D3DADAPTER_IDENTIFIER8& adapter_id);
 	static void Shutdown();
 
 	void Compute_Caps(WW3DFormat display_format, const D3DADAPTER_IDENTIFIER8& adapter_id);
@@ -311,7 +313,6 @@ private:
 	DriverVersionStatusType DriverVersionStatus;
 	VendorIdType VendorId;
 	StringClass DriverDLL;
-	IDirect3D8* Direct3D; // warning XDK name conflict KJM
 	StringClass CapsLog;
 	StringClass CompactLog;
 };

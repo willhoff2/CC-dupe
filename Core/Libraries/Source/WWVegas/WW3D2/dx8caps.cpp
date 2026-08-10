@@ -467,11 +467,9 @@ DX8Caps::DeviceTypeIntel DX8Caps::Get_Intel_Device(unsigned device_id)
 }
 
 DX8Caps::DX8Caps(
-	IDirect3D8* direct3d,
 	WW3DFormat display_format,
 	const D3DADAPTER_IDENTIFIER8& adapter_id)
 	:
-	Direct3D(direct3d),
 	MaxDisplayWidth(0),
 	MaxDisplayHeight(0)
 {
@@ -480,12 +478,10 @@ DX8Caps::DX8Caps(
 }
 
 DX8Caps::DX8Caps(
-	IDirect3D8* direct3d,
 	const D3DCAPS8& caps,
 	WW3DFormat display_format,
 	const D3DADAPTER_IDENTIFIER8& adapter_id)
 	:
-	Direct3D(direct3d),
 	Caps(caps),
 	MaxDisplayWidth(0),
 	MaxDisplayHeight(0)
