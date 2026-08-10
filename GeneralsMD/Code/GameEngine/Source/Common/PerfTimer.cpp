@@ -47,6 +47,10 @@ __forceinline void ProfileGetTime(__int64 &t)
 
 #if defined(PERF_TIMERS) || defined(DUMP_PERF_STATS)
 
+// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+#include <windows.h>
+#include <mmsystem.h>
+
 //-------------------------------------------------------------------------------------------------
 static Int64 s_ticksPerSec = 0;
 static double s_ticksPerMSec = 0;
