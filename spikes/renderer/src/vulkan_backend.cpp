@@ -551,14 +551,17 @@ bool VulkanBackend::Pick_Device() {
 	// Required by spec whenever the physical device advertises it (MoltenVK always does).
 	// The subset also says which of Vulkan's guarantees the device does not keep; the
 	// only one this backend depends on is the image-view swizzle.
+	PortabilitySubsetFeatures portability{};
+	portability.sType = kPortabilitySubsetFeaturesType;
+	bool portability_subset = false;
 	if (Device_Extension_Available(physical_, "VK_KHR_portability_subset")) {
 		device_extensions.push_back("VK_KHR_portability_subset");
+		portability_subset = true;
 
-		PortabilitySubsetFeatures portability{};
-		portability.sType = kPortabilitySubsetFeaturesType;
 		VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
 		features.pNext = &portability;
 		vkGetPhysicalDeviceFeatures2(physical_, &features);
+		portability.pNext = nullptr;
 		view_swizzle_ = portability.imageViewFormatSwizzle == VK_TRUE;
 	}
 	// Lets a swizzle-capable device (any Linux driver) run the CPU expansion path
@@ -570,6 +573,9 @@ bool VulkanBackend::Pick_Device() {
 	dci.pQueueCreateInfos = &qci;
 	dci.enabledExtensionCount = static_cast<uint32_t>(device_extensions.size());
 	dci.ppEnabledExtensionNames = device_extensions.empty() ? nullptr : device_extensions.data();
+	// A portability-subset feature the device has must also be *enabled* here before it
+	// may be used; passing back what was queried enables exactly what the device has.
+	if (portability_subset) dci.pNext = &portability;
 	VK_CHECK(vkCreateDevice(physical_, &dci, nullptr, &device_));
 	vkGetDeviceQueue(device_, queue_family_, 0, &queue_);
 
