@@ -42,9 +42,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The Linux jobs all run in the same digest-pinned image: ubuntu:22.04, which gives clang 14 and
-# Mesa 22.x -- the toolchain every number in docs/porting/ was measured with. `container.image`
-# cannot read the `env` context, so the digest is repeated per job rather than named once.
+# The Linux jobs run in digest-pinned containers rather than on the runner image. The probe and
+# the OpenAL build use ubuntu:22.04 (clang 14), the toolchain every number in docs/porting/ was
+# measured with. The renderer spike uses ubuntu:24.04, because jammy's Vulkan headers (1.3.204)
+# predate VK_KHR_portability_enumeration and cannot compile the MoltenVK portability opt-in --
+# measured, see the PR description. `container.image` cannot read the `env` context, so each
+# digest is repeated per job rather than named once.
 jobs:
   # 1. The native 64-bit clang readiness probe, gated against a checked-in baseline so a
   #    portability regression fails the build instead of printing a smaller number.
@@ -114,7 +117,7 @@ jobs:
     name: Renderer spike (Linux, lavapipe)
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
+      image: ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
     timeout-minutes: 30
     steps:
       - name: Install toolchain and a software Vulkan device
@@ -123,9 +126,11 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            clang-14 cmake ninja-build git ca-certificates python3 \
+            clang-18 cmake ninja-build git ca-certificates python3 \
             libvulkan-dev vulkan-validationlayers glslang-tools mesa-vulkan-drivers
-          test -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          # Fail loudly here rather than silently rendering on some other ICD or with no
+          # validation layer.
+          test -f /usr/share/vulkan/icd.d/lvp_icd.json
           test -f /usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
 
       - name: Checkout
@@ -133,8 +138,8 @@ jobs:
 
       - name: Build
         env:
-          CC: clang-14
-          CXX: clang++-14
+          CC: clang-18
+          CXX: clang++-18
         run: |
           cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/spike
@@ -143,7 +148,7 @@ jobs:
         env:
           # lavapipe: the CPU Vulkan device. Named explicitly so the job cannot accidentally
           # pass on some other ICD that happens to be installed.
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
           XDG_RUNTIME_DIR: /tmp/xdgrt
         run: |
           set -o pipefail
@@ -286,11 +291,14 @@ jobs:
       - name: Render headless through MoltenVK and compare the readback
         run: |
           set -eux -o pipefail
-          BREW=$(brew --prefix)
-          export VK_ICD_FILENAMES="$BREW/share/vulkan/icd.d/MoltenVK_icd.json"
-          export VK_LAYER_PATH="$BREW/share/vulkan/explicit_layer.d"
-          export DYLD_LIBRARY_PATH="$BREW/lib"
-          vulkaninfo --summary | head -40 || true
+          # Both formulae are kegs: their manifests are not linked into $(brew --prefix)/share.
+          export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/share/vulkan/icd.d/MoltenVK_icd.json"
+          export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
+          # Load-bearing: Homebrew's layer manifest names its dylib relatively, so without this
+          # the loader cannot find it and the run proceeds silently unvalidated.
+          export DYLD_LIBRARY_PATH="$(brew --prefix vulkan-validationlayers)/lib:$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
+          test -f "$VK_ICD_FILENAMES"
+          vulkaninfo --summary | head -30 || true
           {
             echo '## Renderer spike (macOS arm64, MoltenVK)'
             echo '```'
