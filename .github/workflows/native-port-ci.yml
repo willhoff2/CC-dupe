@@ -291,8 +291,11 @@ jobs:
       - name: Render headless through MoltenVK and compare the readback
         run: |
           set -eux -o pipefail
-          # Both formulae are kegs: their manifests are not linked into $(brew --prefix)/share.
-          export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/share/vulkan/icd.d/MoltenVK_icd.json"
+          # Both formulae are kegs: their manifests are not linked into $(brew --prefix)/share,
+          # and molten-vk has moved the manifest between releases, so locate it rather than
+          # hard-coding a path that silently leaves the loader with no driver at all.
+          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
+          export VK_ICD_FILENAMES
           export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
           # Load-bearing: Homebrew's layer manifest names its dylib relatively, so without this
           # the loader cannot find it and the run proceeds silently unvalidated.
