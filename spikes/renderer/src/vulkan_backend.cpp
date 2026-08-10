@@ -311,6 +311,8 @@ private:
 	Image color_target_;
 	Image depth_target_;
 	VkFormat depth_format_ = VK_FORMAT_D32_SFLOAT_S8_UINT;
+	// Non-identity VkImageView component mappings; false under MoltenVK.
+	bool view_swizzle_ = true;
 	VkRenderPass render_pass_ = VK_NULL_HANDLE;
 	VkFramebuffer framebuffer_ = VK_NULL_HANDLE;
 
@@ -376,6 +378,32 @@ bool Instance_Extension_Available(const char* name) {
 	}
 	return false;
 }
+
+// VK_KHR_portability_subset is a provisional extension, so its structures only
+// exist in vulkan_beta.h behind VK_ENABLE_BETA_EXTENSIONS, which not every SDK
+// ships. Declaring the one structure the backend reads keeps the Linux and macOS
+// builds on the same headers. Field order is the extension's, and must stay so.
+struct PortabilitySubsetFeatures {
+	VkStructureType sType;
+	void* pNext;
+	VkBool32 constantAlphaColorBlendFactors;
+	VkBool32 events;
+	VkBool32 imageViewFormatReinterpretation;
+	VkBool32 imageViewFormatSwizzle;
+	VkBool32 imageView2DOn3DImage;
+	VkBool32 multisampleArrayImage;
+	VkBool32 mutableComparisonSamplers;
+	VkBool32 pointPolygons;
+	VkBool32 samplerMipLodBias;
+	VkBool32 separateStencilMaskRef;
+	VkBool32 shaderSampleRateInterpolationFunctions;
+	VkBool32 tessellationIsolines;
+	VkBool32 tessellationPointMode;
+	VkBool32 triangleFans;
+	VkBool32 vertexAttributeAccessBeyondStride;
+};
+constexpr VkStructureType kPortabilitySubsetFeaturesType =
+    static_cast<VkStructureType>(1000163000); // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR
 
 bool Device_Extension_Available(VkPhysicalDevice device, const char* name) {
 	uint32_t count = 0;
@@ -521,9 +549,21 @@ bool VulkanBackend::Pick_Device() {
 		device_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 	}
 	// Required by spec whenever the physical device advertises it (MoltenVK always does).
+	// The subset also says which of Vulkan's guarantees the device does not keep; the
+	// only one this backend depends on is the image-view swizzle.
 	if (Device_Extension_Available(physical_, "VK_KHR_portability_subset")) {
 		device_extensions.push_back("VK_KHR_portability_subset");
+
+		PortabilitySubsetFeatures portability{};
+		portability.sType = kPortabilitySubsetFeaturesType;
+		VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+		features.pNext = &portability;
+		vkGetPhysicalDeviceFeatures2(physical_, &features);
+		view_swizzle_ = portability.imageViewFormatSwizzle == VK_TRUE;
 	}
+	// Lets a swizzle-capable device (any Linux driver) run the CPU expansion path
+	// that MoltenVK forces, so the two are covered by the same tests.
+	if (std::getenv("ZH_SPIKE_NO_VIEW_SWIZZLE") != nullptr) view_swizzle_ = false;
 
 	VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
 	dci.queueCreateInfoCount = 1;
@@ -1021,7 +1061,11 @@ struct FormatPlan {
 	uint32_t block_bytes = 4; // bytes per block (or per texel when block_size == 1)
 };
 
-FormatPlan Plan_For(TextureFormat format) {
+// view_swizzle: whether the device permits a non-identity VkImageView component
+// mapping. MoltenVK's portability subset reports imageViewFormatSwizzle as false
+// -- Metal has no equivalent -- so on Apple the channel expansion D3D8 defines
+// for L8/A8/A8L8/X8R8G8B8 has to happen on the CPU at upload instead.
+FormatPlan Plan_For(TextureFormat format, bool view_swizzle) {
 	FormatPlan p;
 	const VkComponentMapping lll1{VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R,
 	                              VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_ONE};
@@ -1044,7 +1088,11 @@ FormatPlan Plan_For(TextureFormat format) {
 		// Same bits, but the X channel is not alpha: D3D8 samples 1.0 for it, so the
 		// stored byte has to be swizzled away or a stale byte becomes transparency.
 		p.vk = VK_FORMAT_B8G8R8A8_UNORM;
-		p.swizzle.a = VK_COMPONENT_SWIZZLE_ONE;
+		if (view_swizzle) {
+			p.swizzle.a = VK_COMPONENT_SWIZZLE_ONE;
+		} else {
+			p.expand_to_bgra8 = true;
+		}
 		p.block_bytes = 4;
 		break;
 	case TextureFormat::R8G8B8:
@@ -1068,19 +1116,22 @@ FormatPlan Plan_For(TextureFormat format) {
 		p.block_bytes = 2;
 		break;
 	case TextureFormat::L8:
-		p.vk = VK_FORMAT_R8_UNORM;
-		p.swizzle = lll1;
-		p.block_bytes = 1;
+		p.vk = view_swizzle ? VK_FORMAT_R8_UNORM : VK_FORMAT_B8G8R8A8_UNORM;
+		p.swizzle = view_swizzle ? lll1 : p.swizzle;
+		p.expand_to_bgra8 = !view_swizzle;
+		p.block_bytes = view_swizzle ? 1 : 4;
 		break;
 	case TextureFormat::A8:
-		p.vk = VK_FORMAT_R8_UNORM;
-		p.swizzle = zero_a;
-		p.block_bytes = 1;
+		p.vk = view_swizzle ? VK_FORMAT_R8_UNORM : VK_FORMAT_B8G8R8A8_UNORM;
+		p.swizzle = view_swizzle ? zero_a : p.swizzle;
+		p.expand_to_bgra8 = !view_swizzle;
+		p.block_bytes = view_swizzle ? 1 : 4;
 		break;
 	case TextureFormat::A8L8:
-		p.vk = VK_FORMAT_R8G8_UNORM;
-		p.swizzle = lllg;
-		p.block_bytes = 2;
+		p.vk = view_swizzle ? VK_FORMAT_R8G8_UNORM : VK_FORMAT_B8G8R8A8_UNORM;
+		p.swizzle = view_swizzle ? lllg : p.swizzle;
+		p.expand_to_bgra8 = !view_swizzle;
+		p.block_bytes = view_swizzle ? 2 : 4;
 		break;
 	case TextureFormat::V8U8:
 		p.vk = VK_FORMAT_R8G8_SNORM;
@@ -1107,7 +1158,8 @@ FormatPlan Plan_For(TextureFormat format) {
 	return p;
 }
 
-// CPU expansion for the three formats with no Vulkan equivalent. Output is
+// CPU expansion for the formats with no Vulkan equivalent, and for the
+// swizzle-expanded ones when the device has no view swizzle. Output is
 // B8G8R8A8, i.e. D3DFMT_A8R8G8B8 byte order.
 void Expand_To_Bgra8(TextureFormat format, const TextureMip& mip, const uint32_t* palette,
                      std::vector<uint8_t>& out) {
@@ -1130,6 +1182,24 @@ void Expand_To_Bgra8(TextureFormat format, const TextureMip& mip, const uint32_t
 			a = static_cast<uint8_t>((entry >> 24) & 0xff);
 			break;
 		}
+		case TextureFormat::X8R8G8B8:
+			b = src[i * 4 + 0];
+			g = src[i * 4 + 1];
+			r = src[i * 4 + 2];
+			// a stays 255: the X byte is not alpha.
+			break;
+		case TextureFormat::L8:
+			b = g = r = src[i];
+			break;
+		case TextureFormat::A8:
+			// See Plan_For: (0,0,0,A) is D3D9/DXGI's rule, not a documented D3D8 one.
+			b = g = r = 0;
+			a = src[i];
+			break;
+		case TextureFormat::A8L8:
+			b = g = r = src[i * 2 + 0];
+			a = src[i * 2 + 1];
+			break;
 		case TextureFormat::A4R4G4B4: {
 			uint16_t v = 0;
 			std::memcpy(&v, src + i * 2, sizeof(v));
@@ -1153,7 +1223,7 @@ void Expand_To_Bgra8(TextureFormat format, const TextureMip& mip, const uint32_t
 } // namespace
 
 bool VulkanBackend::Supports_Texture_Format(TextureFormat format) const {
-	const FormatPlan plan = Plan_For(format);
+	const FormatPlan plan = Plan_For(format, view_swizzle_);
 	VkFormatProperties props{};
 	vkGetPhysicalDeviceFormatProperties(physical_, plan.vk, &props);
 	return (props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
@@ -1161,7 +1231,7 @@ bool VulkanBackend::Supports_Texture_Format(TextureFormat format) const {
 
 TextureHandle* VulkanBackend::Create_Texture(const TextureDesc& desc) {
 	if (desc.mips == nullptr || desc.mip_count == 0) return nullptr;
-	const FormatPlan plan = Plan_For(desc.format);
+	const FormatPlan plan = Plan_For(desc.format, view_swizzle_);
 	if (!Supports_Texture_Format(desc.format)) {
 		std::fprintf(stderr, "Create_Texture: device cannot sample VkFormat %d\n",
 		             static_cast<int>(plan.vk));

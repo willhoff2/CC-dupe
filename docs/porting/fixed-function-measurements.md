@@ -205,6 +205,18 @@ Findings worth more than a workaround:
   alpha-only texture samples as. The backend produces `(0,0,0,A)`, matching D3D9/DXGI, but that
   is our choice, not a D3D8 fact, so the test asserts alpha and marks the colour **PENDING**
   rather than freezing our own behaviour into a golden value.
+- **MoltenVK has no image-view component swizzle** (`imageViewFormatSwizzle` is `VK_FALSE` in
+  `VkPhysicalDevicePortabilitySubsetFeaturesKHR`; Metal has no equivalent). `L8`, `A8`, `A8L8`
+  and `X8R8G8B8` were being reproduced with a view swizzle, which is a validation error there.
+  The backend now reads the portability feature and falls back to expanding those four to
+  B8G8R8A8 on the CPU at upload. Linux CI runs the tests a second time with
+  `ZH_SPIKE_NO_VIEW_SWIZZLE=1` so the expansion path is asserted against the swizzled result
+  rather than only on the Mac.
+- **MoltenVK forbids a vertex binding stride of zero** (`vertexAttributeAccessBeyondStride`).
+  The spike feeds shader inputs an FVF omits from a one-element constant buffer, which the
+  obvious way expresses as stride 0. It now binds that buffer at `VK_VERTEX_INPUT_RATE_INSTANCE`
+  with a real stride instead; every vertex of the single instance still reads element 0. Any
+  backend using the same trick for absent FVF components will hit this.
 - **`D3DFMT_D24S8` does not exist on MoltenVK.** The backend now picks
   `D24_UNORM_S8_UINT` if the device has it and falls back to `D32_SFLOAT_S8_UINT` otherwise;
   before that it used `D32_SFLOAT`, which has no stencil at all and made the stencil path
@@ -262,7 +274,7 @@ MoltenVK additionally converts SPIR-V to MSL first.
 ## 7. What the spike now implements, and what it does not
 
 Implemented in `spikes/renderer/`, each with a pixel assertion in `zh-fixedfunc-tests`
-(56 assertions; 0 failures; **0 validation-layer messages**; 6 marked PENDING):
+(50 assertions; 0 failures; **0 validation-layer messages**; 6 marked PENDING):
 
 | Area | Implemented |
 |---|---|

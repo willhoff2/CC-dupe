@@ -32,7 +32,7 @@ alpha-blended screen-space quad (`D3DFVF_XYZRHW | D3DFVF_DIFFUSE`, no texture,
 | `src/main.cpp` | driver. Issues the calls in the engine's order, then proves the result by readback |
 | `src/caps_probe.cpp` | `zh-caps-probe`: formats, features and limits, queried. No rendering |
 | `src/feature_probe.cpp` | `zh-feature-probe`: nine rendered cases (DXT, stencil, render targets, depth, blending, two stages, dynamic buffers), each asserted by reading pixels back |
-| `src/fixedfunc_tests.cpp` | `zh-fixedfunc-tests`: 56 pixel assertions over the measured fixed-function subset — the whole cascade, FVF, transforms, lighting, fog, raster state and texture formats |
+| `src/fixedfunc_tests.cpp` | `zh-fixedfunc-tests`: 50 pixel assertions over the measured fixed-function subset — the whole cascade, FVF, transforms, lighting, fog, raster state and texture formats |
 | `src/throughput.cpp` | `zh-throughput`: draw calls/sec, state changes/sec, and pipeline-creation cost |
 | `tools/d3d8-surface-scan.py` | the measurement behind every number in `renderer-surface.md` |
 | `tools/texture-stage-scan.py` | the texture-stage cascade measurement in `fixed-function-measurements.md` |
@@ -133,7 +133,7 @@ Two extra binaries, built by the same project, answer what the two draws above c
 ```sh
 /tmp/zh-renderer-build/zh-caps-probe        # formats, features, limits, portability subset
 /tmp/zh-renderer-build/zh-feature-probe     # nine rendered cases, each checked pixel by pixel
-/tmp/zh-renderer-build/zh-fixedfunc-tests   # 56 fixed-function pixel assertions
+/tmp/zh-renderer-build/zh-fixedfunc-tests   # 50 fixed-function pixel assertions
 /tmp/zh-renderer-build/zh-throughput        # draw calls/sec, state changes/sec, pipeline cost
 ```
 

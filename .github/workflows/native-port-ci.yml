@@ -181,6 +181,10 @@ jobs:
             echo '```'
             build/spike/zh-feature-probe
             build/spike/zh-fixedfunc-tests
+            # MoltenVK has no image-view swizzle, so L8/A8/A8L8/X8R8G8B8 take a CPU
+            # expansion path there. Exercise it here too, where it can be compared
+            # against the swizzled result above.
+            ZH_SPIKE_NO_VIEW_SWIZZLE=1 build/spike/zh-fixedfunc-tests
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
