@@ -248,7 +248,13 @@ jobs:
   #    loader does not report MoltenVK at all, and nothing on Linux would notice it being
   #    deleted.
   #
-  #    Scope, honestly: the macos-14 runner is a VM with a paravirtualised GPU, not the M1 Pro
+  #    macos-15, not macos-14, and that is not cosmetic: on macos-14 Homebrew's MoltenVK 1.4.2
+  #    aborts inside MVKPhysicalDevice::initMetalFeatures against the runner's paravirtualised
+  #    Metal device ("-[AppleParavirtDevice newArgumentEncoderWithLayout:]: unrecognized
+  #    selector"). Even `vulkaninfo` crashes there. macos-15 enumerates the device fine. Measured,
+  #    see the PR description.
+  #
+  #    Scope, honestly: the runner is a VM with a paravirtualised GPU, not the M1 Pro
   #    docs/porting/moltenvk-findings.md was measured on, and MoltenVK is a translation layer, so
   #    the rasterisation need not be bit-identical to llvmpipe's (on real hardware it was within
   #    1/255). This job therefore asserts:
@@ -261,7 +267,7 @@ jobs:
   #    It does NOT assert pixel equality with the Linux reference: the Linux job owns that.
   renderer-spike-macos:
     name: Renderer spike (macOS arm64, MoltenVK)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - name: Checkout
