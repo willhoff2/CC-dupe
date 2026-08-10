@@ -1,0 +1,38 @@
+name: SCRATCH macOS MoltenVK probe
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - devin/1786400000-native-port-ci
+
+jobs:
+  brew-macos15:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - run: |
+          set -eux
+          brew install molten-vk vulkan-loader vulkan-headers vulkan-tools glslang vulkan-validationlayers
+          sw_vers
+          ICD=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
+          export VK_ICD_FILENAMES="$ICD"
+          export DYLD_LIBRARY_PATH="$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
+          vulkaninfo --summary | head -25 || echo "VULKANINFO FAILED rc=$?"
+
+  old-moltenvk-macos14:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - run: |
+          set -eux
+          brew install vulkan-loader vulkan-headers vulkan-tools glslang
+          for v in 1.2.11 1.3.0; do
+            rm -rf "/tmp/mvk-$v"; mkdir -p "/tmp/mvk-$v"
+            curl -sSL "https://github.com/KhronosGroup/MoltenVK/releases/download/v$v/MoltenVK-macos.tar" -o "/tmp/mvk-$v.tar" || { echo "no asset for $v"; continue; }
+            tar -xf "/tmp/mvk-$v.tar" -C "/tmp/mvk-$v"
+            find "/tmp/mvk-$v" -name 'MoltenVK_icd.json'
+            ICD=$(find "/tmp/mvk-$v" -name 'MoltenVK_icd.json' | head -1)
+            DIR=$(dirname "$ICD")
+            echo "=== MoltenVK $v"
+            VK_ICD_FILENAMES="$ICD" DYLD_LIBRARY_PATH="$DIR:$(brew --prefix)/lib" vulkaninfo --summary | head -25 || echo "VULKANINFO FAILED for $v"
+          done
