@@ -27,8 +27,7 @@ typedef WCHAR* LPWSTR;
 #define _wcsicmp wcscasecmp
 #define wcsicmp wcscasecmp
 
-// MultiByteToWideChar
-#define CP_ACP 0
-#define MultiByteToWideChar(cp, flags, mbstr, cb, wcstr, cch) mbstowcs(wcstr, mbstr, cch)
-#define WideCharToMultiByte(cp, flags, wcstr, cch, mbstr, cb, defchar, used) wcstombs(mbstr, wcstr, cb)
+// MultiByteToWideChar / WideCharToMultiByte, with the Win32 signature and semantics rather
+// than the mbstowcs()/wcstombs() aliases that used to stand in for them here.
+#include "unicode_compat.h"
 

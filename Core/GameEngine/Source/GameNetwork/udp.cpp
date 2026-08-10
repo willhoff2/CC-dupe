@@ -30,8 +30,9 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
-#include <winsock.h>
+// TheSuperHackers @port BSD sockets behind the Winsock spellings; see
+// docs/porting/sockets-and-text-encoding.md
+#include <Utility/socket_compat.h>
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/GameEngine.h"
@@ -42,6 +43,8 @@
 //-------------------------------------------------------------------------
 
 #ifdef DEBUG_LOGGING
+
+#ifdef _WIN32
 
 #define CASE(x) case (x): return #x;
 
@@ -113,6 +116,20 @@ AsciiString GetWSAErrorString( Int error )
 
 #undef CASE
 
+#else // !_WIN32
+
+// TheSuperHackers @port The BSD socket error space is errno, which has no fixed table of
+// names to switch over. strerror() gives the description rather than the symbolic name, so the
+// log line reads "Connection refused" where Windows logs "WSAECONNREFUSED".
+AsciiString GetWSAErrorString( Int error )
+{
+	AsciiString ret;
+	ret.format("%s (%d)", strerror(error), error);
+	return ret;
+}
+
+#endif // _WIN32
+
 #endif // defined(RTS_DEBUG)
 
 //-------------------------------------------------------------------------
@@ -157,22 +174,18 @@ Int UDP::Bind(UnsignedInt IP,UnsignedShort Port)
   addr.sin_port=Port;
   addr.sin_addr.s_addr=IP;
   fd=socket(AF_INET,SOCK_DGRAM,DEFAULT_PROTOCOL);
-  #ifdef _WIN32
   if (fd==SOCKET_ERROR)
     fd=-1;
-  #endif
   if (fd==-1)
     return(UNKNOWN);
 
   retval=bind(fd,(struct sockaddr *)&addr,sizeof(addr));
 
-  #ifdef _WIN32
   if (retval==SOCKET_ERROR)
 	{
     retval=-1;
 		m_lastError = WSAGetLastError();
 	}
-  #endif
   if (retval==-1)
   {
     status=GetStatus();
@@ -180,7 +193,7 @@ Int UDP::Bind(UnsignedInt IP,UnsignedShort Port)
     return(status);
   }
 
-  int namelen=sizeof(addr);
+  socklen_t namelen=sizeof(addr);
   getsockname(fd, (struct sockaddr *)&addr, &namelen);
 
   myIP=ntohl(addr.sin_addr.s_addr);
@@ -247,7 +260,6 @@ Int UDP::Write(const unsigned char *msg,UnsignedInt len,UnsignedInt IP,UnsignedS
 
   ClearStatus();
   retval=sendto(fd,(const char *)msg,len,0,(struct sockaddr *)&to,sizeof(to));
-  #ifdef _WIN32
   if (retval==SOCKET_ERROR)
 	{
     retval=-1;
@@ -257,7 +269,6 @@ Int UDP::Write(const unsigned char *msg,UnsignedInt len,UnsignedInt IP,UnsignedS
 #endif
 		DEBUG_ASSERTLOG(errCount++ > 100, ("UDP::Write() - WSA error is %s", GetWSAErrorString(WSAGetLastError()).str()));
 	}
-  #endif
 
   return(retval);
 }
@@ -265,12 +276,11 @@ Int UDP::Write(const unsigned char *msg,UnsignedInt len,UnsignedInt IP,UnsignedS
 Int UDP::Read(unsigned char *msg,UnsignedInt len,sockaddr_in *from)
 {
   Int retval;
-  int    alen=sizeof(sockaddr_in);
+  socklen_t alen=sizeof(sockaddr_in);
 
   if (from!=nullptr)
   {
     retval=recvfrom(fd,(char *)msg,len,0,(struct sockaddr *)from,&alen);
-    #ifdef _WIN32
     if (retval == SOCKET_ERROR)
 		{
 			if (WSAGetLastError() != WSAEWOULDBLOCK)
@@ -286,12 +296,10 @@ Int UDP::Read(unsigned char *msg,UnsignedInt len,sockaddr_in *from)
 				retval = 0;
 			}
 		}
-    #endif
   }
   else
   {
     retval=recvfrom(fd,(char *)msg,len,0,nullptr,nullptr);
-    #ifdef _WIN32
     if (retval==SOCKET_ERROR)
 		{
 			if (WSAGetLastError() != WSAEWOULDBLOCK)
@@ -307,7 +315,6 @@ Int UDP::Read(unsigned char *msg,UnsignedInt len,sockaddr_in *from)
 				retval = 0;
 			}
 		}
-    #endif
   }
   return(retval);
 }
@@ -322,6 +329,9 @@ void UDP::ClearStatus()
 	m_lastError = 0;
 }
 
+
+// TheSuperHackers @port m_lastError holds a Winsock error code on Windows and an errno value
+// off it, so the two halves of this switch stay separate.
 UDP::sockStat UDP::GetStatus()
 {
 	Int status = m_lastError;
@@ -376,8 +386,12 @@ UDP::sockStat UDP::GetStatus()
       return ALREADY;
     case EAGAIN:
       return AGAIN;
+    // TheSuperHackers @port EWOULDBLOCK and EAGAIN are the same value on Linux and macOS; the
+    // two labels are only distinct on the systems this code was originally written for.
+#if EWOULDBLOCK != EAGAIN
     case EWOULDBLOCK:
       return WOULDBLOCK;
+#endif
     case EBADF:
       return BADF;
     default:
@@ -508,7 +522,8 @@ Int UDP::SetOutputBuffer(UnsignedInt bytes)
 
 int UDP::GetInputBuffer()
 {
-   int retval,arg=0,len=sizeof(int);
+   int retval,arg=0;
+   socklen_t len=sizeof(int);
 
    retval=getsockopt(fd,SOL_SOCKET,SO_RCVBUF,
      (char *)&arg,&len);
@@ -518,7 +533,8 @@ int UDP::GetInputBuffer()
 
 int UDP::GetOutputBuffer()
 {
-   int retval,arg=0,len=sizeof(int);
+   int retval,arg=0;
+   socklen_t len=sizeof(int);
 
    retval=getsockopt(fd,SOL_SOCKET,SO_SNDBUF,
      (char *)&arg,&len);

@@ -29,7 +29,13 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+// Off Windows, MultiByteToWideChar/WideCharToMultiByte come from Utility/unicode_compat.h,
+// which BaseTypeCore.h already pulls in; see docs/porting/sockets-and-text-encoding.md.
+#ifdef _WIN32
 #include <windows.h>
+#endif
+
+#include <wchar.h>
 
 //-------------------------------------------------------------------------
 

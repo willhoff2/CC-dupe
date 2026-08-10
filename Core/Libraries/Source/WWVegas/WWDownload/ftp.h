@@ -23,7 +23,9 @@
 //#include "../resource.h"       // main symbols
 
 #include <cstddef>
-#include <winsock.h>
+// TheSuperHackers @port BSD sockets behind the Winsock spellings; see
+// docs/porting/sockets-and-text-encoding.md
+#include <Utility/socket_compat.h>
 #include <Utility/stdio_adapter.h>
 
 #include "ftpdefs.h"

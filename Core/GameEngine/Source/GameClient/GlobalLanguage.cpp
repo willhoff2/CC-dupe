@@ -53,7 +53,9 @@
 #include "PreRTS.h"
 
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include "Common/AddonCompat.h"
 #include "Common/INI.h"
@@ -139,6 +141,7 @@ GlobalLanguage::GlobalLanguage()
 
 GlobalLanguage::~GlobalLanguage()
 {
+#ifdef _WIN32
 	StringList::iterator it = m_localFonts.begin();
 	while( it != m_localFonts.end())
 	{
@@ -147,6 +150,7 @@ GlobalLanguage::~GlobalLanguage()
 		//SendMessage( HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
 		++it;
 	}
+#endif
 }
 
 void GlobalLanguage::init()
@@ -159,6 +163,14 @@ void GlobalLanguage::init()
 		ini.loadFileDirectory( fname, INI_LOAD_OVERWRITE, nullptr );
 	}
 
+	// TheSuperHackers @port AddFontResource() installs a font file into the GDI font namespace
+	// for the lifetime of the process, so that the GDI font rasteriser used by the W3D font
+	// engine can find the language pack's fonts by family name. There is no process-scoped
+	// equivalent off Windows -- fontconfig and CoreText both want the file loaded into the text
+	// system that will rasterise it -- so this is deliberately left as a no-op rather than
+	// approximated. It becomes real work when the font rasteriser is ported, and the file names
+	// parsed out of Language.ini are kept in m_localFonts either way.
+#ifdef _WIN32
 	StringList::iterator it = m_localFonts.begin();
 	while( it != m_localFonts.end())
 	{
@@ -173,6 +185,7 @@ void GlobalLanguage::init()
 		}
 		++it;
 	}
+#endif
 
 	// override values with user preferences
 	OptionPreferences optionPref;

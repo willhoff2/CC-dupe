@@ -182,8 +182,8 @@ change:
 | Wall-clock structs in interfaces | `GameState.h`, `Recorder.h` | `SYSTEMTIME` in saved-game and replay records — also a **file-format** concern, not just an API one |
 | ~~Threading primitives~~ | `CriticalSection.h` | **done** — [`timing-and-threading.md`](timing-and-threading.md). `CRITICAL_SECTION` is recursive, so it is `std::recursive_mutex`. This row's "very large fan-out" was wrong: 8 including files, no headers |
 | Crash reporting | `StackDump.h`, `MiniDumper.cpp` | `EXCEPTION_POINTERS`, DbgHelp, SEH |
-| Text encoding | `ThreadUtils.cpp`, `GlobalLanguage.cpp` | `MultiByteToWideChar`, font registration |
-| Winsock | `udp.cpp`, `Transport.cpp`, `IPEnumeration.cpp` | BSD sockets shim |
+| ~~Text encoding~~ | ~~`ThreadUtils.cpp`, `GlobalLanguage.cpp`~~ | done, see [sockets-and-text-encoding.md](sockets-and-text-encoding.md) |
+| ~~Winsock~~ | ~~`udp.cpp`, `Transport.cpp`, `IPEnumeration.cpp`~~ | done, see [sockets-and-text-encoding.md](sockets-and-text-encoding.md) |
 | SNMP / COM / ATL / DirectInput | `StagingRoomGameInfo.cpp`, `WebBrowser.h`, `FEBDispatch.h` | subsystem-level decisions, not header moves |
 
 ## Shim status
