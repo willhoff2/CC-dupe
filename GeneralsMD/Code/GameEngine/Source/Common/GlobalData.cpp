@@ -32,6 +32,10 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+#include <windows.h>
+#include <shlobj.h>
+
 #include "WW3D2/ww3d.h"
 #include "WW3D2/texturefilter.h"
 

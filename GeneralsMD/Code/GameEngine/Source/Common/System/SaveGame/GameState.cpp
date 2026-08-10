@@ -29,6 +29,10 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"
+
+// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+#include <io.h>
+
 #include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GameEngine.h"

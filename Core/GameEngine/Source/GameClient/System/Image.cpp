@@ -33,6 +33,9 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+#include <windows.h>
+
 #define DEFINE_IMAGE_STATUS_NAMES
 #include "Lib/BaseType.h"
 #include "Common/Debug.h"

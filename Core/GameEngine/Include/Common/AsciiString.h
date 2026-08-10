@@ -46,6 +46,7 @@
 #pragma once
 
 #include <stdarg.h>
+#include <string.h>		// for _stricmp, which used to arrive via PreRTS.h's <windows.h>
 #include "Lib/BaseType.h"
 #include "Common/Debug.h"
 #include "Common/Errors.h"

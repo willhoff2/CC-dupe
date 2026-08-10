@@ -19,6 +19,8 @@
 // This file contains string macros and alias functions to help compiling on non-windows platforms
 #pragma once
 #include <ctype.h>
+#include <string.h>
+#include <strings.h>
 
 typedef const char* LPCSTR;
 typedef char* LPSTR;
@@ -35,4 +37,10 @@ inline char *_strlwr(char *str) {
 #define stricmp strcasecmp
 #define strnicmp strncasecmp
 #define strcmpi strcasecmp
+
+// TheSuperHackers @port The underscore-prefixed MSVC spellings. The engine uses both; they used
+// to be supplied off Windows by the probe's stand-in <windows.h>, which real code cannot rely on.
+#define _stricmp strcasecmp
+#define _strnicmp strncasecmp
+#define _strcmpi strcasecmp
 

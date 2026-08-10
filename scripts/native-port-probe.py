@@ -17,6 +17,10 @@ Two modes, because they answer different questions:
 Translation unit lists come from the CMake source lists, not from `rglob`, so the probe
 measures exactly what the real build compiles and does not report on dead files.
 
+By default the renderer, audio, device and entry-point targets are excluded, because their
+numbers are much worse and folding them into the headline figure would hide movement in the
+engine proper. `--include-renderer` adds them and labels their contribution separately.
+
 Usage:
     python3 scripts/native-port-probe.py [--with-shims] [--report report.md] [--jobs N]
                                         [--json results.json]
@@ -49,6 +53,8 @@ FETCHED_DEP_INCLUDES = [
     "gamespy-src/include",
     "lzhl-src",
     "miles-src",
+    # The Miles headers live one level down; WWAudio includes them as <mss.h>.
+    "miles-src/mss",
 ]
 
 # Include dirs shared by every target.
@@ -144,6 +150,81 @@ TARGETS = [
         includes=tuple(GAMEENGINE_INCLUDES),
         cmake_lists="GeneralsMD/Code/GameEngine/CMakeLists.txt",
         cmake_root="GeneralsMD/Code/GameEngine",
+        defines=("RTS_ZEROHOUR=1",),
+    ),
+]
+
+# Renderer, audio, device and entry-point code. Kept out of the default target list on purpose:
+# the numbers above are tracked over time, and silently widening their scope would make the
+# history meaningless. Enable with --include-renderer and read the figure as its own thing.
+#
+# These translation units have never been compiled off Windows. They are the code most likely to
+# be unportable (Direct3D 8, DirectSound/Miles, Bink, WinMain), so a bad number here is expected
+# and is still worth having measured.
+
+# `corei_ww3d2` and the other Core renderer/device libraries are CMake INTERFACE libraries: their
+# sources are compiled as part of the game-specific targets, with the game-specific include tree
+# ahead of the Core one (that is how the game copies of e.g. `w3d_file.h`, which Core has no copy
+# of, get found). The probe mirrors that ordering rather than compiling Core in isolation.
+GAME_RENDERER_INCLUDES = [
+    "GeneralsMD/Code/Libraries/Source/WWVegas",
+    "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2",
+    "GeneralsMD/Code/Libraries/Source/WWVegas/WWAudio",
+    "GeneralsMD/Code/Libraries/Source/WWVegas/WWDownload",
+]
+
+RENDERER_INCLUDES = GAME_RENDERER_INCLUDES + WWVEGAS_INCLUDES + [
+    "Core/Libraries/Source/WWVegas/WW3D2",
+    "Core/Libraries/Source/WWVegas/WWAudio",
+    "Core/Libraries/Source/WWVegas/WWDownload",
+]
+
+DEVICE_INCLUDES = GAME_RENDERER_INCLUDES + GAMEENGINE_INCLUDES + [
+    "Core/Libraries/Source/WWVegas/WW3D2",
+    "Core/Libraries/Source/WWVegas/WWAudio",
+    "Core/GameEngineDevice/Include",
+    "GeneralsMD/Code/GameEngineDevice/Include",
+]
+
+RENDERER_TARGETS = [
+    Target(
+        name="Core/Libraries/Source/WWVegas/WW3D2",
+        includes=tuple(RENDERER_INCLUDES),
+        source_dirs=("Core/Libraries/Source/WWVegas/WW3D2",),
+    ),
+    Target(
+        name="Core/Libraries/Source/WWVegas/WWAudio",
+        includes=tuple(RENDERER_INCLUDES),
+        source_dirs=("Core/Libraries/Source/WWVegas/WWAudio",),
+    ),
+    Target(
+        name="Core/Libraries/Source/WWVegas/WWDownload",
+        includes=tuple(RENDERER_INCLUDES),
+        source_dirs=("Core/Libraries/Source/WWVegas/WWDownload",),
+    ),
+    Target(
+        name="GeneralsMD/Code/Libraries/Source/WWVegas",
+        includes=tuple(RENDERER_INCLUDES),
+        source_dirs=("GeneralsMD/Code/Libraries/Source/WWVegas",),
+    ),
+    Target(
+        name="Core/GameEngineDevice",
+        includes=tuple(DEVICE_INCLUDES),
+        cmake_lists="Core/GameEngineDevice/CMakeLists.txt",
+        cmake_root="Core/GameEngineDevice",
+        defines=("RTS_ZEROHOUR=1",),
+    ),
+    Target(
+        name="GeneralsMD/Code/GameEngineDevice",
+        includes=tuple(DEVICE_INCLUDES),
+        cmake_lists="GeneralsMD/Code/GameEngineDevice/CMakeLists.txt",
+        cmake_root="GeneralsMD/Code/GameEngineDevice",
+        defines=("RTS_ZEROHOUR=1",),
+    ),
+    Target(
+        name="GeneralsMD/Code/Main",
+        includes=tuple(DEVICE_INCLUDES) + ("GeneralsMD/Code/Main",),
+        source_dirs=("GeneralsMD/Code/Main",),
         defines=("RTS_ZEROHOUR=1",),
     ),
 ]
@@ -248,6 +329,10 @@ def probe(job):
 CMAKE_SOURCE_RE = re.compile(r"^\s+(Source/\S+\.cpp)\s*$")
 
 
+def targets(include_renderer):
+    return TARGETS + RENDERER_TARGETS if include_renderer else TARGETS
+
+
 def cmake_sources(target):
     """Translation units CMake actually compiles, i.e. list entries that are not commented out."""
     text = (REPO_ROOT / target.cmake_lists).read_text().splitlines()
@@ -263,10 +348,10 @@ def cmake_sources(target):
     return sorted(set(sources))
 
 
-def collect_jobs(deps_dir, with_shims):
+def collect_jobs(deps_dir, with_shims, include_renderer=False):
     extra = tuple(dep_includes(deps_dir))
     jobs = []
-    for target in TARGETS:
+    for target in targets(include_renderer):
         if target.cmake_lists:
             sources = cmake_sources(target)
         else:
@@ -277,7 +362,7 @@ def collect_jobs(deps_dir, with_shims):
     return jobs
 
 
-def render_report(results, with_shims, deps_dir, deps_present):
+def render_report(results, with_shims, deps_dir, deps_present, include_renderer=False):
     total = len(results)
     clean = [r for r in results if r.ok]
     by_category = collections.Counter()
@@ -297,6 +382,17 @@ def render_report(results, with_shims, deps_dir, deps_present):
         f"`clang++ {' '.join(CLANG_FLAGS)}` (no Windows SDK, no Wine, no MSVC).",
         "",
     ]
+    if include_renderer:
+        renderer_names = {t.name for t in RENDERER_TARGETS}
+        renderer = [r for r in results if r.target in renderer_names]
+        renderer_clean = sum(1 for r in renderer if r.ok)
+        lines += [
+            f"Scope: **extended**. The renderer/audio/device/entry-point targets "
+            f"({', '.join(sorted(renderer_names))}) are included; they are excluded by default. "
+            f"They contribute **{renderer_clean} / {len(renderer)}** of the totals below, and "
+            "have never been compiled off Windows at all.",
+            "",
+        ]
     if with_shims:
         lines += [
             "Mode: **shimmed**. `scripts/native-port-shims/` supplies declaration-only "
@@ -341,7 +437,7 @@ def render_report(results, with_shims, deps_dir, deps_present):
 
     lines += ["", "## Per-target breakdown", "",
               "| Target | Clean | Total | Clean % |", "|---|---:|---:|---:|"]
-    per_target = collections.OrderedDict((t.name, [0, 0]) for t in TARGETS)
+    per_target = collections.OrderedDict((t.name, [0, 0]) for t in targets(include_renderer))
     for result in results:
         per_target[result.target][1] += 1
         if result.ok:
@@ -396,6 +492,10 @@ def main():
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--with-shims", action="store_true",
                         help="put scripts/native-port-shims/ on the include path")
+    parser.add_argument("--include-renderer", action="store_true",
+                        help="also probe WW3D2, WWAudio, WWDownload, GameEngineDevice and Main, "
+                             "which are excluded by default because they widen the scope of the "
+                             "headline numbers")
     parser.add_argument("--deps-dir", default=str(DEFAULT_DEPS_DIR),
                         help="CMake FetchContent _deps directory to take dx8/gamespy/miles/lzhl "
                              "headers from")
@@ -406,7 +506,7 @@ def main():
         deps_dir = None
     deps_present = [d for d in FETCHED_DEP_INCLUDES if deps_dir and (deps_dir / d).is_dir()]
 
-    jobs = collect_jobs(deps_dir, args.with_shims)
+    jobs = collect_jobs(deps_dir, args.with_shims, args.include_renderer)
     if not jobs:
         print("No sources found", file=sys.stderr)
         return 1
@@ -414,7 +514,8 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         results = list(pool.map(probe, jobs))
 
-    report = render_report(results, args.with_shims, deps_dir, deps_present)
+    report = render_report(results, args.with_shims, deps_dir, deps_present,
+                           args.include_renderer)
     pathlib.Path(args.report).write_text(report)
     if args.json_out:
         pathlib.Path(args.json_out).write_text(

@@ -18,6 +18,9 @@
 
 #pragma once
 
+// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+#include <windows.h>
+
 // Helper class that allows you to start a worker process and retrieve its exit code
 // and console output as a string.
 // It also makes sure that the started process is killed in case our process exits in any way.

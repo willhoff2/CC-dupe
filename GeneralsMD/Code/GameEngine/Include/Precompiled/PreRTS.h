@@ -35,59 +35,26 @@
 class STLSpecialAlloc;
 
 
-// We actually don't use Windows for much other than timeGetTime, but it was included in 40
-// different .cpp files, so I bit the bullet and included it here.
-// PLEASE DO NOT ABUSE WINDOWS OR IT WILL BE REMOVED ENTIRELY. :-)
 //--------------------------------------------------------------------------------- System Includes
-#define WIN32_LEAN_AND_MEAN
-// TheSuperHackers @build JohnsterID 05/01/2026 Add ATL compatibility for MinGW-w64 builds
-#if defined(__GNUC__) && defined(_WIN32)
-    #include <Utility/atl_compat.h>
-#endif
-#include <atlbase.h>
-#include <windows.h>
-
+// TheSuperHackers @port The Win32 header block that used to live here (windows.h, atlbase.h,
+// imagehlp.h, dinput.h and ~20 more) has been pushed down into the translation units that
+// actually use those APIs. Do not add platform headers back to this file: it is force-included
+// into every GameEngine translation unit, so anything here is a dependency of all of them.
+// See docs/porting/prerts-win32-surgery.md.
 #include <assert.h>
 #include <ctype.h>
-#include <direct.h>
-#include <excpt.h>
 #include <float.h>
 #include <Utility/fstream_adapter.h>
-#include <imagehlp.h>
-#include <io.h>
 #include <limits.h>
-#include <lmcons.h>
-#if defined(_MSC_VER) && _MSC_VER < 1300
-#include <mapicode.h>
-#endif
 #include <math.h>
 #include <memory.h>
-#include <mmsystem.h>
-#include <objbase.h>
-#include <ocidl.h>
-#include <process.h>
-#include <shellapi.h>
-#include <shlobj.h>
-#include <shlguid.h>
-#include <snmp.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
-#include <sys/timeb.h>
 #include <sys/types.h>
-#include <tchar.h>
 #include <time.h>
-#include <vfw.h>
-#include <winerror.h>
-#include <wininet.h>
-#include <winreg.h>
-
-#ifndef DIRECTINPUT_VERSION
-#	define DIRECTINPUT_VERSION	0x800
-#endif
-
-#include <dinput.h>
 
 //------------------------------------------------------------------------------------ STL Includes
 // srj sez: no, include STLTypesdefs below, instead, thanks
@@ -128,7 +95,3 @@ class STLSpecialAlloc;
 
 #include "Common/Thing.h"
 #include "Common/UnicodeString.h"
-
-#if defined(__GNUC__) && defined(_WIN32)
-    #pragma GCC diagnostic pop
-#endif

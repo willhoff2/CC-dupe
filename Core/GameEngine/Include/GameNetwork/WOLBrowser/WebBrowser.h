@@ -43,6 +43,11 @@
 #pragma once
 
 #include "Common/SubsystemInterface.h"
+// TheSuperHackers @port ATL compatibility used to arrive via PreRTS.h, which no longer includes
+// platform headers; see docs/porting/prerts-win32-surgery.md
+#if defined __MINGW32__
+#include "Utility/atl_compat.h"
+#endif
 #include <atlbase.h>
 #include <windows.h>
 #include <Common/GameMemory.h>

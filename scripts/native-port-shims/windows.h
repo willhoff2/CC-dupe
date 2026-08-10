@@ -15,18 +15,8 @@
 // redeclaring them, so the shims and the real compat layer cannot drift apart.
 #include <Utility/compat.h>
 
-// Spellings the engine uses that `Utility/string_compat.h` does not alias.
-#define _stricmp   strcasecmp
-#define _strnicmp  strncasecmp
-#define _strcmpi   strcasecmp
-#define _snprintf  snprintf
-#define _vsnprintf vsnprintf
-#define _isnan     isnan
-#define _finite    isfinite
-#define _itoa(v, buf, radix) (sprintf((buf), "%d", (v)), (buf))
-#define itoa       _itoa
-#define __max(a, b) ((a) > (b) ? (a) : (b))
-#define __min(a, b) ((a) < (b) ? (a) : (b))
+// MSVC CRT spellings live in this directory's <stdlib.h> / <stdio.h> stand-ins, not here: a real
+// <windows.h> does not declare them either, and PreRTS.h no longer drags <windows.h> everywhere.
 
 // ---------------------------------------------------------------- calling conventions
 #define WINAPI

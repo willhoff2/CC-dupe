@@ -52,6 +52,9 @@
 //-----------------------------------------------------------------------------
 #include "PreRTS.h"
 
+// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+#include <windows.h>
+
 #include "Common/AddonCompat.h"
 #include "Common/INI.h"
 #include "Common/Registry.h"
