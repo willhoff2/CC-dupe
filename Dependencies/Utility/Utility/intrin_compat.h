@@ -78,12 +78,22 @@ static inline unsigned int rotl32(unsigned int value, int shift)
 
 #include <cstdint>
 
+// __has_builtin must never appear in an expression the preprocessor might still tokenize on a
+// compiler that does not provide it: MSVC expands the unknown identifier to 0 and then chokes on
+// the argument list. Route every query through this macro so the token only survives where it is
+// actually understood.
+#ifdef __has_builtin
+#define RTS_HAS_BUILTIN(x) __has_builtin(x)
+#else
+#define RTS_HAS_BUILTIN(x) 0
+#endif
+
 // Width-explicit rotate. Prefer this over _lrotl: the MS intrinsic is declared over
 // `unsigned long`, which is 64 bits under LP64, so callers that need 32-bit rotation
 // semantics (CRC) would silently change behaviour off Windows.
 static inline uint32_t rotl32(uint32_t value, int shift)
 {
-#if defined(__has_builtin) && __has_builtin(__builtin_rotateleft32)
+#if RTS_HAS_BUILTIN(__builtin_rotateleft32)
     return __builtin_rotateleft32(value, shift);
 #else
     shift &= 31;
@@ -94,7 +104,7 @@ static inline uint32_t rotl32(uint32_t value, int shift)
 // Only define the shim when the compiler does not already provide the intrinsic. Clang
 // predeclares it under -fms-extensions / -fms-compatibility, but not otherwise, so gate on the
 // builtin itself rather than on the compiler identity.
-#if !defined(_lrotl) && !defined(_WIN32) && !(defined(__has_builtin) && __has_builtin(_lrotl))
+#if !defined(_lrotl) && !defined(_WIN32) && !RTS_HAS_BUILTIN(_lrotl)
 static inline uint32_t _lrotl(uint32_t value, int shift)
 {
     return rotl32(value, shift);
@@ -112,9 +122,9 @@ static inline uint64_t _rdtsc()
 {
 #ifdef _WIN32
     return __rdtsc();
-#elif defined(__has_builtin) && __has_builtin(__builtin_readcyclecounter)
+#elif RTS_HAS_BUILTIN(__builtin_readcyclecounter)
     return __builtin_readcyclecounter();
-#elif defined(__has_builtin) && __has_builtin(__builtin_ia32_rdtsc)
+#elif RTS_HAS_BUILTIN(__builtin_ia32_rdtsc)
     return __builtin_ia32_rdtsc();
 #else
 #error "No implementation for _rdtsc"
@@ -125,29 +135,21 @@ static inline uint64_t _rdtsc()
 #ifdef _WIN32
 #include <intrin.h>
 #pragma intrinsic(_ReturnAddress)
-#elif defined(__has_builtin) && __has_builtin(_ReturnAddress)
+#elif RTS_HAS_BUILTIN(_ReturnAddress)
 // Already provided as a compiler builtin (clang under -fms-extensions / -fms-compatibility).
-#elif defined(__has_builtin)
-    #if __has_builtin(__builtin_return_address)
-    static inline uintptr_t _ReturnAddress()
-    {
-        return reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-    }
-    #else
-    #error "No implementation for _ReturnAddress"
-    #endif
+#elif RTS_HAS_BUILTIN(__builtin_return_address)
+static inline uintptr_t _ReturnAddress()
+{
+    return reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+}
 #else
 #error "No implementation for _ReturnAddress"
 #endif
 
-#if defined(__has_builtin)
-    #if  __has_builtin(__builtin_debugtrap)
-    #define __debugbreak() __builtin_debugtrap()
-    #elif __has_builtin(__builtin_trap)
-    #define __debugbreak() __builtin_trap()
-    #else
-    #error "No implementation for __debugbreak"
-    #endif
+#if RTS_HAS_BUILTIN(__builtin_debugtrap)
+#define __debugbreak() __builtin_debugtrap()
+#elif RTS_HAS_BUILTIN(__builtin_trap)
+#define __debugbreak() __builtin_trap()
 #elif !defined(_MSC_VER)
 #error "No implementation for __debugbreak"
 #endif
