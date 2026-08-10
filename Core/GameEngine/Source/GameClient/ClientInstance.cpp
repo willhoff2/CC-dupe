@@ -17,15 +17,49 @@
 */
 #include "PreRTS.h"
 
+#ifdef _WIN32
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
 #include <windows.h>
+#else
+#include "WWLib/platform/platform_process.h"
+#endif
+
 #include "GameClient/ClientInstance.h"
 
 #define GENERALS_GUID "685EAFF2-3216-4265-B047-251C5F4B82F3"
 
 namespace rts
 {
-HANDLE ClientInstance::s_mutexHandle = nullptr;
+namespace
+{
+// TheSuperHackers @port The single instance test, and only that test, differs by platform. A
+// Win32 named mutex vanishes with the process that created it; the lock file used elsewhere does
+// not, so the lock rather than the file is what marks an instance as running. The crash
+// semantics are not identical - see docs/porting/process-and-crash-seam.md.
+// Returns null when the lock could not be taken, with alreadyExists telling the two reasons
+// apart the way GetLastError() == ERROR_ALREADY_EXISTS does on Windows.
+void* acquireInstanceLock(const char* name, bool& alreadyExists)
+{
+#ifdef _WIN32
+	HANDLE mutexHandle = CreateMutex(nullptr, FALSE, name);
+	alreadyExists = GetLastError() == ERROR_ALREADY_EXISTS;
+	if (alreadyExists && mutexHandle != nullptr)
+	{
+		CloseHandle(mutexHandle);
+		mutexHandle = nullptr;
+	}
+	return mutexHandle;
+#else
+	// flock() cannot say whether the lock is held by another instance or could not be taken at
+	// all, and treating an unusable lock as an instance already running is the safe reading.
+	void* lock = WWPlatform::Instance_Lock_Acquire(name);
+	alreadyExists = lock == nullptr;
+	return lock;
+#endif
+}
+} // anonymous namespace
+
+void* ClientInstance::s_instanceLock = nullptr;
 UnsignedInt ClientInstance::s_instanceIndex = 0;
 
 #if defined(RTS_MULTI_INSTANCE)
@@ -41,8 +75,9 @@ bool ClientInstance::initialize()
 		return true;
 	}
 
-	// Create a mutex with a unique name to Generals in order to determine if our app is already running.
+	// Take a lock with a unique name to Generals in order to determine if our app is already running.
 	// WARNING: DO NOT use this number for any other application except Generals.
+	bool alreadyExists = false;
 	while (true)
 	{
 		if (isMultiInstance())
@@ -50,19 +85,15 @@ bool ClientInstance::initialize()
 			std::string guidStr = getFirstInstanceName();
 			if (s_instanceIndex > 0u)
 			{
+				// TheSuperHackers @port itoa() is an MSVC CRT spelling with no portable equivalent.
 				char idStr[33];
-				itoa(s_instanceIndex, idStr, 10);
+				sprintf(idStr, "%u", s_instanceIndex);
 				guidStr.push_back('-');
 				guidStr.append(idStr);
 			}
-			s_mutexHandle = CreateMutex(nullptr, FALSE, guidStr.c_str());
-			if (GetLastError() == ERROR_ALREADY_EXISTS)
+			s_instanceLock = acquireInstanceLock(guidStr.c_str(), alreadyExists);
+			if (alreadyExists)
 			{
-				if (s_mutexHandle != nullptr)
-				{
-					CloseHandle(s_mutexHandle);
-					s_mutexHandle = nullptr;
-				}
 				// Try again with a new instance.
 				++s_instanceIndex;
 				continue;
@@ -70,14 +101,9 @@ bool ClientInstance::initialize()
 		}
 		else
 		{
-			s_mutexHandle = CreateMutex(nullptr, FALSE, getFirstInstanceName());
-			if (GetLastError() == ERROR_ALREADY_EXISTS)
+			s_instanceLock = acquireInstanceLock(getFirstInstanceName(), alreadyExists);
+			if (alreadyExists)
 			{
-				if (s_mutexHandle != nullptr)
-				{
-					CloseHandle(s_mutexHandle);
-					s_mutexHandle = nullptr;
-				}
 				return false;
 			}
 		}
@@ -89,7 +115,7 @@ bool ClientInstance::initialize()
 
 bool ClientInstance::isInitialized()
 {
-	return s_mutexHandle != nullptr;
+	return s_instanceLock != nullptr;
 }
 
 bool ClientInstance::isMultiInstance()

@@ -176,12 +176,12 @@ change:
 | Area | Files | Needs |
 |---|---|---|
 | ~~High-resolution timing~~ | `FrameRateLimit.cpp`, `ProcessAnimateWindow.cpp`, `LANAPI.cpp` | **done** — [`timing-and-threading.md`](timing-and-threading.md). `LANAPI.cpp` still includes `<windows.h>`, for `GetUserNameA`/`GetComputerNameA`, i.e. the process/identity row |
-| Process / single-instance | `ClientInstance.{h,cpp}`, `WorkerProcess.{h,cpp}`, `MainMenu.cpp` | named mutex, pipes, `_spawnl` → process abstraction |
+| ~~Process / single-instance~~ | `ClientInstance.{h,cpp}`, `WorkerProcess.{h,cpp}`, `MainMenu.cpp` | **done** — see [`process-and-crash-seam.md`](process-and-crash-seam.md) |
 | Registry | `registry.cpp` (both games) | `HKEY`/`RegQueryValueEx` → settings store |
 | Filesystem / paths | `GameStateMap.cpp`, `GameState.cpp`, `Image.cpp`, `INIWebpageURL.cpp`, `MiniDumper.cpp`, `GlobalData.cpp`, `ReplayMenu.cpp` | `WIN32_FIND_DATA`, `_access`, `getcwd`, `SHGetKnownFolderPath`/`CSIDL_*` → path + directory API |
 | Wall-clock structs in interfaces | `GameState.h`, `Recorder.h` | `SYSTEMTIME` in saved-game and replay records — also a **file-format** concern, not just an API one |
 | ~~Threading primitives~~ | `CriticalSection.h` | **done** — [`timing-and-threading.md`](timing-and-threading.md). `CRITICAL_SECTION` is recursive, so it is `std::recursive_mutex`. This row's "very large fan-out" was wrong: 8 including files, no headers |
-| Crash reporting | `StackDump.h`, `MiniDumper.cpp` | `EXCEPTION_POINTERS`, DbgHelp, SEH |
+| ~~Crash reporting~~ | `StackDump.h`, `MiniDumper.cpp` | **done** (Windows-only by design, stub elsewhere) — see [`process-and-crash-seam.md`](process-and-crash-seam.md) |
 | ~~Text encoding~~ | ~~`ThreadUtils.cpp`, `GlobalLanguage.cpp`~~ | done, see [sockets-and-text-encoding.md](sockets-and-text-encoding.md) |
 | ~~Winsock~~ | ~~`udp.cpp`, `Transport.cpp`, `IPEnumeration.cpp`~~ | done, see [sockets-and-text-encoding.md](sockets-and-text-encoding.md) |
 | SNMP / COM / ATL / DirectInput | `StagingRoomGameInfo.cpp`, `WebBrowser.h`, `FEBDispatch.h` | subsystem-level decisions, not header moves |

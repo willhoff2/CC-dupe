@@ -17,9 +17,6 @@
 */
 #include "Lib/BaseType.h"
 
-// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
-#include <windows.h>
-
 namespace rts
 {
 
@@ -52,7 +49,9 @@ public:
 	static const char* getFirstInstanceName();
 
 private:
-	static HANDLE s_mutexHandle;
+	// TheSuperHackers @port The lock is a Win32 named mutex HANDLE on Windows and a locked file
+	// elsewhere; see docs/porting/process-and-crash-seam.md.
+	static void* s_instanceLock;
 	static UnsignedInt s_instanceIndex;
 	static Bool s_isMultiInstance;
 };

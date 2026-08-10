@@ -26,6 +26,8 @@
 
 #if defined(RTS_DEBUG) || defined(IG_DEBUG_STACKTRACE)
 
+#ifdef _WIN32
+
 #pragma pack(push, 8)
 
 #include "Common/StackDump.h"
@@ -635,6 +637,115 @@ void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 
 
 #pragma pack(pop)
+
+#else // !_WIN32
+
+// TheSuperHackers @port The deliberate stub. DbgHelp, the i386 frame walk and the SEH entry
+// points above have no equivalent off Windows, so this side is backtrace()/backtrace_symbols():
+// return addresses and mangled symbol names, no line numbers, no source files, and nothing at
+// all for a frame in a function the linker did not export. That is enough for DEBUG_CRASH and
+// the memory pool leak reports, which are the only callers. See
+// docs/porting/process-and-crash-seam.md.
+
+#include "Common/StackDump.h"
+#include "Common/Debug.h"
+
+#include <execinfo.h>
+#include <stdlib.h>
+
+static void StackDumpDefaultHandler(const char *line)
+{
+	DEBUG_LOG((line));
+}
+
+AsciiString g_LastErrorDump;
+
+void FillStackAddresses(void **addresses, unsigned int count, unsigned int skip)
+{
+	if (addresses == nullptr || count == 0)
+		return;
+
+	const unsigned int wanted = count + skip + 1;
+	void **captured = (void **)::malloc(wanted * sizeof(void *));
+	if (captured == nullptr)
+	{
+		::memset(addresses, 0, count * sizeof(void *));
+		return;
+	}
+
+	// The first frame is this function, hence the extra skip.
+	const unsigned int got = (unsigned int)::backtrace(captured, (int)wanted);
+	const unsigned int first = skip + 1;
+
+	for (unsigned int i = 0; i < count; ++i)
+	{
+		addresses[i] = (first + i < got) ? captured[first + i] : nullptr;
+	}
+
+	::free(captured);
+}
+
+void GetFunctionDetails(void *pointer, char *name, char *filename, unsigned int *linenumber, unsigned int *address)
+{
+	if (name != nullptr)
+	{
+		name[0] = 0;
+		char **symbols = ::backtrace_symbols(&pointer, 1);
+		if (symbols != nullptr)
+		{
+			// The buffer sizes are the caller's; every caller in the engine passes 512 bytes.
+			::strncpy(name, symbols[0], 511);
+			name[511] = 0;
+			::free(symbols);
+		}
+	}
+
+	// No line table is available without a symboliser, so these stay empty rather than wrong.
+	if (filename != nullptr)
+	{
+		filename[0] = 0;
+	}
+	if (linenumber != nullptr)
+	{
+		*linenumber = 0;
+	}
+	if (address != nullptr)
+	{
+		*address = (unsigned int)(uintptr_t)pointer;
+	}
+}
+
+void StackDumpFromAddresses(void **addresses, unsigned int count, void (*callback)(const char *))
+{
+	if (callback == nullptr)
+	{
+		callback = StackDumpDefaultHandler;
+	}
+
+	while ((count--) && (*addresses != nullptr))
+	{
+		char function_name[512];
+		char line[1024];
+		GetFunctionDetails(*addresses, function_name, nullptr, nullptr, nullptr);
+		::snprintf(line, sizeof(line), "  %s 0x%p", function_name, *addresses);
+		if (g_LastErrorDump.isNotEmpty())
+		{
+			g_LastErrorDump.concat(line);
+			g_LastErrorDump.concat("\n");
+		}
+		callback(line);
+		addresses++;
+	}
+}
+
+void StackDump(void (*callback)(const char *))
+{
+	void *addresses[64];
+	FillStackAddresses(addresses, ARRAY_SIZE(addresses), 1);
+	StackDumpFromAddresses(addresses, ARRAY_SIZE(addresses), callback);
+}
+
+#endif // _WIN32
 
 #endif
 

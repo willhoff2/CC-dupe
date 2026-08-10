@@ -18,10 +18,16 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+#ifdef _WIN32
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
 #include <windows.h>
+#else
+#include "WWLib/platform/platform_process.h"
+#endif
 
 #include "Common/WorkerProcess.h"
+
+#ifdef _WIN32
 
 // We need Job-related functions, but these aren't defined in the Windows-headers that VC6 uses.
 // So we define them here and load them dynamically.
@@ -78,6 +84,7 @@ WorkerProcess::WorkerProcess()
 	m_isDone = false;
 }
 
+
 bool WorkerProcess::startProcess(UnicodeString command)
 {
 	m_stdOutput.clear();
@@ -87,9 +94,11 @@ bool WorkerProcess::startProcess(UnicodeString command)
 	SECURITY_ATTRIBUTES saAttr = { sizeof(SECURITY_ATTRIBUTES) };
 	saAttr.bInheritHandle = TRUE;
 	HANDLE writeHandle = nullptr;
-	if (!CreatePipe(&m_readHandle, &writeHandle, &saAttr, 0))
+	HANDLE readHandle = nullptr;
+	if (!CreatePipe(&readHandle, &writeHandle, &saAttr, 0))
 		return false;
-	SetHandleInformation(m_readHandle, HANDLE_FLAG_INHERIT, 0);
+	m_readHandle = readHandle;
+	SetHandleInformation(readHandle, HANDLE_FLAG_INHERIT, 0);
 
 	STARTUPINFOW si = { sizeof(STARTUPINFOW) };
 	si.dwFlags = STARTF_FORCEOFFFEEDBACK; // Prevent cursor wait animation
@@ -104,7 +113,7 @@ bool WorkerProcess::startProcess(UnicodeString command)
 			nullptr, nullptr, &si, &pi))
 	{
 		CloseHandle(writeHandle);
-		CloseHandle(m_readHandle);
+		CloseHandle(readHandle);
 		m_readHandle = nullptr;
 		return false;
 	}
@@ -137,7 +146,7 @@ bool WorkerProcess::isDone() const
 	return m_isDone;
 }
 
-DWORD WorkerProcess::getExitCode() const
+UnsignedInt WorkerProcess::getExitCode() const
 {
 	return m_exitcode;
 }
@@ -154,7 +163,7 @@ bool WorkerProcess::fetchStdOutput()
 		// Call PeekNamedPipe to make sure ReadFile won't block
 		DWORD bytesAvailable = 0;
 		DEBUG_ASSERTCRASH(m_readHandle != nullptr, ("Is not expected null"));
-		BOOL success = PeekNamedPipe(m_readHandle, nullptr, 0, nullptr, &bytesAvailable, nullptr);
+		BOOL success = PeekNamedPipe((HANDLE)m_readHandle, nullptr, 0, nullptr, &bytesAvailable, nullptr);
 		if (!success)
 			return true;
 		if (bytesAvailable == 0)
@@ -165,7 +174,7 @@ bool WorkerProcess::fetchStdOutput()
 
 		DWORD readBytes = 0;
 		char buffer[1024];
-		success = ReadFile(m_readHandle, buffer, ARRAY_SIZE(buffer)-1, &readBytes, nullptr);
+		success = ReadFile((HANDLE)m_readHandle, buffer, ARRAY_SIZE(buffer)-1, &readBytes, nullptr);
 		if (!success)
 			return true;
 		DEBUG_ASSERTCRASH(readBytes != 0, ("expected readBytes to be non null"));
@@ -191,15 +200,17 @@ void WorkerProcess::update()
 	}
 
 	// Pipe broke, that means the process already exited. But we call this just to make sure
-	WaitForSingleObject(m_processHandle, INFINITE);
-	GetExitCodeProcess(m_processHandle, &m_exitcode);
-	CloseHandle(m_processHandle);
+	WaitForSingleObject((HANDLE)m_processHandle, INFINITE);
+	DWORD exitcode = 0;
+	GetExitCodeProcess((HANDLE)m_processHandle, &exitcode);
+	m_exitcode = exitcode;
+	CloseHandle((HANDLE)m_processHandle);
 	m_processHandle = nullptr;
 
-	CloseHandle(m_readHandle);
+	CloseHandle((HANDLE)m_readHandle);
 	m_readHandle = nullptr;
 
-	CloseHandle(m_jobHandle);
+	CloseHandle((HANDLE)m_jobHandle);
 	m_jobHandle = nullptr;
 
 	m_isDone = true;
@@ -212,24 +223,128 @@ void WorkerProcess::kill()
 
 	if (m_processHandle != nullptr)
 	{
-		TerminateProcess(m_processHandle, 1);
-		CloseHandle(m_processHandle);
+		TerminateProcess((HANDLE)m_processHandle, 1);
+		CloseHandle((HANDLE)m_processHandle);
 		m_processHandle = nullptr;
 	}
 
 	if (m_readHandle != nullptr)
 	{
-		CloseHandle(m_readHandle);
+		CloseHandle((HANDLE)m_readHandle);
 		m_readHandle = nullptr;
 	}
 
 	if (m_jobHandle != nullptr)
 	{
-		CloseHandle(m_jobHandle);
+		CloseHandle((HANDLE)m_jobHandle);
 		m_jobHandle = nullptr;
 	}
 
 	m_stdOutput.clear();
 	m_isDone = false;
 }
+
+#else // !_WIN32
+
+// TheSuperHackers @port The same class over an anonymous pipe and a forked child. The Win32 job
+// object has no portable equivalent; see docs/porting/process-and-crash-seam.md for what that
+// costs.
+
+WorkerProcess::WorkerProcess()
+{
+	m_childProcess = nullptr;
+	m_exitcode = 0;
+	m_isDone = false;
+}
+
+bool WorkerProcess::startProcess(UnicodeString command)
+{
+	m_stdOutput.clear();
+	m_isDone = false;
+
+	AsciiString commandLine;
+	commandLine.translate(command);
+
+	m_childProcess = WWPlatform::Child_Process_Start(commandLine.str());
+	return m_childProcess != nullptr;
+}
+
+bool WorkerProcess::isRunning() const
+{
+	return m_childProcess != nullptr;
+}
+
+bool WorkerProcess::isDone() const
+{
+	return m_isDone;
+}
+
+UnsignedInt WorkerProcess::getExitCode() const
+{
+	return m_exitcode;
+}
+
+AsciiString WorkerProcess::getStdOutput() const
+{
+	return m_stdOutput;
+}
+
+bool WorkerProcess::fetchStdOutput()
+{
+	while (true)
+	{
+		char buffer[1024];
+		Int readBytes = WWPlatform::Child_Process_Read(m_childProcess, buffer, ARRAY_SIZE(buffer)-1);
+		if (readBytes < 0)
+		{
+			// The pipe is closed, so the child is done writing.
+			return true;
+		}
+		if (readBytes == 0)
+		{
+			// Child process is still running and we have all output so far
+			return false;
+		}
+
+		// Remove \r, otherwise each new line is doubled when we output it again
+		for (Int i = 0; i < readBytes; i++)
+			if (buffer[i] == '\r')
+				buffer[i] = ' ';
+		buffer[readBytes] = 0;
+		m_stdOutput.concat(buffer);
+	}
+}
+
+void WorkerProcess::update()
+{
+	if (!isRunning())
+		return;
+
+	if (!fetchStdOutput())
+	{
+		// There is still potential output pending
+		return;
+	}
+
+	m_exitcode = WWPlatform::Child_Process_Wait(m_childProcess);
+	WWPlatform::Child_Process_Close(m_childProcess);
+	m_childProcess = nullptr;
+
+	m_isDone = true;
+}
+
+void WorkerProcess::kill()
+{
+	if (!isRunning())
+		return;
+
+	WWPlatform::Child_Process_Kill(m_childProcess);
+	WWPlatform::Child_Process_Close(m_childProcess);
+	m_childProcess = nullptr;
+
+	m_stdOutput.clear();
+	m_isDone = false;
+}
+
+#endif // _WIN32
 

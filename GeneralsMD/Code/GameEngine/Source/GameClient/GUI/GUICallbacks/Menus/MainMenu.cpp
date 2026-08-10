@@ -30,9 +30,6 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
-#include <process.h>
-
 #include "gamespy/ghttp/ghttp.h"
 
 #include "Lib/BaseType.h"
@@ -42,6 +39,7 @@
 #include "Common/NameKeyGenerator.h"
 #include "Common/RandomValue.h"
 #include "Common/OptionPreferences.h"
+#include "Common/ProcessLaunch.h"
 #include "Common/version.h"
 #include "Common/GameLOD.h"
 #include "GameClient/AnimateWindowManager.h"
@@ -1459,10 +1457,10 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 			else if( controlID == worldBuilderID )
 			{
 #if defined RTS_DEBUG
-				if(_spawnl(_P_NOWAIT,"WorldBuilderD.exe","WorldBuilderD.exe", nullptr) < 0)
+				if(!rts::launchProcessDetached("WorldBuilderD.exe"))
 					MessageBoxOk(TheGameText->fetch("GUI:WorldBuilder"), TheGameText->fetch("GUI:WorldBuilderLoadFailed"),nullptr);
 #else
-				if(_spawnl(_P_NOWAIT,"WorldBuilder.exe","WorldBuilder.exe", nullptr) < 0)
+				if(!rts::launchProcessDetached("WorldBuilder.exe"))
 					MessageBoxOk(TheGameText->fetch("GUI:WorldBuilder"), TheGameText->fetch("GUI:WorldBuilderLoadFailed"),nullptr);
 #endif
 			}

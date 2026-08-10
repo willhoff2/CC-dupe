@@ -18,9 +18,6 @@
 
 #pragma once
 
-// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
-#include <windows.h>
-
 // Helper class that allows you to start a worker process and retrieve its exit code
 // and console output as a string.
 // It also makes sure that the started process is killed in case our process exits in any way.
@@ -38,7 +35,7 @@ public:
 	// returns true iff the process exited.
 	bool isDone() const;
 
-	DWORD getExitCode() const;
+	UnsignedInt getExitCode() const;
 	AsciiString getStdOutput() const;
 
 	// Terminate Process if it's running
@@ -50,10 +47,17 @@ private:
 	bool fetchStdOutput();
 
 private:
-	HANDLE m_processHandle;
-	HANDLE m_readHandle;
-	HANDLE m_jobHandle;
+	// TheSuperHackers @port The Win32 members are HANDLEs, kept as void* so that this header does
+	// not need windows.h; off Windows a single opaque child process replaces all three. See
+	// docs/porting/process-and-crash-seam.md.
+#ifdef _WIN32
+	void* m_processHandle;
+	void* m_readHandle;
+	void* m_jobHandle;
+#else
+	void* m_childProcess;
+#endif
 	AsciiString m_stdOutput;
-	DWORD m_exitcode;
+	UnsignedInt m_exitcode;
 	bool m_isDone;
 };
