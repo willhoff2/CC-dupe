@@ -18,6 +18,14 @@ Both are fixed by reviewing the diff and running:
 
 Sites reached through DX8CALL / DX8CALL_HRES / DX8CALL_D3D (and the DX8CALL_RAW* variants) are
 not counted here at all: those *are* the wrapper.
+
+Neither are the D3D8 calls inside the render backend implementation
+(`WW3D2/d3d8renderbackend.cpp`), which the scanner reports as kind "backend": that file is the
+D3D8 side of the RenderBackendClass seam and holding an IDirect3DDevice8 is its job. That is a
+fixed list of implementation files in the scanner (SEAM_FILES), not an allowlist entry with a
+numeric budget, so a D3D8 call appearing in any other file still fails this check - and this
+check additionally fails if the backend implementation stops containing any D3D8 calls at all,
+which would mean the seam files were renamed and the scanner is now blind to them.
 """
 import argparse
 import collections
@@ -43,14 +51,18 @@ def scan():
             raise SystemExit("the D3D8 surface scanner failed")
         sites = json.loads(out.read_text())
     direct = collections.Counter()
+    backend = collections.Counter()
     detail = collections.defaultdict(list)
     for method, entries in sites.items():
         for rel, line, kind in entries:
+            if kind == "backend":
+                backend[rel] += 1
+                continue
             if kind != "direct":
                 continue
             direct[rel] += 1
             detail[rel].append((line, method))
-    return direct, detail
+    return direct, backend, detail
 
 
 def main():
@@ -60,8 +72,9 @@ def main():
                     help="rewrite the allowlist from the current tree")
     args = ap.parse_args()
 
-    direct, detail = scan()
+    direct, backend, detail = scan()
     total = sum(direct.values())
+    backend_total = sum(backend.values())
 
     if args.update:
         existing = json.loads(ALLOWLIST.read_text()) if ALLOWLIST.is_file() else {}
@@ -81,6 +94,9 @@ def main():
     budgets = {f: e["allowed"] for f, e in allow["files"].items()}
 
     failures = []
+    if backend_total == 0:
+        failures.append("the render backend implementation contains no D3D8 calls at all - "
+                        "the scanner's SEAM_FILES list is stale")
     for path in sorted(set(budgets) | set(direct)):
         got, want = direct.get(path, 0), budgets.get(path, 0)
         if got == want:
@@ -93,8 +109,12 @@ def main():
             failures.append(f"{path}: {got} direct D3D8 call sites, allowlist still permits "
                             f"{want} -- tighten the allowlist in this PR")
 
-    print(f"direct (non-wrapper) D3D8 call sites: {total}, allowlist total: {allow['total']}")
+    print(f"direct (non-wrapper, non-backend) D3D8 call sites: {total}, "
+          f"allowlist total: {allow['total']}")
     for path, n in sorted(direct.items(), key=lambda kv: -kv[1])[:15]:
+        print(f"  {n:4d}  {path}")
+    print(f"D3D8 calls inside the backend implementation (seam-owned): {backend_total}")
+    for path, n in sorted(backend.items(), key=lambda kv: -kv[1]):
         print(f"  {n:4d}  {path}")
 
     if failures:

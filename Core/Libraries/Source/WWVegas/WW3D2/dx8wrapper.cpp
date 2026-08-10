@@ -145,8 +145,11 @@ unsigned							DX8Wrapper::render_state_changed;
 bool								DX8Wrapper::FogEnable									= false;
 D3DCOLOR							DX8Wrapper::FogColor										= 0;
 
-IDirect3D8 *					DX8Wrapper::D3DInterface								= nullptr;
-IDirect3DDevice8 *			DX8Wrapper::D3DDevice									= nullptr;
+// The one and only graphics backend.  It is installed at static initialisation time rather
+// than in Init() because callers ask DX8Wrapper whether a device exists before (and after)
+// the wrapper is initialised; acquiring D3D8 and creating a device are what Init() and
+// Create_Device() do to it.
+RenderBackendClass *			DX8Wrapper::RenderBackend							= &TheD3D8RenderBackend;
 IDirect3DSurface8 *			DX8Wrapper::CurrentRenderTarget						= nullptr;
 IDirect3DSurface8 *			DX8Wrapper::CurrentDepthBuffer						= nullptr;
 IDirect3DSurface8 *			DX8Wrapper::DefaultRenderTarget						= nullptr;
@@ -178,10 +181,6 @@ static DynamicVectorClass<StringClass>					_RenderDeviceNameTable;
 static DynamicVectorClass<StringClass>					_RenderDeviceShortNameTable;
 static DynamicVectorClass<RenderDeviceDescClass>	_RenderDeviceDescriptionTable;
 
-
-typedef IDirect3D8* (WINAPI *Direct3DCreate8Type) (UINT SDKVersion);
-Direct3DCreate8Type	Direct3DCreate8Ptr = nullptr;
-HINSTANCE D3D8Lib = nullptr;
 
 DX8_CleanupHook	 *DX8Wrapper::m_pCleanupHook=nullptr;
 #ifdef EXTENDED_STATS
@@ -283,34 +282,17 @@ bool DX8Wrapper::Init(void * hwnd, bool lite)
 	//world_identity;
 	//CurrentFogColor;
 
-	D3DInterface = nullptr;
-	D3DDevice = nullptr;
-
 	WWDEBUG_SAY(("Reset DX8Wrapper statistics"));
 	Reset_Statistics();
 
 	Invalidate_Cached_Render_States();
 
 	if (!lite) {
-		D3D8Lib = LoadLibrary("D3D8.DLL");
-
-		if (D3D8Lib == nullptr) return false;	// Return false at this point if init failed
-
-		Direct3DCreate8Ptr = (Direct3DCreate8Type) GetProcAddress(D3D8Lib, "Direct3DCreate8");
-		if (Direct3DCreate8Ptr == nullptr) return false;
-
 		/*
-		** Create the D3D interface object
+		** Bring up the graphics backend (for D3D8: load D3D8.DLL and create the interface)
 		*/
-		WWDEBUG_SAY(("Create Direct3D8"));
-		{
-			// TheSuperHackers @bugfix xezon 13/06/2025 Front load the system dbghelp.dll to prevent
-			// the graphics driver from potentially loading the old game dbghelp.dll and then crashing the game process.
-			DbgHelpGuard dbgHelpGuard;
-
-			D3DInterface = Direct3DCreate8Ptr(D3D_SDK_VERSION);		// TODO: handle failure cases...
-		}
-		if (D3DInterface == nullptr) {
+		WWDEBUG_SAY(("Open render backend"));
+		if (!RenderBackend->Open()) {
 			return(false);
 		}
 		IsInitted = true;
@@ -328,17 +310,13 @@ bool DX8Wrapper::Init(void * hwnd, bool lite)
 
 void DX8Wrapper::Shutdown()
 {
-	if (D3DDevice) {
+	if (RenderBackend->Has_Device()) {
 
 		Set_Render_Target ((IDirect3DSurface8 *)nullptr);
 		Release_Device();
 	}
 
-	if (D3DInterface) {
-		D3DInterface->Release();
-		D3DInterface=nullptr;
-
-	}
+	RenderBackend->Release_Interface();
 
 	if (CurrentCaps)
 	{
@@ -353,10 +331,7 @@ void DX8Wrapper::Shutdown()
 		}
 	}
 
-	if (D3D8Lib) {
-		FreeLibrary(D3D8Lib);
-		D3D8Lib = nullptr;
-	}
+	RenderBackend->Free_Library();
 
 	_RenderDeviceNameTable.Clear();		 // note - Delete_All() resizes the vector, causing a reallocation.  Clear is better. jba.
 	_RenderDeviceShortNameTable.Clear();
@@ -486,14 +461,14 @@ void DX8Wrapper::Do_Onetime_Device_Dependent_Shutdowns()
 
 bool DX8Wrapper::Create_Device()
 {
-	WWASSERT(D3DDevice==nullptr);	// for now, once you've created a device, you're stuck with it!
+	WWASSERT(!RenderBackend->Has_Device());	// for now, once you've created a device, you're stuck with it!
 
 	D3DCAPS8 caps;
 	if
 	(
 		FAILED
 		(
-			D3DInterface->GetDeviceCaps
+			RenderBackend->GetDeviceCaps
 			(
 				CurRenderDevice,
 				WW3D_DEVTYPE,
@@ -511,7 +486,7 @@ bool DX8Wrapper::Create_Device()
 	(
 		FAILED
 		(
-			D3DInterface->GetAdapterIdentifier
+			RenderBackend->GetAdapterIdentifier
 			(
 				CurRenderDevice,
 				D3DENUM_NO_WHQL_LEVEL,
@@ -550,14 +525,13 @@ bool DX8Wrapper::Create_Device()
 	// the graphics driver from potentially loading the old game dbghelp.dll and then crashing the game process.
 	DbgHelpGuard dbgHelpGuard;
 
-	HRESULT hr=D3DInterface->CreateDevice
+	HRESULT hr=RenderBackend->Create_Device
 	(
 		CurRenderDevice,
 		WW3D_DEVTYPE,
 		_Hwnd,
 		Vertex_Processing_Behavior,
-		&_PresentParameters,
-		&D3DDevice
+		&_PresentParameters
 	);
 
 	if (FAILED(hr))
@@ -573,14 +547,13 @@ bool DX8Wrapper::Create_Device()
 			_PresentParameters.AutoDepthStencilFormat==D3DFMT_D24X8))
 		{
 			_PresentParameters.AutoDepthStencilFormat=D3DFMT_D16;
-			hr = D3DInterface->CreateDevice
+			hr = RenderBackend->Create_Device
 			(
 				CurRenderDevice,
 				WW3D_DEVTYPE,
 				_Hwnd,
 				Vertex_Processing_Behavior,
-				&_PresentParameters,
-				&D3DDevice
+				&_PresentParameters
 			);
 
 			if (FAILED(hr))
@@ -607,7 +580,7 @@ bool DX8Wrapper::Reset_Device(bool reload_assets)
 {
 	WWDEBUG_SAY(("Resetting device."));
 	DX8_THREAD_ASSERT();
-	if ((IsInitted) && (D3DDevice != nullptr)) {
+	if ((IsInitted) && (RenderBackend->Has_Device())) {
 		// Release all non-MANAGED stuff
 		WW3D::_Invalidate_Textures();
 
@@ -659,7 +632,7 @@ bool DX8Wrapper::Reset_Device(bool reload_assets)
 
 void DX8Wrapper::Release_Device()
 {
-	if (D3DDevice) {
+	if (RenderBackend->Has_Device()) {
 
 		for (int a=0;a<MAX_TEXTURE_STAGES;++a)
 		{	//release references to any textures that were used in last rendering call
@@ -690,8 +663,7 @@ void DX8Wrapper::Release_Device()
 		** Release the device
 		*/
 
-		D3DDevice->Release();
-		D3DDevice=nullptr;
+		RenderBackend->Release_Device();
 	}
 }
 
@@ -730,7 +702,7 @@ void DX8Wrapper::Enumerate_Devices()
 			DX8CALL_RAW_D3D(GetDeviceCaps(adapter_index,WW3D_DEVTYPE,&desc.Caps));
 			DX8CALL_RAW_D3D(GetAdapterIdentifier(adapter_index,D3DENUM_NO_WHQL_LEVEL,&desc.AdapterIdentifier));
 
-			DX8Caps dx8caps(D3DInterface,desc.Caps,WW3D_FORMAT_UNKNOWN,desc.AdapterIdentifier);
+			DX8Caps dx8caps(desc.Caps,WW3D_FORMAT_UNKNOWN,desc.AdapterIdentifier);
 
 			/*
 			** Enumerate the resolutions
@@ -973,7 +945,7 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 	}
 #endif
 	//must be either resetting existing device or creating a new one.
-	WWASSERT(reset_device || D3DDevice == nullptr);
+	WWASSERT(reset_device || !RenderBackend->Has_Device());
 
 	/*
 	** Initialize values for D3DPRESENT_PARAMETERS members.
@@ -1254,7 +1226,7 @@ const char * DX8Wrapper::Get_Render_Device_Name(int device_index)
 
 bool DX8Wrapper::Set_Device_Resolution(int width,int height,int bits,int windowed, bool resize_window)
 {
-	if (D3DDevice != nullptr) {
+	if (RenderBackend->Has_Device()) {
 
 		if (width != -1) {
 			_PresentParameters.BackBufferWidth = ResolutionWidth = width;
@@ -1663,7 +1635,7 @@ unsigned long DX8Wrapper::Get_FrameCount() {return FrameCount;}
 
 void DX8_Assert()
 {
-	WWASSERT(DX8Wrapper::_Get_D3D8());
+	WWASSERT(DX8Wrapper::Get_Render_Backend()->Has_Interface());
 	DX8_THREAD_ASSERT();
 }
 
@@ -2580,7 +2552,9 @@ IDirect3DTexture8 * DX8Wrapper::_Create_DX8_ZTexture
 
 	D3DFORMAT zfmt=WW3DZFormat_To_D3DFormat(zformat);
 
-	unsigned ret=DX8Wrapper::_Get_D3D_Device8()->CreateTexture
+	// Not a DX8CALL: this inspects the HRESULT itself and treats NOTAVAILABLE and
+	// OUTOFVIDEOMEMORY as expected outcomes, so it must neither assert nor be counted.
+	unsigned ret=Get_Render_Backend()->CreateTexture
 	(
 		width,
 		height,
@@ -2607,7 +2581,7 @@ IDirect3DTexture8 * DX8Wrapper::_Create_DX8_ZTexture
 		// Invalidate the mesh cache
 		WW3D::_Invalidate_Mesh_Cache();
 
-		ret=DX8Wrapper::_Get_D3D_Device8()->CreateTexture
+		ret=Get_Render_Backend()->CreateTexture
 		(
 			width,
 			height,
@@ -2955,7 +2929,7 @@ void DX8Wrapper::Compute_Caps(WW3DFormat display_format)
 	DX8_THREAD_ASSERT();
 	DX8_Assert();
 	delete CurrentCaps;
-	CurrentCaps=new DX8Caps(_Get_D3D8(),display_format,Get_Current_Adapter_Identifier());
+	CurrentCaps=new DX8Caps(display_format,Get_Current_Adapter_Identifier());
 }
 
 

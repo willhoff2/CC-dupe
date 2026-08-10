@@ -52,6 +52,7 @@
 #include "WWMath/vector4.h"
 #include "WWLib/cpudetect.h"
 #include "dx8caps.h"
+#include "d3d8renderbackend.h"
 
 #include "texture.h"
 #include "dx8vertexbuffer.h"
@@ -144,15 +145,21 @@ WWINLINE void DX8_ErrorCode(unsigned res)
 	Log_DX8_ErrorCode(res);
 }
 
+// These macros are the seam between DX8Wrapper and the graphics backend: every one of
+// them issues its operation on the single RenderBackendClass instance rather than on a
+// device pointer.  The _D3D variants used to go to IDirect3D8 instead of
+// IDirect3DDevice8; both now land on the same backend object, and the two spellings are
+// kept so that adapter-level operations remain distinguishable from device-level ones at
+// the call site.
 #ifdef WWDEBUG
-#define DX8CALL_HRES(x,res) DX8_Assert(); res = DX8Wrapper::_Get_D3D_Device8()->x; DX8_ErrorCode(res); DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL(x) DX8_Assert(); DX8_ErrorCode(DX8Wrapper::_Get_D3D_Device8()->x); DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL_D3D(x) DX8_Assert(); DX8_ErrorCode(DX8Wrapper::_Get_D3D8()->x); DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_HRES(x,res) DX8_Assert(); res = DX8Wrapper::Get_Render_Backend()->x; DX8_ErrorCode(res); DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL(x) DX8_Assert(); DX8_ErrorCode(DX8Wrapper::Get_Render_Backend()->x); DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_D3D(x) DX8_Assert(); DX8_ErrorCode(DX8Wrapper::Get_Render_Backend()->x); DX8Wrapper::Increment_DX8_CallCount();
 #define DX8_THREAD_ASSERT() if (_DX8SingleThreaded) { WWASSERT_PRINT(DX8Wrapper::_Get_Main_Thread_ID()==ThreadClass::_Get_Current_Thread_ID(),"DX8Wrapper::DX8 calls must be called from the main thread!"); }
 #else
-#define DX8CALL_HRES(x,res) res = DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL(x) DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL_D3D(x) DX8Wrapper::_Get_D3D8()->x; DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_HRES(x,res) res = DX8Wrapper::Get_Render_Backend()->x; DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL(x) DX8Wrapper::Get_Render_Backend()->x; DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_D3D(x) DX8Wrapper::Get_Render_Backend()->x; DX8Wrapper::Increment_DX8_CallCount();
 #define DX8_THREAD_ASSERT() ;
 #endif
 
@@ -162,10 +169,10 @@ WWINLINE void DX8_ErrorCode(unsigned res)
 // _Get_D3D_Device8() without ever looking at the HRESULT.  They exist so that those
 // calls can still be funnelled through DX8Wrapper without changing what happens when
 // the call fails.
-#define DX8CALL_RAW(x) DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL_RAW_HRES(x,res) res = DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL_RAW_D3D(x) DX8Wrapper::_Get_D3D8()->x; DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL_RAW_D3D_HRES(x,res) res = DX8Wrapper::_Get_D3D8()->x; DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_RAW(x) DX8Wrapper::Get_Render_Backend()->x; DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_RAW_HRES(x,res) res = DX8Wrapper::Get_Render_Backend()->x; DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_RAW_D3D(x) DX8Wrapper::Get_Render_Backend()->x; DX8Wrapper::Increment_DX8_CallCount();
+#define DX8CALL_RAW_D3D_HRES(x,res) res = DX8Wrapper::Get_Render_Backend()->x; DX8Wrapper::Increment_DX8_CallCount();
 
 
 #define no_EXTENDED_STATS
@@ -617,8 +624,22 @@ public:
 
 
 
-	static IDirect3DDevice8* _Get_D3D_Device8() { return D3DDevice; }
-	static IDirect3D8* _Get_D3D8() { return D3DInterface; }
+	/*
+	** The backend every DX8CALL macro dispatches on.  There is exactly one instance and it
+	** never changes: a device being lost, reset or released changes state inside the
+	** backend, not which backend is installed.
+	*/
+	static RenderBackendClass* Get_Render_Backend() { return RenderBackend; }
+
+	/*
+	** Raw D3D8 access.  The backend owns these pointers now; these accessors remain
+	** because the engine uses them for "is there a device yet?" tests, because the D3DX
+	** helper calls in dx8wrapper.cpp take a device, and because the tools and the embedded
+	** browser reach for the device directly.  They are the documented hole in the seam -
+	** see docs/porting/renderer-seam.md.
+	*/
+	static IDirect3DDevice8* _Get_D3D_Device8() { return TheD3D8RenderBackend.Peek_D3D_Device8(); }
+	static IDirect3D8* _Get_D3D8() { return TheD3D8RenderBackend.Peek_D3D8(); }
 	/// Returns the display format - added by TR for video playback - not part of W3D
 	static WW3DFormat	getBackBufferFormat();
 	static bool Reset_Device(bool reload_assets=true);
@@ -775,8 +796,7 @@ protected:
 
 	static D3DADAPTER_IDENTIFIER8		CurrentAdapterIdentifier;
 
-	static IDirect3D8 *					D3DInterface;			//d3d8;
-	static IDirect3DDevice8 *			D3DDevice;				//d3ddevice8;
+	static RenderBackendClass *		RenderBackend;
 
 	static IDirect3DSurface8 *			CurrentRenderTarget;
 	static IDirect3DSurface8 *			CurrentDepthBuffer;

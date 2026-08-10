@@ -73,6 +73,10 @@ Methodology, stated so the numbers can be argued with:
 
 ## 0.5 Post-refactor state, after the `DX8Wrapper` consolidation
 
+> Those 155 sites have since been moved onto an abstract backend interface, with D3D8 as the
+> only implementation. See [`renderer-seam.md`](renderer-seam.md) for the interface, the
+> resource-handle measurement, the hot-path reasoning and the lifecycle story.
+
 Step 2 of "what to do next" (below) has been done: every `IDirect3DDevice8` / `IDirect3D8` call
 site outside `dx8wrapper.{h,cpp}` now goes through `DX8Wrapper`, still on D3D8, verified by the
 Windows build (`./scripts/docker-build.sh --game zh`).
