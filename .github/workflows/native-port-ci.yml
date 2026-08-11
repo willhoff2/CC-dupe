@@ -113,7 +113,63 @@ jobs:
             probe-native.json
             probe-shimmed.json
 
-  # 2. Build the D3D8 -> Vulkan spike and render with it. Exit status is not the assertion:
+  # 2. The same translation units, compiled to object files and linked. The probe above answers
+  #    "does it parse"; this answers "does it produce code, and what does that code reference that
+  #    nothing defines". Two ratchets: objects must not go down, unresolved symbols must not go up.
+  #
+  #    Same container as the probe on purpose -- object counts and libstdc++ symbol availability
+  #    are compiler-version dependent, and the checker refuses to compare across clang majors.
+  native-build:
+    name: Native build (Linux, clang 14, 64-bit)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
+    timeout-minutes: 45
+    steps:
+      - name: Install toolchain
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            clang-14 cmake ninja-build python3 git ca-certificates binutils zlib1g-dev
+          clang++-14 --version
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Provision the third-party headers
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ./scripts/ci/fetch-probe-deps.sh
+
+      - name: Compile objects and link (shimmed, levels 1-2)
+        env:
+          CLANGXX: clang++-14
+        run: |
+          python3 scripts/native-build.py --level 1 --level 2 --with-shims \
+            --report native-build-report.md --json native-build.json
+
+      - name: Gate against the checked-in baseline
+        run: |
+          set -o pipefail
+          {
+            echo '## Native 64-bit build'
+            echo '```'
+            python3 scripts/ci/check-native-build-baseline.py --results native-build.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the build report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: native-build-report
+          path: |
+            native-build-report.md
+            native-build.json
+
+  # 3. Build the D3D8 -> Vulkan spike and render with it. Exit status is not the assertion:
   #    the framebuffer is read back and compared against the committed reference image, and the
   #    validation layer must be loaded and silent.
   renderer-spike-linux:
@@ -195,7 +251,7 @@ jobs:
           name: spike-render-linux
           path: spike-linux.png
 
-  # 3. The D3D8 surface scanner as a ratchet: direct (non-DX8Wrapper) call sites must match the
+  # 4. The D3D8 surface scanner as a ratchet: direct (non-DX8Wrapper) call sites must match the
   #    checked-in allowlist exactly, so the consolidation cannot rot one call site at a time.
   d3d8-surface:
     name: D3D8 surface scanner
@@ -225,7 +281,7 @@ jobs:
           name: d3d8-surface-scan
           path: d3d8-surface-scan.txt
 
-  # 4. The OpenAL replacement for Miles, built through the *real* top-level CMake build: the
+  # 5. The OpenAL replacement for Miles, built through the *real* top-level CMake build: the
   #    non-Windows branch of the root CMakeLists supplies `milesstub` from cmake/openal.cmake, and
   #    every audio consumer links that target, so this is the same wiring the engine gets. The job
   #    additionally checks the backend defines every AIL_* entry point it declares, and measures
@@ -305,7 +361,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
           test "$clean" -ge "$expected"
 
-  # 5. The same spike on Apple Silicon through MoltenVK. This exists to guard the
+  # 6. The same spike on Apple Silicon through MoltenVK. This exists to guard the
   #    VK_KHR_portability_enumeration / VK_KHR_portability_subset opt-in: without it the Khronos
   #    loader does not report MoltenVK at all, and nothing on Linux would notice it being
   #    deleted.
