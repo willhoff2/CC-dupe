@@ -22,24 +22,26 @@ python3 scripts/window-input-scan.py --check       # what CI runs
 Categories are symbol groups, not lines: `wndproc` counts `WM_*`/`WPARAM`/`LPARAM`/`WndProc`,
 `message_pump` counts `PeekMessage`/`GetMessage`/`DispatchMessage`/`MSG`, and so on. In-scope means
 Zero Hour engine, device layer and libraries; out of scope is `Tools/` (WorldBuilder, W3DView,
-GUIEdit, ImagePacker, ParticleEditor), the base `Generals/` tree, and the port harness itself
-(`spikes/`, `scripts/native-port-shims/`, which *declare* `HWND` and would otherwise inflate
-every figure).
+GUIEdit, ImagePacker, ParticleEditor) and the base `Generals/` tree. The port harness itself
+(`spikes/`, `scripts/native-port-shims/`) is not scanned at all: the shims *declare* `HWND` and the
+whole `VK_*` table, and the spike is Vulkan code whose `VK_STRUCTURE_TYPE_*` tokens a regex cannot
+tell from `VK_LBUTTON`, so counting it would both inflate the figures and make them move whenever
+the renderer changes.
 
 | Category | In-scope refs | In-scope files | Out-of-scope refs | Out-of-scope files |
 |---|---:|---:|---:|---:|
-| `window_handle` | 125 | 27 | 1386 | 261 |
-| `message_pump` | 25 | 7 | 341 | 55 |
-| `wndproc` | 342 | 9 | 2194 | 312 |
-| `polled_input` | 29 | 10 | 838 | 38 |
-| `cursor` | 36 | 9 | 288 | 96 |
-| `placement` | 20 | 5 | 581 | 121 |
+| `window_handle` | 125 | 27 | 1333 | 258 |
+| `message_pump` | 25 | 7 | 332 | 54 |
+| `wndproc` | 342 | 9 | 2163 | 311 |
+| `polled_input` | 29 | 10 | 101 | 33 |
+| `cursor` | 36 | 9 | 281 | 95 |
+| `placement` | 20 | 5 | 576 | 120 |
 | `mode_change` | 53 | 8 | 26 | 8 |
-| **Total** | **630** | **39** | **5654** | **432** |
+| **Total** | **630** | **39** | **4812** | **425** |
 
-**24 in-scope files mention `HWND`, against 179 out of scope.** That is consistent with
+**24 in-scope files mention `HWND`, against 176 out of scope.** That is consistent with
 `next-slice-scope.md`'s "roughly 20 `HWND` files in scope": the extra four are the `Core/Libraries/Source/debug`
-dialog library, which that count did not walk. So 90% of this repo's Win32 window code belongs to
+dialog library, which that count did not walk. So 88% of this repo's `HWND` files belong to
 the tools that are staying on Wine.
 
 The individual API calls, in scope only — this is the actual work list:
