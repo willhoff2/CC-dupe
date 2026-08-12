@@ -26,6 +26,15 @@ typedef const char* LPCSTR;
 typedef char* LPSTR;
 
 // String functions
+//
+// TheSuperHackers @port C linkage, not C++: the GameSpy SDK declares `_strlwr` and `_strupr`
+// itself for non-Windows targets, inside its own `extern "C"` block. A C++-linkage definition here
+// makes every translation unit that reaches both declarations fail with "different language
+// linkage", which off Windows is most of GameEngine.
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 inline char *_strlwr(char *str) {
   for (int i = 0; str[i] != '\0'; i++) {
     str[i] = tolower(str[i]);
@@ -33,7 +42,19 @@ inline char *_strlwr(char *str) {
   return str;
 }
 
+inline char *_strupr(char *str) {
+  for (int i = 0; str[i] != '\0'; i++) {
+    str[i] = toupper(str[i]);
+  }
+  return str;
+}
+
+#ifdef __cplusplus
+}
+#endif
+
 #define strlwr _strlwr
+#define strupr _strupr
 #define stricmp strcasecmp
 #define strnicmp strncasecmp
 #define strcmpi strcasecmp
