@@ -20,15 +20,21 @@ skipped, with a warning, if -m32 is unavailable; checks 1 and 3 are not skippabl
 
 Usage:
     python3 scripts/native-layout-test.py [--verbose]
+
+`CLANGXX` selects the compiler, as it does for `native-port-probe.py` and `native-build.py`.
 """
 
 import argparse
+import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+# Same knob as the probe and the native build, so all three can be pointed at one pinned compiler.
+CXX = os.environ.get("CLANGXX", "clang++")
 
 INCLUDES = [
     "Dependencies/Utility",
@@ -82,7 +88,7 @@ typedef unsigned long  ULONG;
 
 def compile_tu(tu_path, bits, extra_includes=(), verbose=False):
     cmd = [
-        "clang++", "-std=c++17", "-fsyntax-only", f"-m{bits}", "-ferror-limit=0",
+        CXX, "-std=c++17", "-fsyntax-only", f"-m{bits}", "-ferror-limit=0",
         "-include", "Utility/CppMacros.h",
         str(tu_path),
     ]
@@ -92,6 +98,18 @@ def compile_tu(tu_path, bits, extra_includes=(), verbose=False):
         print("  $", " ".join(cmd))
     proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
     return proc.returncode, proc.stdout + proc.stderr
+
+
+def multilib_available(tmp, verbose=False):
+    """Whether -m32 has libstdc++ headers, asked directly instead of pattern-matched out of a
+    failure. The diagnostic differs between compilers and versions, and guessing it wrong turns a
+    missing g++-multilib into a reported layout failure."""
+    probe = tmp / "multilib_probe.cpp"
+    probe.write_text("#include <utility>\nint main() { return 0; }\n")
+    cmd = [CXX, "-std=c++17", "-fsyntax-only", "-m32", str(probe)]
+    if verbose:
+        print("  $", " ".join(cmd))
+    return subprocess.run(cmd, capture_output=True, text=True).returncode == 0
 
 
 def main():
@@ -117,7 +135,7 @@ def main():
         rc, out = compile_tu(tu, 32, verbose=args.verbose)
         if rc == 0:
             print("      PASS - identical assertions hold under ILP32 (the Windows layout)")
-        elif "bits/c++config.h" in out or "cannot find" in out:
+        elif not multilib_available(tmp, verbose=args.verbose):
             print("      SKIP - no 32-bit libstdc++ headers (install g++-multilib)")
         else:
             failures.append("32-bit layout check failed")
