@@ -24,15 +24,22 @@
 //   ./zh-window-spike                     # 240 frames, exits, prints PASS/FAIL lines
 //   ./zh-window-spike --interactive       # runs until the window is closed or Escape
 //   ./zh-window-spike --mode-change       # also exercises Window_Set_Mode() mid-run
+//   ./zh-window-spike --frame-ms 16       # paces the loop, so a human can watch it
+//
+// Note that unpaced, this presents a few hundred frames a second even on lavapipe, so the
+// default run is over in a couple of seconds: use --frame-ms (and --frames) when the point is
+// for someone to see the window rather than for the checks to pass.
 
 #include "png_write.h"
 #include "render_backend.h"
 
 #include "platform/platform_window.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace spike;
@@ -113,6 +120,7 @@ int main(int argc, char** argv) {
 	bool interactive = false;
 	bool mode_change = false;
 	int frames = 240;
+	int frame_ms = 0;
 	std::string out_path = "window-spike.png";
 	for (int i = 1; i < argc; ++i) {
 		if (std::strcmp(argv[i], "--no-validation") == 0) validation = false;
@@ -120,9 +128,12 @@ int main(int argc, char** argv) {
 		else if (std::strcmp(argv[i], "--mode-change") == 0) mode_change = true;
 		else if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) frames = std::atoi(argv[++i]);
 		else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc) out_path = argv[++i];
+		else if (std::strcmp(argv[i], "--frame-ms") == 0 && i + 1 < argc) {
+			frame_ms = std::atoi(argv[++i]);
+		}
 		else if (std::strcmp(argv[i], "--help") == 0) {
 			std::printf("usage: %s [--interactive] [--mode-change] [--frames N] "
-			            "[--no-validation] [--out file.png]\n", argv[0]);
+			            "[--frame-ms N] [--no-validation] [--out file.png]\n", argv[0]);
 			return 0;
 		}
 	}
@@ -201,6 +212,7 @@ int main(int argc, char** argv) {
 	int keys_seen = 0;
 	int presented = 0;
 	bool quit = false;
+	bool resized = false;
 
 	// This is the loop shape Win32GameEngine::serviceWindowsOS() has: drain everything the
 	// window server has for us, then run the frame. The difference is that nothing is
@@ -226,6 +238,15 @@ int main(int argc, char** argv) {
 					break;
 				case WWPlatform::WINDOW_EVENT_RESIZE:
 					std::printf("       resize to %dx%d\n", event.Width, event.Height);
+					// The swapchain no longer matches the window, and on a platform whose
+					// driver never returns VK_ERROR_OUT_OF_DATE_KHR (lavapipe does not)
+					// nothing else will notice: without this the presented image stays the
+					// old size in the corner of a bigger window.
+					resized = gfx->Resize_Presentation(static_cast<uint32_t>(event.Width),
+					                                   static_cast<uint32_t>(event.Height));
+					if (!resized) {
+						std::fprintf(stderr, "Resize_Presentation() failed\n");
+					}
 					break;
 				case WWPlatform::WINDOW_EVENT_TEXT:
 					std::printf("       text U+%04X\n", event.Character);
@@ -237,8 +258,8 @@ int main(int argc, char** argv) {
 
 		if (mode_change && frame == frames / 2) {
 			// The fullscreen/mode-change path, which on Win32 is SetWindowPos + ShowWindow +
-			// a D3D device reset. Here it is one call; the swapchain follows on the next
-			// acquire because the renderer recreates it on VK_ERROR_OUT_OF_DATE_KHR.
+			// a D3D device reset. Here it is one call plus the resize event it produces,
+			// which is what rebuilds the swapchain (see WINDOW_EVENT_RESIZE above).
 			const bool ok = WWPlatform::Window_Set_Mode(window, 1024, 768, false);
 			Check(ok, "Window_Set_Mode(1024x768, windowed)");
 		}
@@ -290,10 +311,25 @@ int main(int argc, char** argv) {
 
 		gfx->End_Scene(true);	// flip: this is the vkQueuePresentKHR
 		++presented;
+		if (frame_ms > 0) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(frame_ms));
+		}
 	}
 
 	Check(presented > 0, "frames presented to the window's swapchain");
 	std::printf("       presented %d frame(s)\n", presented);
+
+	// A mode change that the renderer did not follow is the failure the readback cannot see:
+	// the colour target keeps its size, so only the swapchain rebuild proves the window is
+	// still being filled.
+	if (mode_change) {
+		int client_width = 0;
+		int client_height = 0;
+		WWPlatform::Window_Client_Size(window, client_width, client_height);
+		std::printf("       client size after the mode change: %dx%d\n", client_width,
+		            client_height);
+		Check(resized, "the swapchain was rebuilt for the new window size");
+	}
 
 	// Read the last frame back and check it, so that "a window appeared" is not the only
 	// evidence: a window showing a black rectangle would pass a screenshot and fail here.

@@ -257,6 +257,8 @@ public:
 	// Public so main.cpp can drive the optional presentation path.
 	bool Present();
 
+	bool Resize_Presentation(uint32_t width, uint32_t height) override;
+
 	uint32_t Validation_Message_Count() const override { return validation_messages_; }
 
 private:
@@ -279,6 +281,8 @@ private:
 	bool Create_Descriptor_Machinery();
 	bool Create_Shaders();
 	bool Create_Swapchain(void* window_handle);
+	bool Build_Swapchain();
+	void Destroy_Swapchain();
 
 	bool Allocate_Buffer(VkDeviceSize size, VkBufferUsageFlags usage,
 	                     VkMemoryPropertyFlags props, Buffer& out);
@@ -367,7 +371,12 @@ private:
 	VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
 	std::vector<VkImage> swapchain_images_;
 	VkFormat swapchain_format_ = VK_FORMAT_UNDEFINED;
-	VkSemaphore acquire_semaphore_ = VK_NULL_HANDLE;
+	VkExtent2D swapchain_extent_ = {0, 0};
+	// The image is acquired with a fence rather than a semaphore: every submission in this
+	// spike is CPU-waited (End_One_Shot waits the queue idle), so a fence is the whole of the
+	// synchronisation, and one reusable semaphore would be signalled again while the previous
+	// present's wait was still pending.
+	VkFence acquire_fence_ = VK_NULL_HANDLE;
 };
 
 // ---------------------------------------------------------------------------
@@ -894,6 +903,28 @@ bool VulkanBackend::Create_Shaders() {
 bool VulkanBackend::Create_Swapchain(void* window_handle) {
 #if defined(SPIKE_WITH_SDL) || defined(SPIKE_WITH_PLATFORM_WINDOW)
 	if (headless_ || window_handle == nullptr) return true;
+	if (!Build_Swapchain()) return false;
+
+	VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+	VK_CHECK(vkCreateFence(device_, &fci, nullptr, &acquire_fence_));
+	return true;
+#else
+	(void)window_handle;
+	return true;
+#endif
+}
+
+void VulkanBackend::Destroy_Swapchain() {
+	if (swapchain_ == VK_NULL_HANDLE) return;
+	vkDeviceWaitIdle(device_);
+	vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+	swapchain_ = VK_NULL_HANDLE;
+	swapchain_images_.clear();
+}
+
+bool VulkanBackend::Build_Swapchain() {
+#if defined(SPIKE_WITH_SDL) || defined(SPIKE_WITH_PLATFORM_WINDOW)
+	if (surface_ == VK_NULL_HANDLE) return true;
 
 	VkSurfaceCapabilitiesKHR caps{};
 	VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &caps));
@@ -910,7 +941,14 @@ bool VulkanBackend::Create_Swapchain(void* window_handle) {
 	sci.minImageCount = caps.minImageCount < 2 ? 2 : caps.minImageCount;
 	sci.imageFormat = chosen.format;
 	sci.imageColorSpace = chosen.colorSpace;
-	sci.imageExtent = {width_, height_};
+	// The window, not the render target, decides the presented extent: the colour target keeps
+	// its own resolution and is scaled on present, which is what lets the window be resized
+	// without re-creating every render target.
+	VkExtent2D extent = caps.currentExtent;
+	if (extent.width == 0xFFFFFFFFu) extent = {width_, height_};
+	if (extent.width == 0 || extent.height == 0) return false;
+	swapchain_extent_ = extent;
+	sci.imageExtent = extent;
 	sci.imageArrayLayers = 1;
 	sci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -924,12 +962,8 @@ bool VulkanBackend::Create_Swapchain(void* window_handle) {
 	VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain_, &image_count, nullptr));
 	swapchain_images_.resize(image_count);
 	VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain_, &image_count, swapchain_images_.data()));
-
-	VkSemaphoreCreateInfo semci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-	VK_CHECK(vkCreateSemaphore(device_, &semci, nullptr, &acquire_semaphore_));
 	return true;
 #else
-	(void)window_handle;
 	return true;
 #endif
 }
@@ -1045,7 +1079,7 @@ void VulkanBackend::Shutdown() {
 	free_image(color_target_);
 	free_image(depth_target_);
 
-	if (acquire_semaphore_) vkDestroySemaphore(device_, acquire_semaphore_, nullptr);
+	if (acquire_fence_) vkDestroyFence(device_, acquire_fence_, nullptr);
 	if (swapchain_) vkDestroySwapchainKHR(device_, swapchain_, nullptr);
 	if (framebuffer_) vkDestroyFramebuffer(device_, framebuffer_, nullptr);
 	if (render_pass_) vkDestroyRenderPass(device_, render_pass_, nullptr);
@@ -1922,13 +1956,31 @@ void VulkanBackend::End_Scene(bool flip_frame) {
 	if (flip_frame) Present();
 }
 
+bool VulkanBackend::Resize_Presentation(uint32_t width, uint32_t height) {
+	if (swapchain_ == VK_NULL_HANDLE) return true;
+	(void)width;
+	(void)height;
+	// The surface's own currentExtent is authoritative; the reported size is only the trigger.
+	Destroy_Swapchain();
+	return Build_Swapchain();
+}
+
 bool VulkanBackend::Present() {
 	if (swapchain_ == VK_NULL_HANDLE) return true;
 
 	uint32_t index = 0;
+	VK_CHECK(vkResetFences(device_, 1, &acquire_fence_));
 	VkResult acquired = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX,
-	                                          acquire_semaphore_, VK_NULL_HANDLE, &index);
+	                                          VK_NULL_HANDLE, acquire_fence_, &index);
+	if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
+		// The window changed under us without the seam reporting it yet.
+		if (!Resize_Presentation(0, 0)) return false;
+		VK_CHECK(vkResetFences(device_, 1, &acquire_fence_));
+		acquired = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX,
+		                                 VK_NULL_HANDLE, acquire_fence_, &index);
+	}
 	if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) return false;
+	VK_CHECK(vkWaitForFences(device_, 1, &acquire_fence_, VK_TRUE, UINT64_MAX));
 
 	VkCommandBuffer cmd = Begin_One_Shot();
 	if (cmd == VK_NULL_HANDLE) return false;
@@ -1938,17 +1990,19 @@ bool VulkanBackend::Present() {
 	blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
 	blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
 	blit.srcOffsets[1] = {static_cast<int32_t>(width_), static_cast<int32_t>(height_), 1};
-	blit.dstOffsets[1] = {static_cast<int32_t>(width_), static_cast<int32_t>(height_), 1};
+	// Stretched to the window, so a resized window is filled rather than painted in one corner.
+	blit.dstOffsets[1] = {static_cast<int32_t>(swapchain_extent_.width),
+	                      static_cast<int32_t>(swapchain_extent_.height), 1};
 	vkCmdBlitImage(cmd, color_target_.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 	               swapchain_images_[index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
-	               VK_FILTER_NEAREST);
+	               VK_FILTER_LINEAR);
 	Transition(cmd, swapchain_images_[index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	           VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
 	if (!End_One_Shot(cmd)) return false;
 
 	VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
-	pi.waitSemaphoreCount = 1;
-	pi.pWaitSemaphores = &acquire_semaphore_;
+	// No wait semaphore: End_One_Shot() has already waited the queue idle, so the blit is
+	// complete on the host's timeline before the image is handed to the presentation engine.
 	pi.swapchainCount = 1;
 	pi.pSwapchains = &swapchain_;
 	pi.pImageIndices = &index;

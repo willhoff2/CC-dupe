@@ -153,6 +153,16 @@ public:
 	virtual void Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
 	                            uint32_t min_vertex_index, uint32_t vertex_count) = 0;
 
+	// --- windowed presentation: the DX8Wrapper::Reset_Device shape ------------
+	// The window's client area changed size, so the swapchain no longer matches it. The
+	// colour target keeps its own resolution and is scaled on present, which is the cheap
+	// half of a device reset. A headless backend has nothing to do.
+	virtual bool Resize_Presentation(uint32_t width, uint32_t height) {
+		(void)width;
+		(void)height;
+		return true;
+	}
+
 	// --- spike-only: prove what was rasterised -------------------------------
 	// Reads the colour target back to host memory as tightly packed RGBA8.
 	virtual bool Read_Back_Color_Target(std::string& out_rgba,

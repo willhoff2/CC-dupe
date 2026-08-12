@@ -191,7 +191,9 @@ device: llvmpipe (LLVM 15.0.7, 256 bits)
 PASS   Window_Set_Mode(1024x768, windowed)
        resize to 1024x768
 PASS   frames presented to the window's swapchain
-       presented 120 frame(s)
+       presented 240 frame(s)
+       client size after the mode change: 1024x768
+PASS   the swapchain was rebuilt for the new window size
 PASS   Read_Back_Color_Target()
        centre pixel rgba = 132,151,170,255
 PASS   the presented frame contains the geometry, not just the clear colour
@@ -204,6 +206,27 @@ That is the first window this port has ever opened: before it, both the Linux an
 rendered to an offscreen image and read it back. The `vulkan_backend.cpp` change behind it is small
 — the instance-extension query and `vkCreateSurfaceKHR` call now go through the seam instead of
 `SDL_Vulkan_*` — which is the point: the renderer no longer knows what a window is.
+
+Opening a window turned up two real defects in that renderer, neither of which the headless path
+could ever have shown, and both of which are fixed here:
+
+* the swapchain was rebuilt only on `VK_ERROR_OUT_OF_DATE_KHR`, which lavapipe/X11 never returns
+  for a programmatic resize, so after `Window_Set_Mode()` the window grew but the presented image
+  stayed 800×600 in the corner with the rest never painted. It now rebuilds on
+  `WINDOW_EVENT_RESIZE` (`RenderBackend::Resize_Presentation()`) and the present blit stretches
+  the colour target to the swapchain extent, which is the cheap half of a D3D8 `Reset_Device`. The
+  spike now *checks* this, because the readback cannot see it: the colour target keeps its own size,
+  so a frozen window still produces a correct PNG;
+* the present path reused one acquire semaphore every frame, which is
+  `VUID-vkAcquireNextImageKHR-semaphore-01779` — 121 validation errors on a CI runner with
+  validation 1.3.275, and silence locally on 1.3.204, which is a good argument for CI pinning the
+  newer layers. The image is now acquired with a fence: every submission in the spike is already
+  CPU-waited, so a fence is the whole of the synchronisation and the present needs no wait
+  semaphore.
+
+One usability note that matters when a human is watching rather than a script: unpaced, this presents
+several hundred frames a second even on llvmpipe, so `--frames 240` is over in under two seconds.
+`--frame-ms 30` paces the loop.
 
 CI job `Window seam (Linux, Xvfb + lavapipe)` runs the scanner check, the scan-code check, and 240
 frames under Xvfb. Xvfb is a real X server, so the surface, swapchain, present and event
@@ -288,7 +311,7 @@ code), so that difference is cheap here — but it is a difference.
 | `Core/Libraries/Source/WWVegas/WWLib/platform/platform_window.h` | 279 | header only |
 | `Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_sdl2.cpp` | 649 | yes, on Linux/X11 |
 | `Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_cocoa.mm` | 780 | **no. never compiled** |
-| `spikes/renderer/src/window_spike.cpp` | 353 | yes, on Linux/X11 |
+| `spikes/renderer/src/window_spike.cpp` | 389 | yes, on Linux/X11 |
 | `spikes/renderer/tools/macos-window-check.sh` | — | the Linux-irrelevant parts, no |
 | `scripts/window-input-scan.py` | 389 | yes |
-| `scripts/ci/check-window-scancodes.py` | 105 | yes |
+| `scripts/ci/check-window-scancodes.py` | 106 | yes |
