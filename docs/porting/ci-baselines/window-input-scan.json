@@ -1,0 +1,735 @@
+{
+  "_comment": "Produced by scripts/window-input-scan.py; gated in CI by the same script's --check mode. Update with --check --update.",
+  "files": {
+    "in_scope": {
+      "cursor": 9,
+      "message_pump": 7,
+      "mode_change": 8,
+      "placement": 5,
+      "polled_input": 10,
+      "window_handle": 27,
+      "wndproc": 9
+    },
+    "out_of_scope": {
+      "cursor": 95,
+      "message_pump": 54,
+      "mode_change": 8,
+      "placement": 120,
+      "polled_input": 33,
+      "window_handle": 258,
+      "wndproc": 311
+    }
+  },
+  "hwnd_files": {
+    "in_scope": [
+      "Core/GameEngine/Source/Common/System/Debug.cpp",
+      "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp",
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp",
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8webbrowser.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8webbrowser.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/render2dsentence.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WWLib/win.h",
+      "Core/Libraries/Source/debug/debug_debug.cpp",
+      "Core/Libraries/Source/debug/debug_dlg/debug_dlg.cpp",
+      "Core/Libraries/Source/debug/debug_except.cpp",
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32OSDisplay.cpp",
+      "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp",
+      "GeneralsMD/Code/Main/WinMain.h"
+    ],
+    "out_of_scope": [
+      "Core/Tools/Autorun/autorun.cpp",
+      "Core/Tools/Autorun/autorun.h",
+      "Core/Tools/Babylon/Babylon.cpp",
+      "Core/Tools/DebugWindow/DebugWindow.cpp",
+      "Core/Tools/DebugWindow/DebugWindowDialog.cpp",
+      "Core/Tools/DebugWindow/DebugWindowDialog.h",
+      "Core/Tools/ImagePacker/Include/ImagePacker.h",
+      "Core/Tools/ImagePacker/Include/WindowProc.h",
+      "Core/Tools/ImagePacker/Source/ImagePacker.cpp",
+      "Core/Tools/ImagePacker/Source/WinMain.cpp",
+      "Core/Tools/ImagePacker/Source/WindowProcedures/DirectorySelect.cpp",
+      "Core/Tools/ImagePacker/Source/WindowProcedures/ImageErrorProc.cpp",
+      "Core/Tools/ImagePacker/Source/WindowProcedures/ImagePackerProc.cpp",
+      "Core/Tools/ImagePacker/Source/WindowProcedures/PageErrorProc.cpp",
+      "Core/Tools/ImagePacker/Source/WindowProcedures/PreviewProc.cpp",
+      "Core/Tools/Launcher/dialog.cpp",
+      "Core/Tools/Launcher/dialog.h",
+      "Core/Tools/Launcher/loadbmp.cpp",
+      "Core/Tools/Launcher/loadbmp.h",
+      "Core/Tools/Launcher/main.cpp",
+      "Core/Tools/Launcher/patch.cpp",
+      "Core/Tools/MapCacheBuilder/Source/WinMain.cpp",
+      "Core/Tools/PATCHGET/CHATAPI.cpp",
+      "Core/Tools/PATCHGET/WINBLOWS.cpp",
+      "Core/Tools/ParticleEditor/ParticleEditor.cpp",
+      "Core/Tools/ParticleEditor/ParticleEditorDialog.cpp",
+      "Core/Tools/ParticleEditor/ParticleEditorDialog.h",
+      "Core/Tools/W3DView/ColorBar.cpp",
+      "Core/Tools/W3DView/ColorBar.h",
+      "Core/Tools/W3DView/ColorPicker.cpp",
+      "Core/Tools/W3DView/ColorPicker.h",
+      "Core/Tools/W3DView/ColorPickerDialogClass.cpp",
+      "Core/Tools/W3DView/ColorUtils.h",
+      "Core/Tools/W3DView/DirectoryDialog.cpp",
+      "Core/Tools/W3DView/DirectoryDialog.h",
+      "Core/Tools/W3DView/EmitterGeneralPropPage.cpp",
+      "Core/Tools/W3DView/GraphicView.cpp",
+      "Core/Tools/W3DView/MainFrm.cpp",
+      "Core/Tools/W3DView/SceneLightDialog.cpp",
+      "Core/Tools/W3DView/ScreenCursor.h",
+      "Core/Tools/W3DView/TextureSettingsDialog.cpp",
+      "Core/Tools/W3DView/Toolbar.h",
+      "Core/Tools/W3DView/Utils.cpp",
+      "Core/Tools/W3DView/Utils.h",
+      "Core/Tools/W3DView/Vector3RndCombo.cpp",
+      "Core/Tools/W3DView/Vector3RndCombo.h",
+      "Core/Tools/W3DView/W3DView.cpp",
+      "Core/Tools/WW3D/max2w3d/AlphaModifier.cpp",
+      "Core/Tools/WW3D/max2w3d/AlphaModifier.h",
+      "Core/Tools/WW3D/max2w3d/ExportAllDlg.cpp",
+      "Core/Tools/WW3D/max2w3d/ExportAllDlg.h",
+      "Core/Tools/WW3D/max2w3d/FormClass.cpp",
+      "Core/Tools/WW3D/max2w3d/FormClass.h",
+      "Core/Tools/WW3D/max2w3d/GameMtl.cpp",
+      "Core/Tools/WW3D/max2w3d/GameMtlDlg.cpp",
+      "Core/Tools/WW3D/max2w3d/GameMtlDlg.h",
+      "Core/Tools/WW3D/max2w3d/GameMtlPassDlg.cpp",
+      "Core/Tools/WW3D/max2w3d/GameMtlPassDlg.h",
+      "Core/Tools/WW3D/max2w3d/GameMtlShaderDlg.cpp",
+      "Core/Tools/WW3D/max2w3d/GameMtlShaderDlg.h",
+      "Core/Tools/WW3D/max2w3d/GameMtlTextureDlg.cpp",
+      "Core/Tools/WW3D/max2w3d/GameMtlTextureDlg.h",
+      "Core/Tools/WW3D/max2w3d/GameMtlVertexMaterialDlg.cpp",
+      "Core/Tools/WW3D/max2w3d/GameMtlVertexMaterialDlg.h",
+      "Core/Tools/WW3D/max2w3d/InputDlg.cpp",
+      "Core/Tools/WW3D/max2w3d/InputDlg.h",
+      "Core/Tools/WW3D/max2w3d/MeshDeform.h",
+      "Core/Tools/WW3D/max2w3d/MeshDeformPanel.cpp",
+      "Core/Tools/WW3D/max2w3d/MeshDeformPanel.h",
+      "Core/Tools/WW3D/max2w3d/PS2GameMtlShaderDlg.cpp",
+      "Core/Tools/WW3D/max2w3d/PS2GameMtlShaderDlg.h",
+      "Core/Tools/WW3D/max2w3d/SceneSetupDlg.cpp",
+      "Core/Tools/WW3D/max2w3d/SceneSetupDlg.h",
+      "Core/Tools/WW3D/max2w3d/animationcompressionsettings.cpp",
+      "Core/Tools/WW3D/max2w3d/animationcompressionsettings.h",
+      "Core/Tools/WW3D/max2w3d/bpick.cpp",
+      "Core/Tools/WW3D/max2w3d/bpick.h",
+      "Core/Tools/WW3D/max2w3d/exportlog.cpp",
+      "Core/Tools/WW3D/max2w3d/exportlog.h",
+      "Core/Tools/WW3D/max2w3d/floaterdialog.cpp",
+      "Core/Tools/WW3D/max2w3d/floaterdialog.h",
+      "Core/Tools/WW3D/max2w3d/gamemtl.h",
+      "Core/Tools/WW3D/max2w3d/genlodextensiondialog.cpp",
+      "Core/Tools/WW3D/max2w3d/genlodextensiondialog.h",
+      "Core/Tools/WW3D/max2w3d/genmtlnamesdialog.cpp",
+      "Core/Tools/WW3D/max2w3d/genmtlnamesdialog.h",
+      "Core/Tools/WW3D/max2w3d/gennamesdialog.cpp",
+      "Core/Tools/WW3D/max2w3d/gennamesdialog.h",
+      "Core/Tools/WW3D/max2w3d/gmtldlg.cpp",
+      "Core/Tools/WW3D/max2w3d/logdlg.cpp",
+      "Core/Tools/WW3D/max2w3d/logdlg.h",
+      "Core/Tools/WW3D/max2w3d/motion.cpp",
+      "Core/Tools/WW3D/max2w3d/motion.h",
+      "Core/Tools/WW3D/max2w3d/presetexportoptionsdialog.cpp",
+      "Core/Tools/WW3D/max2w3d/presetexportoptionsdialog.h",
+      "Core/Tools/WW3D/max2w3d/rcmenu.cpp",
+      "Core/Tools/WW3D/max2w3d/rcmenu.h",
+      "Core/Tools/WW3D/max2w3d/simpdib.cpp",
+      "Core/Tools/WW3D/max2w3d/simpdib.h",
+      "Core/Tools/WW3D/max2w3d/skin.cpp",
+      "Core/Tools/WW3D/max2w3d/skin.h",
+      "Core/Tools/WW3D/max2w3d/vxldbg.cpp",
+      "Core/Tools/WW3D/max2w3d/vxldbg.h",
+      "Core/Tools/WW3D/max2w3d/w3ddlg.cpp",
+      "Core/Tools/WW3D/max2w3d/w3ddlg.h",
+      "Core/Tools/WW3D/max2w3d/w3dexp.h",
+      "Core/Tools/WW3D/max2w3d/w3dmtl.cpp",
+      "Core/Tools/WW3D/max2w3d/w3dutil.cpp",
+      "Core/Tools/WW3D/pluglib/win.h",
+      "Core/Tools/wolSetup/wolSetup.cpp",
+      "Generals/Code/GameEngine/Source/Common/GameEngine.cpp",
+      "Generals/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp",
+      "Generals/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp",
+      "Generals/Code/GameEngineDevice/Source/Win32Device/Common/Win32OSDisplay.cpp",
+      "Generals/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+      "Generals/Code/Main/WinMain.cpp",
+      "Generals/Code/Main/WinMain.h",
+      "Generals/Code/Tools/GUIEdit/Include/DialogProc.h",
+      "Generals/Code/Tools/GUIEdit/Include/EditWindow.h",
+      "Generals/Code/Tools/GUIEdit/Include/GUIEdit.h",
+      "Generals/Code/Tools/GUIEdit/Include/HierarchyView.h",
+      "Generals/Code/Tools/GUIEdit/Include/Properties.h",
+      "Generals/Code/Tools/GUIEdit/Include/WinMain.h",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/CallbackEditor.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/CheckBoxProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/ColorDialog.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/ComboBoxProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/GenericProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/GridSettings.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/ListboxProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/NewLayoutDialog.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/ProgressBarProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/PushButtonProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/RadioButtonProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/SliderProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/StaticTextProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/TabControlProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Dialog Procedures/TextEntryProperties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/EditWindow.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/HierarchyView.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/LayoutScheme.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/Properties.cpp",
+      "Generals/Code/Tools/GUIEdit/Source/WinMain.cpp",
+      "Generals/Code/Tools/WorldBuilder/src/MainFrm.cpp",
+      "Generals/Code/Tools/WorldBuilder/src/WorldBuilder.cpp",
+      "Generals/Code/Tools/WorldBuilder/src/wbview.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Include/DialogProc.h",
+      "GeneralsMD/Code/Tools/GUIEdit/Include/EditWindow.h",
+      "GeneralsMD/Code/Tools/GUIEdit/Include/GUIEdit.h",
+      "GeneralsMD/Code/Tools/GUIEdit/Include/HierarchyView.h",
+      "GeneralsMD/Code/Tools/GUIEdit/Include/Properties.h",
+      "GeneralsMD/Code/Tools/GUIEdit/Include/WinMain.h",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/CallbackEditor.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/CheckBoxProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/ColorDialog.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/ComboBoxProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/GenericProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/GridSettings.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/ListboxProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/NewLayoutDialog.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/ProgressBarProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/PushButtonProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/RadioButtonProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/SliderProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/StaticTextProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/TabControlProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Dialog Procedures/TextEntryProperties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/EditWindow.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/HierarchyView.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/LayoutScheme.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/Properties.cpp",
+      "GeneralsMD/Code/Tools/GUIEdit/Source/WinMain.cpp",
+      "GeneralsMD/Code/Tools/WorldBuilder/src/MainFrm.cpp",
+      "GeneralsMD/Code/Tools/WorldBuilder/src/WorldBuilder.cpp",
+      "GeneralsMD/Code/Tools/WorldBuilder/src/wbview.cpp",
+      "GeneralsMD/Code/Tools/wdump/wdump.cpp"
+    ]
+  },
+  "in_scope_symbol_files": {
+    "AdjustWindowRect": [
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "ApplicationHWnd": [
+      "Core/GameEngine/Source/Common/System/Debug.cpp",
+      "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp",
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp",
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIKeyboard.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp",
+      "GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32OSDisplay.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp",
+      "GeneralsMD/Code/Main/WinMain.h"
+    ],
+    "BeginPaint": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "ClientToScreen": [
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp"
+    ],
+    "ClipCursor": [
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp"
+    ],
+    "CreateWindow": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "D3DPRESENT_PARAMETERS": [
+      "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h"
+    ],
+    "DefWindowProc": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "DestroyWindow": [
+      "Core/Libraries/Source/debug/test2/test2.cpp"
+    ],
+    "DirectInput8Create": [
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIKeyboard.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp"
+    ],
+    "DispatchMessage": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp"
+    ],
+    "EndPaint": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "GetAsyncKeyState": [
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp"
+    ],
+    "GetClientRect": [
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "GetCursorPos": [
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp",
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp"
+    ],
+    "GetDoubleClickTime": [
+      "Core/GameEngine/Source/GameClient/GUI/Gadget/GadgetListBox.cpp",
+      "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp"
+    ],
+    "GetKeyState": [
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIKeyboard.cpp"
+    ],
+    "GetKeyboardLayout": [
+      "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp",
+      "Core/GameEngine/Source/GameClient/Input/Keyboard.cpp"
+    ],
+    "GetMessage": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp"
+    ],
+    "GetSystemMetrics": [
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "GetWindowLong": [
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/debug/debug_debug.cpp"
+    ],
+    "GetWindowRect": [
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp",
+      "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "HKL": [
+      "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp",
+      "Core/GameEngine/Source/GameClient/Input/Keyboard.cpp"
+    ],
+    "HWND": [
+      "Core/GameEngine/Source/Common/System/Debug.cpp",
+      "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp",
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp",
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8webbrowser.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8webbrowser.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/render2dsentence.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WWLib/win.h",
+      "Core/Libraries/Source/debug/debug_debug.cpp",
+      "Core/Libraries/Source/debug/debug_dlg/debug_dlg.cpp",
+      "Core/Libraries/Source/debug/debug_except.cpp",
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32OSDisplay.cpp",
+      "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp",
+      "GeneralsMD/Code/Main/WinMain.h"
+    ],
+    "IsIconic": [
+      "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp"
+    ],
+    "LPARAM": [
+      "Core/GameEngineDevice/Include/Win32Device/GameClient/Win32Mouse.h",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp",
+      "Core/Libraries/Source/debug/debug_debug.cpp",
+      "Core/Libraries/Source/debug/debug_dlg/debug_dlg.cpp",
+      "Core/Libraries/Source/debug/debug_except.cpp",
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "LRESULT": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "LoadCursor": [
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp",
+      "Core/Libraries/Source/debug/test2/test2.cpp"
+    ],
+    "MSG": [
+      "Core/GameEngine/Include/Common/GameMemory.h",
+      "Core/GameEngine/Include/Common/GameMemoryNull.h",
+      "Core/Libraries/Source/WWVegas/WWLib/always.h",
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/GameEngine/Source/GameLogic/ScriptEngine/ScriptActions.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp"
+    ],
+    "PeekMessage": [
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp"
+    ],
+    "PostQuitMessage": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "RegisterClass": [
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "RegisterClassEx": [
+      "Core/Libraries/Source/debug/test2/test2.cpp"
+    ],
+    "ReleaseCapture": [
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp"
+    ],
+    "Reset_Device": [
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
+      "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp"
+    ],
+    "ScreenToClient": [
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp",
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp"
+    ],
+    "SetCapture": [
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp"
+    ],
+    "SetCursor": [
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp"
+    ],
+    "SetCursorPos": [
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp"
+    ],
+    "SetFocus": [
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "SetForegroundWindow": [
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "SetWindowPos": [
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "Set_Device_Resolution": [
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
+      "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp",
+      "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+      "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.h"
+    ],
+    "Set_Render_Device": [
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
+      "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp",
+      "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+      "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.h"
+    ],
+    "ShowCursor": [
+      "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h"
+    ],
+    "ShowWindow": [
+      "Core/GameEngine/Source/Common/System/Debug.cpp",
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "Toggle_Windowed": [
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
+      "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+      "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.h"
+    ],
+    "TranslateMessage": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp"
+    ],
+    "UpdateWindow": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "VK_[A-Z0-9_]+": [
+      "Core/GameEngine/Source/GameClient/GUI/Gadget/GadgetTextEntry.cpp",
+      "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp",
+      "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIKeyboard.cpp",
+      "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/KeyboardOptionsMenu.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "WM_[A-Z0-9_]+": [
+      "Core/GameEngine/Source/Common/Audio/simpleplayer.cpp",
+      "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp",
+      "Core/Libraries/Source/debug/debug_dlg/debug_dlg.cpp",
+      "Core/Libraries/Source/debug/debug_except.cpp",
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "WNDCLASS": [
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "WNDPROC": [
+      "Core/Libraries/Source/debug/test2/test2.cpp"
+    ],
+    "WPARAM": [
+      "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp",
+      "Core/GameEngineDevice/Include/Win32Device/GameClient/Win32Mouse.h",
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp",
+      "Core/Libraries/Source/debug/debug_dlg/debug_dlg.cpp",
+      "Core/Libraries/Source/debug/debug_except.cpp",
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ],
+    "WndProc": [
+      "Core/Libraries/Source/debug/test2/test2.cpp",
+      "GeneralsMD/Code/Main/WinMain.cpp"
+    ]
+  },
+  "per_area": {
+    "device": {
+      "cursor": 30,
+      "message_pump": 5,
+      "mode_change": 3,
+      "polled_input": 18,
+      "window_handle": 35,
+      "wndproc": 18
+    },
+    "engine": {
+      "message_pump": 6,
+      "placement": 3,
+      "polled_input": 10,
+      "window_handle": 27,
+      "wndproc": 33
+    },
+    "generals": {
+      "message_pump": 8,
+      "mode_change": 16,
+      "placement": 9,
+      "polled_input": 3,
+      "window_handle": 47,
+      "wndproc": 217
+    },
+    "libraries": {
+      "cursor": 6,
+      "message_pump": 13,
+      "mode_change": 50,
+      "placement": 8,
+      "window_handle": 42,
+      "wndproc": 74
+    },
+    "main": {
+      "message_pump": 1,
+      "placement": 9,
+      "polled_input": 1,
+      "window_handle": 21,
+      "wndproc": 217
+    },
+    "tools": {
+      "cursor": 281,
+      "message_pump": 324,
+      "mode_change": 10,
+      "placement": 567,
+      "polled_input": 98,
+      "window_handle": 1286,
+      "wndproc": 1946
+    }
+  },
+  "spotlight": {
+    "Core/GameEngine/Source/Common/System/Debug.cpp": {
+      "placement": 3,
+      "window_handle": 11
+    },
+    "Core/GameEngine/Source/GameClient/Input/Keyboard.cpp": {
+      "polled_input": 2
+    },
+    "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIKeyboard.cpp": {
+      "polled_input": 5,
+      "window_handle": 1
+    },
+    "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp": {
+      "cursor": 16,
+      "polled_input": 1,
+      "window_handle": 7
+    },
+    "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp": {
+      "cursor": 7,
+      "window_handle": 5,
+      "wndproc": 14
+    },
+    "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp": {
+      "message_pump": 5,
+      "window_handle": 8
+    },
+    "GeneralsMD/Code/Main/WinMain.cpp": {
+      "message_pump": 1,
+      "placement": 9,
+      "polled_input": 1,
+      "window_handle": 19,
+      "wndproc": 217
+    }
+  },
+  "symbols": {
+    "in_scope": {
+      "AdjustWindowRect": 2,
+      "ApplicationHWnd": 52,
+      "BeginPaint": 2,
+      "ClientToScreen": 4,
+      "ClipCursor": 3,
+      "CreateWindow": 2,
+      "D3DPRESENT_PARAMETERS": 12,
+      "DefWindowProc": 3,
+      "DestroyWindow": 1,
+      "DirectInput8Create": 2,
+      "DispatchMessage": 2,
+      "EndPaint": 2,
+      "GetAsyncKeyState": 6,
+      "GetClientRect": 4,
+      "GetCursorPos": 3,
+      "GetDoubleClickTime": 2,
+      "GetKeyState": 2,
+      "GetKeyboardLayout": 2,
+      "GetMessage": 2,
+      "GetSystemMetrics": 2,
+      "GetWindowLong": 2,
+      "GetWindowRect": 3,
+      "HKL": 2,
+      "HWND": 50,
+      "IsIconic": 3,
+      "LPARAM": 43,
+      "LRESULT": 5,
+      "LoadCursor": 4,
+      "MSG": 16,
+      "PeekMessage": 1,
+      "PostQuitMessage": 2,
+      "RegisterClass": 1,
+      "RegisterClassEx": 1,
+      "ReleaseCapture": 1,
+      "Reset_Device": 8,
+      "ScreenToClient": 4,
+      "SetCapture": 1,
+      "SetCursor": 9,
+      "SetCursorPos": 2,
+      "SetFocus": 1,
+      "SetForegroundWindow": 2,
+      "SetWindowPos": 4,
+      "Set_Device_Resolution": 9,
+      "Set_Render_Device": 19,
+      "ShowCursor": 5,
+      "ShowWindow": 6,
+      "Toggle_Windowed": 5,
+      "TranslateMessage": 2,
+      "UpdateWindow": 2,
+      "VK_[A-Z0-9_]+": 13,
+      "WM_[A-Z0-9_]+": 272,
+      "WNDCLASS": 1,
+      "WNDPROC": 1,
+      "WPARAM": 15,
+      "WndProc": 5
+    },
+    "out_of_scope": {
+      "AdjustWindowRect": 5,
+      "ApplicationHWnd": 50,
+      "BeginPaint": 8,
+      "ClientToScreen": 24,
+      "ClipCursor": 2,
+      "CreateWindow": 3,
+      "CreateWindowEx": 8,
+      "DefWindowProc": 17,
+      "DestroyWindow": 112,
+      "DispatchMessage": 10,
+      "EndPaint": 8,
+      "GetActiveWindow": 2,
+      "GetAsyncKeyState": 20,
+      "GetClientRect": 84,
+      "GetCursorPos": 16,
+      "GetDoubleClickTime": 3,
+      "GetForegroundWindow": 1,
+      "GetKeyState": 5,
+      "GetMessage": 6,
+      "GetSystemMetrics": 22,
+      "GetWindowLong": 42,
+      "GetWindowRect": 174,
+      "HWND": 774,
+      "InvalidateRect": 71,
+      "IsIconic": 27,
+      "LPARAM": 643,
+      "LRESULT": 256,
+      "LoadCursor": 66,
+      "MSG": 16,
+      "MoveWindow": 18,
+      "PeekMessage": 15,
+      "PostMessage": 30,
+      "PostQuitMessage": 8,
+      "RegisterClass": 6,
+      "RegisterClassEx": 6,
+      "ReleaseCapture": 14,
+      "Reset_Device": 1,
+      "ScreenToClient": 78,
+      "SendMessage": 236,
+      "SetCapture": 18,
+      "SetCursor": 63,
+      "SetFocus": 50,
+      "SetForegroundWindow": 14,
+      "SetWindowLong": 26,
+      "SetWindowPos": 86,
+      "Set_Device_Resolution": 8,
+      "Set_Render_Device": 14,
+      "ShowWindow": 250,
+      "Toggle_Windowed": 3,
+      "TranslateMessage": 11,
+      "UpdateWindow": 45,
+      "VK_[A-Z0-9_]+": 73,
+      "WM_[A-Z0-9_]+": 734,
+      "WNDCLASS": 6,
+      "WNDPROC": 13,
+      "WPARAM": 503,
+      "WndProc": 8
+    }
+  },
+  "totals": {
+    "in_scope": {
+      "cursor": 36,
+      "message_pump": 25,
+      "mode_change": 53,
+      "placement": 20,
+      "polled_input": 29,
+      "window_handle": 125,
+      "wndproc": 342
+    },
+    "out_of_scope": {
+      "cursor": 281,
+      "message_pump": 332,
+      "mode_change": 26,
+      "placement": 576,
+      "polled_input": 101,
+      "window_handle": 1333,
+      "wndproc": 2163
+    }
+  }
+}

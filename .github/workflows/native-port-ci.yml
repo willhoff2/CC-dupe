@@ -509,3 +509,153 @@ jobs:
         with:
           name: spike-render-macos
           path: spike-macos.png
+
+  # 6. The window / event loop / input seam (docs/porting/window-event-loop.md).
+  #
+  #    This is the job that presents to a real window, which nothing in this workflow did
+  #    before: a real X server (Xvfb), a real VkSurfaceKHR from VK_KHR_xlib_surface, and a real
+  #    swapchain, presented to for 240 frames and then read back and checked. Xvfb is a display
+  #    server without a monitor, so this proves the surface/swapchain/present path and the
+  #    event translation; it cannot prove that pixels reached a physical screen. That was
+  #    verified by hand on a desktop X session - see the doc.
+  window-seam-linux:
+    name: Window seam (Linux, Xvfb + lavapipe)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
+    timeout-minutes: 30
+    steps:
+      - name: Install toolchain, SDL2, a software Vulkan device and an X server
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            clang-18 cmake ninja-build git ca-certificates python3 \
+            libvulkan-dev vulkan-validationlayers glslang-tools mesa-vulkan-drivers \
+            libsdl2-dev xvfb
+          test -f /usr/share/vulkan/icd.d/lvp_icd.json
+          test -f /usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Scan the Win32 window/event/input surface against the baseline
+        run: |
+          set -o pipefail
+          {
+            echo '## Win32 window / event loop / input surface'
+            echo '```'
+            python3 scripts/window-input-scan.py --check
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Check both backends' scan-code tables against KeyScanCodes.h
+        run: |
+          set -o pipefail
+          {
+            echo '## Scan-code tables'
+            echo '```'
+            python3 scripts/ci/check-window-scancodes.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Build the seam and the window spike
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: |
+          set -eux
+          cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/spike --target zh-window-spike
+
+      - name: Present 240 frames to a real X11 window and check the readback
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+          XDG_RUNTIME_DIR: /tmp/xdgrt
+        run: |
+          set -o pipefail
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          {
+            echo '## Window seam (Linux, Xvfb + lavapipe)'
+            echo '```'
+            xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+              build/spike/zh-window-spike --frames 240 --mode-change \
+                --out window-spike-linux.png
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the presented frame
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: window-spike-linux
+          path: window-spike-linux.png
+
+  # 7. The macOS half of the same seam - and the only job in this workflow that is expected to
+  #    fail, on purpose, so it is marked continue-on-error.
+  #
+  #    platform_window_cocoa.mm was written on a Linux box with no macOS SDK: it has never been
+  #    compiled, and its author could not run it. This job is the cheapest available way to find
+  #    out what is wrong with it, and its log is the deliverable. Two further limits, stated so
+  #    that a green tick here is not mistaken for a working macOS window:
+  #      * the runner's GPU is paravirtualised and it has no attached display, so even if the
+  #        NSWindow is created, "a window appeared on a screen" is NOT what is being tested;
+  #      * a GitHub macOS runner's shell is not guaranteed a WindowServer session, so
+  #        NSApplication may refuse to activate at all.
+  #    Real verification needs a Mac with a login session:
+  #    spikes/renderer/tools/macos-window-check.sh. Until someone runs that, the macOS path is
+  #    unverified.
+  window-seam-macos:
+    name: Window seam (macOS arm64, CAMetalLayer) [blind, informational]
+    runs-on: macos-15
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install MoltenVK, the Vulkan loader, glslang and SDL2
+        run: |
+          set -eux
+          brew update > /dev/null
+          brew install molten-vk vulkan-loader vulkan-headers glslang \
+                       vulkan-validationlayers sdl2
+          command -v cmake > /dev/null || brew install cmake
+
+      - name: Compile the blind Cocoa backend
+        run: |
+          set -o pipefail
+          BREW=$(brew --prefix)
+          {
+            echo '## Window seam (macOS, blind Cocoa/CAMetalLayer path)'
+            echo 'This code has never been compiled before this job ran.'
+            echo '```'
+            cmake -S spikes/renderer -B build/spike -G "Unix Makefiles" \
+              -DCMAKE_BUILD_TYPE=Release -DSPIKE_USE_SDL2=OFF \
+              -DCMAKE_PREFIX_PATH="$BREW" 2>&1
+            cmake --build build/spike --target zh-window-spike-cocoa -j3 2>&1
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Try to present to a CAMetalLayer (may fail for lack of a display session)
+        run: |
+          set -o pipefail
+          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
+          export VK_ICD_FILENAMES
+          export DYLD_LIBRARY_PATH="$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
+          {
+            echo '## Cocoa window run attempt'
+            echo '```'
+            build/spike/zh-window-spike-cocoa --frames 120 --no-validation \
+              --out window-spike-macos.png 2>&1
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload whatever it produced
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: window-spike-macos
+          path: window-spike-macos.png
+          if-no-files-found: ignore

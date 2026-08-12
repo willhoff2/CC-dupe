@@ -328,6 +328,12 @@ def probe(job):
 
 CMAKE_SOURCE_RE = re.compile(r"^\s+(Source/\S+\.cpp)\s*$")
 
+# Backends that are opt-in in CMake because they need a dependency this probe deliberately does
+# not have on its include path (SDL2). They are not part of "how much of the engine compiles
+# natively": the answer for them is "only with their dependency present", which the spike's own
+# build answers instead. See docs/porting/window-event-loop.md.
+OPTIONAL_BACKENDS = {"platform_window_sdl2.cpp"}
+
 
 def targets(include_renderer):
     return TARGETS + RENDERER_TARGETS if include_renderer else TARGETS
@@ -357,7 +363,8 @@ def collect_jobs(deps_dir, with_shims, include_renderer=False):
         else:
             sources = []
             for directory in target.source_dirs:
-                sources.extend(sorted((REPO_ROOT / directory).rglob("*.cpp")))
+                sources.extend(sorted(path for path in (REPO_ROOT / directory).rglob("*.cpp")
+                                      if path.name not in OPTIONAL_BACKENDS))
         jobs.extend((target, source, extra, with_shims) for source in sources)
     return jobs
 
