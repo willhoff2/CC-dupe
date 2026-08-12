@@ -39,6 +39,10 @@ Matrix4x4 Matrix4x4::Identity() {
 namespace {
 
 constexpr uint32_t kMaxDrawsPerFrame = 64;
+// Renamed copies behind one dynamic vertex buffer: one per frame that can be in
+// flight, plus the one being written. D3D8's DISCARD promises the driver hands back
+// memory the GPU is not reading, and this is how many copies that costs.
+constexpr uint32_t kDynamicRingRegions = 3;
 constexpr VkFormat kColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
 // The engine asks for D3DFMT_D24S8 and uses the stencil for shadow volumes, so the
 // depth target must have a stencil component. MoltenVK does not expose
@@ -185,14 +189,60 @@ std::vector<uint32_t> Read_Spirv(const std::string& path) {
 
 } // namespace
 
+// One mip level of a lockable texture: where in the persistent staging buffer its
+// texels live, and the pitch handed to the caller. Tightly packed rows, so the
+// pitch is the level width in bytes -- D3D8 does not promise any particular pitch,
+// only that the caller uses the one it is given.
+struct LockableLevel {
+	VkDeviceSize offset = 0;
+	uint32_t pitch = 0;
+	uint32_t width = 0;
+	uint32_t height = 0;
+	bool locked = false;
+	uint32_t lock_flags = 0;
+	LockRect lock_rect{};
+};
+
 struct TextureHandle {
 	Image image;
+
+	// --- lockable path (see docs/porting/renderer-resource-seam.md) ------------
+	bool lockable = false;
+	TextureFormat format = TextureFormat::A8R8G8B8;
+	VkFormat vk_format = VK_FORMAT_B8G8R8A8_UNORM;
+	bool expand_on_unlock = false;
+	// Bytes per texel in the format the *caller* writes, which is the D3D8 format,
+	// not necessarily the VkFormat the image has.
+	uint32_t src_texel_bytes = 4;
+	uint32_t dst_texel_bytes = 4;
+	// Permanently mapped, permanently owned: a D3D8 lock may hand out a pointer that
+	// outlives the Lock call (class C4) or even the Unlock (class C7).
+	Buffer staging;
+	void* staging_mapped = nullptr;
+	// Second staging buffer, only when the device has no view swizzle and the format
+	// has to be expanded on the CPU: the caller writes L8/A8/A8L8/X8R8G8B8 into
+	// `staging`, Unlock expands into this, and this is what the image is copied from.
+	Buffer upload;
+	void* upload_mapped = nullptr;
+	std::vector<LockableLevel> levels;
+	VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 
 struct VertexBufferHandle {
 	Buffer buffer;
 	VertexLayout layout;
 	uint32_t fvf = 0;
+
+	// --- dynamic ring (class C5) ----------------------------------------------
+	bool dynamic = false;
+	VkDeviceSize capacity = 0; // bytes the engine thinks the buffer has
+	uint32_t region_count = 1; // renamed copies behind that one buffer
+	uint32_t region = 0;       // which copy the next draw reads
+	// Frame each region was last drawn from, so a DISCARD knows whether renaming
+	// onto it would overwrite bytes the GPU has not read yet.
+	std::vector<uint64_t> region_last_use;
+	void* mapped = nullptr;
+	VkDeviceSize bind_offset = 0;
 };
 
 struct IndexBufferHandle {
@@ -232,6 +282,18 @@ public:
 	VertexBufferHandle* Create_Vertex_Buffer(const void* data, size_t bytes,
 	                                         uint32_t fvf) override;
 	IndexBufferHandle* Create_Index_Buffer(const uint16_t* data, size_t count) override;
+
+	TextureHandle* Create_Lockable_Texture(uint32_t width, uint32_t height,
+	                                       TextureFormat format,
+	                                       uint32_t mip_count) override;
+	bool Lock_Texture(TextureHandle* texture, uint32_t level, const LockRect* rect,
+	                  uint32_t flags, LockedRect& out) override;
+	bool Unlock_Texture(TextureHandle* texture, uint32_t level) override;
+	VertexBufferHandle* Create_Dynamic_Vertex_Buffer(size_t bytes, uint32_t fvf) override;
+	bool Lock_Vertex_Buffer(VertexBufferHandle* vb, size_t offset, size_t size,
+	                        uint32_t flags, void** out_bits) override;
+	bool Unlock_Vertex_Buffer(VertexBufferHandle* vb) override;
+	ResourceStats Get_Resource_Stats() const override { return resource_stats_; }
 
 	void Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream) override;
 	void Set_Index_Buffer(IndexBufferHandle* ib, uint32_t index_base_offset) override;
@@ -331,6 +393,13 @@ private:
 
 	std::unordered_map<uint64_t, VkPipeline> pipelines_;
 	std::unordered_map<SamplerKey, VkSampler, SamplerKeyHash> samplers_;
+	ResourceStats resource_stats_;
+	// Frame being recorded, and the last frame known to have finished on the GPU, so
+	// a DISCARD can tell whether renaming onto a ring region is safe. The spike keeps
+	// one frame in flight.
+	uint64_t frame_counter_ = 0;
+	uint64_t completed_frame_ = 0;
+
 	std::vector<TextureHandle*> owned_textures_;
 	std::vector<VertexBufferHandle*> owned_vbs_;
 	std::vector<IndexBufferHandle*> owned_ibs_;
@@ -1004,10 +1073,17 @@ void VulkanBackend::Shutdown() {
 
 	for (auto* t : owned_textures_) {
 		free_image(t->image);
+		// A lockable texture's staging memory stays mapped for its whole life; the
+		// unmap only happens here.
+		if (t->staging_mapped != nullptr) vkUnmapMemory(device_, t->staging.memory);
+		if (t->upload_mapped != nullptr) vkUnmapMemory(device_, t->upload.memory);
+		free_buffer(t->staging);
+		free_buffer(t->upload);
 		delete t;
 	}
 	owned_textures_.clear();
 	for (auto* vb : owned_vbs_) {
+		if (vb->mapped != nullptr) vkUnmapMemory(device_, vb->buffer.memory);
 		free_buffer(vb->buffer);
 		delete vb;
 	}
@@ -1378,6 +1454,393 @@ IndexBufferHandle* VulkanBackend::Create_Index_Buffer(const uint16_t* data, size
 }
 
 // ---------------------------------------------------------------------------
+// lockable resources: emulating the D3D8 Lock/Unlock contract
+//
+// The engine's resource interfaces stay D3D8-shaped (see
+// docs/porting/renderer-resource-seam.md), so the cost of that contract lands
+// here: a permanently mapped host-visible allocation per lockable resource, a
+// buffer-to-image copy per unlock, and a submit-and-wait per read-only lock.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Bytes per texel in the *D3D8* format, i.e. the layout the caller writes through
+// the pointer Lock hands out. Zero for the block-compressed formats, which this
+// path does not serve.
+uint32_t Source_Texel_Bytes(TextureFormat format) {
+	switch (format) {
+	case TextureFormat::A8R8G8B8:
+	case TextureFormat::X8R8G8B8: return 4;
+	case TextureFormat::R8G8B8: return 3;
+	case TextureFormat::A4R4G4B4:
+	case TextureFormat::A1R5G5B5:
+	case TextureFormat::R5G6B5:
+	case TextureFormat::A8L8:
+	case TextureFormat::V8U8: return 2;
+	case TextureFormat::L8:
+	case TextureFormat::A8:
+	case TextureFormat::P8: return 1;
+	default: return 0; // DXT1..DXT5
+	}
+}
+
+} // namespace
+
+TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t height,
+                                                      TextureFormat format,
+                                                      uint32_t mip_count) {
+	const uint32_t src_texel_bytes = Source_Texel_Bytes(format);
+	if (width == 0 || height == 0 || mip_count == 0 || src_texel_bytes == 0) {
+		std::fprintf(stderr,
+		             "Create_Lockable_Texture: block-compressed formats are not served "
+		             "by this path\n");
+		return nullptr;
+	}
+	if (format == TextureFormat::P8) {
+		// P8 needs the palette at upload time, and a lockable P8 texture could have
+		// its palette changed between locks. No engine lock site uses P8, so rather
+		// than guess a policy this path refuses it.
+		std::fprintf(stderr, "Create_Lockable_Texture: P8 is not served by this path\n");
+		return nullptr;
+	}
+	if (!Supports_Texture_Format(format)) return nullptr;
+
+	const FormatPlan plan = Plan_For(format, view_swizzle_);
+	auto* handle = new TextureHandle();
+	handle->lockable = true;
+	handle->format = format;
+	handle->vk_format = plan.vk;
+	handle->expand_on_unlock = plan.expand_to_bgra8;
+	handle->src_texel_bytes = src_texel_bytes;
+	handle->dst_texel_bytes = plan.block_bytes;
+	handle->image.width = width;
+	handle->image.height = height;
+	handle->image.mip_levels = mip_count;
+
+	VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+	ici.imageType = VK_IMAGE_TYPE_2D;
+	ici.format = plan.vk;
+	ici.extent = {width, height, 1};
+	ici.mipLevels = mip_count;
+	ici.arrayLayers = 1;
+	ici.samples = VK_SAMPLE_COUNT_1_BIT;
+	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+	// TRANSFER_SRC as well as DST: D3DLOCK_READONLY has to copy the image back out.
+	ici.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+	            VK_IMAGE_USAGE_SAMPLED_BIT;
+	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	if (vkCreateImage(device_, &ici, nullptr, &handle->image.image) != VK_SUCCESS) {
+		delete handle;
+		return nullptr;
+	}
+
+	VkMemoryRequirements req;
+	vkGetImageMemoryRequirements(device_, handle->image.image, &req);
+	uint32_t type = 0;
+	if (!Find_Memory_Type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, type)) {
+		delete handle;
+		return nullptr;
+	}
+	VkMemoryAllocateInfo mai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+	mai.allocationSize = req.size;
+	mai.memoryTypeIndex = type;
+	if (vkAllocateMemory(device_, &mai, nullptr, &handle->image.memory) != VK_SUCCESS ||
+	    vkBindImageMemory(device_, handle->image.image, handle->image.memory, 0) != VK_SUCCESS) {
+		delete handle;
+		return nullptr;
+	}
+
+	// The staging buffer holds the whole mip chain, because a texture-loader lock
+	// (class C4) locks every level at once and keeps all the pointers.
+	VkDeviceSize staging_size = 0;
+	VkDeviceSize upload_size = 0;
+	handle->levels.resize(mip_count);
+	for (uint32_t level = 0; level < mip_count; ++level) {
+		const uint32_t level_width = width >> level ? width >> level : 1u;
+		const uint32_t level_height = height >> level ? height >> level : 1u;
+		LockableLevel& l = handle->levels[level];
+		l.width = level_width;
+		l.height = level_height;
+		l.pitch = level_width * src_texel_bytes;
+		l.offset = staging_size;
+		staging_size += static_cast<VkDeviceSize>(l.pitch) * level_height;
+		upload_size += static_cast<VkDeviceSize>(level_width) * level_height * 4;
+	}
+
+	const VkMemoryPropertyFlags host =
+	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	if (!Allocate_Buffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+	                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+	                     host, handle->staging) ||
+	    vkMapMemory(device_, handle->staging.memory, 0, staging_size, 0,
+	                &handle->staging_mapped) != VK_SUCCESS) {
+		delete handle;
+		return nullptr;
+	}
+	std::memset(handle->staging_mapped, 0, static_cast<size_t>(staging_size));
+	++resource_stats_.staging_allocations;
+	resource_stats_.staging_bytes += staging_size;
+
+	// No view swizzle (MoltenVK): the caller still writes D3D8's L8/A8/A8L8/X8R8G8B8
+	// layout, so Unlock has to expand into a *second* host-visible buffer that the
+	// image is actually copied from. That doubles the resident staging memory for
+	// those formats and adds a CPU pass over every unlocked rectangle.
+	if (handle->expand_on_unlock) {
+		if (!Allocate_Buffer(upload_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, host,
+		                     handle->upload) ||
+		    vkMapMemory(device_, handle->upload.memory, 0, upload_size, 0,
+		                &handle->upload_mapped) != VK_SUCCESS) {
+			delete handle;
+			return nullptr;
+		}
+		std::memset(handle->upload_mapped, 0, static_cast<size_t>(upload_size));
+		++resource_stats_.staging_allocations;
+		resource_stats_.staging_bytes += upload_size;
+	}
+
+	VkImageViewCreateInfo vci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+	vci.image = handle->image.image;
+	vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	vci.format = plan.vk;
+	vci.components = plan.swizzle;
+	vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mip_count, 0, 1};
+	if (vkCreateImageView(device_, &vci, nullptr, &handle->image.view) != VK_SUCCESS) {
+		delete handle;
+		return nullptr;
+	}
+
+	// D3D8 hands out a lockable texture whose contents are undefined; the image here
+	// starts UNDEFINED and only gets a layout at the first unlock. Sampling it before
+	// then is a Vulkan error where D3D8 merely gives garbage, so the whole image is
+	// cleared once to make the two behave the same.
+	VkCommandBuffer cmd = Begin_One_Shot();
+	if (cmd == VK_NULL_HANDLE) {
+		delete handle;
+		return nullptr;
+	}
+	Transition(cmd, handle->image.image, VK_IMAGE_LAYOUT_UNDEFINED,
+	           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT, mip_count);
+	const VkClearColorValue black{{0.0f, 0.0f, 0.0f, 0.0f}};
+	const VkImageSubresourceRange all{VK_IMAGE_ASPECT_COLOR_BIT, 0, mip_count, 0, 1};
+	vkCmdClearColorImage(cmd, handle->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	                     &black, 1, &all);
+	Transition(cmd, handle->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+	           mip_count);
+	if (!End_One_Shot(cmd)) {
+		delete handle;
+		return nullptr;
+	}
+	handle->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	++resource_stats_.upload_submits;
+
+	owned_textures_.push_back(handle);
+	return handle;
+}
+
+bool VulkanBackend::Lock_Texture(TextureHandle* texture, uint32_t level,
+                                 const LockRect* rect, uint32_t flags, LockedRect& out) {
+	if (texture == nullptr || !texture->lockable || level >= texture->levels.size()) {
+		return false;
+	}
+	LockableLevel& l = texture->levels[level];
+	if (l.locked) return false; // D3D8 does not allow a nested lock of one level
+
+	LockRect whole{0, 0, l.width, l.height};
+	const LockRect r = rect != nullptr ? *rect : whole;
+	if (r.right > l.width || r.bottom > l.height || r.left >= r.right || r.top >= r.bottom) {
+		return false;
+	}
+
+	if ((flags & LOCK_READONLY) != 0) {
+		if (texture->expand_on_unlock) {
+			// The image holds expanded BGRA8, the caller expects the D3D8 format:
+			// contracting back is not implemented, and no engine site needs it (no
+			// READONLY lock in the classes uses an expanded format).
+			std::fprintf(stderr,
+			             "Lock_Texture: READONLY on a CPU-expanded format is not "
+			             "implemented\n");
+			return false;
+		}
+		// This is the cost D3D8 hides: a read-only lock is a copy back out of the
+		// image, a queue submit, and a fence wait before the pointer can be handed
+		// over. Nothing else can proceed in between.
+		VkCommandBuffer cmd = Begin_One_Shot();
+		if (cmd == VK_NULL_HANDLE) return false;
+		Transition(cmd, texture->image.image, texture->layout,
+		           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+		           texture->image.mip_levels);
+		VkBufferImageCopy copy{};
+		copy.bufferOffset = l.offset;
+		copy.bufferRowLength = l.width;
+		copy.bufferImageHeight = l.height;
+		copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+		copy.imageExtent = {l.width, l.height, 1};
+		vkCmdCopyImageToBuffer(cmd, texture->image.image,
+		                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		                       texture->staging.buffer, 1, &copy);
+		Transition(cmd, texture->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+		           texture->image.mip_levels);
+		if (!End_One_Shot(cmd)) return false;
+		texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		++resource_stats_.readback_stalls;
+	}
+
+	l.locked = true;
+	l.lock_flags = flags;
+	l.lock_rect = r;
+	// The pointer is into the persistent mapping, offset to the rectangle's first
+	// texel, exactly as D3D8 documents pBits for a sub-rect lock.
+	out.bits = static_cast<uint8_t*>(texture->staging_mapped) + l.offset +
+	           static_cast<size_t>(r.top) * l.pitch +
+	           static_cast<size_t>(r.left) * texture->src_texel_bytes;
+	out.pitch = l.pitch;
+	return true;
+}
+
+bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
+	if (texture == nullptr || !texture->lockable || level >= texture->levels.size()) {
+		return false;
+	}
+	LockableLevel& l = texture->levels[level];
+	if (!l.locked) return false;
+	l.locked = false;
+
+	// A read-only lock uploads nothing. This is why the write-only/read-only
+	// distinction matters: it is the difference between a copy and no copy.
+	if ((l.lock_flags & LOCK_READONLY) != 0) return true;
+
+	const LockRect r = l.lock_rect;
+	const uint32_t rect_width = r.right - r.left;
+	const uint32_t rect_height = r.bottom - r.top;
+
+	VkBuffer source = texture->staging.buffer;
+	VkDeviceSize source_offset = l.offset + static_cast<VkDeviceSize>(r.top) * l.pitch +
+	                             static_cast<VkDeviceSize>(r.left) * texture->src_texel_bytes;
+	uint32_t row_length = l.pitch / texture->src_texel_bytes;
+
+	if (texture->expand_on_unlock) {
+		// CPU channel expansion, row by row, into the second staging buffer. Only the
+		// locked rectangle is expanded, so a partial-rect unlock does not cost a pass
+		// over the whole level.
+		VkDeviceSize level_upload_offset = 0;
+		for (uint32_t i = 0; i < level; ++i) {
+			level_upload_offset += static_cast<VkDeviceSize>(texture->levels[i].width) *
+			                       texture->levels[i].height * 4;
+		}
+		auto* dst = static_cast<uint8_t*>(texture->upload_mapped) + level_upload_offset;
+		const auto* src = static_cast<const uint8_t*>(texture->staging_mapped) + l.offset;
+		std::vector<uint8_t> row;
+		for (uint32_t y = 0; y < rect_height; ++y) {
+			const TextureMip mip{src + static_cast<size_t>(r.top + y) * l.pitch +
+			                         static_cast<size_t>(r.left) * texture->src_texel_bytes,
+			                     static_cast<size_t>(rect_width) * texture->src_texel_bytes,
+			                     rect_width, 1};
+			Expand_To_Bgra8(texture->format, mip, nullptr, row);
+			std::memcpy(dst + (static_cast<size_t>(r.top + y) * l.width + r.left) * 4,
+			            row.data(), row.size());
+		}
+		++resource_stats_.cpu_expansions;
+		source = texture->upload.buffer;
+		source_offset = level_upload_offset +
+		                (static_cast<VkDeviceSize>(r.top) * l.width + r.left) * 4;
+		row_length = l.width;
+	}
+
+	VkCommandBuffer cmd = Begin_One_Shot();
+	if (cmd == VK_NULL_HANDLE) return false;
+	Transition(cmd, texture->image.image, texture->layout,
+	           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+	           texture->image.mip_levels);
+	VkBufferImageCopy copy{};
+	copy.bufferOffset = source_offset;
+	copy.bufferRowLength = row_length;
+	copy.bufferImageHeight = rect_height;
+	copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+	copy.imageOffset = {static_cast<int32_t>(r.left), static_cast<int32_t>(r.top), 0};
+	copy.imageExtent = {rect_width, rect_height, 1};
+	vkCmdCopyBufferToImage(cmd, source, texture->image.image,
+	                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+	Transition(cmd, texture->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+	           texture->image.mip_levels);
+	if (!End_One_Shot(cmd)) return false;
+	texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	++resource_stats_.texture_upload_regions;
+	++resource_stats_.upload_submits;
+	return true;
+}
+
+VertexBufferHandle* VulkanBackend::Create_Dynamic_Vertex_Buffer(size_t bytes,
+                                                                uint32_t fvf) {
+	if (bytes == 0) return nullptr;
+	auto* handle = new VertexBufferHandle();
+	handle->fvf = fvf;
+	if (!Decode_Fvf(fvf, handle->layout)) {
+		std::fprintf(stderr, "Decode_Fvf: unsupported FVF 0x%x\n", fvf);
+		delete handle;
+		return nullptr;
+	}
+	handle->dynamic = true;
+	handle->capacity = bytes;
+	// D3DLOCK_DISCARD is "rename this buffer": the driver hands back memory the GPU
+	// is not reading. Reproducing that needs more than one copy behind the handle,
+	// one per frame that can be in flight, plus one being written.
+	handle->region_count = kDynamicRingRegions;
+	handle->region_last_use.assign(handle->region_count, 0);
+	const VkMemoryPropertyFlags host =
+	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	const VkDeviceSize total = handle->capacity * handle->region_count;
+	if (!Allocate_Buffer(total, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, host, handle->buffer) ||
+	    vkMapMemory(device_, handle->buffer.memory, 0, total, 0, &handle->mapped) !=
+	        VK_SUCCESS) {
+		delete handle;
+		return nullptr;
+	}
+	++resource_stats_.staging_allocations;
+	resource_stats_.staging_bytes += total;
+	owned_vbs_.push_back(handle);
+	return handle;
+}
+
+bool VulkanBackend::Lock_Vertex_Buffer(VertexBufferHandle* vb, size_t offset, size_t size,
+                                      uint32_t flags, void** out_bits) {
+	if (vb == nullptr || out_bits == nullptr || vb->mapped == nullptr) return false;
+	if (offset + size > vb->capacity) return false;
+
+	if ((flags & LOCK_DISCARD) != 0) {
+		vb->region = (vb->region + 1) % vb->region_count;
+		if (vb->region_last_use[vb->region] > completed_frame_) {
+			// The ring has wrapped onto bytes a submitted frame may still be reading.
+			// D3D8's DISCARD promises this never blocks, so a real port has to grow
+			// the ring rather than wait; the spike counts it and continues, and a
+			// within-frame wrap is reported because there is no fence to wait on.
+			++resource_stats_.ring_wrap_waits;
+			if (vb->region_last_use[vb->region] < frame_counter_) {
+				vkWaitForFences(device_, 1, &frame_fence_, VK_TRUE, UINT64_MAX);
+				completed_frame_ = frame_counter_ - 1;
+			}
+		}
+		++resource_stats_.ring_discards;
+	} else if ((flags & LOCK_NOOVERWRITE) != 0) {
+		// Append: the earlier bytes of this region stay valid, because draws already
+		// recorded against them have not been submitted or have not finished.
+		++resource_stats_.ring_appends;
+	}
+	vb->bind_offset = vb->capacity * vb->region;
+	resource_stats_.ring_bytes += size;
+	*out_bits = static_cast<uint8_t*>(vb->mapped) + vb->bind_offset + offset;
+	return true;
+}
+
+bool VulkanBackend::Unlock_Vertex_Buffer(VertexBufferHandle* vb) {
+	// Host-coherent memory, so there is nothing to flush and nothing to copy: this
+	// is the one D3D8 lock class that maps onto Vulkan for free.
+	return vb != nullptr && vb->mapped != nullptr;
+}
+
+// ---------------------------------------------------------------------------
 // state
 // ---------------------------------------------------------------------------
 
@@ -1638,6 +2101,10 @@ VkPipeline VulkanBackend::Get_Or_Create_Pipeline(const PipelineKey& key,
 void VulkanBackend::Begin_Scene() {
 	vkWaitForFences(device_, 1, &frame_fence_, VK_TRUE, UINT64_MAX);
 	vkResetFences(device_, 1, &frame_fence_);
+	// Everything submitted before this point has finished, which is what makes a
+	// dynamic-buffer region safe to rename.
+	completed_frame_ = frame_counter_;
+	++frame_counter_;
 	vkResetCommandBuffer(frame_cmd_, 0);
 
 	VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -1878,7 +2345,12 @@ void VulkanBackend::Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
 	vkCmdBindDescriptorSets(frame_cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_,
 	                        0, 1, &set, 0, nullptr);
 	VkBuffer vertex_buffers[2] = {bound_vb_->buffer.buffer, dummy_vertex_buffer_.buffer};
-	VkDeviceSize offsets[2] = {0, 0};
+	// A dynamic buffer's current ring region is applied here, so the engine's vertex
+	// numbering is unchanged by the renaming DISCARD does behind the handle.
+	VkDeviceSize offsets[2] = {bound_vb_->bind_offset, 0};
+	if (bound_vb_->dynamic) {
+		bound_vb_->region_last_use[bound_vb_->region] = frame_counter_;
+	}
 	vkCmdBindVertexBuffers(frame_cmd_, 0, 2, vertex_buffers, offsets);
 	vkCmdBindIndexBuffer(frame_cmd_, bound_ib_->buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
 	vkCmdDrawIndexed(frame_cmd_, polygon_count * 3, 1, start_index, index_base_offset_, 0);

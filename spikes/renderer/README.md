@@ -33,8 +33,11 @@ alpha-blended screen-space quad (`D3DFVF_XYZRHW | D3DFVF_DIFFUSE`, no texture,
 | `src/caps_probe.cpp` | `zh-caps-probe`: formats, features and limits, queried. No rendering |
 | `src/feature_probe.cpp` | `zh-feature-probe`: nine rendered cases (DXT, stencil, render targets, depth, blending, two stages, dynamic buffers), each asserted by reading pixels back |
 | `src/fixedfunc_tests.cpp` | `zh-fixedfunc-tests`: 50 pixel assertions over the measured fixed-function subset — the whole cascade, FVF, transforms, lighting, fog, raster state and texture formats |
+| `src/resource_lock_tests.cpp` | `zh-resource-lock-tests`: the D3D8 `Lock`/`Unlock` contract over Vulkan — five of the eight usage classes in `renderer-resource-seam.md`, each asserted on read-back pixels or read-back bytes |
 | `src/throughput.cpp` | `zh-throughput`: draw calls/sec, state changes/sec, and pipeline-creation cost |
 | `tools/d3d8-surface-scan.py` | the measurement behind every number in `renderer-surface.md` |
+| `tools/d3d8-lock-scan.py` | the resource-interface and lock/unlock measurement behind `renderer-resource-seam.md`; `--check` gates the class table |
+| `tools/d3d8-lock-classes.json` | the usage class each lock/unlock site belongs to, keyed by file and function |
 | `tools/texture-stage-scan.py` | the texture-stage cascade measurement in `fixed-function-measurements.md` |
 | `tools/engine-usage-scan.py` | the FVF / transform / lighting / fog / raster / format measurement in the same doc |
 
@@ -134,8 +137,15 @@ Two extra binaries, built by the same project, answer what the two draws above c
 /tmp/zh-renderer-build/zh-caps-probe        # formats, features, limits, portability subset
 /tmp/zh-renderer-build/zh-feature-probe     # nine rendered cases, each checked pixel by pixel
 /tmp/zh-renderer-build/zh-fixedfunc-tests   # 50 fixed-function pixel assertions
+/tmp/zh-renderer-build/zh-resource-lock-tests  # D3D8 Lock/Unlock usage classes, plus their cost
 /tmp/zh-renderer-build/zh-throughput        # draw calls/sec, state changes/sec, pipeline cost
 ```
+
+`zh-resource-lock-tests` implements the D3D8 lock contract the engine actually uses — whole-surface
+write, partial rect, `D3DLOCK_READONLY` read-back, a whole mip chain locked at once and filled
+afterwards, and a `D3DLOCK_DISCARD`/`D3DLOCK_NOOVERWRITE` dynamic vertex ring — and prints what each
+cost in staging bytes, copies, submits and stalls. `docs/porting/renderer-resource-seam.md` explains
+the classes and what is *not* covered.
 
 `zh-fixedfunc-tests` covers the subset measured in `docs/porting/fixed-function-measurements.md`:
 all 17 `D3DTOP_*` ops the engine can request across 8 stages, `COLORARG0`/`ALPHAARG0`,

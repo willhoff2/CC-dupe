@@ -73,6 +73,53 @@ struct TextureDesc {
 	const uint32_t* palette = nullptr;
 };
 
+// --- D3D8-shaped resource locking -------------------------------------------
+// The engine's 95 Lock/Unlock call sites hand out a raw pointer and a pitch and
+// expect D3D8's contract. These entry points keep that shape deliberately; the
+// classes they have to serve, and what each costs over Vulkan, are in
+// docs/porting/renderer-resource-seam.md.
+enum LockFlags : uint32_t {
+	LOCK_NONE = 0,
+	LOCK_READONLY = 0x00000010,    // D3DLOCK_READONLY
+	LOCK_NOOVERWRITE = 0x00001000, // D3DLOCK_NOOVERWRITE
+	LOCK_DISCARD = 0x00002000,     // D3DLOCK_DISCARD
+};
+
+// D3DLOCKED_RECT.
+struct LockedRect {
+	void* bits = nullptr;
+	uint32_t pitch = 0;
+};
+
+// RECT, in texels, right/bottom exclusive, as D3D8's LockRect takes it.
+struct LockRect {
+	uint32_t left = 0, top = 0, right = 0, bottom = 0;
+};
+
+// What emulating the D3D8 lock contract actually costs, counted rather than
+// estimated. The resource-lock tests print these so the cost model in the doc is
+// measured on at least one implementation.
+struct ResourceStats {
+	// Host-visible allocations that exist for the lifetime of a resource, because a
+	// D3D8 lock may hand out a pointer that outlives the call (class C4/C7).
+	uint32_t staging_allocations = 0;
+	uint64_t staging_bytes = 0;
+	// vkCmdCopyBufferToImage regions issued from Unlock, and the submits they cost.
+	uint32_t texture_upload_regions = 0;
+	uint32_t upload_submits = 0;
+	// Lock(READONLY) round trips: copy-to-buffer, submit, fence wait.
+	uint32_t readback_stalls = 0;
+	// CPU channel expansions forced by the absence of view swizzle (MoltenVK).
+	uint32_t cpu_expansions = 0;
+	// Dynamic buffer ring: DISCARD renames, NOOVERWRITE appends, bytes handed out,
+	// and the times a DISCARD had to wait because the ring wrapped onto a region the
+	// GPU had not finished reading.
+	uint32_t ring_discards = 0;
+	uint32_t ring_appends = 0;
+	uint64_t ring_bytes = 0;
+	uint32_t ring_wrap_waits = 0;
+};
+
 // D3DLIGHT8, minus the fields the engine never fills.
 struct LightState {
 	uint32_t type = 0; // D3DLIGHTTYPE; 0 disables the slot
@@ -145,6 +192,27 @@ public:
 	                                                 uint32_t fvf) = 0;
 	virtual IndexBufferHandle* Create_Index_Buffer(const uint16_t* data,
 	                                               size_t count) = 0;
+
+	// --- lockable resources: the seam under investigation ---------------------
+	// A texture whose contents arrive through Lock/Unlock rather than at creation,
+	// i.e. what CreateTexture(D3DPOOL_MANAGED) + LockRect gives the engine.
+	virtual TextureHandle* Create_Lockable_Texture(uint32_t width, uint32_t height,
+	                                               TextureFormat format,
+	                                               uint32_t mip_count) = 0;
+	// `rect` null locks the whole level. Flags are the D3DLOCK_* subset above.
+	virtual bool Lock_Texture(TextureHandle* texture, uint32_t level, const LockRect* rect,
+	                          uint32_t flags, LockedRect& out) = 0;
+	virtual bool Unlock_Texture(TextureHandle* texture, uint32_t level) = 0;
+
+	// A dynamic vertex buffer, i.e. D3DUSAGE_DYNAMIC|WRITEONLY, locked with
+	// DISCARD/NOOVERWRITE many times per frame.
+	virtual VertexBufferHandle* Create_Dynamic_Vertex_Buffer(size_t bytes,
+	                                                         uint32_t fvf) = 0;
+	virtual bool Lock_Vertex_Buffer(VertexBufferHandle* vb, size_t offset, size_t size,
+	                                uint32_t flags, void** out_bits) = 0;
+	virtual bool Unlock_Vertex_Buffer(VertexBufferHandle* vb) = 0;
+
+	virtual ResourceStats Get_Resource_Stats() const = 0;
 
 	virtual void Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream = 0) = 0;
 	virtual void Set_Index_Buffer(IndexBufferHandle* ib, uint32_t index_base_offset) = 0;
