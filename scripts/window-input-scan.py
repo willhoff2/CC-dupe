@@ -48,7 +48,10 @@ SOURCE_EXT = (".cpp", ".h", ".hpp", ".c", ".inl", ".mm")
 AREAS = [
     # The port harness itself: the Win32 header stand-ins and the renderer spike. They
     # mention these symbols by construction (the shims *declare* HWND), so counting them as
-    # engine work would inflate every number here.
+    # engine work would inflate every number here. It is not scanned at all (see SKIP_AREAS):
+    # the spike is Vulkan code, whose VK_STRUCTURE_TYPE_* and VK_FORMAT_* tokens are
+    # indistinguishable from Win32 virtual-key codes to a regex, so every renderer edit would
+    # otherwise move a number that has nothing to do with the Win32 surface.
     ("harness", False, lambda rel: rel.startswith((
         "scripts/native-port-shims/", "spikes/"))),
     ("tools", False, lambda rel: "/Tools/" in "/" + rel),
@@ -62,6 +65,9 @@ AREAS = [
         "Core/Libraries/", "GeneralsMD/Code/Libraries/"))),
     ("other", False, lambda rel: True),
 ]
+
+# Areas whose files are not read at all, as opposed to counted as out of scope.
+SKIP_AREAS = frozenset(["harness"])
 
 # The categories the seam is answerable for. Each entry is (identifier -> regex); a symbol
 # is counted once per textual occurrence outside comments and string literals.
@@ -188,6 +194,8 @@ def scan():
             path = os.path.join(dirpath, name)
             rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
             area, _ = area_of(rel)
+            if area in SKIP_AREAS:
+                continue
             with open(path, "r", errors="replace") as handle:
                 text = strip_comments_and_strings(handle.read())
             if "HWND" in text:
