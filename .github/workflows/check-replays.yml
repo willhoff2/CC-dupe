@@ -29,6 +29,12 @@ jobs:
       GAME_PATH: C:\GameData
       GENERALS_PATH: C:\GameData\Generals
       GENERALSMD_PATH: C:\GameData\GeneralsMD
+      # Where the trimmed game data lives and what it should hash to. Override per repository
+      # (Settings -> Secrets and variables -> Actions -> Variables) to use your own bucket; the
+      # defaults are the upstream bucket and the hashes of the archives in it.
+      GAMEDATA_S3_BASE_URI: ${{ vars.GAMEDATA_S3_BASE_URI || 's3://github-ci' }}
+      EXPECTED_HASH_GENERALS: ${{ vars.GAMEDATA_GENERALS_SHA256 || '37A351AA430199D1F05DEB9E404857DCE7B461A6AC272C5D4A0B5652CDB06372' }}
+      EXPECTED_HASH_GENERALSMD: ${{ vars.GAMEDATA_GENERALSMD_SHA256 || '6837FE1E3009A4C239406C39B1598216C0943EE8ED46BB10626767029AC05E21' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -46,30 +52,39 @@ jobs:
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: ${{ env.GAME_PATH }}
-          key: gamedata-permanent-cache-v4
+          # The hashes are part of the key so that repointing the workflow at a differently
+          # packed copy of the game data does not silently reuse the previous one.
+          key: gamedata-permanent-cache-v4-${{ env.EXPECTED_HASH_GENERALS }}-${{ env.EXPECTED_HASH_GENERALSMD }}
 
-      - name: Download Game Data from Cloudflare R2
+      - name: Download Game Data
         if: ${{ steps.cache-gamedata.outputs.cache-hit != 'true' }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
-          EXPECTED_HASH_GENERALS: "37A351AA430199D1F05DEB9E404857DCE7B461A6AC272C5D4A0B5652CDB06372"
-          EXPECTED_HASH_GENERALSMD: "6837FE1E3009A4C239406C39B1598216C0943EE8ED46BB10626767029AC05E21"
         shell: pwsh
         run: |
           # Download trimmed gamedata of both Generals 1.08 and Generals Zero Hour 1.04.
           # This data cannot be used for playing because it's
           # missing textures, audio and gui files. But it's enough for replay checking.
-          # It's also encrypted because it's not allowed to distribute these files.
+          # It is not redistributable, hence a private bucket and a hash check.
+          #
+          # The bucket, the endpoint and the expected hashes are all configurable, so a fork
+          # that cannot use the upstream bucket can pack its own copy from retail installs with
+          # scripts/ci/pack-gamedata.ps1 and host it itself. AWS_ENDPOINT_URL is only needed for
+          # S3-compatible services such as Cloudflare R2; leave it unset for plain AWS S3.
+          # See docs/porting/replay-check-gamedata.md.
 
-          if (-not $env:AWS_ACCESS_KEY_ID -or -not $env:AWS_SECRET_ACCESS_KEY -or -not $env:AWS_ENDPOINT_URL) {
+          if (-not $env:AWS_ACCESS_KEY_ID -or -not $env:AWS_SECRET_ACCESS_KEY) {
               $ok1 = [bool]$env:AWS_ACCESS_KEY_ID
               $ok2 = [bool]$env:AWS_SECRET_ACCESS_KEY
-              $ok3 = [bool]$env:AWS_ENDPOINT_URL
-              Write-Host "One or more required secrets are not set or are empty. R2_ACCESS_KEY_ID: $ok1, R2_SECRET_ACCESS_KEY: $ok2, R2_ENDPOINT_URL: $ok3"
+              Write-Host "Required bucket credentials are not set or are empty. R2_ACCESS_KEY_ID: $ok1, R2_SECRET_ACCESS_KEY: $ok2"
+              Write-Host "See docs/porting/replay-check-gamedata.md for how to provide game data in a fork."
               exit 1
           }
+
+          $awsArgs = @()
+          if ($env:AWS_ENDPOINT_URL) { $awsArgs += @("--endpoint-url", $env:AWS_ENDPOINT_URL) }
 
           # Download Generals Game Files
           # The archive contains these files:
@@ -83,7 +98,11 @@ jobs:
           # Data\Scripts\SkirmishScripts.scb
 
           Write-Host "Downloading Game Data for Generals" -ForegroundColor Cyan
-          aws s3 cp s3://github-ci/generals108_gamedata_trimmed.7z generals108_gamedata_trimmed.7z --endpoint-url $env:AWS_ENDPOINT_URL
+          aws s3 cp "$env:GAMEDATA_S3_BASE_URI/generals108_gamedata_trimmed.7z" generals108_gamedata_trimmed.7z @awsArgs
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "Download failed (aws exit $LASTEXITCODE). Check GAMEDATA_S3_BASE_URI and the bucket credentials."
+              exit 1
+          }
 
           Write-Host "Verifying File Integrity" -ForegroundColor Cyan
           $fileHash = (Get-FileHash -Path generals108_gamedata_trimmed.7z -Algorithm SHA256).Hash
@@ -111,7 +130,11 @@ jobs:
           # Data\Scripts\SkirmishScripts.scb
 
           Write-Host "Downloading Game Data for GeneralsMD" -ForegroundColor Cyan
-          aws s3 cp s3://github-ci/zerohour104_gamedata_trimmed.7z zerohour104_gamedata_trimmed.7z --endpoint-url $env:AWS_ENDPOINT_URL
+          aws s3 cp "$env:GAMEDATA_S3_BASE_URI/zerohour104_gamedata_trimmed.7z" zerohour104_gamedata_trimmed.7z @awsArgs
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "Download failed (aws exit $LASTEXITCODE). Check GAMEDATA_S3_BASE_URI and the bucket credentials."
+              exit 1
+          }
 
           Write-Host "Verifying File Integrity" -ForegroundColor Cyan
           $fileHash = (Get-FileHash -Path zerohour104_gamedata_trimmed.7z -Algorithm SHA256).Hash
