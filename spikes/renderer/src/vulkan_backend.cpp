@@ -19,6 +19,14 @@
 #include <SDL2/SDL_vulkan.h>
 #endif
 
+// The window/event-loop/input seam. When it is present the window handle passed to Init() is
+// a WWPlatform window rather than an SDL_Window, and the surface comes from the seam - which
+// is how the CAMetalLayer reaches MoltenVK on macOS. See
+// Core/Libraries/Source/WWVegas/WWLib/platform/platform_window.h.
+#ifdef SPIKE_WITH_PLATFORM_WINDOW
+#include "platform/platform_window.h"
+#endif
+
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -432,7 +440,13 @@ bool VulkanBackend::Create_Instance(void* window_handle) {
 		instance_flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 	}
 
-#ifdef SPIKE_WITH_SDL
+#ifdef SPIKE_WITH_PLATFORM_WINDOW
+	if (!headless_ && window_handle != nullptr) {
+		const char* names[8] = {nullptr};
+		const int count = WWPlatform::Window_Vulkan_Instance_Extensions(window_handle, names, 8);
+		for (int i = 0; i < count; ++i) extensions.push_back(names[i]);
+	}
+#elif defined(SPIKE_WITH_SDL)
 	if (!headless_ && window_handle != nullptr) {
 		unsigned count = 0;
 		SDL_Vulkan_GetInstanceExtensions(static_cast<SDL_Window*>(window_handle), &count, nullptr);
@@ -878,7 +892,7 @@ bool VulkanBackend::Create_Shaders() {
 }
 
 bool VulkanBackend::Create_Swapchain(void* window_handle) {
-#ifdef SPIKE_WITH_SDL
+#if defined(SPIKE_WITH_SDL) || defined(SPIKE_WITH_PLATFORM_WINDOW)
 	if (headless_ || window_handle == nullptr) return true;
 
 	VkSurfaceCapabilitiesKHR caps{};
@@ -926,7 +940,15 @@ bool VulkanBackend::Init(void* window_handle, uint32_t width, uint32_t height) {
 
 	if (!Create_Instance(window_handle)) return false;
 
-#ifdef SPIKE_WITH_SDL
+#ifdef SPIKE_WITH_PLATFORM_WINDOW
+	if (!headless_ && window_handle != nullptr) {
+		if (!WWPlatform::Window_Create_Vulkan_Surface(window_handle, instance_, &surface_)) {
+			std::fprintf(stderr, "Window_Create_Vulkan_Surface failed: %s\n",
+			             WWPlatform::Window_Last_Error());
+			return false;
+		}
+	}
+#elif defined(SPIKE_WITH_SDL)
 	if (!headless_ && window_handle != nullptr) {
 		if (!SDL_Vulkan_CreateSurface(static_cast<SDL_Window*>(window_handle), instance_, &surface_)) {
 			std::fprintf(stderr, "SDL_Vulkan_CreateSurface failed: %s\n", SDL_GetError());

@@ -4,7 +4,8 @@
 #   cmake -S . -B build && cmake --build build && ./build/zh-renderer-spike
 #
 # Requires: a Vulkan SDK/loader with headers, glslangValidator (or glslc), CMake 3.20+.
-# SDL2 is optional and only used for the on-screen window.
+# SDL2 is optional; it backs zh-renderer-spike's --window and the portable backend of the
+# window/event-loop/input seam (zh-window-spike, see tools/macos-window-check.sh).
 
 cmake_minimum_required(VERSION 3.20)
 project(zh-renderer-spike CXX)
@@ -122,9 +123,79 @@ if(SPIKE_HAVE_SDL2)
     endif()
 endif()
 
+# --- window / event loop / input ---------------------------------------------
+# The seam under test lives in the engine tree, not here, because it is engine code; the
+# spike just builds it standalone, exactly as it does with the D3D8-shaped backend.
+set(WWLIB_PLATFORM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Libraries/Source/WWVegas/WWLib")
+
+# zh-window-spike: the same two draws as zh-renderer-spike, but presented to a real window
+# through platform_window.h. One target per backend, because the backend is a link-time
+# choice and both need to be buildable on a Mac to be compared.
+if(SPIKE_HAVE_SDL2)
+    add_executable(zh-window-spike
+        src/window_spike.cpp
+        src/png_write.cpp
+        src/state_translate.cpp
+        src/vulkan_backend.cpp
+        "${WWLIB_PLATFORM_DIR}/platform/platform_window_sdl2.cpp")
+    add_dependencies(zh-window-spike spike-shaders)
+    target_include_directories(zh-window-spike PRIVATE src "${WWLIB_PLATFORM_DIR}")
+    target_link_libraries(zh-window-spike PRIVATE Vulkan::Vulkan)
+    target_compile_definitions(zh-window-spike PRIVATE
+        SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}"
+        SPIKE_WITH_PLATFORM_WINDOW)
+    if(TARGET SDL2::SDL2)
+        target_link_libraries(zh-window-spike PRIVATE SDL2::SDL2)
+    else()
+        target_include_directories(zh-window-spike PRIVATE ${SDL2_INCLUDE_DIRS})
+        target_link_libraries(zh-window-spike PRIVATE ${SDL2_LIBRARIES})
+    endif()
+    # The SDL2 backend includes <SDL.h>, not <SDL2/SDL.h>, so that the same file works
+    # against a Homebrew/framework SDL2 on macOS.
+    if(SDL2_INCLUDE_DIRS)
+        target_include_directories(zh-window-spike PRIVATE ${SDL2_INCLUDE_DIRS})
+    endif()
+endif()
+
+# zh-window-spike-cocoa: the same driver against the native Cocoa/CAMetalLayer backend.
+#
+# WRITTEN BLIND - neither this target nor the file it compiles has ever been configured,
+# compiled or run, because the session that wrote them had only Linux. It is what
+# tools/macos-window-check.sh builds, and finding out whether it even compiles is that
+# script's first job.
+if(APPLE)
+    include(CheckLanguage)
+    check_language(OBJCXX)
+    if(CMAKE_OBJCXX_COMPILER)
+        enable_language(OBJCXX)
+        add_executable(zh-window-spike-cocoa
+            src/window_spike.cpp
+            src/png_write.cpp
+            src/state_translate.cpp
+            src/vulkan_backend.cpp
+            "${WWLIB_PLATFORM_DIR}/platform/platform_window_cocoa.mm")
+        add_dependencies(zh-window-spike-cocoa spike-shaders)
+        target_include_directories(zh-window-spike-cocoa PRIVATE src "${WWLIB_PLATFORM_DIR}")
+        target_link_libraries(zh-window-spike-cocoa PRIVATE Vulkan::Vulkan
+            "-framework AppKit" "-framework QuartzCore" "-framework Metal"
+            "-framework CoreGraphics" "-framework Foundation")
+        target_compile_definitions(zh-window-spike-cocoa PRIVATE
+            SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}"
+            SPIKE_WITH_PLATFORM_WINDOW)
+    else()
+        message(STATUS "no Objective-C++ compiler: zh-window-spike-cocoa not built")
+    endif()
+endif()
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     foreach(target zh-renderer-spike zh-caps-probe zh-feature-probe zh-fixedfunc-tests
                    zh-throughput)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
+    endforeach()
+    foreach(target zh-window-spike zh-window-spike-cocoa)
+        if(TARGET ${target})
+            target_compile_options(${target} PRIVATE
+                -Wall -Wextra -Wno-missing-field-initializers)
+        endif()
     endforeach()
 endif()
