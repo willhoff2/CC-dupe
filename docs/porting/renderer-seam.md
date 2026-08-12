@@ -233,6 +233,12 @@ A half-abstracted resource model would be worse than an honest un-abstracted one
 `IDirect3DTexture8*` and friends appear in `renderbackend.h` as-is. Making them opaque is a
 separately scoped slice, and the numbers above are its estimate.
 
+That slice has since been done as an investigation: **`docs/porting/renderer-resource-seam.md`**
+re-derives the counts with a second scanner (226/72/154, 95 lock/unlock — it reconciles the
+difference from the 213/71/142/88 above site by site), classifies every lock site into 8 usage
+classes, and concludes that the resource interfaces should *stay* D3D8-shaped, with the cost of
+emulating `Lock`/`Unlock` over Vulkan measured by a running test rather than estimated.
+
 ## 6. Remaining holes in the seam, stated plainly
 
 **`_Get_D3D_Device8()` / `_Get_D3D8()` still exist.** They now read through the backend

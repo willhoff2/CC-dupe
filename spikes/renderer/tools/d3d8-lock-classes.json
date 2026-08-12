@@ -1,0 +1,119 @@
+{
+  "_comment": [
+    "Usage class per (file, enclosing function) for every D3D8 Lock/Unlock site the",
+    "engine has.  `d3d8-lock-scan.py --check` fails if a lock site is in no class or a",
+    "class entry matches no lock site, so adding a lock site forces a decision about",
+    "which Vulkan resource path has to serve it.",
+    "`contract` is what the *caller* relies on, i.e. what the Vulkan implementation must",
+    "reproduce.  See docs/porting/renderer-resource-seam.md."
+  ],
+  "classes": [
+    {
+      "id": "C1",
+      "name": "whole-surface write",
+      "contract": "lock a whole surface or mip level with no flags, fill every texel from the CPU, unlock; nothing is read back. Upload can happen entirely at unlock.",
+      "vulkan": "persistent host-visible staging allocation per resource + vkCmdCopyBufferToImage at unlock"
+    },
+    {
+      "id": "C2",
+      "name": "partial-rect write",
+      "contract": "same as C1, but the lock covers a sub-rect and the caller only writes inside it; texels outside the rect must survive.",
+      "vulkan": "as C1, but the copy region is the locked rect, and the staging allocation must hold the resource's current contents (not be discarded)"
+    },
+    {
+      "id": "C3",
+      "name": "read-back",
+      "contract": "D3DLOCK_READONLY on a surface, read the texels on the CPU, unlock. The data must be what the GPU last wrote.",
+      "vulkan": "vkCmdCopyImageToBuffer + queue submit + fence wait before Lock returns, i.e. a full pipeline stall"
+    },
+    {
+      "id": "C4",
+      "name": "mip-chain load, lock held across frames and threads",
+      "contract": "lock every mip level (or cube face, or volume slice) of a fresh texture at once, keep the pointers and pitches in an array, fill them later - for the background loader, on another thread and some frames later - then unlock them all.",
+      "vulkan": "one persistent host-visible staging allocation per texture covering all levels, mapped for the whole task lifetime, uploaded level by level at Unlock_Surfaces on the render thread"
+    },
+    {
+      "id": "C5",
+      "name": "dynamic ring stream",
+      "contract": "every frame, many times per frame: lock a sub-range of a dynamic vertex/index buffer with D3DLOCK_DISCARD (offset 0, buffer is renamed) or D3DLOCK_NOOVERWRITE (append, previously submitted draws still read the earlier bytes), write, unlock, draw.",
+      "vulkan": "per-frame linear allocator over a host-visible ring, frames-in-flight copies, no barriers between NOOVERWRITE sub-allocations; DISCARD advances to a fresh region rather than reusing bytes the GPU may still be reading"
+    },
+    {
+      "id": "C6",
+      "name": "static buffer fill",
+      "contract": "lock a static vertex/index buffer (whole, or a caller-chosen sub-range for the Append locks), write geometry once at load time, unlock, then draw from it for the rest of the level.",
+      "vulkan": "staging buffer + vkCmdCopyBuffer into a DEVICE_LOCAL buffer at unlock, or a persistently mapped host-visible buffer where BAR memory is available"
+    },
+    {
+      "id": "C7",
+      "name": "pointer kept after unlock",
+      "contract": "lock, unlock immediately, and keep using the returned pBits/Pitch for the rest of the process: the shroud writes into that pointer every frame and then CopyRects the surface to a texture. Undefined behaviour in D3D8 that happens to work for D3DPOOL_SYSTEMMEM.",
+      "vulkan": "the staging allocation for that surface must be permanently mapped and never recycled, and the upload has to be driven by the CopyRects that follows rather than by Unlock"
+    },
+    {
+      "id": "C8",
+      "name": "opaque hand-out",
+      "contract": "SurfaceClass::Lock/Unlock returns the raw pointer and pitch to arbitrary engine code, which may read, write, or both; the class cannot tell which. Callers outside the scanner's scope (GUI, map preview, water, terrain) use it.",
+      "vulkan": "read-write mapping: read-back on Lock (C3 cost) and upload on Unlock (C1 cost), unless each caller is audited and split into C1/C2/C3"
+    }
+  ],
+  "assignments": {
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/TerrainTex.cpp::TerrainTextureClass::update": "C1",
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/TerrainTex.cpp::TerrainTextureClass::updateFlat": "C1",
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/TerrainTex.cpp::AlphaEdgeTextureClass::update": "C1",
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DTreeBuffer.cpp::W3DTreeBuffer::W3DTreeTextureClass::update": "C1",
+    "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ddsfile.cpp::DDSFileClass::Copy_Level_To_Surface": "C1",
+    "Core/Libraries/Source/WWVegas/WW3D2/missingtexture.cpp::MissingTexture::_Init": "C1",
+    "Core/Libraries/Source/WWVegas/WW3D2/surfaceclass.cpp::SurfaceClass::Clear": "C1",
+    "Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp::TextureLoader::Load_Surface_Immediate": "C1",
+
+    "Core/Libraries/Source/WWVegas/WW3D2/surfaceclass.cpp::SurfaceClass::Copy": "C2",
+
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DSmudge.cpp::copyRect": "C3",
+    "Core/Libraries/Source/WWVegas/WW3D2/surfaceclass.cpp::SurfaceClass::CreateCopy": "C3",
+    "Core/Libraries/Source/WWVegas/WW3D2/surfaceclass.cpp::SurfaceClass::FindBB": "C3",
+    "Core/Libraries/Source/WWVegas/WW3D2/surfaceclass.cpp::SurfaceClass::Is_Transparent_Column": "C3",
+
+    "Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp::TextureLoadTaskClass::Lock_Surfaces": "C4",
+    "Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp::TextureLoadTaskClass::Unlock_Surfaces": "C4",
+    "Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp::CubeTextureLoadTaskClass::Lock_Surfaces": "C4",
+    "Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp::CubeTextureLoadTaskClass::Unlock_Surfaces": "C4",
+    "Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp::VolumeTextureLoadTaskClass::Lock_Surfaces": "C4",
+    "Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp::VolumeTextureLoadTaskClass::Unlock_Surfaces": "C4",
+    "Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp::TextureLoader::Load_Thumbnail": "C4",
+
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8vertexbuffer.cpp::DynamicVBAccessClass::WriteLockClass::WriteLockClass": "C5",
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8vertexbuffer.cpp::DynamicVBAccessClass::WriteLockClass::~WriteLockClass": "C5",
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8indexbuffer.cpp::DynamicIBAccessClass::WriteLockClass::WriteLockClass": "C5",
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8indexbuffer.cpp::DynamicIBAccessClass::WriteLockClass::~WriteLockClass": "C5",
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DSnow.cpp::W3DSnowManager::renderSubBox": "C5",
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp::WaterRenderObjClass::renderWaterMesh": "C5",
+    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DProjectedShadow.cpp::W3DProjectedShadowManager::renderProjectedTerrainShadow": "C5",
+    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DProjectedShadow.cpp::W3DProjectedShadowManager::queueDecal": "C5",
+    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DProjectedShadow.cpp::W3DProjectedShadowManager::queueSimpleDecal": "C5",
+    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DVolumetricShadow.cpp::W3DVolumetricShadow::RenderDynamicMeshVolume": "C5",
+    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DVolumetricShadow.cpp::W3DVolumetricShadow::RenderMeshVolumeBounds": "C5",
+
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8vertexbuffer.cpp::VertexBufferClass::WriteLockClass::WriteLockClass": "C6",
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8vertexbuffer.cpp::VertexBufferClass::WriteLockClass::~WriteLockClass": "C6",
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8vertexbuffer.cpp::VertexBufferClass::AppendLockClass::AppendLockClass": "C6",
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8vertexbuffer.cpp::VertexBufferClass::AppendLockClass::~AppendLockClass": "C6",
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8indexbuffer.cpp::IndexBufferClass::WriteLockClass::WriteLockClass": "C6",
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8indexbuffer.cpp::IndexBufferClass::WriteLockClass::~WriteLockClass": "C6",
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8indexbuffer.cpp::IndexBufferClass::AppendLockClass::AppendLockClass": "C6",
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8indexbuffer.cpp::IndexBufferClass::AppendLockClass::~AppendLockClass": "C6",
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp::WaterRenderObjClass::generateVertexBuffer": "C6",
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp::WaterRenderObjClass::generateIndexBuffer": "C6",
+
+    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DShroud.cpp::W3DShroud::init": "C7",
+
+    "Core/Libraries/Source/WWVegas/WW3D2/surfaceclass.cpp::SurfaceClass::Lock": "C8",
+    "Core/Libraries/Source/WWVegas/WW3D2/surfaceclass.cpp::SurfaceClass::Unlock": "C8"
+  },
+  "expected": {
+    "total": 226,
+    "refcount": 72,
+    "lock_unlock": 95,
+    "files": 19
+  }
+}

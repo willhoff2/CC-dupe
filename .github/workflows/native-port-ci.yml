@@ -188,6 +188,34 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: D3D8 Lock/Unlock assertions
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+          XDG_RUNTIME_DIR: /tmp/xdgrt
+        run: |
+          set -o pipefail
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          unset DISPLAY
+          {
+            echo '## D3D8 Lock/Unlock usage classes (Linux, lavapipe)'
+            echo '```'
+            build/spike/zh-resource-lock-tests
+            # The CPU expansion at unlock only runs where the view cannot swizzle,
+            # which is MoltenVK's case; force it here so the path is covered.
+            ZH_SPIKE_NO_VIEW_SWIZZLE=1 build/spike/zh-resource-lock-tests
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Re-derive the resource-seam counts
+        run: |
+          set -o pipefail
+          {
+            echo '## D3D8 resource seam'
+            echo '```'
+            python3 spikes/renderer/tools/d3d8-lock-scan.py --check
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the rendered image
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -393,6 +421,23 @@ jobs:
             echo '```'
             build/spike/zh-feature-probe
             build/spike/zh-fixedfunc-tests
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The Lock/Unlock emulation on the device it is actually for. The author has no
+      # Mac: everything this job asserts about MoltenVK was written blind and this run
+      # is the only evidence for it.
+      - name: D3D8 Lock/Unlock assertions through MoltenVK
+        run: |
+          set -eux -o pipefail
+          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
+          export VK_ICD_FILENAMES
+          export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
+          export DYLD_LIBRARY_PATH="$(brew --prefix vulkan-validationlayers)/lib:$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
+          {
+            echo '## D3D8 Lock/Unlock usage classes (macOS arm64, MoltenVK)'
+            echo '```'
+            build/spike/zh-resource-lock-tests
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

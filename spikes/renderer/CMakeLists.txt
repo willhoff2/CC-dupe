@@ -101,6 +101,18 @@ target_include_directories(zh-fixedfunc-tests PRIVATE src)
 target_link_libraries(zh-fixedfunc-tests PRIVATE Vulkan::Vulkan)
 target_compile_definitions(zh-fixedfunc-tests PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
 
+# Resource-lock tests: drive the D3D8 Lock/Unlock contract over Vulkan and assert on
+# read-back pixels and read-back bytes. This is what backs
+# docs/porting/renderer-resource-seam.md.
+add_executable(zh-resource-lock-tests
+    src/resource_lock_tests.cpp
+    src/state_translate.cpp
+    src/vulkan_backend.cpp)
+add_dependencies(zh-resource-lock-tests spike-shaders)
+target_include_directories(zh-resource-lock-tests PRIVATE src)
+target_link_libraries(zh-resource-lock-tests PRIVATE Vulkan::Vulkan)
+target_compile_definitions(zh-resource-lock-tests PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+
 # Throughput baseline: draw calls/sec and state changes/sec, so the Mac has a Linux
 # number to be compared against.
 add_executable(zh-throughput
@@ -124,7 +136,7 @@ endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     foreach(target zh-renderer-spike zh-caps-probe zh-feature-probe zh-fixedfunc-tests
-                   zh-throughput)
+                   zh-resource-lock-tests zh-throughput)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
 endif()
