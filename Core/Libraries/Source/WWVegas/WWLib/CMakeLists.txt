@@ -182,7 +182,25 @@ else()
         platform/platform_thread.h
         platform/platform_time.cpp
         platform/platform_time.h
+        platform/platform_window.h
     )
+    # The window/event-loop/input backends (docs/porting/window-event-loop.md). The header
+    # above is always listed because it is pure declarations; a backend is opt-in and off by
+    # default, because it drags in SDL2 or Objective-C++ and nothing in the engine calls the
+    # seam yet - the engine still cannot link natively at all (docs/porting/native-build.md).
+    # spikes/renderer builds both backends standalone, which is where they are exercised.
+    option(CORE_WWLIB_WINDOW_BACKEND
+        "Compile a platform_window backend into core_wwlib (needs SDL2; Objective-C++ on Apple)"
+        OFF)
+    if(CORE_WWLIB_WINDOW_BACKEND)
+        if(APPLE)
+            enable_language(OBJCXX)
+            list(APPEND WWLIB_SRC platform/platform_window_cocoa.mm)
+        else()
+            find_package(SDL2 REQUIRED)
+            list(APPEND WWLIB_SRC platform/platform_window_sdl2.cpp)
+        endif()
+    endif()
 endif()
 
 add_library(core_wwlib STATIC)
@@ -204,3 +222,15 @@ target_link_libraries(core_wwlib PRIVATE
     core_wwcommon
     corei_always
 )
+
+if(NOT WIN32 AND CORE_WWLIB_WINDOW_BACKEND)
+    if(APPLE)
+        target_link_libraries(core_wwlib PRIVATE
+            "-framework AppKit" "-framework QuartzCore" "-framework Metal")
+    elseif(TARGET SDL2::SDL2)
+        target_link_libraries(core_wwlib PRIVATE SDL2::SDL2)
+    else()
+        target_include_directories(core_wwlib PRIVATE ${SDL2_INCLUDE_DIRS})
+        target_link_libraries(core_wwlib PRIVATE ${SDL2_LIBRARIES})
+    endif()
+endif()
