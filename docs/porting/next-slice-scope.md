@@ -40,12 +40,16 @@ and two thirds of it is wrong:
 | distinct D3D8 methods | 34 | **62** (52 `IDirect3DDevice8` + 10 `IDirect3D8`) |
 | total D3D8 call sites | — | **458**, of which only 82 (18%) go through the macro |
 
-The remaining **376 call sites bypass `DX8Wrapper` and talk to `IDirect3DDevice8` directly**,
-concentrated in `W3DWater.cpp` (129), `W3DShaderManager.cpp` (103), `W3DVolumetricShadow.cpp` (38)
-and `W3DProjectedShadow.cpp` (25) — effectively a second renderer beside the wrapper. So
-"retarget one wrapper" is not the whole renderer job. 62 methods is still a small, fixed-function
-slice of D3D8 and still worth retargeting rather than rewriting, but the direct call sites have to
-be routed through the wrapper first.
+At the time of measurement the remaining **376 call sites bypassed `DX8Wrapper` and talked to
+`IDirect3DDevice8` directly**, concentrated in `W3DWater.cpp` (129), `W3DShaderManager.cpp` (103),
+`W3DVolumetricShadow.cpp` (38) and `W3DProjectedShadow.cpp` (25) — effectively a second renderer
+beside the wrapper.
+
+**Since superseded: that routing is done.** The direct (non-wrapper, non-backend) count is now **0**,
+and `scripts/ci/check-d3d8-surface.py` enforces a budget of exactly 0 in both directions. The 64
+remaining D3D8 call sites live inside the seam implementation, `WW3D2/d3d8renderbackend.cpp`. What is
+left of the renderer job is backend coverage of the 62 methods, not re-routing call sites. See
+[`STATUS.md`](STATUS.md) for the current figure.
 
 Full enumeration, Vulkan mapping and working proof-of-concept: `docs/porting/renderer-surface.md`
 and `spikes/renderer/`.
@@ -55,7 +59,7 @@ and `spikes/renderer/`.
 | Phase | Was | Now | Why |
 |---|---:|---:|---|
 | 3 Platform abstraction | 400–800 h | **250–450 h** | ~20 `HWND` files in scope, not 287 |
-| 4 Renderer | 600–1,200 h | **700–1,300 h** | 62 D3D8 entry points, and 376 of 458 call sites bypass the wrapper — see `renderer-surface.md` |
+| 4 Renderer | 600–1,200 h | **700–1,300 h** | 62 D3D8 entry points; the 376 direct call sites have since been routed through the wrapper — see `renderer-surface.md` |
 | Total (cut scope, skirmish + campaign) | 3,000–6,000 h | **2,800–5,600 h** | |
 
 ## Proposed next slice: Phase 3a — threading, timing, registry
@@ -89,6 +93,6 @@ on where settings live on macOS.
    Vulkan; the two architectural risks (immutable pipelines, the `SetTextureStageState` cascade)
    both have working solutions. Verified on Linux only — running it through MoltenVK on macOS is
    the one open item.
-3. **Route the 376 direct D3D8 call sites through `DX8Wrapper`, while still on D3D8.** Highest-value
-   de-risking now available: mechanical, incremental, and verifiable against the working Windows
-   build. Do it before writing the Vulkan backend, not after.
+3. ~~**Route the 376 direct D3D8 call sites through `DX8Wrapper`, while still on D3D8.**~~ — **done**:
+   the direct count is 0 and `scripts/ci/check-d3d8-surface.py` holds it there. The next renderer
+   slice is Vulkan backend coverage behind `RenderBackendClass`, measured method by method.

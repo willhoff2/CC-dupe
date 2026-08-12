@@ -302,6 +302,12 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # docs/porting/STATUS.md is generated from the same baselines and allowlist these gates read,
+      # so it can only go stale if someone edits it by hand or refreshes a baseline without
+      # regenerating it. Both are failures.
+      - name: Check the generated status document is in sync
+        run: python3 scripts/porting-status.py --check
+
       - name: Upload the scan
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
