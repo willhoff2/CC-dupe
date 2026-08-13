@@ -137,6 +137,16 @@ struct LightState {
 	float phi = 0.0f;   // outer cone, full angle in radians
 };
 
+// D3DVIEWPORT8.
+struct ViewportRect {
+	int32_t x = 0;
+	int32_t y = 0;
+	uint32_t width = 0;
+	uint32_t height = 0;
+	float min_z = 0.0f;
+	float max_z = 1.0f;
+};
+
 // D3DMATERIAL8.
 struct MaterialState {
 	float diffuse[4]{1.0f, 1.0f, 1.0f, 1.0f};
@@ -170,6 +180,10 @@ public:
 	                                         uint32_t value) = 0;
 	virtual void Set_Transform(D3DTRANSFORMSTATETYPE transform, const Matrix4x4& m) = 0;
 	virtual void Set_Texture(uint32_t stage, TextureHandle* texture) = 0;
+	// GetRenderState/GetTransform answer from the shadowed copy, which is what the
+	// D3D8 runtime does too rather than asking the device.
+	virtual uint32_t Get_DX8_Render_State(D3DRENDERSTATETYPE state) const = 0;
+	virtual void Get_Transform(D3DTRANSFORMSTATETYPE transform, Matrix4x4& out) const = 0;
 
 	// --- fixed function: SetLight/LightEnable, SetMaterial, SetScissorRect ----
 	// `light` may be null, which is D3D8's LightEnable(index, FALSE).
@@ -177,6 +191,10 @@ public:
 	virtual void Set_Material(const MaterialState& material) = 0;
 	virtual void Set_Scissor(bool enable, int32_t x, int32_t y, int32_t width,
 	                         int32_t height) = 0;
+	// SetViewport/GetViewport: both the NDC-to-pixel mapping and the depth range.
+	// The engine changes it per shadow and reflection pass.
+	virtual void Set_Viewport(const ViewportRect& viewport) = 0;
+	virtual void Get_Viewport(ViewportRect& out) const = 0;
 
 	// --- geometry: DX8Wrapper::Set_Vertex_Buffer / Set_Index_Buffer -----------
 	// fvf is the raw D3DFVF_* bitfield the engine feeds to SetVertexShader.
@@ -220,6 +238,20 @@ public:
 	// --- draw: DX8Wrapper::Draw_Triangles -> DrawIndexedPrimitive ------------
 	virtual void Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
 	                            uint32_t min_vertex_index, uint32_t vertex_count) = 0;
+	// The general form of the same call, for the primitive types other than
+	// D3DPT_TRIANGLELIST the engine draws: strips for terrain, points for snow.
+	virtual void Draw_Indexed_Primitive(uint32_t primitive_type, uint32_t start_index,
+	                                    uint32_t primitive_count,
+	                                    uint32_t min_vertex_index,
+	                                    uint32_t vertex_count) = 0;
+	// DrawPrimitive: the bound vertex buffer, no index buffer.
+	virtual void Draw_Primitive(uint32_t primitive_type, uint32_t start_vertex,
+	                            uint32_t primitive_count) = 0;
+	// DrawPrimitiveUP: vertices straight from host memory, no vertex buffer at all.
+	// D3D8 leaves stream 0 unbound afterwards, and so does this.
+	virtual void Draw_Primitive_UP(uint32_t primitive_type, uint32_t primitive_count,
+	                               const void* vertex_data, uint32_t vertex_stride,
+	                               uint32_t fvf) = 0;
 
 	// --- windowed presentation: the DX8Wrapper::Reset_Device shape ------------
 	// The window's client area changed size, so the swapchain no longer matches it. The

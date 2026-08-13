@@ -118,6 +118,28 @@ VkStencilOp To_Vk_Stencil_Op(uint32_t op) {
 	}
 }
 
+VkBlendOp To_Vk_Blend_Op(uint32_t op) {
+	switch (op) {
+	case D3DBLENDOP_SUBTRACT: return VK_BLEND_OP_SUBTRACT;
+	case D3DBLENDOP_REVSUBTRACT: return VK_BLEND_OP_REVERSE_SUBTRACT;
+	case D3DBLENDOP_MIN: return VK_BLEND_OP_MIN;
+	case D3DBLENDOP_MAX: return VK_BLEND_OP_MAX;
+	default: return VK_BLEND_OP_ADD;
+	}
+}
+
+uint32_t Vertex_Count_For_Primitives(uint32_t primitive_type, uint32_t primitive_count) {
+	if (primitive_count == 0) return 0;
+	switch (primitive_type) {
+	case D3DPT_POINTLIST: return primitive_count;
+	case D3DPT_LINELIST: return primitive_count * 2;
+	case D3DPT_LINESTRIP: return primitive_count + 1;
+	case D3DPT_TRIANGLESTRIP:
+	case D3DPT_TRIANGLEFAN: return primitive_count + 2;
+	default: return primitive_count * 3; // D3DPT_TRIANGLELIST
+	}
+}
+
 float Z_Bias_To_Depth_Bias_Constant_Factor(uint32_t z_bias) {
 	// Negative: D3D8 pulls larger ZBIAS values towards the eye, and the engine's
 	// depth comparison is LESSEQUAL, so "closer" means a smaller depth value.

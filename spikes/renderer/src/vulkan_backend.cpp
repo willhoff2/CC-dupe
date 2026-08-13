@@ -27,6 +27,7 @@
 #include "platform/platform_window.h"
 #endif
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -118,18 +119,22 @@ struct Image {
 // Sampler state in D3D8 is texture *stage* state, not part of the texture object.
 // In Vulkan it is a VkSampler bound alongside the image, so it needs its own cache.
 struct SamplerKey {
-	uint32_t min_filter, mag_filter, mip_filter, address_u, address_v;
+	uint32_t min_filter, mag_filter, mip_filter, address_u, address_v, address_w;
+	// D3DTSS_BORDERCOLOR as the engine passes it (a D3DCOLOR) and D3DTSS_MAXANISOTROPY.
+	uint32_t border_color, max_anisotropy;
 	bool operator==(const SamplerKey& o) const {
 		return min_filter == o.min_filter && mag_filter == o.mag_filter &&
 		       mip_filter == o.mip_filter && address_u == o.address_u &&
-		       address_v == o.address_v;
+		       address_v == o.address_v && address_w == o.address_w &&
+		       border_color == o.border_color && max_anisotropy == o.max_anisotropy;
 	}
 };
 
 struct SamplerKeyHash {
 	size_t operator()(const SamplerKey& k) const {
 		size_t h = 1469598103934665603ull;
-		for (uint32_t v : {k.min_filter, k.mag_filter, k.mip_filter, k.address_u, k.address_v}) {
+		for (uint32_t v : {k.min_filter, k.mag_filter, k.mip_filter, k.address_u,
+		                   k.address_v, k.address_w, k.border_color, k.max_anisotropy}) {
 			h = (h ^ v) * 1099511628211ull;
 		}
 		return h;
@@ -156,6 +161,9 @@ struct PerStage {
 	uint32_t mip_filter = D3DTEXF_NONE;
 	uint32_t address_u = D3DTADDRESS_WRAP;
 	uint32_t address_v = D3DTADDRESS_WRAP;
+	uint32_t address_w = D3DTADDRESS_WRAP;
+	uint32_t border_color = 0;   // D3DTSS_BORDERCOLOR, a D3DCOLOR
+	uint32_t max_anisotropy = 1; // D3DTSS_MAXANISOTROPY
 	// D3DTSS_BUMPENVMAT00/01/10/11 and the luminance pair. The engine passes these
 	// as float bit patterns through its F2DW macro (W3DWater.cpp), so they are
 	// stored as floats here after the bit-cast.
@@ -169,6 +177,12 @@ float Dword_To_Float(uint32_t value) {
 	float f = 0.0f;
 	std::memcpy(&f, &value, sizeof(f));
 	return f;
+}
+
+uint32_t Float_To_Dword(float value) {
+	uint32_t d = 0;
+	std::memcpy(&d, &value, sizeof(d));
+	return d;
 }
 
 void Unpack_D3dcolor(uint32_t color, float* out_rgba) {
@@ -282,6 +296,12 @@ public:
 	void Set_Material(const MaterialState& material) override;
 	void Set_Scissor(bool enable, int32_t x, int32_t y, int32_t width,
 	                 int32_t height) override;
+	void Set_Viewport(const ViewportRect& viewport) override;
+	void Get_Viewport(ViewportRect& out) const override { out = viewport_; }
+	uint32_t Get_DX8_Render_State(D3DRENDERSTATETYPE state) const override {
+		return static_cast<uint32_t>(state) < D3DRS_MAX ? render_states_[state] : 0;
+	}
+	void Get_Transform(D3DTRANSFORMSTATETYPE transform, Matrix4x4& out) const override;
 
 	TextureHandle* Create_Texture(uint32_t width, uint32_t height,
 	                              const uint8_t* argb_pixels) override;
@@ -308,6 +328,14 @@ public:
 
 	void Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
 	                    uint32_t min_vertex_index, uint32_t vertex_count) override;
+	void Draw_Indexed_Primitive(uint32_t primitive_type, uint32_t start_index,
+	                            uint32_t primitive_count, uint32_t min_vertex_index,
+	                            uint32_t vertex_count) override;
+	void Draw_Primitive(uint32_t primitive_type, uint32_t start_vertex,
+	                    uint32_t primitive_count) override;
+	void Draw_Primitive_UP(uint32_t primitive_type, uint32_t primitive_count,
+	                       const void* vertex_data, uint32_t vertex_stride,
+	                       uint32_t fvf) override;
 
 	bool Read_Back_Color_Target(std::string& out_rgba, SurfaceFormat& out_format) override;
 
@@ -357,11 +385,16 @@ private:
 	// Collapses the whole shadowed D3D8 state block into the uniform block the
 	// uber-shader interprets. This is Apply_Render_State_Changes for everything
 	// Vulkan cannot bake into a pipeline.
-	void Fill_Draw_Uniforms(DrawUniforms& out) const;
+	void Fill_Draw_Uniforms(uint32_t primitive_type, const VertexLayout& layout,
+	                        DrawUniforms& out) const;
 	VkRect2D Clamp_Scissor(const VkRect2D& rect) const;
 
 	VkPipeline Get_Or_Create_Pipeline(const PipelineKey& key, const VertexLayout& layout);
 	VkSampler Get_Or_Create_Sampler(const SamplerKey& key);
+	// Everything a draw needs before the vkCmdDraw* itself: pipeline, uniforms,
+	// descriptors and the dynamic state D3D8 changes without a pipeline notion.
+	// False when the draw cannot be issued at all.
+	bool Prepare_Draw(uint32_t primitive_type, const VertexBufferHandle& vb);
 	void Transition(VkCommandBuffer cmd, VkImage image, VkImageLayout from,
 	                VkImageLayout to, VkImageAspectFlags aspect,
 	                uint32_t mip_levels = 1);
@@ -430,6 +463,18 @@ private:
 	MaterialState material_;
 	bool scissor_enabled_ = false;
 	VkRect2D scissor_{{0, 0}, {0, 0}};
+	ViewportRect viewport_;
+	// DrawPrimitiveUP's vertices: one host-visible buffer, bump-allocated within the
+	// frame and rewound in Begin_Scene. D3D8 copies UP vertices into its own scratch
+	// buffer for exactly the same reason.
+	Buffer up_ring_;
+	void* up_mapped_ = nullptr;
+	VkDeviceSize up_offset_ = 0;
+	// One decoded VertexLayout per FVF DrawPrimitiveUP has been called with; the
+	// layout is what the pipeline's vertex input is built from.
+	std::unordered_map<uint32_t, VertexLayout> up_layouts_;
+	float max_anisotropy_ = 1.0f; // 1.0 when the device has no samplerAnisotropy
+	float max_point_size_ = 1.0f;
 	VertexBufferHandle* bound_vb_ = nullptr;
 	IndexBufferHandle* bound_ib_ = nullptr;
 	uint32_t index_base_offset_ = 0;
@@ -660,9 +705,30 @@ bool VulkanBackend::Pick_Device() {
 	// that MoltenVK forces, so the two are covered by the same tests.
 	if (std::getenv("ZH_SPIKE_NO_VIEW_SWIZZLE") != nullptr) view_swizzle_ = false;
 
+	// D3D8 states that need a Vulkan *feature*, not just a pipeline field:
+	// D3DRS_POINTSIZE > 1 needs largePoints, D3DTSS_MAXANISOTROPY needs
+	// samplerAnisotropy, D3DFILL_WIREFRAME/POINT need fillModeNonSolid. Each is
+	// enabled only when the device has it, and what was actually enabled decides
+	// what the translation clamps to (D3D8 caps work the same way).
+	VkPhysicalDeviceFeatures available{};
+	vkGetPhysicalDeviceFeatures(physical_, &available);
+	VkPhysicalDeviceProperties device_props{};
+	vkGetPhysicalDeviceProperties(physical_, &device_props);
+	VkPhysicalDeviceFeatures enabled{};
+	enabled.samplerAnisotropy = available.samplerAnisotropy;
+	enabled.largePoints = available.largePoints;
+	enabled.fillModeNonSolid = available.fillModeNonSolid;
+	max_anisotropy_ = available.samplerAnisotropy == VK_TRUE
+	                      ? device_props.limits.maxSamplerAnisotropy
+	                      : 1.0f;
+	max_point_size_ = available.largePoints == VK_TRUE
+	                      ? device_props.limits.pointSizeRange[1]
+	                      : 1.0f;
+
 	VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
 	dci.queueCreateInfoCount = 1;
 	dci.pQueueCreateInfos = &qci;
+	dci.pEnabledFeatures = &enabled;
 	dci.enabledExtensionCount = static_cast<uint32_t>(device_extensions.size());
 	dci.ppEnabledExtensionNames = device_extensions.empty() ? nullptr : device_extensions.data();
 	// A portability-subset feature the device has must also be *enabled* here before it
@@ -1100,6 +1166,47 @@ bool VulkanBackend::Init(void* window_handle, uint32_t width, uint32_t height) {
 	// dx8wrapper.cpp:402 sets table fog off and leaves vertex fog to the caller.
 	render_states_[D3DRS_FOGTABLEMODE] = D3DFOG_NONE;
 	render_states_[D3DRS_FOGVERTEXMODE] = D3DFOG_NONE;
+	// Point-sprite defaults, as D3D8 documents them: one-pixel points, no scaling.
+	// These are float-valued render states, so they arrive as bit patterns.
+	render_states_[D3DRS_POINTSIZE] = Float_To_Dword(1.0f);
+	render_states_[D3DRS_POINTSIZE_MIN] = Float_To_Dword(0.0f);
+	render_states_[D3DRS_POINTSIZE_MAX] = Float_To_Dword(max_point_size_);
+	render_states_[D3DRS_POINTSCALE_A] = Float_To_Dword(1.0f);
+	render_states_[D3DRS_POINTSCALE_B] = Float_To_Dword(0.0f);
+	render_states_[D3DRS_POINTSCALE_C] = Float_To_Dword(0.0f);
+	render_states_[D3DRS_BLENDOP] = D3DBLENDOP_ADD;
+	// The four states the engine sets that a Vulkan backend has nothing to serve them
+	// with. They are shadowed so a GetRenderState still answers, and declared here so
+	// the coverage gate reports them as a decision rather than as a hole.
+	// COVERAGE-IGNORE: D3DRS_CLIPPING - Vulkan always clips to the view volume; there
+	// is no pipeline bit to turn primitive clipping off, and the engine only ever sets
+	// it to TRUE (its D3D8 default).
+	// COVERAGE-IGNORE: D3DRS_DITHERENABLE - no Vulkan equivalent. D3D8 dithered when
+	// blending to a 16-bit target; the backend renders 8 bits per channel, which is
+	// what the dithering existed to hide.
+	// COVERAGE-IGNORE: D3DRS_SOFTWAREVERTEXPROCESSING - a D3D8 device-model switch
+	// between the driver's vertex pipeline and D3D8's own; the Vulkan backend has one
+	// vertex path.
+	// COVERAGE-IGNORE: D3DRS_PATCHSEGMENTS - N-patch tessellation, which no D3D8 driver
+	// the game shipped against implemented either.
+	render_states_[D3DRS_CLIPPING] = 1;
+	render_states_[D3DRS_DITHERENABLE] = 0;
+	render_states_[D3DRS_SOFTWAREVERTEXPROCESSING] = 0;
+	render_states_[D3DRS_PATCHSEGMENTS] = Float_To_Dword(1.0f);
+
+	// D3D8's implicit SetViewport at device creation: the whole render target.
+	viewport_ = ViewportRect{0, 0, width_, height_, 0.0f, 1.0f};
+
+	// DrawPrimitiveUP's scratch vertices. 1 MiB is well above the largest UP draw
+	// the engine issues (debug lines and the 2D UI batches).
+	if (!Allocate_Buffer(1u << 20, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+	                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+	                     up_ring_)) {
+		return false;
+	}
+	if (vkMapMemory(device_, up_ring_.memory, 0, up_ring_.size, 0, &up_mapped_) != VK_SUCCESS) {
+		return false;
+	}
 
 	const uint32_t white = 0xffffffffu;
 	white_texture_ = Create_Texture(1, 1, reinterpret_cast<const uint8_t*>(&white));
@@ -1152,6 +1259,11 @@ void VulkanBackend::Shutdown() {
 
 	free_buffer(draw_uniforms_);
 	free_buffer(dummy_vertex_buffer_);
+	if (up_mapped_ != nullptr) {
+		vkUnmapMemory(device_, up_ring_.memory);
+		up_mapped_ = nullptr;
+	}
+	free_buffer(up_ring_);
 	free_image(color_target_);
 	free_image(depth_target_);
 
@@ -1926,6 +2038,9 @@ void VulkanBackend::Set_DX8_Texture_Stage_State(uint32_t stage,
 	case D3DTSS_MIPFILTER: s.mip_filter = value; break;
 	case D3DTSS_ADDRESSU: s.address_u = value; break;
 	case D3DTSS_ADDRESSV: s.address_v = value; break;
+	case D3DTSS_ADDRESSW: s.address_w = value; break;
+	case D3DTSS_BORDERCOLOR: s.border_color = value; break;
+	case D3DTSS_MAXANISOTROPY: s.max_anisotropy = value; break;
 	case D3DTSS_BUMPENVMAT00: s.bump_matrix[0] = Dword_To_Float(value); break;
 	case D3DTSS_BUMPENVMAT01: s.bump_matrix[1] = Dword_To_Float(value); break;
 	case D3DTSS_BUMPENVMAT10: s.bump_matrix[2] = Dword_To_Float(value); break;
@@ -1951,6 +2066,21 @@ void VulkanBackend::Set_Transform(D3DTRANSFORMSTATETYPE transform, const Matrix4
 	}
 }
 
+void VulkanBackend::Get_Transform(D3DTRANSFORMSTATETYPE transform, Matrix4x4& out) const {
+	switch (transform) {
+	case D3DTS_WORLD: out = world_; break;
+	case D3DTS_VIEW: out = view_; break;
+	case D3DTS_PROJECTION: out = projection_; break;
+	case D3DTS_TEXTURE0:
+	case D3DTS_TEXTURE1:
+	case D3DTS_TEXTURE2:
+	case D3DTS_TEXTURE3:
+		out = texture_transform_[transform - D3DTS_TEXTURE0];
+		break;
+	default: out = Matrix4x4::Identity(); break;
+	}
+}
+
 void VulkanBackend::Set_Texture(uint32_t stage, TextureHandle* texture) {
 	if (stage < kMaxTextureStages) bound_textures_[stage] = texture;
 }
@@ -1968,6 +2098,15 @@ void VulkanBackend::Set_Scissor(bool enable, int32_t x, int32_t y, int32_t width
 	scissor_enabled_ = enable;
 	scissor_.offset = {x, y};
 	scissor_.extent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
+}
+
+void VulkanBackend::Set_Viewport(const ViewportRect& viewport) {
+	// A zero-sized viewport is what D3D8 reports before the first SetViewport; it is
+	// also invalid in Vulkan, so it falls back to the whole target.
+	viewport_ = viewport;
+	if (viewport_.width == 0 || viewport_.height == 0) {
+		viewport_ = ViewportRect{0, 0, width_, height_, viewport.min_z, viewport.max_z};
+	}
 }
 
 void VulkanBackend::Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream) {
@@ -1989,8 +2128,32 @@ VkSampler VulkanBackend::Get_Or_Create_Sampler(const SamplerKey& key) {
 	sci.mipmapMode = To_Vk_Mipmap_Mode(key.mip_filter);
 	sci.addressModeU = To_Vk_Address_Mode(key.address_u);
 	sci.addressModeV = To_Vk_Address_Mode(key.address_v);
-	sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	sci.addressModeW = To_Vk_Address_Mode(key.address_w);
 	sci.maxLod = VK_LOD_CLAMP_NONE;
+	// D3DTSS_MAXANISOTROPY only means anything with an ANISOTROPIC filter, and only
+	// up to what the device allows -- D3D8 clamps to D3DCAPS8::MaxAnisotropy the
+	// same way. A device without samplerAnisotropy leaves this off, which is the
+	// D3D8 behaviour when the cap is 1.
+	const bool anisotropic =
+	    key.min_filter == D3DTEXF_ANISOTROPIC || key.mag_filter == D3DTEXF_ANISOTROPIC;
+	if (anisotropic && max_anisotropy_ > 1.0f && key.max_anisotropy > 1) {
+		sci.anisotropyEnable = VK_TRUE;
+		sci.maxAnisotropy =
+		    std::min(static_cast<float>(key.max_anisotropy), max_anisotropy_);
+	}
+	// D3DTSS_BORDERCOLOR is an arbitrary D3DCOLOR; core Vulkan only has the four
+	// fixed border colours, so anything that is not one of them is rounded to the
+	// nearest of transparent-black, opaque-black and opaque-white. A full port needs
+	// VK_EXT_custom_border_color, which MoltenVK does not expose.
+	if (key.address_u == D3DTADDRESS_BORDER || key.address_v == D3DTADDRESS_BORDER ||
+	    key.address_w == D3DTADDRESS_BORDER) {
+		float rgba[4];
+		Unpack_D3dcolor(key.border_color, rgba);
+		const float luminance = (rgba[0] + rgba[1] + rgba[2]) / 3.0f;
+		sci.borderColor = rgba[3] < 0.5f ? VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
+		                                 : (luminance >= 0.5f ? VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE
+		                                                      : VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK);
+	}
 	VkSampler sampler = VK_NULL_HANDLE;
 	if (vkCreateSampler(device_, &sci, nullptr, &sampler) != VK_SUCCESS) return VK_NULL_HANDLE;
 	samplers_[key] = sampler;
@@ -2060,6 +2223,22 @@ VkPipeline VulkanBackend::Get_Or_Create_Pipeline(const PipelineKey& key,
 	VkPipelineInputAssemblyStateCreateInfo input_assembly{
 	    VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
 	input_assembly.topology = To_Vk_Topology(key.topology);
+	// Metal cannot turn primitive restart off, and MoltenVK reports
+	// VK_ERROR_FEATURE_NOT_PRESENT for a strip or fan pipeline that asks it to. D3D8 has
+	// no restart index at all, so restart is requested exactly where Metal forces it and
+	// nowhere else. The cost is that 0xffff inside a strip -- a legal D3D8 index --
+	// restarts it; the engine's strips come from index buffers orders of magnitude
+	// smaller than 65536 vertices.
+	switch (input_assembly.topology) {
+	case VK_PRIMITIVE_TOPOLOGY_LINE_STRIP:
+	case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP:
+	case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN:
+		input_assembly.primitiveRestartEnable = VK_TRUE;
+		break;
+	default:
+		input_assembly.primitiveRestartEnable = VK_FALSE;
+		break;
+	}
 
 	VkViewport viewport{0.0f, 0.0f, static_cast<float>(width_), static_cast<float>(height_), 0.0f, 1.0f};
 	VkRect2D scissor{{0, 0}, {width_, height_}};
@@ -2107,10 +2286,11 @@ VkPipeline VulkanBackend::Get_Or_Create_Pipeline(const PipelineKey& key,
 	blend.blendEnable = key.alpha_blend_enable ? VK_TRUE : VK_FALSE;
 	blend.srcColorBlendFactor = To_Vk_Blend_Factor(key.src_blend);
 	blend.dstColorBlendFactor = To_Vk_Blend_Factor(key.dest_blend);
-	blend.colorBlendOp = VK_BLEND_OP_ADD;
+	blend.colorBlendOp = To_Vk_Blend_Op(key.blend_op);
 	blend.srcAlphaBlendFactor = To_Vk_Blend_Factor(key.src_blend);
 	blend.dstAlphaBlendFactor = To_Vk_Blend_Factor(key.dest_blend);
-	blend.alphaBlendOp = VK_BLEND_OP_ADD;
+	// D3D8 has one D3DRS_BLENDOP for colour and alpha alike.
+	blend.alphaBlendOp = To_Vk_Blend_Op(key.blend_op);
 	blend.colorWriteMask = To_Vk_Color_Write_Mask(key.color_write_enable);
 
 	VkPipelineColorBlendStateCreateInfo blend_state{
@@ -2118,12 +2298,14 @@ VkPipeline VulkanBackend::Get_Or_Create_Pipeline(const PipelineKey& key,
 	blend_state.attachmentCount = 1;
 	blend_state.pAttachments = &blend;
 
-	// Scissor and depth-bias amount are dynamic: D3D8 changes both without any
-	// notion of pipeline identity, and baking them in would multiply the cache.
-	const VkDynamicState kDynamic[] = {VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS};
+	// Scissor, viewport and depth-bias amount are dynamic: D3D8 changes all three
+	// without any notion of pipeline identity, and baking them in would multiply the
+	// cache by every viewport rectangle the engine sets.
+	const VkDynamicState kDynamic[] = {VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS,
+	                                   VK_DYNAMIC_STATE_VIEWPORT};
 	VkPipelineDynamicStateCreateInfo dynamic_state{
 	    VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-	dynamic_state.dynamicStateCount = 2;
+	dynamic_state.dynamicStateCount = 3;
 	dynamic_state.pDynamicStates = kDynamic;
 
 	VkGraphicsPipelineCreateInfo gpci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
@@ -2162,6 +2344,9 @@ void VulkanBackend::Begin_Scene() {
 	completed_frame_ = frame_counter_;
 	++frame_counter_;
 	vkResetCommandBuffer(frame_cmd_, 0);
+	// The UP scratch bytes of the previous frame have been consumed by the draws that
+	// have now finished, so the bump allocator restarts.
+	up_offset_ = 0;
 
 	VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -2219,7 +2404,8 @@ VkRect2D VulkanBackend::Clamp_Scissor(const VkRect2D& rect) const {
 	                {static_cast<uint32_t>(x1 - x0), static_cast<uint32_t>(y1 - y0)}};
 }
 
-void VulkanBackend::Fill_Draw_Uniforms(DrawUniforms& out) const {
+void VulkanBackend::Fill_Draw_Uniforms(uint32_t primitive_type, const VertexLayout& layout,
+                                       DrawUniforms& out) const {
 	// D3D8 lights are in world space and fog and lighting are evaluated in camera
 	// space, so the shader needs world_view and view separately, not just the
 	// composite.
@@ -2296,7 +2482,10 @@ void VulkanBackend::Fill_Draw_Uniforms(DrawUniforms& out) const {
 	out.flags[2] = static_cast<int32_t>(render_states_[D3DRS_LIGHTING]);
 	out.flags[3] = static_cast<int32_t>(render_states_[D3DRS_FOGENABLE]);
 
-	out.flags2[0] = (bound_vb_ != nullptr && bound_vb_->layout.pretransformed) ? 1 : 0;
+	// Pretransformed-ness is a property of the vertices being drawn, not of whatever
+	// happens to be bound to stream 0: a DrawPrimitiveUP draw has no bound buffer at
+	// all.
+	out.flags2[0] = layout.pretransformed ? 1 : 0;
 	out.flags2[1] = static_cast<int32_t>(render_states_[D3DRS_FOGVERTEXMODE]);
 	out.flags2[2] = static_cast<int32_t>(render_states_[D3DRS_FOGTABLEMODE]);
 	out.flags2[3] = static_cast<int32_t>(render_states_[D3DRS_SPECULARENABLE]);
@@ -2310,23 +2499,40 @@ void VulkanBackend::Fill_Draw_Uniforms(DrawUniforms& out) const {
 	out.flags3[1] = static_cast<int32_t>(render_states_[D3DRS_NORMALIZENORMALS]);
 	out.flags3[2] = static_cast<int32_t>(render_states_[D3DRS_LOCALVIEWER]);
 	out.flags3[3] = static_cast<int32_t>(render_states_[D3DRS_RANGEFOGENABLE]);
+
+	// Point sprites. D3D8's size states are floats in DWORD clothing, and the size
+	// is clamped to [POINTSIZE_MIN, POINTSIZE_MAX] and then to what the device can
+	// rasterise, because a point wider than pointSizeRange is undefined in Vulkan
+	// rather than clamped.
+	out.point_size[0] = Dword_To_Float(render_states_[D3DRS_POINTSIZE]);
+	out.point_size[1] = Dword_To_Float(render_states_[D3DRS_POINTSIZE_MIN]);
+	out.point_size[2] = std::min(Dword_To_Float(render_states_[D3DRS_POINTSIZE_MAX]),
+	                             max_point_size_);
+	// D3DRS_POINTSPRITEENABLE only means anything for a point primitive, and the
+	// shader may only read gl_PointCoord when one is being rasterised, so the two
+	// conditions are folded together here.
+	out.point_size[3] = (render_states_[D3DRS_POINTSPRITEENABLE] != 0 &&
+	                     primitive_type == D3DPT_POINTLIST)
+	                        ? 1.0f
+	                        : 0.0f;
+	out.point_scale[0] = Dword_To_Float(render_states_[D3DRS_POINTSCALE_A]);
+	out.point_scale[1] = Dword_To_Float(render_states_[D3DRS_POINTSCALE_B]);
+	out.point_scale[2] = Dword_To_Float(render_states_[D3DRS_POINTSCALE_C]);
+	out.point_scale[3] = render_states_[D3DRS_POINTSCALEENABLE] != 0 ? 1.0f : 0.0f;
 }
 
-void VulkanBackend::Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
-                                   uint32_t min_vertex_index, uint32_t vertex_count) {
-	(void)min_vertex_index;
-	(void)vertex_count;
-	if (!in_scene_ || bound_vb_ == nullptr || bound_ib_ == nullptr) return;
+bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHandle& vb) {
+	if (!in_scene_) return false;
 	if (draw_index_ >= kMaxDrawsPerFrame) {
 		std::fprintf(stderr, "spike limit: more than %u draws per frame\n", kMaxDrawsPerFrame);
-		return;
+		return false;
 	}
 
 	// This is DX8Wrapper::Apply_Render_State_Changes' job, moved to draw time
 	// because Vulkan has no per-state setters.
 	PipelineKey key;
-	key.fvf = bound_vb_->fvf;
-	key.topology = D3DPT_TRIANGLELIST;
+	key.fvf = vb.fvf;
+	key.topology = primitive_type;
 	key.z_enable = render_states_[D3DRS_ZENABLE];
 	key.z_write_enable = render_states_[D3DRS_ZWRITEENABLE];
 	key.z_func = render_states_[D3DRS_ZFUNC];
@@ -2336,6 +2542,7 @@ void VulkanBackend::Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
 	key.alpha_blend_enable = render_states_[D3DRS_ALPHABLENDENABLE];
 	key.src_blend = render_states_[D3DRS_SRCBLEND];
 	key.dest_blend = render_states_[D3DRS_DESTBLEND];
+	key.blend_op = render_states_[D3DRS_BLENDOP];
 	key.color_write_enable = render_states_[D3DRS_COLORWRITEENABLE];
 	key.stencil_enable = render_states_[D3DRS_STENCILENABLE];
 	key.stencil_func = render_states_[D3DRS_STENCILFUNC];
@@ -2347,11 +2554,11 @@ void VulkanBackend::Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
 	key.stencil_write_mask = render_states_[D3DRS_STENCILWRITEMASK];
 	key.depth_bias_enable = render_states_[D3DRS_ZBIAS] != 0 ? 1 : 0;
 
-	VkPipeline pipeline = Get_Or_Create_Pipeline(key, bound_vb_->layout);
-	if (pipeline == VK_NULL_HANDLE) return;
+	VkPipeline pipeline = Get_Or_Create_Pipeline(key, vb.layout);
+	if (pipeline == VK_NULL_HANDLE) return false;
 
 	DrawUniforms uniforms;
-	Fill_Draw_Uniforms(uniforms);
+	Fill_Draw_Uniforms(primitive_type, vb.layout, uniforms);
 
 	const VkDeviceSize ubo_offset = ubo_stride_ * draw_index_;
 	void* mapped = nullptr;
@@ -2368,9 +2575,10 @@ void VulkanBackend::Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
 	VkDescriptorImageInfo image_info[kMaxTextureStages]{};
 	for (uint32_t i = 0; i < kMaxTextureStages; ++i) {
 		TextureHandle* tex = bound_textures_[i] ? bound_textures_[i] : white_texture_;
-		const SamplerKey sk{stages_[i].min_filter, stages_[i].mag_filter,
+		const SamplerKey sk{stages_[i].min_filter,  stages_[i].mag_filter,
 		                    stages_[i].mip_filter, stages_[i].address_u,
-		                    stages_[i].address_v};
+		                    stages_[i].address_v,  stages_[i].address_w,
+		                    stages_[i].border_color, stages_[i].max_anisotropy};
 		image_info[i] = {Get_Or_Create_Sampler(sk), tex->image.view,
 		                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 	}
@@ -2390,28 +2598,113 @@ void VulkanBackend::Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
 	vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
 
 	vkCmdBindPipeline(frame_cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-	// D3D8 has no pipeline object, so scissor and depth bias are dynamic here;
-	// baking them in would give every scissor rectangle its own VkPipeline.
+	// D3D8 has no pipeline object, so scissor, viewport and depth bias are dynamic
+	// here; baking them in would give every rectangle its own VkPipeline.
 	const VkRect2D scissor =
 	    scissor_enabled_ ? Clamp_Scissor(scissor_) : VkRect2D{{0, 0}, {width_, height_}};
 	vkCmdSetScissor(frame_cmd_, 0, 1, &scissor);
+	// D3D8's viewport is y-down from the top-left of the target and so is Vulkan's,
+	// so the rectangle carries over unchanged; the y flip lives in the projection
+	// matrix, not here.
+	const VkViewport vk_viewport{static_cast<float>(viewport_.x),
+	                             static_cast<float>(viewport_.y),
+	                             static_cast<float>(viewport_.width),
+	                             static_cast<float>(viewport_.height),
+	                             viewport_.min_z,
+	                             viewport_.max_z};
+	vkCmdSetViewport(frame_cmd_, 0, 1, &vk_viewport);
 	vkCmdSetDepthBias(
 	    frame_cmd_, Z_Bias_To_Depth_Bias_Constant_Factor(render_states_[D3DRS_ZBIAS]), 0.0f,
 	    0.0f);
 	vkCmdBindDescriptorSets(frame_cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_,
 	                        0, 1, &set, 0, nullptr);
-	VkBuffer vertex_buffers[2] = {bound_vb_->buffer.buffer, dummy_vertex_buffer_.buffer};
+	VkBuffer vertex_buffers[2] = {vb.buffer.buffer, dummy_vertex_buffer_.buffer};
 	// A dynamic buffer's current ring region is applied here, so the engine's vertex
 	// numbering is unchanged by the renaming DISCARD does behind the handle.
-	VkDeviceSize offsets[2] = {bound_vb_->bind_offset, 0};
-	if (bound_vb_->dynamic) {
-		bound_vb_->region_last_use[bound_vb_->region] = frame_counter_;
-	}
+	VkDeviceSize offsets[2] = {vb.bind_offset, 0};
 	vkCmdBindVertexBuffers(frame_cmd_, 0, 2, vertex_buffers, offsets);
-	vkCmdBindIndexBuffer(frame_cmd_, bound_ib_->buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
-	vkCmdDrawIndexed(frame_cmd_, polygon_count * 3, 1, start_index, index_base_offset_, 0);
+	return true;
+}
 
+void VulkanBackend::Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
+                                   uint32_t min_vertex_index, uint32_t vertex_count) {
+	Draw_Indexed_Primitive(D3DPT_TRIANGLELIST, start_index, polygon_count, min_vertex_index,
+	                       vertex_count);
+}
+
+void VulkanBackend::Draw_Indexed_Primitive(uint32_t primitive_type, uint32_t start_index,
+                                           uint32_t primitive_count,
+                                           uint32_t min_vertex_index,
+                                           uint32_t vertex_count) {
+	// D3D8 passes MinIndex/NumVertices only so the driver can bound its software
+	// vertex processing; Vulkan derives the same range from the indices it reads.
+	(void)min_vertex_index;
+	(void)vertex_count;
+	if (bound_vb_ == nullptr || bound_ib_ == nullptr) return;
+	if (!Prepare_Draw(primitive_type, *bound_vb_)) return;
+	if (bound_vb_->dynamic) bound_vb_->region_last_use[bound_vb_->region] = frame_counter_;
+
+	vkCmdBindIndexBuffer(frame_cmd_, bound_ib_->buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
+	vkCmdDrawIndexed(frame_cmd_, Vertex_Count_For_Primitives(primitive_type, primitive_count),
+	                 1, start_index, index_base_offset_, 0);
 	++draw_index_;
+}
+
+void VulkanBackend::Draw_Primitive(uint32_t primitive_type, uint32_t start_vertex,
+                                   uint32_t primitive_count) {
+	if (bound_vb_ == nullptr) return;
+	if (!Prepare_Draw(primitive_type, *bound_vb_)) return;
+	if (bound_vb_->dynamic) bound_vb_->region_last_use[bound_vb_->region] = frame_counter_;
+
+	vkCmdDraw(frame_cmd_, Vertex_Count_For_Primitives(primitive_type, primitive_count), 1,
+	          start_vertex, 0);
+	++draw_index_;
+}
+
+void VulkanBackend::Draw_Primitive_UP(uint32_t primitive_type, uint32_t primitive_count,
+                                      const void* vertex_data, uint32_t vertex_stride,
+                                      uint32_t fvf) {
+	if (vertex_data == nullptr || vertex_stride == 0 || up_mapped_ == nullptr) return;
+	const uint32_t vertices = Vertex_Count_For_Primitives(primitive_type, primitive_count);
+	if (vertices == 0) return;
+
+	// The FVF's layout is what the pipeline's vertex input is built from, and a UP
+	// draw is the only path where it arrives without a vertex buffer to hold it.
+	auto layout_it = up_layouts_.find(fvf);
+	if (layout_it == up_layouts_.end()) {
+		VertexLayout layout;
+		if (!Decode_Fvf(fvf, layout)) return;
+		// The caller's stride wins: D3D8 lets a UP draw pass a stride larger than the
+		// FVF needs, and the attribute offsets are relative to it either way.
+		layout.stride = vertex_stride;
+		layout_it = up_layouts_.emplace(fvf, layout).first;
+	}
+
+	const VkDeviceSize bytes = static_cast<VkDeviceSize>(vertices) * vertex_stride;
+	// 16-byte alignment keeps every vertex's float4s naturally aligned.
+	const VkDeviceSize offset = (up_offset_ + 15u) & ~VkDeviceSize{15u};
+	if (offset + bytes > up_ring_.size) {
+		std::fprintf(stderr, "spike limit: DrawPrimitiveUP ring exhausted (%llu bytes)\n",
+		             static_cast<unsigned long long>(bytes));
+		return;
+	}
+	std::memcpy(static_cast<uint8_t*>(up_mapped_) + offset, vertex_data,
+	            static_cast<size_t>(bytes));
+
+	VertexBufferHandle scratch;
+	scratch.buffer = up_ring_;
+	scratch.layout = layout_it->second;
+	scratch.fvf = fvf;
+	scratch.bind_offset = offset;
+	if (!Prepare_Draw(primitive_type, scratch)) return;
+	up_offset_ = offset + bytes;
+
+	vkCmdDraw(frame_cmd_, vertices, 1, 0, 0);
+	++draw_index_;
+	// D3D8's DrawPrimitiveUP leaves stream 0 unbound, so the engine must call
+	// SetStreamSource again before the next buffered draw. Matching that here means
+	// a port cannot accidentally depend on the stronger guarantee.
+	bound_vb_ = nullptr;
 }
 
 void VulkanBackend::End_Scene(bool flip_frame) {
