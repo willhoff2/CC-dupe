@@ -36,6 +36,9 @@
 
 #pragma once
 
-#ifndef _UNIX
+// TheSuperHackers @port strtok_r is POSIX, and <string.h> declares it with the platform's own
+// exception specification, so redeclaring it here is a hard error rather than merely redundant.
+// The replacement is Windows-only; the original _UNIX guard is kept.
+#if !defined(_UNIX) && defined(_WIN32)
 char *strtok_r(char *strptr, const char *delimiters, char **lasts);
 #endif

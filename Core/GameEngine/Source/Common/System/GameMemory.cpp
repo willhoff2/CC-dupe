@@ -45,6 +45,10 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 // SYSTEM INCLUDES
+// TheSuperHackers @port For GlobalAlloc/GlobalSize/GlobalFree, which used to arrive through
+// PreRTS.h. Replacing them changes where every pool in the game comes from, so that is the memory
+// seam's call; see docs/porting/crt-and-widechar-compat.md.
+#include <windows.h>
 
 // USER INCLUDES
 #include "Common/GameMemory.h"

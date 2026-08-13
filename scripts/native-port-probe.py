@@ -334,6 +334,20 @@ CMAKE_SOURCE_RE = re.compile(r"^\s+(Source/\S+\.cpp)\s*$")
 # build answers instead. See docs/porting/window-event-loop.md.
 OPTIONAL_BACKENDS = {"platform_window_sdl2.cpp"}
 
+# Sources CMake compiles only in the *other* branch of a mutually exclusive option, and which
+# therefore cannot compile in the configuration being measured. GameMemoryNull.cpp is the whole
+# list: cmake/config-memory.cmake defaults RTS_GAMEMEMORY_ENABLE to ON, so the build compiles
+# GameMemory.cpp, and GameMemoryNull.h redefines DynamicMemoryAllocator, MemoryPoolFactory and
+# MemoryPoolObject -- classes PreRTS.h has already supplied through GameMemory.h. Counting it as a
+# port blocker measured the harness rather than the code; it appeared as one from the first probe
+# run until this exclusion.
+EXCLUSIVE_ALTERNATIVES = {"GameMemoryNull.cpp"}
+
+
+def is_measured_source(path):
+    """Whether a source belongs to the configuration the probe measures."""
+    return path.name not in OPTIONAL_BACKENDS and path.name not in EXCLUSIVE_ALTERNATIVES
+
 
 def targets(include_renderer):
     return TARGETS + RENDERER_TARGETS if include_renderer else TARGETS
@@ -349,7 +363,7 @@ def cmake_sources(target):
         if not match:
             continue
         path = root / match.group(1)
-        if path.is_file():
+        if path.is_file() and is_measured_source(path):
             sources.append(path)
     return sorted(set(sources))
 
@@ -364,7 +378,7 @@ def collect_jobs(deps_dir, with_shims, include_renderer=False):
             sources = []
             for directory in target.source_dirs:
                 sources.extend(sorted(path for path in (REPO_ROOT / directory).rglob("*.cpp")
-                                      if path.name not in OPTIONAL_BACKENDS))
+                                      if is_measured_source(path)))
         jobs.extend((target, source, extra, with_shims) for source in sources)
     return jobs
 

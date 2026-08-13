@@ -47,6 +47,10 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port For DeleteFile/CopyFile/GetLastError/FormatMessage, which used to arrive
+// through PreRTS.h. Replacing them belongs to the filesystem seam.
+#include <windows.h>
+
 #include "Common/LocalFileSystem.h"
 #include "Common/MessageStream.h"
 #include "Common/Recorder.h"
