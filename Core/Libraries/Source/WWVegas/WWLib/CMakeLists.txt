@@ -195,6 +195,10 @@ else()
     if(CORE_WWLIB_WINDOW_BACKEND)
         if(APPLE)
             enable_language(OBJCXX)
+            # The backend is Objective-C++17 (ARC is off; it retains/releases nothing that
+            # outlives the window). The spike builds the same file the same way.
+            set(CMAKE_OBJCXX_STANDARD 17)
+            set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
             list(APPEND WWLIB_SRC platform/platform_window_cocoa.mm)
         else()
             find_package(SDL2 REQUIRED)
@@ -225,8 +229,12 @@ target_link_libraries(core_wwlib PRIVATE
 
 if(NOT WIN32 AND CORE_WWLIB_WINDOW_BACKEND)
     if(APPLE)
+        # CoreGraphics for the cursor calls (macOS has no ClipCursor) and Foundation for the
+        # autorelease pool; AppKit drags both in, but linking what the source #imports keeps
+        # this working if the backend is ever built on its own.
         target_link_libraries(core_wwlib PRIVATE
-            "-framework AppKit" "-framework QuartzCore" "-framework Metal")
+            "-framework AppKit" "-framework QuartzCore" "-framework Metal"
+            "-framework CoreGraphics" "-framework Foundation")
     elseif(TARGET SDL2::SDL2)
         target_link_libraries(core_wwlib PRIVATE SDL2::SDL2)
     else()

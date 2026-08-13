@@ -70,6 +70,8 @@ std::string Result_Name(VkResult result) {
 		case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER";
 		case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR: return "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR";
 		case VK_ERROR_SURFACE_LOST_KHR: return "VK_ERROR_SURFACE_LOST_KHR";
+		case VK_SUBOPTIMAL_KHR: return "VK_SUBOPTIMAL_KHR";
+		case VK_ERROR_OUT_OF_DATE_KHR: return "VK_ERROR_OUT_OF_DATE_KHR";
 		default: return "VkResult " + std::to_string(static_cast<int>(result));
 	}
 }
@@ -210,6 +212,9 @@ int main(int argc, char** argv) {
 		layer.device = metal_device;
 		layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
 		layer.framebufferOnly = NO;
+		// The bounds first: a layer with a zero frame logs "CAMetalLayer ignoring invalid
+		// setDrawableSize width=0.000000" and keeps a zero drawable.
+		layer.bounds = CGRectMake(0.0, 0.0, width, height);
 		layer.drawableSize = CGSizeMake(width, height);
 	}
 	Check("layer", layer != nil && metal_device != nil,
@@ -289,9 +294,12 @@ int main(int argc, char** argv) {
 	                      std::to_string(caps.minImageCount) + ".." +
 	                      std::to_string(caps.maxImageCount)
 	                : "no queue family can present to this surface");
+	// MoltenVK advertises the same handful of formats once per colour space (60 pairs on the
+	// CI runner), so only the sRGB-nonlinear ones are listed; the count above is the total.
 	for (const VkSurfaceFormatKHR& format : formats) {
-		std::printf("       surface format: %s colorSpace %d\n",
-		            Format_Name(format.format).c_str(), static_cast<int>(format.colorSpace));
+		if (format.colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) continue;
+		std::printf("       surface format: %s (VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)\n",
+		            Format_Name(format.format).c_str());
 	}
 	if (supported) {
 		std::printf("       supportedUsageFlags = 0x%X (TRANSFER_DST %s, which the renderer's "

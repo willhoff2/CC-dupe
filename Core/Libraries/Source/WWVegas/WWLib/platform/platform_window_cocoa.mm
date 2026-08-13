@@ -22,12 +22,13 @@
  *  the Vulkan surface created through VK_EXT_metal_surface so MoltenVK presents straight to    *
  *  the layer.                                                                                  *
  *                                                                                             *
- *  This file is COMPILED IN CI on a macos-15 arm64 runner (the `window-seam-macos` job in      *
- *  .github/workflows/native-port-ci.yml), together with a probe that resolves                   *
- *  vkCreateMetalSurfaceEXT and creates a real VkSurfaceKHR from a CAMetalLayer. It has still    *
- *  never run in front of a human on a Mac with a display: what is and is not verified is        *
- *  listed in docs/porting/window-event-loop.md, and the runtime paths that need a windowing     *
- *  session (activation, focus, Retina contentsScale, cursor clipping) remain unverified.       *
+ *  This file is COMPILED AND RUN IN CI on a macos-15 arm64 runner (the `window-seam-macos` job  *
+ *  in .github/workflows/native-port-ci.yml): it creates an NSWindow, gets a VkSurfaceKHR from   *
+ *  its CAMetalLayer through vkCreateMetalSurfaceEXT, presents 240 frames through MoltenVK and   *
+ *  reads them back. The runner has no display and nobody types on it, so what remains          *
+ *  unverified is anything visible (window ordering, a Retina contentsScale of 2), the           *
+ *  kVK_* table against a real keypress, mouse translation and cursor clipping. The list is in   *
+ *  docs/porting/window-event-loop.md section 4.                                                *
  *                                                                                             *
  *  Design notes that are *not* guesses, because they come from Apple's and MoltenVK's          *
  *  documented contracts rather than from having run this:                                       *

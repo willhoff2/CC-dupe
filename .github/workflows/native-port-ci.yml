@@ -600,15 +600,14 @@ jobs:
   #    zh-metal-surface-probe creates a real VkSurfaceKHR from a real CAMetalLayer through
   #    vkCreateMetalSurfaceEXT and presents through a swapchain.
   #
-  #    What this job still cannot prove, and what a Mac with a login session is still needed
-  #    for (spikes/renderer/tools/macos-window-check.sh):
-  #      * that an NSWindow becomes visible and key. The runner has no attached display, and a
-  #        runner shell is not guaranteed a WindowServer session, so the NSWindow half of the
-  #        backend is attempted in a step that is allowed to fail and whose log is the
-  #        deliverable. The surface probe deliberately needs no window: a CAMetalLayer does not
-  #        have to be in a view hierarchy to back a VkSurfaceKHR;
-  #      * that pixels reached a screen, on a Retina contentsScale, with real keyboard and
-  #        mouse input.
+  #    The NSWindow path works here too, which was not expected: see the step below. What this
+  #    job still cannot prove, and what a Mac with a login session is still needed for
+  #    (spikes/renderer/tools/macos-window-check.sh):
+  #      * that anything reached a screen. The runner has no attached display, so window
+  #        visibility, ordering and a Retina contentsScale of 2 are all uncovered;
+  #      * keyboard and mouse translation: nobody types on a runner, so the kVK_* table is
+  #        proven against HIToolbox's constants but not against a real keypress, and the
+  #        bottom-left-to-top-left mouse flip is unexercised.
   window-seam-macos:
     name: Window seam (macOS arm64, CAMetalLayer)
     runs-on: macos-15
@@ -674,18 +673,18 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # The NSWindow half. Allowed to fail: it needs a windowing session the runner does not
-      # promise. Its log is the deliverable - it is how the AppKit paths get any evidence at
-      # all before someone runs tools/macos-window-check.sh on a desk.
-      - name: Try to present to an NSWindow's CAMetalLayer (needs a windowing session)
-        continue-on-error: true
+      # The NSWindow half, which turned out to work on this runner: the first run of this job
+      # created an NSWindow, presented 120 frames through its CAMetalLayer and read the pixels
+      # back with 0 validation messages, so it is a gate too rather than a log to read. If a
+      # future runner image has no windowing session this is the step that will say so.
+      - name: Present to an NSWindow's CAMetalLayer
         run: |
           set -o pipefail
           VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
           export VK_ICD_FILENAMES
           export DYLD_LIBRARY_PATH="$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
           {
-            echo '## Cocoa NSWindow run attempt (allowed to fail)'
+            echo '## Cocoa NSWindow run'
             echo '```'
             build/spike/zh-window-spike-cocoa --frames 120 --no-validation \
               --out window-spike-macos.png 2>&1

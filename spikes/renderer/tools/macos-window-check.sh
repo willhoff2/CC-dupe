@@ -198,7 +198,9 @@ if [[ "${interactive}" == "1" ]]; then
 else
 	run_args+=(--frames 240 --mode-change)
 fi
+window_ran=0
 if "${build_dir}/zh-window-spike-cocoa" "${run_args[@]}"; then
+	window_ran=1
 	pass "the Cocoa backend presented frames to an NSWindow's CAMetalLayer through MoltenVK"
 elif [[ "${allow_no_display}" == "1" ]]; then
 	# AppKit needs a windowing session. On a CI runner or over ssh there may be none, and
@@ -228,15 +230,21 @@ fi
 
 step "summary"
 if [[ "${failures}" == "0" ]]; then
+	if [[ "${window_ran}" == "0" ]]; then
+		echo "SUMMARY: PASS - everything that does not need a windowing session passed. The"
+		echo "NSWindow path is NOT covered by this run; re-run on a Mac with a login session."
+		exit 0
+	fi
 	if [[ "${allow_no_display}" == "1" ]]; then
-		echo "SUMMARY: PASS - everything that does not need a display passed. The NSWindow"
-		echo "path is NOT covered by this run; re-run without --allow-no-display on a Mac with"
-		echo "a login session to cover it."
+		echo "SUMMARY: PASS - including the NSWindow path. Note that --allow-no-display was"
+		echo "given, so nothing here proves anything was visible on a screen: window ordering,"
+		echo "a Retina contentsScale of 2 and real keyboard/mouse input are still uncovered."
 		exit 0
 	fi
 	echo "SUMMARY: PASS - a real window presented MoltenVK frames through a CAMetalLayer."
-	echo "Please record this in docs/porting/window-event-loop.md, which currently states"
-	echo "that the NSWindow path is unverified."
+	echo "If you watched it happen on a screen, and tried the keyboard with --interactive,"
+	echo "record that in docs/porting/window-event-loop.md: those are the last two things in"
+	echo "that document that no machine has been able to check."
 	exit 0
 fi
 echo "SUMMARY: FAIL - ${failures} step(s) failed. See the lines above for how far it got."

@@ -12,7 +12,7 @@ Hand-maintained. `STATUS.md`, by contrast, is generated; do not put measurements
 | Slice | Owns (paths) | Exit criterion | PR |
 |---|---|---|---|
 | _example_ `platform/audio-device` | `Core/Libraries/Source/OpenALAudioDevice/**` | every declared `AIL_*` symbol defined; `check-openal-symbols.py` green | #28 |
-| `platform/macos-window-compile` | `Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_cocoa.mm`, `spikes/renderer/src/metal_surface_probe.mm`, `spikes/renderer/tools/macos-window-check.sh`, `spikes/renderer/CMakeLists.txt`, `docs/porting/window-event-loop.md`, the `window-seam-macos` job in `.github/workflows/native-port-ci.yml` | a green (not `continue-on-error`) `macos-15` job that compiles the Cocoa backend and asserts the Vulkan/Metal surface facts the runner can prove | this PR |
+| `platform/macos-window-compile` | `Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_cocoa.mm`, `spikes/renderer/src/metal_surface_probe.mm`, `spikes/renderer/tools/macos-window-check.sh`, `spikes/renderer/CMakeLists.txt`, the Apple branch of `Core/Libraries/Source/WWVegas/WWLib/CMakeLists.txt`, `scripts/window-input-scan.py`, `docs/porting/window-event-loop.md`, the `window-seam-macos` job in `.github/workflows/native-port-ci.yml` | a green (not `continue-on-error`) `macos-15` job that compiles the Cocoa backend and asserts the Vulkan/Metal surface facts the runner can prove | this PR |
 
 Remove your row when the PR merges.
 
