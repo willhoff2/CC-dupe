@@ -54,10 +54,18 @@ target_include_directories(z_generals PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-target_sources(z_generals PRIVATE
-    WinMain.cpp
-    WinMain.h
-)
+if(WIN32)
+    target_sources(z_generals PRIVATE
+        WinMain.cpp
+        WinMain.h
+    )
+else()
+    # TheSuperHackers @port WinMain.cpp is a WndProc and a WinMain; neither exists here. See
+    # docs/porting/window-event-loop.md.
+    target_sources(z_generals PRIVATE
+        PlatformMain.cpp
+    )
+endif()
 
 # RC files optional for MinGW builds
 # Icon: LoadIcon() handles missing resource gracefully (uses default system icon)

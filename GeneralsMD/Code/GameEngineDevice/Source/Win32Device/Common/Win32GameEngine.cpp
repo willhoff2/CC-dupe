@@ -29,22 +29,49 @@
 //   the game application, it creates all the devices we will use for the game
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+// TheSuperHackers @port The window/message/input seam, see docs/porting/window-event-loop.md.
+#include "GameClient/PlatformWindowHost.h"
+#endif
 
 #include "Win32Device/Common/Win32GameEngine.h"
 #include "Common/PerfTimer.h"
 
 #include "GameNetwork/LANAPICallbacks.h"
 
+#ifdef _WIN32
 extern DWORD TheMessageTime;
+#endif
+
+//-------------------------------------------------------------------------------------------------
+/** IsIconic() on the application window. Off Windows the window seam answers, because there is
+	* no HWND to ask. */
+//-------------------------------------------------------------------------------------------------
+static Bool isApplicationWindowIconic()
+{
+#ifdef _WIN32
+	extern HWND ApplicationHWnd;
+	return ApplicationHWnd != nullptr && ::IsIconic(ApplicationHWnd);
+#else
+	return PlatformWindowHost::isMinimized();
+#endif
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Constructor for Win32GameEngine */
 //-------------------------------------------------------------------------------------------------
 Win32GameEngine::Win32GameEngine()
 {
+#ifdef _WIN32
 	// Stop blue screen
 	m_previousErrorMode = SetErrorMode( SEM_FAILCRITICALERRORS );
+#else
+	// TheSuperHackers @port SetErrorMode() suppresses the Win32 "there is no disk in the drive"
+	// dialog. Nothing off Windows shows such a dialog, so there is nothing to suppress.
+	m_previousErrorMode = 0;
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -52,8 +79,10 @@ Win32GameEngine::Win32GameEngine()
 //-------------------------------------------------------------------------------------------------
 Win32GameEngine::~Win32GameEngine()
 {
+#ifdef _WIN32
 	// restore it (this isn't really necessary, but feels good.)
 	SetErrorMode( m_previousErrorMode );
+#endif
 }
 
 
@@ -90,9 +119,8 @@ void Win32GameEngine::update()
 	// call the engine normal update
 	GameEngine::update();
 
-	extern HWND ApplicationHWnd;
-	if (ApplicationHWnd && ::IsIconic(ApplicationHWnd)) {
-		while (ApplicationHWnd && ::IsIconic(ApplicationHWnd)) {
+	if (isApplicationWindowIconic()) {
+		while (isApplicationWindowIconic()) {
 			// We are alt-tabbed out here.  Sleep a bit, & process windows
 			// so that we can become un-alt-tabbed out.
 			Sleep(5);
@@ -133,6 +161,16 @@ void Win32GameEngine::update()
 //-------------------------------------------------------------------------------------------------
 void Win32GameEngine::serviceWindowsOS()
 {
+#ifndef _WIN32
+
+	// TheSuperHackers @port There is no message queue and no WndProc off Windows: the events are
+	// pulled from the platform here and applied at this point in the frame, rather than being
+	// dispatched to a callback at an arbitrary stack depth. docs/porting/window-event-loop.md
+	// records what that costs.
+	PlatformWindowHost::serviceOS();
+
+#else
+
 	MSG msg;
   Int returnValue;
 
@@ -166,5 +204,6 @@ void Win32GameEngine::serviceWindowsOS()
 
 	}
 
+#endif // !_WIN32
 }
 

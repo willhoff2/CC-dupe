@@ -631,6 +631,16 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: Check the engine's non-Windows window/input path goes through the seam
+        run: |
+          set -o pipefail
+          {
+            echo '## Window seam wiring'
+            echo '```'
+            python3 scripts/ci/check-window-seam-wiring.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Build the seam and the window spike
         env:
           CC: clang-18

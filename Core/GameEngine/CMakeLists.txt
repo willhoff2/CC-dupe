@@ -1173,6 +1173,17 @@ else()
     )
 endif()
 
+if(NOT WIN32)
+    # TheSuperHackers @port The engine side of the window/event-loop/input seam: what WinMain.cpp's
+    # WndProc and initializeAppWindows() become where there is no HWND. Windows keeps using
+    # WinMain.cpp, so this is not compiled there at all.
+    # See docs/porting/window-event-loop.md.
+    list(APPEND GAMEENGINE_SRC
+        Source/GameClient/PlatformWindowHost.cpp
+        Include/GameClient/PlatformWindowHost.h
+    )
+endif()
+
 
 add_library(corei_gameengine_private INTERFACE)
 add_library(corei_gameengine_public INTERFACE)

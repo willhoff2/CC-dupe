@@ -1,23 +1,23 @@
 # Native 64-bit clang probe — shimmed
 
-Compiled 742 translation units with `clang++ -fsyntax-only -std=c++20 -m64 -ferror-limit=0 -fms-extensions -include Utility/CppMacros.h -DWIN32_LEAN_AND_MEAN -D_REENTRANT` (no Windows SDK, no Wine, no MSVC).
+Compiled 744 translation units with `clang++ -fsyntax-only -std=c++20 -m64 -ferror-limit=0 -fms-extensions -include Utility/CppMacros.h -DWIN32_LEAN_AND_MEAN -D_REENTRANT` (no Windows SDK, no Wine, no MSVC).
 
 Mode: **shimmed**. `scripts/native-port-shims/` supplies declaration-only stand-ins for the Win32 headers `PreRTS.h` pulls into every GameEngine translation unit, so the numbers below measure the engine's *own* C++ rather than the absence of `windows.h`.
 
 Fetched SDK headers (dx8, gamespy, miles, lzhl) taken from `/home/ubuntu/repos/CC-dupe/build/docker/_deps`: dx8-src, gamespy-src/include, lzhl-src, miles-src, miles-src/mss.
 
-- Translation units that compile clean: **650 / 742** (87%)
-- Translation units with errors: **92**
-- Total errors: **401**
+- Translation units that compile clean: **654 / 744** (87%)
+- Translation units with errors: **90**
+- Total errors: **379**
 
 ## Errors by category
 
 | Category | Errors | Files | Example |
 |---|---:|---:|---|
-| Win32 / MSVC identifiers undeclared | 95 | 16 | `Core/Libraries/Source/WWVegas/WWLib/DbgHelpGuard.cpp: use of undeclared identifier 'GMEM_FIXED'` |
-| Other | 82 | 26 | `Core/Libraries/Source/WWVegas/WWLib/DbgHelpGuard.cpp: unknown type name 'PREAD_PROCESS_MEMORY_ROUTINE'` |
-| Non-conforming template/name lookup | 82 | 20 | `Core/Libraries/Source/WWVegas/WWLib/DbgHelpLoader.cpp: no member named 'GetSystemDirectoryA' in the global nam` |
-| Win32 types undeclared | 82 | 4 | `Core/Libraries/Source/WWVegas/WWLib/rcfile.cpp: unknown type name 'HMODULE'` |
+| Win32 / MSVC identifiers undeclared | 86 | 15 | `Core/Libraries/Source/WWVegas/WWLib/DbgHelpGuard.cpp: use of undeclared identifier 'GMEM_FIXED'` |
+| Other | 81 | 25 | `Core/Libraries/Source/WWVegas/WWLib/DbgHelpGuard.cpp: unknown type name 'PREAD_PROCESS_MEMORY_ROUTINE'` |
+| Win32 types undeclared | 79 | 3 | `Core/Libraries/Source/WWVegas/WWLib/rcfile.cpp: unknown type name 'HMODULE'` |
+| Non-conforming template/name lookup | 73 | 18 | `Core/Libraries/Source/WWVegas/WWLib/DbgHelpLoader.cpp: no member named 'GetSystemDirectoryA' in the global nam` |
 | Missing project/vendor headers | 41 | 41 | `Core/Libraries/Source/WWVegas/WWLib/WWCOMUtil.cpp: 'oaidl.h' file not found` |
 | 64-bit size/layout assumptions | 14 | 14 | `Core/GameEngine/Source/GameNetwork/ConnectionManager.cpp: static_assert failed due to requirement 'sizeof(LANM` |
 | Missing generated headers (IDL / build-time) | 4 | 4 | `Core/GameEngine/Source/Common/INI/INIWebpageURL.cpp: 'EABrowserDispatch/BrowserDispatch.h' file not found` |
@@ -29,12 +29,12 @@ Fetched SDK headers (dx8, gamespy, miles, lzhl) taken from `/home/ubuntu/repos/C
 |---|---:|---:|---:|
 | Core/Libraries/Source/Compression | 11 | 11 | 100% |
 | Core/Libraries/Source/WWVegas/WWMath | 35 | 35 | 100% |
-| Core/Libraries/Source/WWVegas/WWLib | 59 | 66 | 89% |
+| Core/Libraries/Source/WWVegas/WWLib | 60 | 67 | 89% |
 | Core/Libraries/Source/WWVegas/WWDebug | 2 | 3 | 66% |
 | Core/Libraries/Source/WWVegas/WWSaveLoad | 12 | 12 | 100% |
 | Core/Libraries/Source/debug | 4 | 20 | 20% |
 | Core/Libraries/Source/profile | 4 | 6 | 66% |
-| Core/GameEngine | 176 | 209 | 84% |
+| Core/GameEngine | 179 | 210 | 85% |
 | GeneralsMD/Code/GameEngine | 347 | 380 | 91% |
 
 ## Translation units with errors
@@ -46,7 +46,6 @@ Fetched SDK headers (dx8, gamespy, miles, lzhl) taken from `/home/ubuntu/repos/C
 | `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/DownloadMenu.cpp` | 42 | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `Core/Libraries/Source/debug/debug_io_con.cpp` | 35 | `use of undeclared identifier 'AllocConsole'` |
 | `Core/Libraries/Source/debug/test2/test2.cpp` | 27 | `unknown type name 'HACCEL'` |
-| `Core/GameEngine/Source/Common/System/Debug.cpp` | 20 | `unknown type name 'HWND'` |
 | `Core/Libraries/Source/WWVegas/WWLib/DbgHelpLoader.cpp` | 17 | `use of undeclared identifier 'GMEM_FIXED'` |
 | `Core/Libraries/Source/debug/debug_debug.cpp` | 16 | `"Unsupported compiler or platform. This code requires MSVC or GCC/MinGW-w64 targeting Windows."` |
 | `Core/Libraries/Source/debug/debug_stack.cpp` | 16 | `unknown type name 'PREAD_PROCESS_MEMORY_ROUTINE'` |
@@ -62,7 +61,6 @@ Fetched SDK headers (dx8, gamespy, miles, lzhl) taken from `/home/ubuntu/repos/C
 | `GeneralsMD/Code/GameEngine/Source/Common/System/SaveGame/GameState.cpp` | 4 | `use of undeclared identifier 'GetDateFormatW'; did you mean 'GetDateFormatA'?` |
 | `Core/GameEngine/Source/Common/System/GameMemory.cpp` | 3 | `no member named 'GlobalAlloc' in the global namespace` |
 | `Core/GameEngine/Source/Common/ReplaySimulation.cpp` | 2 | `use of undeclared identifier 'GetModuleFileNameW'; did you mean 'GetModuleFileNameA'?` |
-| `Core/GameEngine/Source/GameClient/Input/Keyboard.cpp` | 2 | `unknown type name 'HKL'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp` | 2 | `unknown type name 'HOSTENT'` |
 | `Core/Libraries/Source/WWVegas/WWLib/verchk.cpp` | 2 | `unknown type name 'VS_FIXEDFILEINFO'` |
 | `GeneralsMD/Code/GameEngine/Source/Common/Recorder.cpp` | 2 | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage s` |

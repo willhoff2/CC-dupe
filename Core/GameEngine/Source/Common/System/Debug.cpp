@@ -66,15 +66,88 @@
 #include "GameClient/GameText.h"
 #include "GameClient/Keyboard.h"
 #include "GameClient/Mouse.h"
-#if defined(DEBUG_STACKTRACE) || defined(IG_DEBUG_STACKTRACE)
-	#include "Common/StackDump.h"
-#endif
+// TheSuperHackers @port Included unconditionally, because the stack helpers it declares are
+// called unconditionally below and the game targets always define IG_DEBUG_STACKTRACE.
+#include "Common/StackDump.h"
 #ifdef RTS_ENABLE_CRASHDUMP
 #include "Common/MiniDumper.h"
 #endif
 
+#ifndef _WIN32
+// TheSuperHackers @port The assert and crash paths need a MessageBox(), a window to hide and a
+// thread id, none of which exist off Windows. They are provided here under their Win32 spellings
+// so the code below is shared: the dialog goes to the window seam's loud stub, the window handle
+// comes from the window seam, and the thread id from the C++ library. There is no native modal
+// dialog: see docs/porting/window-event-loop.md.
+#include "GameClient/PlatformWindowHost.h"
+#include "WWLib/platform/platform_dialog.h"
+
+enum
+{
+	MB_OK = 0x0,
+	MB_ABORTRETRYIGNORE = 0x2,
+	MB_YESNO = 0x4,
+	MB_ICONERROR = 0x10,
+	MB_ICONWARNING = 0x30,
+	MB_DEFBUTTON3 = 0x200,
+	MB_APPLMODAL = 0x0,
+	MB_SYSTEMMODAL = 0x1000,
+	MB_TASKMODAL = 0x2000,
+
+	SW_HIDE = 0,
+};
+
+enum
+{
+	IDOK = WWPlatform::DIALOG_RESULT_OK,
+	IDABORT = WWPlatform::DIALOG_RESULT_ABORT,
+	IDRETRY = WWPlatform::DIALOG_RESULT_RETRY,
+	IDIGNORE = WWPlatform::DIALOG_RESULT_IGNORE,
+	IDYES = WWPlatform::DIALOG_RESULT_YES,
+	IDNO = WWPlatform::DIALOG_RESULT_NO,
+};
+
+typedef void * HWND;
+typedef const char * LPCSTR;
+typedef unsigned int UINT;
+
+static WWPlatform::DialogButtons dialogButtonsFromType( UINT uType )
+{
+	if( (uType & MB_ABORTRETRYIGNORE) != 0 )
+		return WWPlatform::DIALOG_BUTTONS_ABORT_RETRY_IGNORE;
+	if( (uType & MB_YESNO) != 0 )
+		return WWPlatform::DIALOG_BUTTONS_YES_NO;
+	return WWPlatform::DIALOG_BUTTONS_OK;
+}
+
+static int MessageBox( HWND, LPCSTR lpText, LPCSTR lpCaption, UINT uType )
+{
+	return WWPlatform::Dialog_Message_Box( lpCaption, lpText, dialogButtonsFromType( uType ) );
+}
+
+static int MessageBoxW( HWND, const WideChar *text, const WideChar *caption, UINT uType )
+{
+	// Enough of the message to identify it; the crash log carries the full text.
+	char narrowText[ 1024 ];
+	char narrowCaption[ 256 ];
+	snprintf( narrowText, ARRAY_SIZE(narrowText), "%ls", text != nullptr ? text : L"" );
+	snprintf( narrowCaption, ARRAY_SIZE(narrowCaption), "%ls", caption != nullptr ? caption : L"" );
+
+	return WWPlatform::Dialog_Message_Box( narrowCaption, narrowText,
+		dialogButtonsFromType( uType ) );
+}
+
+static void ShowWindow( HWND window, int )
+{
+	if( window != nullptr )
+		WWPlatform::Window_Show( window, false );
+}
+
+#endif // !_WIN32
+
 // Horrible reference, but we really, really need to know if we are windowed.
 extern bool DX8Wrapper_IsWindowed;
+// The application window: WinMain.cpp defines this on Windows, PlatformWindowHost.cpp elsewhere.
 extern HWND ApplicationHWnd;
 
 extern const char *gAppPrefix; /// So WB can have a different log file name.

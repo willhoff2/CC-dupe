@@ -7,7 +7,7 @@
       "mode_change": 8,
       "placement": 5,
       "polled_input": 10,
-      "window_handle": 27,
+      "window_handle": 29,
       "wndproc": 9
     },
     "out_of_scope": {
@@ -232,8 +232,10 @@
       "GeneralsMD/Code/Main/WinMain.cpp"
     ],
     "ApplicationHWnd": [
+      "Core/GameEngine/Include/GameClient/PlatformWindowHost.h",
       "Core/GameEngine/Source/Common/System/Debug.cpp",
       "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp",
+      "Core/GameEngine/Source/GameClient/PlatformWindowHost.cpp",
       "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp",
       "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp",
       "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIKeyboard.cpp",
@@ -517,14 +519,14 @@
       "message_pump": 5,
       "mode_change": 3,
       "polled_input": 18,
-      "window_handle": 35,
+      "window_handle": 32,
       "wndproc": 18
     },
     "engine": {
       "message_pump": 6,
-      "placement": 3,
+      "placement": 4,
       "polled_input": 10,
-      "window_handle": 27,
+      "window_handle": 55,
       "wndproc": 33
     },
     "generals": {
@@ -562,8 +564,8 @@
   },
   "spotlight": {
     "Core/GameEngine/Source/Common/System/Debug.cpp": {
-      "placement": 3,
-      "window_handle": 11
+      "placement": 4,
+      "window_handle": 15
     },
     "Core/GameEngine/Source/GameClient/Input/Keyboard.cpp": {
       "polled_input": 2
@@ -584,7 +586,7 @@
     },
     "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp": {
       "message_pump": 5,
-      "window_handle": 8
+      "window_handle": 5
     },
     "GeneralsMD/Code/Main/WinMain.cpp": {
       "message_pump": 1,
@@ -597,7 +599,7 @@
   "symbols": {
     "in_scope": {
       "AdjustWindowRect": 2,
-      "ApplicationHWnd": 52,
+      "ApplicationHWnd": 74,
       "BeginPaint": 2,
       "ClientToScreen": 4,
       "ClipCursor": 3,
@@ -619,8 +621,8 @@
       "GetWindowLong": 2,
       "GetWindowRect": 3,
       "HKL": 2,
-      "HWND": 50,
-      "IsIconic": 3,
+      "HWND": 54,
+      "IsIconic": 2,
       "LPARAM": 43,
       "LRESULT": 5,
       "LoadCursor": 4,
@@ -641,7 +643,7 @@
       "Set_Device_Resolution": 9,
       "Set_Render_Device": 19,
       "ShowCursor": 5,
-      "ShowWindow": 6,
+      "ShowWindow": 7,
       "Toggle_Windowed": 5,
       "TranslateMessage": 2,
       "UpdateWindow": 2,
@@ -717,9 +719,9 @@
       "cursor": 36,
       "message_pump": 25,
       "mode_change": 53,
-      "placement": 20,
+      "placement": 21,
       "polled_input": 29,
-      "window_handle": 125,
+      "window_handle": 150,
       "wndproc": 342
     },
     "out_of_scope": {
