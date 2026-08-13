@@ -89,7 +89,16 @@ CATEGORIES = collections.OrderedDict([
     ("polled_input", [
         "GetAsyncKeyState", "GetKeyState", "GetKeyboardState", "GetKeyboardLayout",
         "MapVirtualKey", "MapVirtualKeyEx", "ToAscii", "ToUnicode", "HKL",
-        r"VK_[A-Z0-9_]+", "DirectInput8Create", "IDirectInputDevice8",
+        # Win32 virtual keys (VK_ESCAPE, VK_LBUTTON, VK_F1) minus Vulkan's identically
+        # prefixed tokens. The harness area is skipped wholesale for this reason, but the
+        # portable window backends are in-scope files that legitimately name
+        # VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT, and counting those as remaining
+        # Win32 input surface would make this figure move on every renderer or MoltenVK edit.
+        r"VK_(?!STRUCTURE_TYPE_|USE_PLATFORM_|FORMAT_|IMAGE_|API_VERSION|EXT_|KHR_|MVK_|"
+        r"SUCCESS|NULL_HANDLE|TRUE|FALSE|HEADER_VERSION|PRESENT_MODE_|COLOR_SPACE_|"
+        r"COMPOSITE_ALPHA_|SHARING_MODE_|ERROR_|SUBOPTIMAL|INCOMPLETE|WHOLE_SIZE|"
+        r"QUEUE_|MAX_|UUID_|LOD_CLAMP_|ATTACHMENT_UNUSED|REMAINING_)[A-Z0-9_]+",
+        "DirectInput8Create", "IDirectInputDevice8",
         "GetDoubleClickTime",
     ]),
     ("cursor", [
