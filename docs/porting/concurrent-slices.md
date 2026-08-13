@@ -12,6 +12,7 @@ Hand-maintained. `STATUS.md`, by contrast, is generated; do not put measurements
 | Slice | Owns (paths) | Exit criterion | PR |
 |---|---|---|---|
 | _example_ `platform/audio-device` | `Core/Libraries/Source/OpenALAudioDevice/**` | every declared `AIL_*` symbol defined; `check-openal-symbols.py` green | #28 |
+| `renderer/backend-coverage` | `spikes/renderer/src/{vulkan_backend.cpp,render_backend.h,state_translate.*,fixedfunc_tests.cpp}`, `spikes/renderer/shaders/**`, `spikes/renderer/tools/{backend-coverage-scan.py,backend-coverage-map.json,backend-coverage-baseline.json}`, `scripts/ci/check-backend-coverage.py`, `docs/porting/renderer-surface.md` | a committed coverage gate over the 62 (now 64) measured D3D8 entry points and every render/texture-stage state the engine sets; `check-backend-coverage.py` green with a measured before/after count, pixel-verified on lavapipe | this PR |
 
 Remove your row when the PR merges.
 
