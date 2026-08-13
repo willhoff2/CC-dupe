@@ -1,0 +1,1108 @@
+{
+ "cascade_ops": {
+  "D3DTOP_ADD": {
+   "status": "implemented",
+   "uses": 16
+  },
+  "D3DTOP_ADDSIGNED": {
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DTOP_ADDSIGNED2X": {
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DTOP_ADDSMOOTH": {
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DTOP_BLENDCURRENTALPHA": {
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DTOP_BLENDTEXTUREALPHA": {
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DTOP_BUMPENVMAP": {
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DTOP_BUMPENVMAPLUMINANCE": {
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DTOP_DISABLE": {
+   "status": "implemented",
+   "uses": 88
+  },
+  "D3DTOP_DOTPRODUCT3": {
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DTOP_MODULATE": {
+   "status": "implemented",
+   "uses": 64
+  },
+  "D3DTOP_MODULATE2X": {
+   "status": "implemented",
+   "uses": 3
+  },
+  "D3DTOP_MODULATEALPHA_ADDCOLOR": {
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DTOP_MULTIPLYADD": {
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DTOP_SELECTARG1": {
+   "status": "implemented",
+   "uses": 39
+  },
+  "D3DTOP_SELECTARG2": {
+   "status": "implemented",
+   "uses": 14
+  },
+  "D3DTOP_SUBTRACT": {
+   "status": "implemented",
+   "uses": 2
+  }
+ },
+ "methods": {
+  "BeginScene": {
+   "category": "backend",
+   "entry": [
+    "Begin_Scene"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "Clear": {
+   "category": "backend",
+   "entry": [
+    "Clear"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "CopyRects": {
+   "category": "backend",
+   "entry": [
+    "Copy_Rects"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "surface-to-surface blit; the shadow and screenshot paths use it",
+   "sites": 4,
+   "status": "absent"
+  },
+  "CreateAdditionalSwapChain": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3DDevice8",
+   "note": "second swapchain for a second window; the window seam owns swapchains",
+   "sites": 2,
+   "status": "none-needed"
+  },
+  "CreateImageSurface": {
+   "category": "backend",
+   "entry": [
+    "Create_Image_Surface"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "system-memory surface, the staging half of CopyRects/UpdateTexture",
+   "sites": 5,
+   "status": "absent"
+  },
+  "CreateIndexBuffer": {
+   "category": "backend",
+   "entry": [
+    "Create_Index_Buffer"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "CreatePixelShader": {
+   "category": "backend",
+   "entry": [
+    "Create_Pixel_Shader"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "the 16 in-repo ps.1.1/vs.1.1 shaders; not started",
+   "sites": 2,
+   "status": "absent"
+  },
+  "CreateTexture": {
+   "category": "backend",
+   "entry": [
+    "Create_Texture"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "CreateVertexBuffer": {
+   "category": "backend",
+   "entry": [
+    "Create_Vertex_Buffer"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "CreateVertexShader": {
+   "category": "backend",
+   "entry": [
+    "Create_Vertex_Shader"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "declaration-only FVF handles are served by Set_Vertex_Buffer's fvf; real vs.1.1 not started",
+   "sites": 2,
+   "status": "absent"
+  },
+  "DeletePixelShader": {
+   "category": "backend",
+   "entry": [
+    "Delete_Pixel_Shader"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "absent"
+  },
+  "DeleteVertexShader": {
+   "category": "backend",
+   "entry": [
+    "Delete_Vertex_Shader"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "absent"
+  },
+  "DrawIndexedPrimitive": {
+   "category": "backend",
+   "entry": [
+    "Draw_Indexed_Primitive"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "primitive-type coverage is measured separately, see primitive_types",
+   "sites": 4,
+   "status": "absent"
+  },
+  "DrawPrimitive": {
+   "category": "backend",
+   "entry": [
+    "Draw_Primitive"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "non-indexed; W3DSnow's point-sprite batches are the engine's use",
+   "sites": 2,
+   "status": "absent"
+  },
+  "DrawPrimitiveUP": {
+   "category": "backend",
+   "entry": [
+    "Draw_Primitive_UP"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "every engine site draws a 2-triangle strip from stack vertices",
+   "sites": 2,
+   "status": "absent"
+  },
+  "EndScene": {
+   "category": "backend",
+   "entry": [
+    "End_Scene"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "GetAvailableTextureMem": {
+   "category": "backend",
+   "entry": [
+    "Get_Resource_Stats"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 3,
+   "status": "implemented"
+  },
+  "GetBackBuffer": {
+   "category": "backend",
+   "entry": [
+    "Read_Back_Color_Target"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "the engine takes the back buffer to read pixels out of it",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "GetDepthStencilSurface": {
+   "category": "backend",
+   "entry": [
+    "Get_Depth_Stencil_Target"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 5,
+   "status": "absent"
+  },
+  "GetDeviceCaps": {
+   "category": "caps",
+   "entry": [],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 3,
+   "status": "none-needed"
+  },
+  "GetDisplayMode": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 3,
+   "status": "none-needed"
+  },
+  "GetFrontBuffer": {
+   "category": "backend",
+   "entry": [
+    "Read_Back_Color_Target"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "GetRenderState": {
+   "category": "backend",
+   "entry": [
+    "Get_DX8_Render_State"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "absent"
+  },
+  "GetRenderTarget": {
+   "category": "backend",
+   "entry": [
+    "Get_Render_Target"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 4,
+   "status": "absent"
+  },
+  "GetTransform": {
+   "category": "backend",
+   "entry": [
+    "Get_Transform"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 3,
+   "status": "absent"
+  },
+  "GetViewport": {
+   "category": "backend",
+   "entry": [
+    "Get_Viewport"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "absent"
+  },
+  "IDirect3D8::CheckDepthStencilMatch": {
+   "category": "caps",
+   "entry": [],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 3,
+   "status": "none-needed"
+  },
+  "IDirect3D8::CheckDeviceFormat": {
+   "category": "backend",
+   "entry": [
+    "Supports_Texture_Format"
+   ],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 3,
+   "status": "implemented"
+  },
+  "IDirect3D8::CheckDeviceMultiSampleType": {
+   "category": "caps",
+   "entry": [],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 4,
+   "status": "none-needed"
+  },
+  "IDirect3D8::CheckDeviceType": {
+   "category": "caps",
+   "entry": [],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 4,
+   "status": "none-needed"
+  },
+  "IDirect3D8::CreateDevice": {
+   "category": "backend",
+   "entry": [
+    "Init"
+   ],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 1,
+   "status": "implemented"
+  },
+  "IDirect3D8::EnumAdapterModes": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 5,
+   "status": "none-needed"
+  },
+  "IDirect3D8::GetAdapterCount": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 3,
+   "status": "none-needed"
+  },
+  "IDirect3D8::GetAdapterDisplayMode": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 3,
+   "status": "none-needed"
+  },
+  "IDirect3D8::GetAdapterIdentifier": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 4,
+   "status": "none-needed"
+  },
+  "IDirect3D8::GetAdapterModeCount": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 4,
+   "status": "none-needed"
+  },
+  "IDirect3D8::GetDeviceCaps": {
+   "category": "caps",
+   "entry": [],
+   "interface": "IDirect3D8",
+   "note": "",
+   "sites": 3,
+   "status": "none-needed"
+  },
+  "LightEnable": {
+   "category": "backend",
+   "entry": [
+    "Set_Light"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "Set_Light(index, nullptr) is D3D8's LightEnable(index, FALSE)",
+   "sites": 3,
+   "status": "implemented"
+  },
+  "Present": {
+   "category": "backend",
+   "entry": [
+    "End_Scene"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 4,
+   "status": "implemented"
+  },
+  "ProcessVertices": {
+   "category": "backend",
+   "entry": [
+    "Process_Vertices"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "CPU-side transform of a vertex buffer; the mesh-shadow path uses it",
+   "sites": 2,
+   "status": "absent"
+  },
+  "Reset": {
+   "category": "backend",
+   "entry": [
+    "Resize_Presentation"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "ResourceManagerDiscardBytes": {
+   "category": "device-model",
+   "entry": [],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 3,
+   "status": "none-needed"
+  },
+  "SetClipPlane": {
+   "category": "backend",
+   "entry": [
+    "Set_Clip_Plane"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "absent"
+  },
+  "SetCursorPosition": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "none-needed"
+  },
+  "SetCursorProperties": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "none-needed"
+  },
+  "SetGammaRamp": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 3,
+   "status": "none-needed"
+  },
+  "SetIndices": {
+   "category": "backend",
+   "entry": [
+    "Set_Index_Buffer"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 6,
+   "status": "implemented"
+  },
+  "SetLight": {
+   "category": "backend",
+   "entry": [
+    "Set_Light"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "SetMaterial": {
+   "category": "backend",
+   "entry": [
+    "Set_Material"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "implemented"
+  },
+  "SetPixelShader": {
+   "category": "backend",
+   "entry": [
+    "Set_Pixel_Shader"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 3,
+   "status": "absent"
+  },
+  "SetPixelShaderConstant": {
+   "category": "backend",
+   "entry": [
+    "Set_Pixel_Shader_Constant"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 3,
+   "status": "absent"
+  },
+  "SetRenderState": {
+   "category": "backend",
+   "entry": [
+    "Set_DX8_Render_State"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "per-state coverage is the render_states table, not this one method",
+   "sites": 3,
+   "status": "implemented"
+  },
+  "SetRenderTarget": {
+   "category": "backend",
+   "entry": [
+    "Set_Render_Target"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 7,
+   "status": "absent"
+  },
+  "SetStreamSource": {
+   "category": "backend",
+   "entry": [
+    "Set_Vertex_Buffer"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 6,
+   "status": "implemented"
+  },
+  "SetTexture": {
+   "category": "backend",
+   "entry": [
+    "Set_Texture"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 8,
+   "status": "implemented"
+  },
+  "SetTextureStageState": {
+   "category": "backend",
+   "entry": [
+    "Set_DX8_Texture_Stage_State"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "per-state coverage is the stage_states table",
+   "sites": 18,
+   "status": "implemented"
+  },
+  "SetTransform": {
+   "category": "backend",
+   "entry": [
+    "Set_Transform"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 8,
+   "status": "implemented"
+  },
+  "SetVertexShader": {
+   "category": "backend",
+   "entry": [
+    "Set_Vertex_Buffer"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "the engine passes an FVF token here for the fixed-function pipeline; the buffer carries it",
+   "sites": 4,
+   "status": "implemented"
+  },
+  "SetVertexShaderConstant": {
+   "category": "backend",
+   "entry": [
+    "Set_Vertex_Shader_Constant"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 3,
+   "status": "absent"
+  },
+  "SetViewport": {
+   "category": "backend",
+   "entry": [
+    "Set_Viewport"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "absent"
+  },
+  "ShowCursor": {
+   "category": "platform",
+   "entry": [],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 2,
+   "status": "none-needed"
+  },
+  "TestCooperativeLevel": {
+   "category": "device-model",
+   "entry": [],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 5,
+   "status": "none-needed"
+  },
+  "UpdateTexture": {
+   "category": "backend",
+   "entry": [
+    "Update_Texture"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "managed-pool sysmem-to-video copy; the lock/unlock path uploads directly instead",
+   "sites": 6,
+   "status": "absent"
+  },
+  "ValidateDevice": {
+   "category": "caps",
+   "entry": [],
+   "interface": "IDirect3DDevice8",
+   "note": "",
+   "sites": 3,
+   "status": "none-needed"
+  }
+ },
+ "primitive_types": {
+  "D3DPT_POINTLIST": {
+   "reason": "translated, but the pipeline key's topology is fixed",
+   "status": "stubbed",
+   "uses": 1
+  },
+  "D3DPT_TRIANGLELIST": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 8
+  },
+  "D3DPT_TRIANGLESTRIP": {
+   "reason": "translated, but the pipeline key's topology is fixed",
+   "status": "stubbed",
+   "uses": 17
+  }
+ },
+ "render_states": {
+  "D3DRS_ALPHABLENDENABLE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 26
+  },
+  "D3DRS_ALPHAFUNC": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 8
+  },
+  "D3DRS_ALPHAREF": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 10
+  },
+  "D3DRS_ALPHATESTENABLE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 10
+  },
+  "D3DRS_AMBIENT": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 5
+  },
+  "D3DRS_AMBIENTMATERIALSOURCE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DRS_BLENDOP": {
+   "reason": "",
+   "status": "absent",
+   "uses": 3
+  },
+  "D3DRS_CLIPPING": {
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DRS_COLORVERTEX": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DRS_COLORWRITEENABLE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 21
+  },
+  "D3DRS_CULLMODE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DRS_DESTBLEND": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 28
+  },
+  "D3DRS_DIFFUSEMATERIALSOURCE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DRS_DITHERENABLE": {
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DRS_EMISSIVEMATERIALSOURCE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DRS_FILLMODE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 11
+  },
+  "D3DRS_FOGCOLOR": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DRS_FOGENABLE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 3
+  },
+  "D3DRS_FOGEND": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DRS_FOGSTART": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DRS_FOGTABLEMODE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DRS_FOGVERTEXMODE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DRS_LIGHTING": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 6
+  },
+  "D3DRS_NORMALIZENORMALS": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DRS_PATCHSEGMENTS": {
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DRS_POINTSCALEENABLE": {
+   "reason": "",
+   "status": "absent",
+   "uses": 2
+  },
+  "D3DRS_POINTSCALE_A": {
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DRS_POINTSCALE_B": {
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DRS_POINTSCALE_C": {
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DRS_POINTSIZE": {
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DRS_POINTSIZE_MAX": {
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DRS_POINTSIZE_MIN": {
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DRS_POINTSPRITEENABLE": {
+   "reason": "",
+   "status": "absent",
+   "uses": 2
+  },
+  "D3DRS_RANGEFOGENABLE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DRS_SHADEMODE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DRS_SOFTWAREVERTEXPROCESSING": {
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DRS_SPECULARENABLE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DRS_SPECULARMATERIALSOURCE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DRS_SRCBLEND": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 31
+  },
+  "D3DRS_STENCILENABLE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 9
+  },
+  "D3DRS_STENCILFAIL": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 8
+  },
+  "D3DRS_STENCILFUNC": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 8
+  },
+  "D3DRS_STENCILMASK": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 6
+  },
+  "D3DRS_STENCILPASS": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 6
+  },
+  "D3DRS_STENCILREF": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 7
+  },
+  "D3DRS_STENCILWRITEMASK": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 6
+  },
+  "D3DRS_STENCILZFAIL": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 6
+  },
+  "D3DRS_TEXTUREFACTOR": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 7
+  },
+  "D3DRS_ZBIAS": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 15
+  },
+  "D3DRS_ZENABLE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 5
+  },
+  "D3DRS_ZFUNC": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 16
+  },
+  "D3DRS_ZWRITEENABLE": {
+   "reason": "",
+   "status": "implemented",
+   "uses": 9
+  }
+ },
+ "stage_states": {
+  "D3DTSS_ADDRESSU": {
+   "field": "address_u",
+   "reason": "",
+   "status": "implemented",
+   "uses": 45
+  },
+  "D3DTSS_ADDRESSV": {
+   "field": "address_v",
+   "reason": "",
+   "status": "implemented",
+   "uses": 45
+  },
+  "D3DTSS_ADDRESSW": {
+   "field": "",
+   "reason": "",
+   "status": "absent",
+   "uses": 2
+  },
+  "D3DTSS_ALPHAARG1": {
+   "field": "alpha_arg1",
+   "reason": "",
+   "status": "implemented",
+   "uses": 39
+  },
+  "D3DTSS_ALPHAARG2": {
+   "field": "alpha_arg2",
+   "reason": "",
+   "status": "implemented",
+   "uses": 31
+  },
+  "D3DTSS_ALPHAOP": {
+   "field": "alpha_op",
+   "reason": "",
+   "status": "implemented",
+   "uses": 85
+  },
+  "D3DTSS_BORDERCOLOR": {
+   "field": "",
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DTSS_BUMPENVLOFFSET": {
+   "field": "bump_luminance_offset",
+   "reason": "",
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DTSS_BUMPENVLSCALE": {
+   "field": "bump_luminance_scale",
+   "reason": "",
+   "status": "implemented",
+   "uses": 1
+  },
+  "D3DTSS_BUMPENVMAT00": {
+   "field": "bump_matrix",
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DTSS_BUMPENVMAT01": {
+   "field": "bump_matrix",
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DTSS_BUMPENVMAT10": {
+   "field": "bump_matrix",
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DTSS_BUMPENVMAT11": {
+   "field": "bump_matrix",
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DTSS_COLORARG0": {
+   "field": "color_arg0",
+   "reason": "",
+   "status": "implemented",
+   "uses": 2
+  },
+  "D3DTSS_COLORARG1": {
+   "field": "color_arg1",
+   "reason": "",
+   "status": "implemented",
+   "uses": 62
+  },
+  "D3DTSS_COLORARG2": {
+   "field": "color_arg2",
+   "reason": "",
+   "status": "implemented",
+   "uses": 60
+  },
+  "D3DTSS_COLOROP": {
+   "field": "color_op",
+   "reason": "",
+   "status": "implemented",
+   "uses": 87
+  },
+  "D3DTSS_MAGFILTER": {
+   "field": "mag_filter",
+   "reason": "",
+   "status": "implemented",
+   "uses": 54
+  },
+  "D3DTSS_MAXANISOTROPY": {
+   "field": "",
+   "reason": "",
+   "status": "absent",
+   "uses": 1
+  },
+  "D3DTSS_MINFILTER": {
+   "field": "min_filter",
+   "reason": "",
+   "status": "implemented",
+   "uses": 54
+  },
+  "D3DTSS_MIPFILTER": {
+   "field": "mip_filter",
+   "reason": "",
+   "status": "implemented",
+   "uses": 42
+  },
+  "D3DTSS_TEXCOORDINDEX": {
+   "field": "texcoord_index",
+   "reason": "",
+   "status": "implemented",
+   "uses": 113
+  },
+  "D3DTSS_TEXTURETRANSFORMFLAGS": {
+   "field": "transform_flags",
+   "reason": "",
+   "status": "implemented",
+   "uses": 71
+  }
+ },
+ "totals": {
+  "backend_methods": 45,
+  "backend_methods_implemented": 23,
+  "cascade_ops_implemented": 17,
+  "cascade_ops_used": 17,
+  "methods_reached": 64,
+  "primitive_types_implemented": 1,
+  "primitive_types_used": 3,
+  "render_states_implemented": 39,
+  "render_states_set": 52,
+  "stage_states_implemented": 20,
+  "stage_states_set": 23
+ }
+}
