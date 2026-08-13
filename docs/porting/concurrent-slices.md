@@ -12,6 +12,7 @@ Hand-maintained. `STATUS.md`, by contrast, is generated; do not put measurements
 | Slice | Owns (paths) | Exit criterion | PR |
 |---|---|---|---|
 | _example_ `platform/audio-device` | `Core/Libraries/Source/OpenALAudioDevice/**` | every declared `AIL_*` symbol defined; `check-openal-symbols.py` green | #28 |
+| `wire/lanmessage-64bit` | `Core/GameEngine/Include/GameNetwork/LANAPI.h`, `LANMessageWire.h`, `Core/GameEngine/Source/GameNetwork/LANAPI*.cpp`, `Core/GameEngine/Source/GameNetwork/GameInfo.cpp`, `{Generals,GeneralsMD}/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/{LanGameOptionsMenu,NetworkDirectConnect,GameInfoWindow}.cpp`, `scripts/native-layout-test.py`, `scripts/ci/check-lanmessage-layout.py`, `docs/porting/lanmessage-64bit.md`, `docs/porting/ci-baselines/*.json` | `sizeof(LANMessage)` identical under `-m32` and `-m64` and `<= MAX_LANAPI_PACKET_SIZE`, asserted in a committed test; the 17 translation units that failed on that `static_assert` compile | tbd |
 
 Remove your row when the PR merges.
 
