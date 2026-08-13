@@ -23,12 +23,18 @@ DEFAULT_DEPS_DIR = probe.DEFAULT_DEPS_DIR
 
 
 def target_sources(target):
-    """The translation units the real build compiles for a probe target."""
+    """The translation units the real build compiles for a probe target.
+
+    Opt-in backends the probe excludes (`probe.OPTIONAL_BACKENDS`) are excluded here too: counting
+    them would make the two measurements' denominators disagree, and their dependency is absent
+    from both include paths by design.
+    """
     if target.cmake_lists:
         return probe.cmake_sources(target)
     sources = []
     for directory in target.source_dirs:
-        sources.extend(sorted((REPO_ROOT / directory).rglob("*.cpp")))
+        sources.extend(sorted(path for path in (REPO_ROOT / directory).rglob("*.cpp")
+                              if path.name not in probe.OPTIONAL_BACKENDS))
     return sources
 
 

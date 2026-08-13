@@ -48,7 +48,38 @@ A count *below* the baseline is a regression — find the commit, do not update 
 A changed `total` means the denominator moved (files added or removed); say so explicitly rather than
 reporting the ratio as progress.
 
-## 5. Regenerate the status document
+## 5. The rest of the gates, with their exact arguments
+
+```sh
+python3 scripts/ci/check-d3d8-surface.py
+CLANGXX=clang++-14 python3 scripts/native-layout-test.py
+python3 scripts/xfer-blob-audit.py
+```
+
+The native build and its gate, whose denominator must equal the probe's for the two to be
+comparable:
+
+```sh
+CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --with-shims \
+  --report docs/porting/native-build-report.md \
+  --json docs/porting/ci-baselines/native-build-shimmed-level1-2.json
+python3 scripts/ci/check-native-build-baseline.py --results docs/porting/ci-baselines/native-build-shimmed-level1-2.json
+```
+
+The audio gates need the backend *built*, so they need the top-level CMake build (CMake >= 3.25,
+`libopenal-dev`), and `check-openal-symbols.py` needs both of its paths:
+
+```sh
+CC=clang-14 CXX=clang++-14 cmake -S . -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DRTS_BUILD_ZEROHOUR=ON -DRTS_BUILD_GENERALS=OFF
+cmake --build build/native --target core_openalaudiodevice
+python3 scripts/ci/check-openal-symbols.py \
+  --header Core/Libraries/Source/OpenALAudioDevice/mss/mss.h \
+  --archive build/native/Core/Libraries/Source/OpenALAudioDevice/libcore_openalaudiodevice.a
+python3 scripts/audio-surface-scan.py --check
+```
+
+## 6. Regenerate the status document
 
 ```sh
 python3 scripts/porting-status.py          # rewrite docs/porting/STATUS.md
@@ -67,3 +98,8 @@ python3 scripts/porting-status.py --check  # what CI runs
   Without it the VC6 compatibility macros are undefined everywhere.
 - Keep `-fms-extensions`. Dropping it costs ~65 errors from `__int64` and `__forceinline` alone.
 - Report `clean / total`, never a bare percentage.
+- The layout test's 32-bit check needs `g++-multilib`; without it that check is skipped, not failed,
+  and the sweep is incomplete until you install it and see the ILP32 assertions actually pass.
+- Opt-in backends (`probe.OPTIONAL_BACKENDS`, currently the SDL2 window backend) are excluded from
+  both the probe and the native build. If only one of the two excludes them, their denominators
+  drift apart and the native-build gate reports a denominator change that means nothing.
