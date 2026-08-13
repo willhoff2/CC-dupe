@@ -64,20 +64,23 @@ leave the process:
 | `LanguageFilter.cpp` | 2 | the bad-word list file, read one `WideChar` at a time |
 | `LocalFile.cpp` | 4 | `writeWideChar`/`printfWideChar` output |
 | `NetPacketStructs.h/.cpp` | 6 | wide strings in network packets |
-| `LANAPI.h` | 11 `WideChar` array members | `LANMessage`, which is `#pragma pack(1)` and sent as raw bytes |
+| `LANAPI.h` | ~~11 `WideChar` array members~~ **fixed**, see below | `LANMessage`, which is `#pragma pack(1)` and sent as raw bytes |
 
-`LANMessage` is the sharpest example, and it is measurable rather than arguable:
-`sizeof(LANMessage)` is **471** bytes with a 2-byte `WideChar` and **536** with a 4-byte one,
-against a `MAX_LANAPI_PACKET_SIZE` of 476. The `static_assert` at `LANAPI.h:270` already catches
-it — compile `LANAPI.cpp` with the probe's shims and it is the only diagnostic the file produces:
+`LANMessage` was the sharpest example, and it was measurable rather than arguable:
+`sizeof(LANMessage)` was **471** bytes with a 2-byte `WideChar` and **536** with a 4-byte one,
+against a `MAX_LANAPI_PACKET_SIZE` of 476, and the `static_assert` in `LANAPI.h` caught it —
+compile `LANAPI.cpp` with the probe's shims and it was the only diagnostic the file produced:
 
 ```
 static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE'
 ```
 
-So the wire format does not silently change under LP64; it fails to build, which is the right
-failure. The file formats have no such guard, and `.csf`, `.map`, save games and the CRC would all
-silently mis-parse or mis-hash.
+So the wire format did not silently change under LP64; it failed to build, which is the right
+failure. That one has since been fixed on its own terms rather than as part of a `WideChar`
+conversion: the packet's text fields are 16-bit `LANWireChar` and the engine's `WideChar` is
+converted at the send/receive boundary, so the packet is 471 bytes on every target. See
+[`lanmessage-64bit.md`](lanmessage-64bit.md). The remaining rows are untouched, and the file formats
+have no such guard: `.csf`, `.map`, save games and the CRC would all silently mis-parse or mis-hash.
 
 ## Why it is not a typedef change
 
