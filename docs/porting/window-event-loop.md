@@ -9,12 +9,12 @@ python3 scripts/window-input-scan.py               # the tables below
 python3 scripts/window-input-scan.py --check       # what CI runs
 ```
 
-**Read this first.** Two of the three deliverables here have been executed; one has not.
+**Read this first.**
 
 | Piece | Status |
 |---|---|
 | The seam (`platform_window.h`) and its SDL2 backend | built and run; a real X11 window presented 240 Vulkan frames, read back and pixel-checked, 0 validation messages |
-| The Cocoa/`CAMetalLayer`/MoltenVK backend (`platform_window_cocoa.mm`, 780 lines) | **written blind. Never compiled, never run.** No macOS SDK was available to the session that wrote it |
+| The Cocoa/`CAMetalLayer`/MoltenVK backend (`platform_window_cocoa.mm`) | **written blind, now executed.** On a `macos-15` arm64 runner it compiles, creates an `NSWindow`, gets a `VkSurfaceKHR` through `vkCreateMetalSurfaceEXT`, presents 240 frames, survives a mode change to 1024x768 and reads the pixels back with 0 validation messages. What remains unverified is a display: see [section 4](#4-what-is-still-unverified-macos) |
 | The engine actually using the seam | not done, and not attempted — see [What this does not do](#what-this-does-not-do) |
 
 ## 1. The Win32 surface being replaced
@@ -26,7 +26,10 @@ GUIEdit, ImagePacker, ParticleEditor) and the base `Generals/` tree. The port ha
 (`spikes/`, `scripts/native-port-shims/`) is not scanned at all: the shims *declare* `HWND` and the
 whole `VK_*` table, and the spike is Vulkan code whose `VK_STRUCTURE_TYPE_*` tokens a regex cannot
 tell from `VK_LBUTTON`, so counting it would both inflate the figures and make them move whenever
-the renderer changes.
+the renderer changes. The same collision reaches in-scope files now that the portable window
+backends name `VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT`, so `polled_input`'s `VK_*` pattern
+excludes Vulkan's prefixes (`VK_STRUCTURE_TYPE_`, `VK_USE_PLATFORM_`, `VK_FORMAT_`, …) rather than
+the files. That exclusion changes no figure in the table below.
 
 | Category | In-scope refs | In-scope files | Out-of-scope refs | Out-of-scope files |
 |---|---:|---:|---:|---:|
@@ -235,50 +238,67 @@ frames under Xvfb. Xvfb is a real X server, so the surface, swapchain, present a
 translation are all genuinely exercised; it has no monitor, so **CI does not prove pixels reached a
 screen.** That part was checked by hand on a desktop session, as above.
 
-## 4. What was **not** verified: macOS
+## 4. What is still unverified: macOS
 
-`platform_window_cocoa.mm` — `NSApplication`, `NSWindow`, `NSView`, `CAMetalLayer`,
-`nextEventMatchingMask:` pumping, `kVK_*` translation, `vkCreateMetalSurfaceEXT` — **has never been
-compiled or executed.** It was written on Linux with no macOS SDK, from documentation. Expect it to
-be wrong. Specifically, and in the order they will probably fail:
+`platform_window_cocoa.mm` was written on Linux with no macOS SDK and had never been compiled when
+PR #32 merged. It has now been compiled and run on a `macos-15` arm64 GitHub runner (macOS 15.7.7,
+Xcode 16.4 AppleClang 17.0.0, Homebrew MoltenVK, Vulkan header 1.4.357, `Apple Paravirtual device`).
+CI job `Window seam (macOS arm64, CAMetalLayer)` is that run, and it is a gate, not informational.
 
-1. it may not compile at all (AppKit selectors, `enum` names, ARC assumptions);
-2. it declares `VkMetalSurfaceCreateInfoEXT` and `PFN_vkCreateMetalSurfaceEXT` locally and resolves
-   the entry point through `dlsym(RTLD_DEFAULT, "vkGetInstanceProcAddr")`, to avoid needing
-   `VK_USE_PLATFORM_METAL_EXT` headers in WWLib — the struct layout and the loader lookup are both
-   unproven against a real MoltenVK;
-3. AppKit's main-thread rules: window creation and event pumping must happen on the main thread
-   with an activation policy set, and whether this file gets that right is untested;
-4. every `kVK_*` → set-1 mapping is from documentation. The scan-code check proves the table is
-   *self-consistent with `KeyScanCodes.h`*; it cannot prove a Mac actually reports `kVK_ANSI_Q` for
-   the key labelled Q on a non-US layout;
-5. `contentsScale`/`drawableSize` on a Retina display, and what happens to the swapchain on a
-   window resize or a display change, are untested;
-6. mouse coordinates: Cocoa's origin is bottom-left and the seam promises top-left, so every mouse
-   event depends on a flip this file does but nobody has watched;
-7. `Window_Set_Cursor_Clip` on macOS has no `ClipCursor` equivalent and is implemented via
-   `CGAssociateMouseAndMouseCursorPosition`; that is a behaviour difference, not just untested code.
+### What the runner proved
 
-### How a Mac session verifies it
+| Claim that was a guess | How it is now checked | Result |
+|---|---|---|
+| the Objective-C++ compiles at all | the job builds `zh-window-spike-cocoa`, `-Wall -Wextra` | compiles and links, no warnings from the backend |
+| the 104 `kVK_*` literals are the real HIToolbox values | `WWLIB_COCOA_VERIFY_KVK` turns each row into a `static_assert` against `<Carbon/Carbon.h>` | all 104 correct as written |
+| `VkMetalSurfaceCreateInfoEXT`'s layout and `sType` | the local mirror is `static_assert`ed field-by-field against the real header when one is present | correct: `sType` 1000217000, 32 bytes, offsets match |
+| `VK_EXT_metal_surface` is advertised | `zh-metal-surface-probe` enumerates instance extensions | advertised (spec 1), among 19; `VK_MVK_macos_surface` is there too, deprecated |
+| `dlsym(RTLD_DEFAULT, "vkGetInstanceProcAddr")` finds the loader, and it resolves `vkCreateMetalSurfaceEXT` | the probe uses exactly the seam's two-step lookup | both resolve |
+| a `VkSurfaceKHR` can be made from a `CAMetalLayer` | the probe creates one from a layer in no window at all | `VK_SUCCESS` |
+| the surface supports what the renderer asks of it | the probe prints the capabilities | queue family 0 presents; `supportedUsageFlags` 0x1F, so `TRANSFER_DST` (needed for readback) is allowed; 60 format/colour-space pairs; 2..3 images |
+| swapchain and present | the probe, and then the full spike | `vkCreateSwapchainKHR` `VK_SUCCESS`; present returns `VK_SUBOPTIMAL_KHR` for the windowless layer (`currentExtent` 0x0), `VK_SUCCESS` for the window's |
+| `NSApplication`/`NSWindow` on the main thread, event pumping, the mode change | `zh-window-spike-cocoa`, which the runner turned out to be able to run | window created, `WINDOW_EVENT_FOCUS_GAINED` seen, 240 frames presented, `Window_Set_Mode(1024x768)` resized the window and rebuilt the swapchain, read-back centre pixel `131,152,170` is the geometry and not the clear colour, 0 validation messages |
+
+Two things the blind version had wrong, both found this way:
+
+* the `CAMetalLayer` was created with `framebufferOnly = YES`. The renderer's swapchain asks for
+  `VK_IMAGE_USAGE_TRANSFER_DST_BIT`, which a framebuffer-only drawable cannot serve;
+* the view was made layer-*backed* (`setWantsLayer:` before `setLayer:`), which lets AppKit replace
+  the layer with one of its own. Layer-hosting requires the opposite order.
+
+### What is still unverified, and needs a Mac with a display
+
+1. **that anything is visible.** The runner has no attached display. Window ordering, activation
+   actually raising the app, and fullscreen covering the menu bar are all uncovered;
+2. **Retina.** `backingScaleFactor` is 1 on the runner, so the `contentsScale`/`drawableSize`
+   arithmetic that keeps a 2x display from rendering at half resolution has never executed with a
+   scale of 2;
+3. **keyboard and mouse.** Nobody types on a runner. The `kVK_*` -> set-1 table is now proven
+   against HIToolbox's constants, but not against a real keypress, and *no* mouse event has been
+   translated: the bottom-left-to-top-left flip in `Translate_Event` is unexercised, as is the
+   scroll wheel;
+4. **cursor semantics.** `Window_Set_Cursor_Clip` uses `CGAssociateMouseAndMouseCursorPosition`
+   because macOS has no `ClipCursor`; that is a deliberate behaviour difference, and untested;
+5. **display changes.** A resize was exercised; a monitor change, a scale change and a
+   `VK_ERROR_OUT_OF_DATE_KHR` from the compositor were not;
+6. **a non-US layout.** The table is positional, so it should not matter, and nothing has checked
+   that it does not.
+
+### How a Mac session covers the rest
 
 ```
 spikes/renderer/tools/macos-window-check.sh                 # build + 240 frames + pixel check
 spikes/renderer/tools/macos-window-check.sh --interactive    # window stays up; try the keyboard
+spikes/renderer/tools/macos-window-check.sh --allow-no-display --no-sdl2   # what CI runs
 ```
 
-Self-contained: it checks the toolchain and the MoltenVK/loader install, runs the scan-code check,
-configures and builds `zh-window-spike-cocoa` (the first compile this file has ever had), runs it,
-and then runs the *same driver* on the SDL2 backend as a control so a failure can be attributed to
-the Cocoa backend rather than to the Mac. One `SUMMARY: PASS`/`SUMMARY: FAIL` line at the end, exit
-status to match. It must be run on a login session with a display; over ssh it proves nothing.
-
-CI job `Window seam (macOS arm64, CAMetalLayer) [blind, informational]` does as much of that as a
-runner can: it compiles the file and attempts a run. It is `continue-on-error: true` and **expected
-to fail**, because its log is the deliverable — it is the cheapest way to find out what is wrong
-with 780 lines of unexecuted Objective-C++. It cannot replace the script above: the macOS runner
-has a paravirtualised GPU and no attached display, and a runner shell is not guaranteed a
-WindowServer session at all, so even a green tick there would not mean a window appeared on a
-screen.
+Self-contained: it checks the toolchain, locates MoltenVK's ICD manifest and exports the loader
+environment (Homebrew's `molten-vk` is keg-only, and without `VK_ICD_FILENAMES` the loader has no
+driver and blames the backend), runs the scan-code check, builds the Cocoa backend and the surface
+probe, runs the probe, runs the window spike, and then runs the *same driver* on the SDL2 backend as
+a control so a failure can be attributed to the Cocoa backend rather than to the Mac. One
+`SUMMARY: PASS`/`SUMMARY: FAIL` line at the end, exit status to match. Only `--interactive` on a
+login session with a display covers items 1-3 and 6 above.
 
 ## 5. What this does not do
 
@@ -312,8 +332,9 @@ code), so that difference is cheap here — but it is a difference.
 |---|---:|---|
 | `Core/Libraries/Source/WWVegas/WWLib/platform/platform_window.h` | 279 | header only |
 | `Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_sdl2.cpp` | 649 | yes, on Linux/X11 |
-| `Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_cocoa.mm` | 780 | **no. never compiled** |
-| `spikes/renderer/src/window_spike.cpp` | 389 | yes, on Linux/X11 |
-| `spikes/renderer/tools/macos-window-check.sh` | — | the Linux-irrelevant parts, no |
+| `Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_cocoa.mm` | 996 | yes, on a `macos-15` arm64 runner: compiled, window created, 240 frames presented. No display, no keypress |
+| `spikes/renderer/src/window_spike.cpp` | 389 | yes, on Linux/X11 and on macOS/arm64 |
+| `spikes/renderer/src/metal_surface_probe.mm` | 416 | yes, on a `macos-15` arm64 runner |
+| `spikes/renderer/tools/macos-window-check.sh` | — | yes, in `--allow-no-display --no-sdl2` mode; the SDL2 control and `--interactive` are untried |
 | `scripts/window-input-scan.py` | 389 | yes |
 | `scripts/ci/check-window-scancodes.py` | 106 | yes |

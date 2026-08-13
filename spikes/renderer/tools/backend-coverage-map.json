@@ -1,0 +1,131 @@
+{
+ "_comment": [
+  "Which RenderBackend entry point serves each D3D8 method the engine reaches, and which",
+  "of them are the Vulkan backend's job at all. This is the only hand-maintained input to",
+  "backend-coverage-scan.py: it is a design statement, not a measurement. The *status* of",
+  "every entry named here is measured from src/render_backend.h and src/vulkan_backend.cpp,",
+  "so a name that does not exist reads as `absent` rather than as coverage.",
+  "",
+  "categories:",
+  "  backend       the Vulkan backend has to serve it; counted in the coverage figure",
+  "  caps          a capability query, answered once at device creation (zh-feature-probe",
+  "                and caps_probe.cpp measure the device's real caps) rather than per call",
+  "  platform      belongs to the window/display/cursor seam, not the renderer",
+  "  device-model  a D3D8 device-model artefact (device loss, managed-pool eviction) with",
+  "                no Vulkan analogue and nothing to implement behind the seam",
+  "",
+  "Every method the engine reaches must appear here or the scan fails, so a newly reached",
+  "D3D8 method cannot slip in unclassified."
+ ],
+ "methods": {
+  "BeginScene": {"category": "backend", "entry": ["Begin_Scene"]},
+  "Clear": {"category": "backend", "entry": ["Clear"]},
+  "CopyRects": {
+   "category": "backend", "entry": ["Copy_Rects"],
+   "note": "surface-to-surface blit; the shadow and screenshot paths use it"
+  },
+  "CreateAdditionalSwapChain": {
+   "category": "platform", "entry": [],
+   "note": "second swapchain for a second window; the window seam owns swapchains"
+  },
+  "CreateImageSurface": {
+   "category": "backend", "entry": ["Create_Image_Surface"],
+   "note": "system-memory surface, the staging half of CopyRects/UpdateTexture"
+  },
+  "CreateIndexBuffer": {"category": "backend", "entry": ["Create_Index_Buffer"]},
+  "CreatePixelShader": {
+   "category": "backend", "entry": ["Create_Pixel_Shader"],
+   "note": "the 16 in-repo ps.1.1/vs.1.1 shaders; not started"
+  },
+  "CreateTexture": {"category": "backend", "entry": ["Create_Texture"]},
+  "CreateVertexBuffer": {"category": "backend", "entry": ["Create_Vertex_Buffer"]},
+  "CreateVertexShader": {
+   "category": "backend", "entry": ["Create_Vertex_Shader"],
+   "note": "declaration-only FVF handles are served by Set_Vertex_Buffer's fvf; real vs.1.1 not started"
+  },
+  "DeletePixelShader": {"category": "backend", "entry": ["Delete_Pixel_Shader"]},
+  "DeleteVertexShader": {"category": "backend", "entry": ["Delete_Vertex_Shader"]},
+  "DrawIndexedPrimitive": {
+   "category": "backend", "entry": ["Draw_Indexed_Primitive"],
+   "note": "primitive-type coverage is measured separately, see primitive_types"
+  },
+  "DrawPrimitive": {
+   "category": "backend", "entry": ["Draw_Primitive"],
+   "note": "non-indexed; W3DSnow's point-sprite batches are the engine's use"
+  },
+  "DrawPrimitiveUP": {
+   "category": "backend", "entry": ["Draw_Primitive_UP"],
+   "note": "every engine site draws a 2-triangle strip from stack vertices"
+  },
+  "EndScene": {"category": "backend", "entry": ["End_Scene"]},
+  "GetAvailableTextureMem": {"category": "backend", "entry": ["Get_Resource_Stats"]},
+  "GetBackBuffer": {
+   "category": "backend", "entry": ["Read_Back_Color_Target"],
+   "note": "the engine takes the back buffer to read pixels out of it"
+  },
+  "GetDepthStencilSurface": {"category": "backend", "entry": ["Get_Depth_Stencil_Target"]},
+  "GetDeviceCaps": {"category": "caps", "entry": []},
+  "IDirect3D8::GetDeviceCaps": {"category": "caps", "entry": []},
+  "GetDisplayMode": {"category": "platform", "entry": []},
+  "GetFrontBuffer": {"category": "backend", "entry": ["Read_Back_Color_Target"]},
+  "GetRenderState": {"category": "backend", "entry": ["Get_DX8_Render_State"]},
+  "GetRenderTarget": {"category": "backend", "entry": ["Get_Render_Target"]},
+  "GetTransform": {"category": "backend", "entry": ["Get_Transform"]},
+  "GetViewport": {"category": "backend", "entry": ["Get_Viewport"]},
+  "LightEnable": {
+   "category": "backend", "entry": ["Set_Light"],
+   "note": "Set_Light(index, nullptr) is D3D8's LightEnable(index, FALSE)"
+  },
+  "Present": {"category": "backend", "entry": ["End_Scene"]},
+  "ProcessVertices": {
+   "category": "backend", "entry": ["Process_Vertices"],
+   "note": "CPU-side transform of a vertex buffer; the mesh-shadow path uses it"
+  },
+  "Reset": {"category": "backend", "entry": ["Resize_Presentation"]},
+  "ResourceManagerDiscardBytes": {"category": "device-model", "entry": []},
+  "SetClipPlane": {"category": "backend", "entry": ["Set_Clip_Plane"]},
+  "SetCursorPosition": {"category": "platform", "entry": []},
+  "SetCursorProperties": {"category": "platform", "entry": []},
+  "SetGammaRamp": {"category": "platform", "entry": []},
+  "SetIndices": {"category": "backend", "entry": ["Set_Index_Buffer"]},
+  "SetLight": {"category": "backend", "entry": ["Set_Light"]},
+  "SetMaterial": {"category": "backend", "entry": ["Set_Material"]},
+  "SetPixelShader": {"category": "backend", "entry": ["Set_Pixel_Shader"]},
+  "SetPixelShaderConstant": {"category": "backend", "entry": ["Set_Pixel_Shader_Constant"]},
+  "SetRenderState": {
+   "category": "backend", "entry": ["Set_DX8_Render_State"],
+   "note": "per-state coverage is the render_states table, not this one method"
+  },
+  "SetRenderTarget": {"category": "backend", "entry": ["Set_Render_Target"]},
+  "SetStreamSource": {"category": "backend", "entry": ["Set_Vertex_Buffer"]},
+  "SetTexture": {"category": "backend", "entry": ["Set_Texture"]},
+  "SetTextureStageState": {
+   "category": "backend", "entry": ["Set_DX8_Texture_Stage_State"],
+   "note": "per-state coverage is the stage_states table"
+  },
+  "SetTransform": {"category": "backend", "entry": ["Set_Transform"]},
+  "SetVertexShader": {
+   "category": "backend", "entry": ["Set_Vertex_Buffer"],
+   "note": "the engine passes an FVF token here for the fixed-function pipeline; the buffer carries it"
+  },
+  "SetVertexShaderConstant": {"category": "backend", "entry": ["Set_Vertex_Shader_Constant"]},
+  "SetViewport": {"category": "backend", "entry": ["Set_Viewport"]},
+  "ShowCursor": {"category": "platform", "entry": []},
+  "TestCooperativeLevel": {"category": "device-model", "entry": []},
+  "UpdateTexture": {
+   "category": "backend", "entry": ["Update_Texture"],
+   "note": "managed-pool sysmem-to-video copy; the lock/unlock path uploads directly instead"
+  },
+  "ValidateDevice": {"category": "caps", "entry": []},
+  "IDirect3D8::CheckDepthStencilMatch": {"category": "caps", "entry": []},
+  "IDirect3D8::CheckDeviceFormat": {"category": "backend", "entry": ["Supports_Texture_Format"]},
+  "IDirect3D8::CheckDeviceMultiSampleType": {"category": "caps", "entry": []},
+  "IDirect3D8::CheckDeviceType": {"category": "caps", "entry": []},
+  "IDirect3D8::CreateDevice": {"category": "backend", "entry": ["Init"]},
+  "IDirect3D8::EnumAdapterModes": {"category": "platform", "entry": []},
+  "IDirect3D8::GetAdapterCount": {"category": "platform", "entry": []},
+  "IDirect3D8::GetAdapterDisplayMode": {"category": "platform", "entry": []},
+  "IDirect3D8::GetAdapterIdentifier": {"category": "platform", "entry": []},
+  "IDirect3D8::GetAdapterModeCount": {"category": "platform", "entry": []}
+ }
+}

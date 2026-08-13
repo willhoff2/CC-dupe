@@ -253,6 +253,12 @@ for name in ["SetRenderState", "GetRenderState", "SetTextureStageState", "D3DTOP
     for k, v in sorted(c.items(), key=lambda x: (-x[1], x[0])):
         print(f"   {k:44s} {v}")
 
+# The same state buckets to a file, so the backend-coverage scanner can use this one
+# measurement of what the engine asks for rather than re-implementing the regexes.
+if "--states-json-out" in sys.argv:
+    with open(sys.argv[sys.argv.index("--states-json-out") + 1], "w") as fh:
+        json.dump({name: dict(counter) for name, counter in buckets.items()}, fh, indent=1)
+
 # ---------------------------------------------------------------------------
 # Part 3: size of the dx8* wrapper layer.
 # ---------------------------------------------------------------------------

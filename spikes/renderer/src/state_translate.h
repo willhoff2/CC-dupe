@@ -34,6 +34,11 @@ VkSamplerMipmapMode To_Vk_Mipmap_Mode(uint32_t d3d_mip_filter);
 VkPrimitiveTopology To_Vk_Topology(uint32_t d3d_primitive_type);
 VkColorComponentFlags To_Vk_Color_Write_Mask(uint32_t d3d_colorwriteenable);
 VkStencilOp To_Vk_Stencil_Op(uint32_t d3d_stencil_op);
+VkBlendOp To_Vk_Blend_Op(uint32_t d3d_blend_op);
+
+// Number of vertices (or indices) a primitive count covers, per D3DPRIMITIVETYPE.
+// D3D8 counts primitives, Vulkan counts vertices, and the two differ per topology.
+uint32_t Vertex_Count_For_Primitives(uint32_t d3d_primitive_type, uint32_t primitive_count);
 
 // --- category 2: what a VkPipeline has to bake in ---------------------------
 // Every field here is a D3DRS_* the engine sets at draw granularity. Changing any
@@ -51,6 +56,7 @@ struct PipelineKey {
 	uint32_t alpha_blend_enable = 0;
 	uint32_t src_blend = D3DBLEND_ONE;
 	uint32_t dest_blend = D3DBLEND_ZERO;
+	uint32_t blend_op = D3DBLENDOP_ADD;
 	uint32_t color_write_enable = 0xf;
 	uint32_t stencil_enable = 0;
 	uint32_t stencil_func = D3DCMP_ALWAYS;
@@ -191,6 +197,13 @@ struct alignas(16) DrawUniforms {
 	int32_t flags2[4]{0, D3DFOG_NONE, D3DFOG_NONE, 0}; // pretransformed, fogvertexmode, fogtablemode, specularenable
 	int32_t sources[4]{D3DMCS_COLOR1, D3DMCS_COLOR2, D3DMCS_MATERIAL, D3DMCS_MATERIAL};
 	int32_t flags3[4]{1, 0, 1, 0};               // colorvertex, normalizenormals, localviewer, rangefog
+
+	// D3DRS_POINTSIZE/_MIN/_MAX and D3DRS_POINTSPRITEENABLE. Vulkan expands a point
+	// through gl_PointSize, which is a vertex-shader output rather than pipeline
+	// state, so the whole group travels in the uniform block.
+	float point_size[4]{1.f, 0.f, 64.f, 0.f}; // size, min, max, sprite enable
+	// D3DRS_POINTSCALE_A/B/C and D3DRS_POINTSCALEENABLE.
+	float point_scale[4]{1.f, 0.f, 0.f, 0.f}; // a, b, c, scale enable
 };
 
 } // namespace spike
