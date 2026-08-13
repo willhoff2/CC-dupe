@@ -13,6 +13,7 @@ Hand-maintained. `STATUS.md`, by contrast, is generated; do not put measurements
 |---|---|---|---|
 | _example_ `platform/audio-device` | `Core/Libraries/Source/OpenALAudioDevice/**` | every declared `AIL_*` symbol defined; `check-openal-symbols.py` green | #28 |
 | `renderer/backend-coverage` | `spikes/renderer/src/{vulkan_backend.cpp,render_backend.h,state_translate.*,fixedfunc_tests.cpp}`, `spikes/renderer/shaders/**`, `spikes/renderer/tools/{backend-coverage-scan.py,backend-coverage-map.json,backend-coverage-baseline.json}`, `scripts/ci/check-backend-coverage.py`, `docs/porting/renderer-surface.md` | a committed coverage gate over the 62 (now 64) measured D3D8 entry points and every render/texture-stage state the engine sets; `check-backend-coverage.py` green with a measured before/after count, pixel-verified on lavapipe | this PR |
+| `platform/macos-window-compile` | `Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_cocoa.mm`, `spikes/renderer/src/metal_surface_probe.mm`, `spikes/renderer/tools/macos-window-check.sh`, `spikes/renderer/CMakeLists.txt`, the Apple branch of `Core/Libraries/Source/WWVegas/WWLib/CMakeLists.txt`, `scripts/window-input-scan.py`, `docs/porting/window-event-loop.md`, the `window-seam-macos` job in `.github/workflows/native-port-ci.yml` | a green (not `continue-on-error`) `macos-15` job that compiles the Cocoa backend and asserts the Vulkan/Metal surface facts the runner can prove | this PR |
 
 Remove your row when the PR merges.
 

@@ -1,48 +1,55 @@
 #!/usr/bin/env bash
 #
-# macOS window + CAMetalLayer + MoltenVK presentation check.
-#
-# ##############################################################################
-# ##  THE macOS CODE THIS CHECKS WAS WRITTEN BLIND AND HAS NEVER BEEN RUN.    ##
-# ##  This script is how a Mac session finds out what is wrong with it.       ##
-# ##############################################################################
-#
-# The window/event-loop/input seam
-# (Core/Libraries/Source/WWVegas/WWLib/platform/platform_window.h) has two backends: an SDL2
-# one, which has been built and run on Linux against a real X11 window, and a native
-# Cocoa/CAMetalLayer one (platform_window_cocoa.mm), which was written on a Linux box with no
-# macOS SDK and has therefore never been compiled, let alone executed. Everything this script
-# reports about the Cocoa path is new information.
-#
-# What it does, in order, so that a failure tells you how far the path got:
-#
-#   1. checks the toolchain and finds MoltenVK/the Vulkan loader;
-#   2. runs the scan-code table check (pure Python, no Mac needed, but cheap and it gates the
-#      keyboard mapping);
-#   3. configures and builds the spike, which is where a blind Objective-C++ file first meets
-#      a compiler;
-#   4. runs zh-window-spike-cocoa, which creates an NSWindow, puts a CAMetalLayer on it, asks
-#      MoltenVK for a VkSurfaceKHR through VK_EXT_metal_surface, presents 240 frames to it,
-#      reads the last one back and checks the pixels;
-#   5. runs zh-window-spike (the SDL2 backend, if SDL2 is installed) for comparison, so that a
-#      failure can be attributed to the Cocoa backend rather than to the Mac, the driver or
-#      the renderer.
-#
-# Requirements: Xcode command line tools, CMake 3.20+, glslangValidator or glslc, and a Vulkan
-# loader with MoltenVK (the LunarG macOS SDK, or `brew install molten-vk vulkan-headers
-# vulkan-loader glslang`). SDL2 (`brew install sdl2`) is optional and only used for step 5.
-#
-# Usage, from anywhere in the repo:
-#
-#   spikes/renderer/tools/macos-window-check.sh                 # build and run everything
-#   spikes/renderer/tools/macos-window-check.sh --interactive   # keep the window up until
-#                                                               # you close it, so the
-#                                                               # keyboard/mouse translation
-#                                                               # can be tried by hand
-#
-# It exits 0 only if every step passed, and prints a single summary line either way. A real
-# window has to become visible for a pass to mean anything: this runs on a login session with
-# a display, NOT over ssh and NOT on a headless CI runner. See docs/porting/window-event-loop.md.
+#>> macOS window + CAMetalLayer + MoltenVK presentation check.
+#>>
+#>> The window/event-loop/input seam
+#>> (Core/Libraries/Source/WWVegas/WWLib/platform/platform_window.h) has two backends: an SDL2
+#>> one, built and run on Linux against a real X11 window, and a native Cocoa/CAMetalLayer one
+#>> (platform_window_cocoa.mm), which PR #32 wrote on a Linux box with no macOS SDK. The Cocoa
+#>> backend now compiles in CI on a macos-15 runner, and the CAMetalLayer -> VkSurfaceKHR ->
+#>> swapchain -> present path is asserted there; what CI cannot do is put a window on a screen.
+#>> That is what this script is for.
+#>>
+#>> What it does, in order, so that a failure tells you how far the path got:
+#>>
+#>>   1. checks the toolchain, finds MoltenVK/the Vulkan loader and exports the loader
+#>>      environment (a Homebrew molten-vk is keg-only: without VK_ICD_FILENAMES the loader has
+#>>      no driver at all);
+#>>   2. runs the scan-code table check (pure Python: the set-1 column against KeyScanCodes.h -
+#>>      the kVK_* column is checked by the compiler, see WWLIB_COCOA_VERIFY_KVK);
+#>>   3. configures and builds the Cocoa backend and the Metal surface probe;
+#>>   4. runs zh-metal-surface-probe: no window, so this works over ssh and in CI. It resolves
+#>>      vkCreateMetalSurfaceEXT the way the seam does, makes a VkSurfaceKHR from a CAMetalLayer,
+#>>      creates a swapchain and presents;
+#>>   5. runs zh-window-spike-cocoa, which additionally creates an NSWindow, pumps AppKit
+#>>      events, presents 240 frames and checks the read-back pixels. This is the step that
+#>>      needs a login session with a display;
+#>>   6. runs zh-window-spike (the SDL2 backend, if usable) for comparison, so that a failure
+#>>      can be attributed to the Cocoa backend rather than to the Mac, the driver or the
+#>>      renderer.
+#>>
+#>> Requirements: Xcode command line tools, CMake 3.20+, glslangValidator or glslc, and a Vulkan
+#>> loader with MoltenVK (the LunarG macOS SDK, or `brew install molten-vk vulkan-headers
+#>> vulkan-loader glslang`). SDL2 (`brew install sdl2`) is optional and only used for step 6;
+#>> note that Homebrew's SDL2 has shipped x86-only headers on arm64 images, which is what
+#>> --no-sdl2 is for.
+#>>
+#>> Usage, from anywhere in the repo:
+#>>
+#>>   spikes/renderer/tools/macos-window-check.sh                    # build and run everything
+#>>   spikes/renderer/tools/macos-window-check.sh --interactive      # keep the window up until
+#>>                                                                  # you close it, so the
+#>>                                                                  # keyboard/mouse mapping
+#>>                                                                  # can be tried by hand
+#>>   spikes/renderer/tools/macos-window-check.sh --allow-no-display  # what CI runs: the
+#>>                                                                  # NSWindow step is reported
+#>>                                                                  # but does not fail the run
+#>>   spikes/renderer/tools/macos-window-check.sh --no-sdl2           # skip the SDL2 control
+#>>
+#>> It exits 0 only if every required step passed, and prints a single summary line either way.
+#>> Without --allow-no-display, a real window has to become visible for a pass to mean anything:
+#>> run it on a login session with a display, NOT over ssh. See
+#>> docs/porting/window-event-loop.md.
 
 set -u -o pipefail
 
@@ -52,11 +59,15 @@ repo_root="$(cd "${spike_dir}/../.." && pwd)"
 build_dir="${BUILD_DIR:-${spike_dir}/build-macos-window}"
 
 interactive=0
+allow_no_display=0
+use_sdl2=1
 for arg in "$@"; do
 	case "${arg}" in
 		--interactive) interactive=1 ;;
+		--allow-no-display) allow_no_display=1 ;;
+		--no-sdl2) use_sdl2=0 ;;
 		--help)
-			sed -n '2,45p' "${BASH_SOURCE[0]}"
+			sed -n '/^#>>/ s/^#>>[[:space:]]\{0,1\}//p' "${BASH_SOURCE[0]}"
 			exit 0
 			;;
 		*)
@@ -98,20 +109,40 @@ else
 	fail "need glslangValidator or glslc on PATH"
 fi
 
-# The loader is what dlsym(RTLD_DEFAULT, "vkGetInstanceProcAddr") in the Cocoa backend
-# resolves against, so its absence is the most likely cause of a step 4 failure.
+# The loader is what dlsym(RTLD_DEFAULT, "vkGetInstanceProcAddr") in the Cocoa backend resolves
+# against, and MoltenVK's ICD manifest is what tells that loader a driver exists. Homebrew's
+# molten-vk is keg-only and has moved the manifest between releases, so it is located rather
+# than assumed - without this the run fails with VK_ERROR_INCOMPATIBLE_DRIVER and the Cocoa
+# backend gets blamed for it.
+brew_prefix=""
+if command -v brew >/dev/null 2>&1; then
+	brew_prefix="$(brew --prefix)"
+fi
 if [[ -n "${VULKAN_SDK:-}" ]]; then
 	pass "VULKAN_SDK=${VULKAN_SDK}"
+elif [[ -n "${brew_prefix}" && -e "${brew_prefix}/lib/libvulkan.dylib" ]]; then
+	pass "Vulkan loader: ${brew_prefix}/lib/libvulkan.dylib"
 elif [[ -e /usr/local/lib/libvulkan.dylib || -e /opt/homebrew/lib/libvulkan.dylib ]]; then
 	pass "Vulkan loader found under a Homebrew prefix"
 else
 	skip "no VULKAN_SDK and no libvulkan.dylib in the usual places; the build may still \
 find one through CMake"
 fi
+
+if [[ -z "${VK_ICD_FILENAMES:-}" ]] && command -v brew >/dev/null 2>&1 &&
+   brew --prefix molten-vk >/dev/null 2>&1; then
+	found_icd="$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' 2>/dev/null | head -1)"
+	if [[ -n "${found_icd}" ]]; then
+		export VK_ICD_FILENAMES="${found_icd}"
+		# Homebrew's manifests name their dylibs relatively, so the loader needs the search
+		# path as well as the manifest.
+		export DYLD_LIBRARY_PATH="$(brew --prefix molten-vk)/lib:${brew_prefix}/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+	fi
+fi
 if [[ -n "${VK_ICD_FILENAMES:-}" ]]; then
 	pass "VK_ICD_FILENAMES=${VK_ICD_FILENAMES}"
 else
-	skip "VK_ICD_FILENAMES unset; the loader must find MoltenVK's ICD by itself"
+	skip "VK_ICD_FILENAMES unset and no Homebrew molten-vk; the loader must find MoltenVK itself"
 fi
 
 step "scan-code tables (KeyScanCodes.h agreement)"
@@ -122,7 +153,14 @@ else
 fi
 
 step "configure"
-if cmake -S "${spike_dir}" -B "${build_dir}" -DCMAKE_BUILD_TYPE=Release; then
+configure_args=(-S "${spike_dir}" -B "${build_dir}" -DCMAKE_BUILD_TYPE=Release)
+if [[ "${use_sdl2}" == "0" ]]; then
+	configure_args+=(-DSPIKE_USE_SDL2=OFF)
+fi
+if [[ -n "${brew_prefix}" ]]; then
+	configure_args+=(-DCMAKE_PREFIX_PATH="${brew_prefix}")
+fi
+if cmake "${configure_args[@]}"; then
 	pass "cmake configure"
 else
 	fail "cmake configure"
@@ -131,16 +169,24 @@ else
 	exit 1
 fi
 
-step "build the blind Cocoa backend"
-# This is the moment platform_window_cocoa.mm is compiled for the first time ever. Expect
-# work here; the file is a proposal, not a tested artefact.
-if cmake --build "${build_dir}" --target zh-window-spike-cocoa; then
+step "build the Cocoa backend and the Metal surface probe"
+# platform_window_cocoa.mm compiles with WWLIB_COCOA_VERIFY_KVK here, so this step also proves
+# its 104 kVK_* literals against HIToolbox and its VkMetalSurfaceCreateInfoEXT mirror against
+# the MoltenVK headers.
+if cmake --build "${build_dir}" --target zh-window-spike-cocoa zh-metal-surface-probe; then
 	pass "platform_window_cocoa.mm compiles and links"
 else
-	fail "platform_window_cocoa.mm does not build (this is the expected first failure)"
+	fail "platform_window_cocoa.mm does not build"
 	echo
-	echo "SUMMARY: ${failures} step(s) failed; the Cocoa backend does not compile yet"
+	echo "SUMMARY: ${failures} step(s) failed; the Cocoa backend does not compile"
 	exit 1
+fi
+
+step "CAMetalLayer -> vkCreateMetalSurfaceEXT -> swapchain -> present (no window needed)"
+if "${build_dir}/zh-metal-surface-probe"; then
+	pass "VK_EXT_metal_surface is advertised and a surface, swapchain and present all worked"
+else
+	fail "the Metal surface path failed (see its PASS/FAIL lines above)"
 fi
 
 step "run: NSWindow + CAMetalLayer + vkCreateMetalSurfaceEXT + present"
@@ -152,31 +198,54 @@ if [[ "${interactive}" == "1" ]]; then
 else
 	run_args+=(--frames 240 --mode-change)
 fi
+window_ran=0
 if "${build_dir}/zh-window-spike-cocoa" "${run_args[@]}"; then
-	pass "the Cocoa backend presented frames to a CAMetalLayer through MoltenVK"
+	window_ran=1
+	pass "the Cocoa backend presented frames to an NSWindow's CAMetalLayer through MoltenVK"
+elif [[ "${allow_no_display}" == "1" ]]; then
+	# AppKit needs a windowing session. On a CI runner or over ssh there may be none, and
+	# that says nothing about the code, so it is reported and not counted.
+	skip "zh-window-spike-cocoa failed; --allow-no-display, so this is not counted. The \
+NSWindow path remains unverified"
 else
 	fail "zh-window-spike-cocoa reported failures (see its PASS/FAIL lines above)"
 fi
 
 step "control: the same driver on the SDL2 backend"
-if [[ -x "${build_dir}/zh-window-spike" ]] || \
+if [[ "${use_sdl2}" == "0" ]]; then
+	skip "--no-sdl2 - no control run"
+elif [[ -x "${build_dir}/zh-window-spike" ]] || \
    cmake --build "${build_dir}" --target zh-window-spike >/dev/null 2>&1; then
 	if "${build_dir}/zh-window-spike" --frames 240 \
 	       --out "${build_dir}/macos-window-check-sdl2.png"; then
 		pass "SDL2 backend also presents on this machine"
+	elif [[ "${allow_no_display}" == "1" ]]; then
+		skip "SDL2 backend also fails without a display, which is expected"
 	else
 		fail "SDL2 backend fails too, so the problem is not specific to the Cocoa backend"
 	fi
 else
-	skip "SDL2 not installed (brew install sdl2) - no control run"
+	skip "SDL2 not installed or not usable (brew install sdl2) - no control run"
 fi
 
 step "summary"
 if [[ "${failures}" == "0" ]]; then
+	if [[ "${window_ran}" == "0" ]]; then
+		echo "SUMMARY: PASS - everything that does not need a windowing session passed. The"
+		echo "NSWindow path is NOT covered by this run; re-run on a Mac with a login session."
+		exit 0
+	fi
+	if [[ "${allow_no_display}" == "1" ]]; then
+		echo "SUMMARY: PASS - including the NSWindow path. Note that --allow-no-display was"
+		echo "given, so nothing here proves anything was visible on a screen: window ordering,"
+		echo "a Retina contentsScale of 2 and real keyboard/mouse input are still uncovered."
+		exit 0
+	fi
 	echo "SUMMARY: PASS - a real window presented MoltenVK frames through a CAMetalLayer."
-	echo "Please record this in docs/porting/window-event-loop.md, which currently states"
-	echo "that the macOS path is unverified."
+	echo "If you watched it happen on a screen, and tried the keyboard with --interactive,"
+	echo "record that in docs/porting/window-event-loop.md: those are the last two things in"
+	echo "that document that no machine has been able to check."
 	exit 0
 fi
-echo "SUMMARY: FAIL - ${failures} step(s) failed. The macOS path remains unverified."
+echo "SUMMARY: FAIL - ${failures} step(s) failed. See the lines above for how far it got."
 exit 1
