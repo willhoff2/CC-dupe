@@ -126,6 +126,15 @@ public:
 	Rgba Draw_Screen_Quad(uint32_t diffuse, float u = 0.5f, float v = 0.5f);
 	// Same, but the caller supplies the vertices (for the transform/lighting cases).
 	Rgba Draw(VertexBufferHandle* vb, IndexBufferHandle* ib, uint32_t polygon_count);
+	// The left half of the target as a D3DPT_TRIANGLESTRIP, drawn either from a
+	// vertex buffer (DrawPrimitive) or straight out of host memory
+	// (DrawPrimitiveUP). Strip order is top-left, top-right, bottom-left,
+	// bottom-right, which is the order D3D8's own strip examples use. Half the
+	// target rather than all of it, so that a draw whose vertices were mistransformed
+	// into a huge triangle cannot pass by covering everything.
+	void Draw_Screen_Strip(uint32_t diffuse, bool user_pointer);
+	// One D3DPT_POINTLIST vertex at the centre of the target.
+	void Draw_Center_Point(uint32_t diffuse);
 
 	Rgba Pixel(uint32_t x, uint32_t y) const;
 	bool Read_Back();
@@ -189,6 +198,11 @@ void Harness::Reset_State() {
 	g.Set_DX8_Render_State(D3DRS_RANGEFOGENABLE, 0);
 	g.Set_DX8_Render_State(D3DRS_TEXTUREFACTOR, 0xffffffff);
 	g.Set_DX8_Render_State(D3DRS_COLORWRITEENABLE, 0xf);
+	g.Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_ONE);
+	g.Set_DX8_Render_State(D3DRS_DESTBLEND, D3DBLEND_ZERO);
+	g.Set_DX8_Render_State(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	g.Set_DX8_Render_State(D3DRS_POINTSPRITEENABLE, 0);
+	g.Set_DX8_Render_State(D3DRS_POINTSCALEENABLE, 0);
 	g.Set_Transform(D3DTS_WORLD, Matrix4x4::Identity());
 	g.Set_Transform(D3DTS_VIEW, Matrix4x4::Identity());
 	g.Set_Transform(D3DTS_PROJECTION, Matrix4x4::Identity());
@@ -220,6 +234,14 @@ void Harness::Reset_State() {
 	g.Set_Light(3, nullptr);
 	g.Set_Material(MaterialState{});
 	g.Set_Scissor(false, 0, 0, 0, 0);
+	g.Set_Viewport(ViewportRect{0, 0, kWidth, kHeight, 0.0f, 1.0f});
+}
+
+// D3D8 passes the float-valued render states as raw bit patterns.
+uint32_t As_Dword(float value) {
+	uint32_t d = 0;
+	std::memcpy(&d, &value, sizeof(d));
+	return d;
 }
 
 void Harness::Begin() {
@@ -257,6 +279,39 @@ Rgba Harness::Draw(VertexBufferHandle* vb, IndexBufferHandle* ib, uint32_t polyg
 	gfx_->Set_Index_Buffer(ib, 0);
 	gfx_->Draw_Triangles(0, polygon_count, 0, polygon_count * 3);
 	return Rgba{};
+}
+
+void Harness::Draw_Screen_Strip(uint32_t diffuse, bool user_pointer) {
+	const float w = static_cast<float>(kWidth);
+	const float h = static_cast<float>(kHeight);
+	const ScreenVertex strip[4] = {{0.0f, 0.0f, 0.5f, 1.0f, diffuse, 0.5f, 0.5f},
+	                               {w / 2.0f, 0.0f, 0.5f, 1.0f, diffuse, 0.5f, 0.5f},
+	                               {0.0f, h, 0.5f, 1.0f, diffuse, 0.5f, 0.5f},
+	                               {w / 2.0f, h, 0.5f, 1.0f, diffuse, 0.5f, 0.5f}};
+	const uint32_t fvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
+	if (user_pointer) {
+		gfx_->Draw_Primitive_UP(D3DPT_TRIANGLESTRIP, 2, strip, sizeof(ScreenVertex), fvf);
+		return;
+	}
+	VertexBufferHandle* vb = gfx_->Create_Vertex_Buffer(strip, sizeof(strip), fvf);
+	if (vb == nullptr) return;
+	gfx_->Set_Vertex_Buffer(vb, 0);
+	gfx_->Draw_Primitive(D3DPT_TRIANGLESTRIP, 0, 2);
+}
+
+void Harness::Draw_Center_Point(uint32_t diffuse) {
+	// D3D8 rasterises a point around the pixel centre the vertex falls in, so the
+	// half-pixel offset keeps the sprite square on the target rather than split
+	// between two pixel rows.
+	const ScreenVertex point{static_cast<float>(kWidth) / 2.0f + 0.5f,
+	                         static_cast<float>(kHeight) / 2.0f + 0.5f,
+	                         0.5f,
+	                         1.0f,
+	                         diffuse,
+	                         0.5f,
+	                         0.5f};
+	gfx_->Draw_Primitive_UP(D3DPT_POINTLIST, 1, &point, sizeof(ScreenVertex),
+	                        D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 }
 
 TextureHandle* Harness::Solid_Texture(uint32_t argb) {
@@ -1480,6 +1535,276 @@ Outcome Case_Texture_Format(Harness& h, const FormatCase& c) {
 	return Near(actual, expected, 2) ? Pass(detail) : Fail(detail);
 }
 
+// ---------------------------------------------------------------------------
+// blend, topology, viewport and sampler state
+// ---------------------------------------------------------------------------
+
+// Sets up the one-stage "pass the vertex colour through" cascade every raster case
+// wants.
+void Diffuse_Only(RenderBackend& g) {
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+}
+
+struct BlendOpCase {
+	const char* name;
+	uint32_t op;
+};
+
+// D3DRS_BLENDOP with SRCBLEND == DESTBLEND == D3DBLEND_ONE, so the op itself is the
+// only thing between the two colours. The expected value is D3D8's own definition:
+// ADD is src+dst, SUBTRACT src-dst, REVSUBTRACT dst-src, and MIN/MAX are per
+// channel; all of them saturate.
+Outcome Case_Blend_Op(Harness& h, const BlendOpCase& c) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Diffuse_Only(g);
+
+	const uint32_t dst = Argb(0x40, 0x80, 0x20, 0x60);
+	const uint32_t src = Argb(0x80, 0x30, 0x90, 0x20);
+
+	h.Begin();
+	h.Draw_Screen_Quad(dst);
+	g.Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE, 1);
+	g.Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_ONE);
+	g.Set_DX8_Render_State(D3DRS_DESTBLEND, D3DBLEND_ONE);
+	g.Set_DX8_Render_State(D3DRS_BLENDOP, c.op);
+	h.Draw_Screen_Quad(src);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+
+	const Color s = From_Argb(src);
+	const Color d = From_Argb(dst);
+	auto combine = [&c](float a, float b) {
+		switch (c.op) {
+		case D3DBLENDOP_SUBTRACT: return Saturate(a - b);
+		case D3DBLENDOP_REVSUBTRACT: return Saturate(b - a);
+		case D3DBLENDOP_MIN: return a < b ? a : b;
+		case D3DBLENDOP_MAX: return a > b ? a : b;
+		default: return Saturate(a + b);
+		}
+	};
+	const Rgba expected = Quantise(combine(s.r, d.r), combine(s.g, d.g),
+	                               combine(s.b, d.b), combine(s.a, d.a));
+	return Check(h.Pixel(kWidth / 2, kHeight / 2), expected, c.name);
+}
+
+// D3DPT_TRIANGLESTRIP, and with it DrawPrimitive: two primitives from four
+// vertices, which is the count conversion Vulkan does not do for the caller.
+Outcome Case_Triangle_Strip(Harness& h, bool user_pointer) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Diffuse_Only(g);
+
+	h.Begin();
+	h.Draw_Screen_Strip(Argb(0xff, 0x00, 0xff, 0xff), user_pointer);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+
+	// A four-vertex strip covers both triangles of the left half; a strip mistaken
+	// for a triangle list would draw one triangle and leave one of these corners
+	// black, and a mistransformed draw would spill into the right half.
+	const std::string what = user_pointer ? "DrawPrimitiveUP" : "DrawPrimitive";
+	const Rgba expected{0, 255, 255, 255};
+	const std::pair<uint32_t, uint32_t> covered[4] = {{2, 2},
+	                                                  {kWidth / 2 - 2, 2},
+	                                                  {2, kHeight - 2},
+	                                                  {kWidth / 2 - 2, kHeight - 2}};
+	for (const auto& [x, y] : covered) {
+		const Rgba actual = h.Pixel(x, y);
+		if (!Near(actual, expected))
+			return Fail(what + " strip: pixel (" + std::to_string(x) + "," +
+			            std::to_string(y) + ") got=" + To_String(actual) +
+			            " expected=" + To_String(expected));
+	}
+	const Rgba outside = h.Pixel(kWidth * 3 / 4, kHeight / 2);
+	if (!Near(outside, Rgba{0, 0, 0, 0}))
+		return Fail(what + " strip covered the right half too, got " + To_String(outside));
+	return Pass(what + " TRIANGLESTRIP covers two triangles from 4 vertices");
+}
+
+// D3DPT_POINTLIST with D3DRS_POINTSIZE: one vertex, a square of pixels.
+Outcome Case_Point_List(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Diffuse_Only(g);
+	const float size = 16.0f;
+	g.Set_DX8_Render_State(D3DRS_POINTSIZE, As_Dword(size));
+
+	h.Begin();
+	h.Draw_Center_Point(Argb(0xff, 0xff, 0x00, 0xff));
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+
+	const Rgba expected{255, 0, 255, 255};
+	const Rgba centre = h.Pixel(kWidth / 2, kHeight / 2);
+	// Just inside the square, and just outside it.
+	const Rgba edge = h.Pixel(kWidth / 2 + 6, kHeight / 2 + 6);
+	const Rgba outside = h.Pixel(kWidth / 2 + 12, kHeight / 2);
+	if (!Near(centre, expected))
+		return Fail("point centre got=" + To_String(centre) +
+		            " expected=" + To_String(expected) +
+		            " (a point size the device cannot rasterise would leave 1 pixel)");
+	if (!Near(edge, expected))
+		return Fail("point is smaller than D3DRS_POINTSIZE=16: (+6,+6) got=" +
+		            To_String(edge));
+	if (!Near(outside, Rgba{0, 0, 0, 0}))
+		return Fail("point is larger than D3DRS_POINTSIZE=16: (+12,0) got=" +
+		            To_String(outside));
+	return Pass("POINTLIST expands one vertex to a 16x16 square");
+}
+
+// D3DRS_POINTSPRITEENABLE: the point's texture coordinates are replaced by the
+// position within the sprite, so a two-texel texture splits the sprite in half.
+Outcome Case_Point_Sprite(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	const uint32_t texels[2] = {Argb(0xff, 0xff, 0x00, 0x00), Argb(0xff, 0x00, 0xff, 0x00)};
+	TextureHandle* texture = g.Create_Texture(2, 1, reinterpret_cast<const uint8_t*>(texels));
+	if (texture == nullptr) return Fail("Create_Texture failed");
+	g.Set_Texture(0, texture);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+	g.Set_DX8_Render_State(D3DRS_POINTSIZE, As_Dword(16.0f));
+	g.Set_DX8_Render_State(D3DRS_POINTSPRITEENABLE, 1);
+
+	h.Begin();
+	// The vertex's own texture coordinates are 0.5,0.5 -- the boundary between the
+	// two texels -- so any pixel that is not red or green is one that ignored
+	// D3DRS_POINTSPRITEENABLE.
+	h.Draw_Center_Point(Argb(0xff, 0xff, 0xff, 0xff));
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+
+	const Rgba left = h.Pixel(kWidth / 2 - 5, kHeight / 2);
+	const Rgba right = h.Pixel(kWidth / 2 + 5, kHeight / 2);
+	if (!Near(left, Rgba{255, 0, 0, 255}) || !Near(right, Rgba{0, 255, 0, 255}))
+		return Fail("point sprite coordinates: left=" + To_String(left) + " right=" +
+		            To_String(right) + " expected=(255,0,0,255)/(0,255,0,255)");
+	return Pass("POINTSPRITEENABLE replaces the sprite's texture coordinates");
+}
+
+// SetViewport/GetViewport: the pretransformed quad still covers the whole *viewport*
+// and nothing outside it, which is the whole of D3D8's viewport transform.
+Outcome Case_Viewport(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Diffuse_Only(g);
+	const ViewportRect requested{0, 0, kWidth / 2, kHeight, 0.0f, 1.0f};
+	g.Set_Viewport(requested);
+	ViewportRect read_back{};
+	g.Get_Viewport(read_back);
+	if (read_back.x != requested.x || read_back.y != requested.y ||
+	    read_back.width != requested.width || read_back.height != requested.height ||
+	    read_back.min_z != requested.min_z || read_back.max_z != requested.max_z) {
+		return Fail("GetViewport did not return what SetViewport was given");
+	}
+
+	h.Begin();
+	h.Draw_Screen_Quad(Argb(0xff, 0x00, 0x00, 0xff));
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+
+	const Rgba inside = h.Pixel(kWidth / 4, kHeight / 2);
+	const Rgba outside = h.Pixel(kWidth * 3 / 4, kHeight / 2);
+	if (!Near(inside, Rgba{0, 0, 255, 255}))
+		return Fail("inside the viewport should draw, got " + To_String(inside));
+	if (!Near(outside, Rgba{0, 0, 0, 0}))
+		return Fail("outside the viewport should not, got " + To_String(outside));
+	return Pass("viewport confines the draw to the left half, GetViewport round-trips");
+}
+
+// D3DTADDRESS_BORDER with D3DTSS_BORDERCOLOR. Core Vulkan has only the fixed border
+// colours, so the assertion is on a border colour that is one of them; anything
+// else is approximated (see Get_Or_Create_Sampler).
+Outcome Case_Border_Color(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	TextureHandle* texture = h.Solid_Texture(Argb(0xff, 0x00, 0xff, 0x00));
+	if (texture == nullptr) return Fail("Create_Texture failed");
+	g.Set_Texture(0, texture);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ADDRESSU, D3DTADDRESS_BORDER);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ADDRESSV, D3DTADDRESS_BORDER);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_BORDERCOLOR, Argb(0xff, 0xff, 0xff, 0xff));
+
+	h.Begin();
+	// Inside the texture, then two coordinates past its edge, where D3D8 samples the
+	// border colour instead of clamping.
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 0.5f, 0.5f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba in_texture = h.Pixel(kWidth / 2, kHeight / 2);
+
+	h.Begin();
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 2.0f, 2.0f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba in_border = h.Pixel(kWidth / 2, kHeight / 2);
+
+	if (!Near(in_texture, Rgba{0, 255, 0, 255}))
+		return Fail("inside the texture got " + To_String(in_texture));
+	if (!Near(in_border, Rgba{255, 255, 255, 255}))
+		return Fail("outside it should sample the white border, got " + To_String(in_border));
+	return Pass("ADDRESS_BORDER samples D3DTSS_BORDERCOLOR outside [0,1]");
+}
+
+// D3DTEXF_ANISOTROPIC with D3DTSS_MAXANISOTROPY. Anisotropy only changes the result
+// under minification at an angle, which this flat quad has none of, so what is
+// asserted is that the state produces a working sampler rather than a particular
+// filtered value -- the ratio itself is a device capability.
+Outcome Case_Max_Anisotropy(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	TextureHandle* texture = h.Solid_Texture(Argb(0xff, 0x20, 0x40, 0x80));
+	if (texture == nullptr) return Fail("Create_Texture failed");
+	g.Set_Texture(0, texture);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_MINFILTER, D3DTEXF_ANISOTROPIC);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_MAGFILTER, D3DTEXF_ANISOTROPIC);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_MAXANISOTROPY, 4);
+
+	h.Begin();
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 0.5f, 0.5f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	return Check(h.Pixel(kWidth / 2, kHeight / 2), Rgba{0x20, 0x40, 0x80, 255},
+	             "MAXANISOTROPY=4 with an anisotropic filter");
+}
+
+// GetRenderState/GetTransform: the engine reads back what it set, so the backend's
+// shadow state has to answer as D3D8's would.
+Outcome Case_State_Readback(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	g.Set_DX8_Render_State(D3DRS_ALPHAREF, 0x5a);
+	g.Set_DX8_Render_State(D3DRS_POINTSIZE, As_Dword(8.0f));
+	if (g.Get_DX8_Render_State(D3DRS_ALPHAREF) != 0x5a)
+		return Fail("GetRenderState(D3DRS_ALPHAREF) did not return what was set");
+	if (g.Get_DX8_Render_State(D3DRS_POINTSIZE) != As_Dword(8.0f))
+		return Fail("GetRenderState did not preserve a float state's bit pattern");
+
+	const Matrix4x4 world = Translation(1.0f, 2.0f, 3.0f);
+	g.Set_Transform(D3DTS_WORLD, world);
+	Matrix4x4 read_back{};
+	g.Get_Transform(D3DTS_WORLD, read_back);
+	for (int i = 0; i < 4; ++i)
+		for (int j = 0; j < 4; ++j)
+			if (read_back.m[i][j] != world.m[i][j])
+				return Fail("GetTransform(D3DTS_WORLD) did not round-trip");
+	return Pass("GetRenderState and GetTransform return the shadowed state");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1558,6 +1883,24 @@ int main(int argc, char** argv) {
 	report("depth bias", Case_Depth_Bias(harness));
 	report("scissor", Case_Scissor(harness));
 	report("stencil", Case_Stencil(harness));
+
+	std::printf("\n== blend, topology and viewport ==\n");
+	const BlendOpCase kBlendOpCases[] = {{"BLENDOP_ADD", D3DBLENDOP_ADD},
+	                                     {"BLENDOP_SUBTRACT", D3DBLENDOP_SUBTRACT},
+	                                     {"BLENDOP_REVSUBTRACT", D3DBLENDOP_REVSUBTRACT},
+	                                     {"BLENDOP_MIN", D3DBLENDOP_MIN},
+	                                     {"BLENDOP_MAX", D3DBLENDOP_MAX}};
+	for (const BlendOpCase& c : kBlendOpCases) report("blend op", Case_Blend_Op(harness, c));
+	report("triangle strip", Case_Triangle_Strip(harness, false));
+	report("DrawPrimitiveUP", Case_Triangle_Strip(harness, true));
+	report("point list", Case_Point_List(harness));
+	report("point sprite", Case_Point_Sprite(harness));
+	report("viewport", Case_Viewport(harness));
+	report("state readback", Case_State_Readback(harness));
+
+	std::printf("\n== sampler state ==\n");
+	report("border colour", Case_Border_Color(harness));
+	report("max anisotropy", Case_Max_Anisotropy(harness));
 
 	std::printf("\n== texture formats ==\n");
 	for (const FormatCase& c : kFormatCases) report("format", Case_Texture_Format(harness, c));

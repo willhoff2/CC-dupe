@@ -64,6 +64,8 @@ layout(set = 0, binding = 0, std140) uniform Draw {
 	ivec4 flags2;
 	ivec4 sources;
 	ivec4 flags3;
+	vec4 point_size;  // size, min, max, point-sprite active for this draw
+	vec4 point_scale;
 } u;
 
 layout(set = 0, binding = 1) uniform sampler2D u_texture[MAX_STAGES];
@@ -128,7 +130,11 @@ vec4 sample_stage(int stage, vec2 bump_offset) {
 		float divisor = count >= 4 ? coord.w : (count == 3 ? coord.z : coord.y);
 		coord.xy /= (abs(divisor) > 1e-6 ? divisor : 1.0);
 	}
-	vec2 uv = coord.xy + bump_offset;
+	// D3DRS_POINTSPRITEENABLE replaces every stage's coordinates with the position
+	// within the expanded point, which is exactly gl_PointCoord (both are y-down
+	// from the sprite's top-left corner). The uniform is only non-zero when a point
+	// primitive is being rasterised, which is when gl_PointCoord is defined.
+	vec2 uv = (u.point_size.w != 0.0 ? gl_PointCoord : coord.xy) + bump_offset;
 	switch (stage) {
 	case 0: return texture(u_texture[0], uv);
 	case 1: return texture(u_texture[1], uv);

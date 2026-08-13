@@ -69,6 +69,8 @@ layout(set = 0, binding = 0, std140) uniform Draw {
 	ivec4 flags2;
 	ivec4 sources;
 	ivec4 flags3;
+	vec4 point_size;  // size, min, max, D3DRS_POINTSPRITEENABLE
+	vec4 point_scale; // D3DRS_POINTSCALE_A/B/C, D3DRS_POINTSCALEENABLE
 } u;
 
 // D3DTSS_TEXTURETRANSFORMFLAGS
@@ -226,6 +228,24 @@ void main() {
 		           emissive_material.rgb;
 		v_diffuse = vec4(clamp(lit, 0.0, 1.0), diffuse_material.a);
 		v_specular = vec4(clamp(specular_material.rgb * specular_sum, 0.0, 1.0), 0.0);
+	}
+
+	// --- point size ---------------------------------------------------------
+	// D3D8 expands a D3DPT_POINTLIST vertex into a screen-space square; Vulkan does
+	// the same from gl_PointSize, so the whole of D3DRS_POINTSIZE* is this:
+	//   scaling off: the size is already in pixels
+	//   scaling on:  size * viewport_height * sqrt(1 / (A + B*d + C*d*d)), d being the
+	//                camera-space distance, which is D3D8's documented formula
+	// The clamp order is D3D8's: the scaled size is clamped to [MIN, MAX].
+	{
+		float size = u.point_size.x;
+		if (u.point_scale.w != 0.0) {
+			float d = length(camera_position.xyz);
+			float denominator = u.point_scale.x + u.point_scale.y * d +
+			                    u.point_scale.z * d * d;
+			size *= u.misc.z * sqrt(1.0 / max(denominator, 1e-6));
+		}
+		gl_PointSize = clamp(size, max(u.point_size.y, 1.0), u.point_size.z);
 	}
 
 	// --- fog ----------------------------------------------------------------
