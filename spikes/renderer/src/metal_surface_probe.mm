@@ -27,6 +27,11 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 #include <dlfcn.h>
+
+// Without this vulkan.h declares no VkMetalSurfaceCreateInfoEXT and no
+// PFN_vkCreateMetalSurfaceEXT, and clang helpfully suggests VkHeadlessSurfaceCreateInfoEXT
+// instead. Found by the macos-15 job, which is the point of the job.
+#define VK_USE_PLATFORM_METAL_EXT 1
 #include <vulkan/vulkan.h>
 
 #include <cstdio>
