@@ -17,83 +17,47 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/Libraries/Source/WWVegas/WWLib` | 66 | 66 | 66 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 | 3 | 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
-| `Core/GameEngine` | 193 | 208 | 193 |
-| `GeneralsMD/Code/GameEngine` | 366 | 380 | 366 |
-| **Total** | **686** | **715** | **686** |
+| `Core/GameEngine` | 200 | 209 | 200 |
+| `GeneralsMD/Code/GameEngine` | 377 | 380 | 377 |
+| **Total** | **704** | **716** | **704** |
 
-29 translation units produced no object file:
+12 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
 | `Core/GameEngine/Source/Common/System/Debug.cpp` | `unknown type name 'HWND'` |
 | `Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp` | `unknown type name 'HWND'` |
 | `Core/GameEngine/Source/GameClient/Input/Keyboard.cpp` | `unknown type name 'HKL'` |
-| `Core/GameEngine/Source/GameNetwork/ConnectionManager.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
 | `Core/GameEngine/Source/GameNetwork/DownloadManager.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
-| `Core/GameEngine/Source/GameNetwork/GameInfo.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp` | `unknown type name 'AsnObjectIdentifier'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/GameResultsThread.cpp` | `unknown type name 'HOSTENT'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PeerThread.cpp` | `no matching function for call to 'recvfrom'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp` | `unknown type name 'HOSTENT'` |
-| `Core/GameEngine/Source/GameNetwork/LANAPI.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `Core/GameEngine/Source/GameNetwork/LANAPICallbacks.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `Core/GameEngine/Source/GameNetwork/LANAPIhandlers.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `Core/GameEngine/Source/GameNetwork/LANGameInfo.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `GeneralsMD/Code/GameEngine/Source/Common/Recorder.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `GeneralsMD/Code/GameEngine/Source/Common/StatsCollector.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
+| `GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp` | `no member named 'SetWindowText' in the global namespace` |
 | `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/DownloadMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/GameInfoWindow.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/LanGameOptionsMenu.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/LanLobbyMenu.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/LanMapSelectMenu.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
 | `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/MainMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/NetworkDirectConnect.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/ScoreScreen.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/SkirmishMapSelectMenu.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `GeneralsMD/Code/GameEngine/Source/GameLogic/System/GameLogic.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
-| `GeneralsMD/Code/GameEngine/Source/GameNetwork/GUIUtil.cpp` | `static_assert failed due to requirement 'sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE' "LANMessage struct cannot be larg` |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 686 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 704 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 7 archives were linked into one binary with `--whole-archive` (binary produced: yes; clean link: yes). **469 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 7 archives were linked into one binary with `--whole-archive` (binary produced: yes; clean link: yes). **273 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| Defined in a translation unit that failed to compile | 231 |
-| Well-known Dict keys (instantiated in GameEngineDevice) | 103 |
+| Well-known Dict keys (instantiated in GameEngineDevice) | 104 |
 | Win32 API | 43 |
+| Defined in a translation unit that failed to compile | 40 |
+| Defined in a layer not built here (renderer / audio / device / entry point) | 21 |
 | Other / unclassified | 18 |
-| Defined in a layer not built here (renderer / audio / device / entry point) | 18 |
-| Engine C++ not built at this level | 18 |
 | GameSpy | 18 |
 | Third-party library not linked (lzhl, zlib) | 9 |
+| Engine C++ not built at this level | 9 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
 | Direct3D 8 / DirectX | 5 |
-
-### Defined in a translation unit that failed to compile
-
-- `DX8Wrapper_IsWindowed`
-- `ReplayWasPressed`
-- `TheGameEngine`
-- `TheGameInfo`
-- `TheGameLogic`
-- `TheGameSpyPeerMessageQueue`
-- `TheIMEManager`
-- `TheKeyboard`
-- `ThePinger`
-- `TheRecorder`
-- `TheStatsCollector`
-- `TheSubsystemList`
-- `MainMenuInit(WindowLayout*, void*)`
-- `MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- …and 216 more
 
 ### Well-known Dict keys (instantiated in GameEngineDevice)
 
@@ -112,7 +76,7 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `TheKey_objectRecruitableAI`
 - `TheKey_objectScriptAttachment`
 - `TheKey_objectSelectable`
-- …and 88 more
+- …and 89 more
 
 ### Win32 API
 
@@ -133,6 +97,44 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `GetDoubleClickTime`
 - …and 28 more
 
+### Defined in a translation unit that failed to compile
+
+- `DX8Wrapper_IsWindowed`
+- `ReleaseCrash`
+- `TheGameEngine`
+- `TheGameResultsQueue`
+- `TheGameSpyPeerMessageQueue`
+- `TheIMEManager`
+- `TheKeyboard`
+- `ThePinger`
+- `TheSubsystemList`
+- `MainMenuInit(WindowLayout*, void*)`
+- `MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
+- `MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
+- `MainMenuUpdate(WindowLayout*, void*)`
+- `setupGameStart(AsciiString, GameDifficulty)`
+- `DownloadMenuInit(WindowLayout*, void*)`
+- …and 25 more
+
+### Defined in a layer not built here (renderer / audio / device / entry point)
+
+- `DX8Wrapper_PreserveFPU`
+- `TheProjectedShadowManager`
+- `TheSmudgeManager`
+- `MOTDSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
+- `doSkyBoxSet(bool)`
+- `CreateGameEngine()`
+- `ReloadAllTextures()`
+- `oversizeTheTerrain(int)`
+- `OSDisplaySetBusyState(bool, bool)`
+- `testMinimumRequirements(ChipsetType*, CpuType*, int*, unsigned long long*, float*, float*, float*)`
+- `SetUnsignedIntInRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int)`
+- `GetUnsignedIntFromRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int&)`
+- `TextureFilterClass::getTextureFilterMode(char const*)`
+- `WW3D::Get_Texture_Reduction()`
+- `MapObject::getWaypointID()`
+- …and 6 more
+
 ### Other / unclassified
 
 - `CloseStatsConnection`
@@ -150,44 +152,6 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `PreAuthenticatePlayerPM`
 - `SendGameSnapShotA`
 - `SetPersistDataValuesA`
-- …and 3 more
-
-### Defined in a layer not built here (renderer / audio / device / entry point)
-
-- `DX8Wrapper_PreserveFPU`
-- `TheProjectedShadowManager`
-- `TheSmudgeManager`
-- `MOTDSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `doSkyBoxSet(bool)`
-- `CreateGameEngine()`
-- `ReloadAllTextures()`
-- `oversizeTheTerrain(int)`
-- `testMinimumRequirements(ChipsetType*, CpuType*, int*, unsigned long long*, float*, float*, float*)`
-- `SetUnsignedIntInRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int)`
-- `GetUnsignedIntFromRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int&)`
-- `TextureFilterClass::getTextureFilterMode(char const*)`
-- `WW3D::Get_Texture_Reduction()`
-- `MapObject::getWaypointID()`
-- `MapObject::getWaypointName()`
-- …and 3 more
-
-### Engine C++ not built at this level
-
-- `ConnectionManager::ConnectionManager()`
-- `ConnectionManager::~ConnectionManager()`
-- `GameSpyStagingRoom::GameSpyStagingRoom()`
-- `TextureFilterClass::TextureFilterModeString`
-- `WW3D::PreviousSyncTime`
-- `WW3D::SyncTime`
-- `GameInfo::GameInfo()`
-- `GameSlot::GameSlot()`
-- `MapObject::TheWorldDict`
-- `MapObject::TheMapObjectListPtr`
-- `MapObject::MapObject(Coord3D, AsciiString, float, int, Dict const*, ThingTemplate const*)`
-- `_com_util::ConvertStringToBSTR(char const*)`
-- `typeinfo for GameInfo`
-- `typeinfo for GameSlot`
-- `vtable for SkirmishGameInfo`
 - …and 3 more
 
 ### GameSpy
@@ -220,6 +184,18 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `LZHLDestroyDecompressor`
 - `compress2`
 - `uncompress`
+
+### Engine C++ not built at this level
+
+- `GameSpyStagingRoom::GameSpyStagingRoom()`
+- `TextureFilterClass::TextureFilterModeString`
+- `WW3D::PreviousSyncTime`
+- `WW3D::SyncTime`
+- `MapObject::TheWorldDict`
+- `MapObject::TheMapObjectListPtr`
+- `MapObject::MapObject(Coord3D, AsciiString, float, int, Dict const*, ThingTemplate const*)`
+- `_com_util::ConvertStringToBSTR(char const*)`
+- `vtable for GameSpyStagingRoom`
 
 ### Generated gitinfo (build-time, not a blocker)
 

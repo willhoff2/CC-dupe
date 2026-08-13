@@ -20,7 +20,7 @@ compile.
 
 > The figures below are this slice's own measurement and are kept as its record. They have since
 > been superseded: [`crt-and-widechar-compat.md`](crt-and-widechar-compat.md) took levels 1+2 from
-> 663/716 objects and 522 unresolved symbols to 686/715 and 469, and corrected the translation-unit
+> 679/717 objects and 376 unresolved symbols to 704/716 and 273, and corrected the translation-unit
 > denominator (the SDL2 backend and `GameMemoryNull.cpp` were being counted although the configured
 > build compiles neither). For current numbers see [`STATUS.md`](STATUS.md), which is generated.
 

@@ -16,16 +16,20 @@ Apple platforms and never executed are listed under [Blind](#blind-written-for-m
 Re-derived from a fresh run, not from the committed report — `scripts/native-build.py --level 1
 --level 2 --with-shims` and `scripts/native-port-probe.py`, both with `CLANGXX=clang++-14`.
 
-| | Before | After |
+Both columns were measured on this machine after the rebase onto `main` at `b7187cd7b` (the merge of
+#36, which took the `LANMessage` static assert with it), the "before" column in a clean worktree of
+that commit:
+
+| | Before (`b7187cd7b`) | After |
 |---|---:|---:|
-| Objects produced (levels 1–2, shimmed) | 663 / 716 | **686 / 715** |
-| Translation units with no object | 53 | **29** |
-| Unresolved symbols at link | 522 | **469** |
-| Probe-clean, shimmed | 650 / 742 | **669 / 741** |
-| Probe-clean, native (no shims at all) | 621 / 742 | **626 / 741** |
+| Objects produced (levels 1–2, shimmed) | 679 / 717 | **704 / 716** |
+| Translation units with no object | 38 | **12** |
+| Unresolved symbols at link | 376 | **273** |
+| Probe-clean, shimmed | 664 / 743 | **683 / 742** |
+| Probe-clean, native (no shims at all) | 634 / 743 | **639 / 742** |
 | Probe-clean but uncompilable | 0 | **0** |
 
-The denominator moved from 742 to 741, and from 716 to 715, for a reason worth stating: see
+The denominator moved by one in each tool for a reason worth stating: see
 [Two measurement bugs](#two-measurement-bugs).
 
 The native column moving at all is the useful signal. Declaring a Win32 entry point in the shim
@@ -99,9 +103,10 @@ declaration in scope. Gave it an errno branch, which is the counterpart of the W
 ### 4. Win32 declarations that no longer arrive through `PreRTS.h`
 
 [`prerts-win32-surgery.md`](prerts-win32-surgery.md) removed the shared Win32 header wall, which is
-what makes the remaining boundary attributable per file. Five files still use Win32 APIs and had
+what makes the remaining boundary attributable per file. Six files still use Win32 APIs and had
 lost the declarations: `GameMemory.cpp` (`GlobalAlloc`), `PopupPlayerInfo.cpp` (`OSVERSIONINFO`),
-`PopupReplay.cpp` (`DeleteFile`/`CopyFile`), `PeerDefs.cpp` (`CreateDirectory`) and `rcfile.h`
+`PopupReplay.cpp` and `Recorder.cpp` (`DeleteFile`/`CopyFile`), `PeerDefs.cpp` (`CreateDirectory`)
+and `rcfile.h`
 (`HMODULE`/`HRSRC`/`HGLOBAL`). Each got the `#include <windows.h>` it actually needs, with a
 comment naming the seam that owns replacing the call — filesystem for the file APIs, memory for
 `GlobalAlloc`, nothing for `rcfile.h` (a PE resource is a Windows-only concept; the class exists to
@@ -210,19 +215,20 @@ when a compat header stops working; this notices the two failure modes they cann
 
 - The W entry points are declared, not implemented. Four of them are now unresolved symbols
   (`GetModuleFileNameW`, `GetDateFormatW`, `GetTimeFormatW`, `FormatMessageW`) out of 43 in the
-  `Win32 API` category and 469 in total. This
+  `Win32 API` category and 273 in total. This
   needs the `WideChar`/`char16_t` decision from [`widechar-fallout.md`](widechar-fallout.md) first.
 - `GlobalAlloc`/`GlobalSize`/`GlobalFree` under `GameMemory.cpp` are still Win32. The call is a
   page allocation, so `malloc` would do, but it is where every memory pool in the game comes from
   and belongs to the memory seam.
 - `DeleteFile`/`CopyFile`/`CreateDirectory` are still Win32; filesystem seam.
 - `_PC_24` is dropped, so native arithmetic is not bit-identical to the Windows build.
-- Not in this slice, and left failing — the whole of what remains, by first diagnostic: 18 units on
-  the `LANMessage` static assert, 3 on window/input types (`HWND`, `HKL`), 4 on GameSpy
-  sockets/SNMP (`HOSTENT`, `recvfrom`, `AsnObjectIdentifier`), and 4 on `HRESULT` inside
-  `WWDownload/ftp.h`. The last of these is the same root cause as §4 — a
-  file that needs `<windows.h>` and no longer gets it — but `WWDownload` is not this slice's to
-  claim.
+- Not in this slice, and left failing — the whole of what remains, 12 units by first diagnostic:
+  3 on window/input types (`HWND`, `HKL`), 4 on GameSpy sockets/SNMP (`HOSTENT`, `recvfrom`,
+  `AsnObjectIdentifier`), 4 on `HRESULT` inside `WWDownload/ftp.h`, and `GameEngine.cpp` on
+  `SetWindowText`/`SetWindowTextW`. The `HRESULT` group is the same root cause as §4 — a file that
+  needs `<windows.h>` and no longer gets it — but `WWDownload` is not this slice's to claim, and
+  `SetWindowText` is a window entry point owned by the window/input slice, so its declaration is
+  left to them rather than added to the shim from here.
 
 ## Blind: written for macOS/arm64, never compiled there
 

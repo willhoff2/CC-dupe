@@ -24,6 +24,10 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port For CopyFile, which used to arrive through PreRTS.h. Replacing it belongs
+// to the filesystem seam.
+#include <windows.h>
+
 #include "Common/Recorder.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
