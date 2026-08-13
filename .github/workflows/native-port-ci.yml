@@ -592,63 +592,115 @@ jobs:
           name: window-spike-linux
           path: window-spike-linux.png
 
-  # 7. The macOS half of the same seam - and the only job in this workflow that is expected to
-  #    fail, on purpose, so it is marked continue-on-error.
+  # 7. The macOS half of the same seam. This job used to be continue-on-error and expected to
+  #    fail, because platform_window_cocoa.mm had been written on a Linux box with no macOS SDK
+  #    and had never been compiled. It is now a gate: the Objective-C++ compiles, its 104
+  #    kVK_* literals are checked against HIToolbox at compile time, its mirror of
+  #    VkMetalSurfaceCreateInfoEXT is static_asserted against the real MoltenVK header, and
+  #    zh-metal-surface-probe creates a real VkSurfaceKHR from a real CAMetalLayer through
+  #    vkCreateMetalSurfaceEXT and presents through a swapchain.
   #
-  #    platform_window_cocoa.mm was written on a Linux box with no macOS SDK: it has never been
-  #    compiled, and its author could not run it. This job is the cheapest available way to find
-  #    out what is wrong with it, and its log is the deliverable. Two further limits, stated so
-  #    that a green tick here is not mistaken for a working macOS window:
-  #      * the runner's GPU is paravirtualised and it has no attached display, so even if the
-  #        NSWindow is created, "a window appeared on a screen" is NOT what is being tested;
-  #      * a GitHub macOS runner's shell is not guaranteed a WindowServer session, so
-  #        NSApplication may refuse to activate at all.
-  #    Real verification needs a Mac with a login session:
-  #    spikes/renderer/tools/macos-window-check.sh. Until someone runs that, the macOS path is
-  #    unverified.
+  #    What this job still cannot prove, and what a Mac with a login session is still needed
+  #    for (spikes/renderer/tools/macos-window-check.sh):
+  #      * that an NSWindow becomes visible and key. The runner has no attached display, and a
+  #        runner shell is not guaranteed a WindowServer session, so the NSWindow half of the
+  #        backend is attempted in a step that is allowed to fail and whose log is the
+  #        deliverable. The surface probe deliberately needs no window: a CAMetalLayer does not
+  #        have to be in a view hierarchy to back a VkSurfaceKHR;
+  #      * that pixels reached a screen, on a Retina contentsScale, with real keyboard and
+  #        mouse input.
   window-seam-macos:
-    name: Window seam (macOS arm64, CAMetalLayer) [blind, informational]
+    name: Window seam (macOS arm64, CAMetalLayer)
     runs-on: macos-15
     timeout-minutes: 30
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Install MoltenVK, the Vulkan loader, glslang and SDL2
+      - name: Install MoltenVK, the Vulkan loader and glslang
         run: |
           set -eux
           brew update > /dev/null
-          brew install molten-vk vulkan-loader vulkan-headers glslang \
-                       vulkan-validationlayers sdl2
+          # SDL2 is deliberately not installed: Homebrew's SDL2 headers are x86-only in this
+          # image and break the arm64 build (immintrin.h), which is why the renderer spike job
+          # configures with -DSPIKE_USE_SDL2=OFF too. The Cocoa backend is the path under test.
+          brew install molten-vk vulkan-loader vulkan-headers glslang vulkan-tools
           command -v cmake > /dev/null || brew install cmake
+          brew list --versions molten-vk vulkan-loader vulkan-headers glslang
 
-      - name: Compile the blind Cocoa backend
+      - name: Check both backends' scan-code tables against KeyScanCodes.h
+        run: |
+          set -o pipefail
+          {
+            echo '## Scan-code tables (macOS runner)'
+            echo '```'
+            python3 scripts/ci/check-window-scancodes.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Compile the Cocoa backend and the Metal surface probe
         run: |
           set -o pipefail
           BREW=$(brew --prefix)
           {
-            echo '## Window seam (macOS, blind Cocoa/CAMetalLayer path)'
-            echo 'This code has never been compiled before this job ran.'
+            echo '## Window seam (macOS, Cocoa/CAMetalLayer path)'
+            echo 'Compiles platform_window_cocoa.mm with WWLIB_COCOA_VERIFY_KVK, so the'
+            echo 'kVK_* table and the VkMetalSurfaceCreateInfoEXT mirror are compile-time'
+            echo 'assertions rather than comments.'
             echo '```'
             cmake -S spikes/renderer -B build/spike -G "Unix Makefiles" \
               -DCMAKE_BUILD_TYPE=Release -DSPIKE_USE_SDL2=OFF \
               -DCMAKE_PREFIX_PATH="$BREW" 2>&1
-            cmake --build build/spike --target zh-window-spike-cocoa -j3 2>&1
+            cmake --build build/spike --target zh-window-spike-cocoa \
+              zh-metal-surface-probe -j3 2>&1
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Try to present to a CAMetalLayer (may fail for lack of a display session)
+      # The gate: CAMetalLayer -> vkCreateMetalSurfaceEXT -> VkSurfaceKHR -> swapchain ->
+      # present, none of which needs a window. If VK_EXT_metal_surface stops being advertised,
+      # or the entry point stops resolving the way the seam resolves it
+      # (dlsym(RTLD_DEFAULT, "vkGetInstanceProcAddr")), this fails.
+      - name: Create a VkSurfaceKHR from a CAMetalLayer through MoltenVK
+        run: |
+          set -o pipefail
+          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
+          export VK_ICD_FILENAMES
+          export DYLD_LIBRARY_PATH="$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
+          test -f "$VK_ICD_FILENAMES"
+          {
+            echo '## VK_EXT_metal_surface on this runner'
+            echo '```'
+            build/spike/zh-metal-surface-probe
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The NSWindow half. Allowed to fail: it needs a windowing session the runner does not
+      # promise. Its log is the deliverable - it is how the AppKit paths get any evidence at
+      # all before someone runs tools/macos-window-check.sh on a desk.
+      - name: Try to present to an NSWindow's CAMetalLayer (needs a windowing session)
+        continue-on-error: true
         run: |
           set -o pipefail
           VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
           export VK_ICD_FILENAMES
           export DYLD_LIBRARY_PATH="$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
           {
-            echo '## Cocoa window run attempt'
+            echo '## Cocoa NSWindow run attempt (allowed to fail)'
             echo '```'
             build/spike/zh-window-spike-cocoa --frames 120 --no-validation \
               --out window-spike-macos.png 2>&1
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The standalone check a Mac session runs, in the mode that tolerates having no display,
+      # so that the script itself is exercised rather than only documented.
+      - name: Run the standalone macOS window check (no-display mode)
+        run: |
+          set -o pipefail
+          {
+            echo '## spikes/renderer/tools/macos-window-check.sh --allow-no-display'
+            echo '```'
+            spikes/renderer/tools/macos-window-check.sh --allow-no-display --no-sdl2 2>&1
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

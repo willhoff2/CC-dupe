@@ -22,15 +22,12 @@
  *  the Vulkan surface created through VK_EXT_metal_surface so MoltenVK presents straight to    *
  *  the layer.                                                                                  *
  *                                                                                             *
- *  ############################################################################               *
- *  ##  WRITTEN BLIND. NOT ONE LINE OF THIS FILE HAS EVER BEEN COMPILED OR RUN.  ##            *
- *  ############################################################################               *
- *                                                                                             *
- *  The session that wrote it had no macOS machine: it was authored on Linux, where nothing     *
- *  here can even be syntax-checked (no Cocoa headers, no clang Objective-C++ SDK). Treat every *
- *  line as a proposal. spikes/renderer/tools/macos-window-check.sh is the standalone check a    *
- *  Mac session runs to find out which parts are wrong; docs/porting/window-event-loop.md lists *
- *  the specific things most likely to be wrong and why.                                        *
+ *  This file is COMPILED IN CI on a macos-15 arm64 runner (the `window-seam-macos` job in      *
+ *  .github/workflows/native-port-ci.yml), together with a probe that resolves                   *
+ *  vkCreateMetalSurfaceEXT and creates a real VkSurfaceKHR from a CAMetalLayer. It has still    *
+ *  never run in front of a human on a Mac with a display: what is and is not verified is        *
+ *  listed in docs/porting/window-event-loop.md, and the runtime paths that need a windowing     *
+ *  session (activation, focus, Retina contentsScale, cursor clipping) remain unverified.       *
  *                                                                                             *
  *  Design notes that are *not* guesses, because they come from Apple's and MoltenVK's          *
  *  documented contracts rather than from having run this:                                       *
@@ -51,11 +48,52 @@
 #if defined(__APPLE__) && !defined(_WIN32)
 
 #import <AppKit/AppKit.h>
+#import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
+// CGAssociateMouseAndMouseCursorPosition and CGWarpMouseCursorPosition live in
+// CoreGraphics/CGRemoteOperation.h, which AppKit does not promise to pull in.
+#import <CoreGraphics/CoreGraphics.h>
 
+#include <cstddef>
 #include <deque>
 #include <dlfcn.h>
 #include <string>
+
+/*
+**	The Metal surface plumbing below prefers the real VK_EXT_metal_surface declarations from
+**	the Vulkan/MoltenVK headers and falls back to the local mirror when this translation unit
+**	is built without them - which is the WWLib case, since WWLib must not require a Vulkan SDK
+**	to compile. When both are present the mirror is checked against the real thing at compile
+**	time (see the static_asserts further down), so the fallback cannot silently drift.
+*/
+#if defined(__has_include)
+#	if __has_include(<vulkan/vulkan.h>)
+#		define WWLIB_COCOA_HAVE_VULKAN_HEADERS 1
+#	endif
+#endif
+
+/*
+**	The kVK_* column of the scan-code table below is written as literals so that Carbon is not
+**	dragged into the WWLib build. Define WWLIB_COCOA_VERIFY_KVK (the spike and the CI job do)
+**	to have every one of those literals checked against <Carbon/Carbon.h>'s real constant at
+**	compile time; scripts/ci/check-window-scancodes.py checks the other column, against
+**	KeyScanCodes.h.
+*/
+#if defined(WWLIB_COCOA_VERIFY_KVK) && defined(__has_include)
+#	if __has_include(<Carbon/Carbon.h>)
+#		include <Carbon/Carbon.h>
+#		define WWLIB_COCOA_KVK_CHECKED 1
+#	else
+#		error "WWLIB_COCOA_VERIFY_KVK was requested but <Carbon/Carbon.h> is not available"
+#	endif
+#endif
+
+#ifdef WWLIB_COCOA_HAVE_VULKAN_HEADERS
+#	ifndef VK_USE_PLATFORM_METAL_EXT
+#		define VK_USE_PLATFORM_METAL_EXT 1
+#	endif
+#	include <vulkan/vulkan.h>
+#endif
 
 namespace WWPlatform
 {
@@ -196,6 +234,121 @@ const int SCAN_CODE_COUNT =
 // KEYSCAN_CONVERT, KEYSCAN_NOCONVERT and KEYSCAN_CIRCUMFLEX are the three the table does not
 // produce; the doc lists them as a known gap.
 
+#ifdef WWLIB_COCOA_KVK_CHECKED
+/*
+**	Every kVK_* literal in the table above, checked against HIToolbox. This is the half of the
+**	keyboard mapping a Linux box cannot check: the set-1 column is checked by
+**	scripts/ci/check-window-scancodes.py, and these 104 lines are the other column.
+*/
+#define WWLIB_CHECK_KVK(literal, name) \
+	static_assert((literal) == (name), #literal " is not " #name)
+WWLIB_CHECK_KVK(0x35, kVK_Escape);		// KEYSCAN_ESCAPE
+WWLIB_CHECK_KVK(0x12, kVK_ANSI_1);		// KEYSCAN_1
+WWLIB_CHECK_KVK(0x13, kVK_ANSI_2);		// KEYSCAN_2
+WWLIB_CHECK_KVK(0x14, kVK_ANSI_3);		// KEYSCAN_3
+WWLIB_CHECK_KVK(0x15, kVK_ANSI_4);		// KEYSCAN_4
+WWLIB_CHECK_KVK(0x17, kVK_ANSI_5);		// KEYSCAN_5
+WWLIB_CHECK_KVK(0x16, kVK_ANSI_6);		// KEYSCAN_6
+WWLIB_CHECK_KVK(0x1A, kVK_ANSI_7);		// KEYSCAN_7
+WWLIB_CHECK_KVK(0x1C, kVK_ANSI_8);		// KEYSCAN_8
+WWLIB_CHECK_KVK(0x19, kVK_ANSI_9);		// KEYSCAN_9
+WWLIB_CHECK_KVK(0x1D, kVK_ANSI_0);		// KEYSCAN_0
+WWLIB_CHECK_KVK(0x1B, kVK_ANSI_Minus);		// KEYSCAN_MINUS
+WWLIB_CHECK_KVK(0x18, kVK_ANSI_Equal);		// KEYSCAN_EQUALS
+WWLIB_CHECK_KVK(0x33, kVK_Delete);		// KEYSCAN_BACK
+WWLIB_CHECK_KVK(0x30, kVK_Tab);		// KEYSCAN_TAB
+WWLIB_CHECK_KVK(0x0C, kVK_ANSI_Q);		// KEYSCAN_Q
+WWLIB_CHECK_KVK(0x0D, kVK_ANSI_W);		// KEYSCAN_W
+WWLIB_CHECK_KVK(0x0E, kVK_ANSI_E);		// KEYSCAN_E
+WWLIB_CHECK_KVK(0x0F, kVK_ANSI_R);		// KEYSCAN_R
+WWLIB_CHECK_KVK(0x11, kVK_ANSI_T);		// KEYSCAN_T
+WWLIB_CHECK_KVK(0x10, kVK_ANSI_Y);		// KEYSCAN_Y
+WWLIB_CHECK_KVK(0x20, kVK_ANSI_U);		// KEYSCAN_U
+WWLIB_CHECK_KVK(0x22, kVK_ANSI_I);		// KEYSCAN_I
+WWLIB_CHECK_KVK(0x1F, kVK_ANSI_O);		// KEYSCAN_O
+WWLIB_CHECK_KVK(0x23, kVK_ANSI_P);		// KEYSCAN_P
+WWLIB_CHECK_KVK(0x21, kVK_ANSI_LeftBracket);		// KEYSCAN_LBRACKET
+WWLIB_CHECK_KVK(0x1E, kVK_ANSI_RightBracket);		// KEYSCAN_RBRACKET
+WWLIB_CHECK_KVK(0x24, kVK_Return);		// KEYSCAN_RETURN
+WWLIB_CHECK_KVK(0x3B, kVK_Control);		// KEYSCAN_LCONTROL
+WWLIB_CHECK_KVK(0x00, kVK_ANSI_A);		// KEYSCAN_A
+WWLIB_CHECK_KVK(0x01, kVK_ANSI_S);		// KEYSCAN_S
+WWLIB_CHECK_KVK(0x02, kVK_ANSI_D);		// KEYSCAN_D
+WWLIB_CHECK_KVK(0x03, kVK_ANSI_F);		// KEYSCAN_F
+WWLIB_CHECK_KVK(0x05, kVK_ANSI_G);		// KEYSCAN_G
+WWLIB_CHECK_KVK(0x04, kVK_ANSI_H);		// KEYSCAN_H
+WWLIB_CHECK_KVK(0x26, kVK_ANSI_J);		// KEYSCAN_J
+WWLIB_CHECK_KVK(0x28, kVK_ANSI_K);		// KEYSCAN_K
+WWLIB_CHECK_KVK(0x25, kVK_ANSI_L);		// KEYSCAN_L
+WWLIB_CHECK_KVK(0x29, kVK_ANSI_Semicolon);		// KEYSCAN_SEMICOLON
+WWLIB_CHECK_KVK(0x27, kVK_ANSI_Quote);		// KEYSCAN_APOSTROPHE
+WWLIB_CHECK_KVK(0x32, kVK_ANSI_Grave);		// KEYSCAN_GRAVE
+WWLIB_CHECK_KVK(0x38, kVK_Shift);		// KEYSCAN_LSHIFT
+WWLIB_CHECK_KVK(0x2A, kVK_ANSI_Backslash);		// KEYSCAN_BACKSLASH
+WWLIB_CHECK_KVK(0x06, kVK_ANSI_Z);		// KEYSCAN_Z
+WWLIB_CHECK_KVK(0x07, kVK_ANSI_X);		// KEYSCAN_X
+WWLIB_CHECK_KVK(0x08, kVK_ANSI_C);		// KEYSCAN_C
+WWLIB_CHECK_KVK(0x09, kVK_ANSI_V);		// KEYSCAN_V
+WWLIB_CHECK_KVK(0x0B, kVK_ANSI_B);		// KEYSCAN_B
+WWLIB_CHECK_KVK(0x2D, kVK_ANSI_N);		// KEYSCAN_N
+WWLIB_CHECK_KVK(0x2E, kVK_ANSI_M);		// KEYSCAN_M
+WWLIB_CHECK_KVK(0x2B, kVK_ANSI_Comma);		// KEYSCAN_COMMA
+WWLIB_CHECK_KVK(0x2F, kVK_ANSI_Period);		// KEYSCAN_PERIOD
+WWLIB_CHECK_KVK(0x2C, kVK_ANSI_Slash);		// KEYSCAN_SLASH
+WWLIB_CHECK_KVK(0x3C, kVK_RightShift);		// KEYSCAN_RSHIFT
+WWLIB_CHECK_KVK(0x43, kVK_ANSI_KeypadMultiply);		// KEYSCAN_NUMPADSTAR
+WWLIB_CHECK_KVK(0x3A, kVK_Option);		// KEYSCAN_LALT
+WWLIB_CHECK_KVK(0x31, kVK_Space);		// KEYSCAN_SPACE
+WWLIB_CHECK_KVK(0x39, kVK_CapsLock);		// KEYSCAN_CAPSLOCK
+WWLIB_CHECK_KVK(0x7A, kVK_F1);		// KEYSCAN_F1
+WWLIB_CHECK_KVK(0x78, kVK_F2);		// KEYSCAN_F2
+WWLIB_CHECK_KVK(0x63, kVK_F3);		// KEYSCAN_F3
+WWLIB_CHECK_KVK(0x76, kVK_F4);		// KEYSCAN_F4
+WWLIB_CHECK_KVK(0x60, kVK_F5);		// KEYSCAN_F5
+WWLIB_CHECK_KVK(0x61, kVK_F6);		// KEYSCAN_F6
+WWLIB_CHECK_KVK(0x62, kVK_F7);		// KEYSCAN_F7
+WWLIB_CHECK_KVK(0x64, kVK_F8);		// KEYSCAN_F8
+WWLIB_CHECK_KVK(0x65, kVK_F9);		// KEYSCAN_F9
+WWLIB_CHECK_KVK(0x6D, kVK_F10);		// KEYSCAN_F10
+WWLIB_CHECK_KVK(0x47, kVK_ANSI_KeypadClear);		// KEYSCAN_NUMLOCK
+WWLIB_CHECK_KVK(0x6B, kVK_F14);		// KEYSCAN_SCROLL
+WWLIB_CHECK_KVK(0x59, kVK_ANSI_Keypad7);		// KEYSCAN_NUMPAD7
+WWLIB_CHECK_KVK(0x5B, kVK_ANSI_Keypad8);		// KEYSCAN_NUMPAD8
+WWLIB_CHECK_KVK(0x5C, kVK_ANSI_Keypad9);		// KEYSCAN_NUMPAD9
+WWLIB_CHECK_KVK(0x4E, kVK_ANSI_KeypadMinus);		// KEYSCAN_NUMPADMINUS
+WWLIB_CHECK_KVK(0x56, kVK_ANSI_Keypad4);		// KEYSCAN_NUMPAD4
+WWLIB_CHECK_KVK(0x57, kVK_ANSI_Keypad5);		// KEYSCAN_NUMPAD5
+WWLIB_CHECK_KVK(0x58, kVK_ANSI_Keypad6);		// KEYSCAN_NUMPAD6
+WWLIB_CHECK_KVK(0x45, kVK_ANSI_KeypadPlus);		// KEYSCAN_NUMPADPLUS
+WWLIB_CHECK_KVK(0x53, kVK_ANSI_Keypad1);		// KEYSCAN_NUMPAD1
+WWLIB_CHECK_KVK(0x54, kVK_ANSI_Keypad2);		// KEYSCAN_NUMPAD2
+WWLIB_CHECK_KVK(0x55, kVK_ANSI_Keypad3);		// KEYSCAN_NUMPAD3
+WWLIB_CHECK_KVK(0x52, kVK_ANSI_Keypad0);		// KEYSCAN_NUMPAD0
+WWLIB_CHECK_KVK(0x41, kVK_ANSI_KeypadDecimal);		// KEYSCAN_NUMPADPERIOD
+WWLIB_CHECK_KVK(0x0A, kVK_ISO_Section);		// KEYSCAN_OEM_102
+WWLIB_CHECK_KVK(0x67, kVK_F11);		// KEYSCAN_F11
+WWLIB_CHECK_KVK(0x6F, kVK_F12);		// KEYSCAN_F12
+WWLIB_CHECK_KVK(0x68, kVK_JIS_Kana);		// KEYSCAN_KANA
+WWLIB_CHECK_KVK(0x5D, kVK_JIS_Yen);		// KEYSCAN_YEN
+WWLIB_CHECK_KVK(0x66, kVK_JIS_Eisu);		// KEYSCAN_KANJI
+WWLIB_CHECK_KVK(0x4C, kVK_ANSI_KeypadEnter);		// KEYSCAN_NUMPADENTER
+WWLIB_CHECK_KVK(0x3E, kVK_RightControl);		// KEYSCAN_RCONTROL
+WWLIB_CHECK_KVK(0x4B, kVK_ANSI_KeypadDivide);		// KEYSCAN_NUMPADSLASH
+WWLIB_CHECK_KVK(0x69, kVK_F13);		// KEYSCAN_SYSRQ
+WWLIB_CHECK_KVK(0x3D, kVK_RightOption);		// KEYSCAN_RALT
+WWLIB_CHECK_KVK(0x73, kVK_Home);		// KEYSCAN_HOME
+WWLIB_CHECK_KVK(0x7E, kVK_UpArrow);		// KEYSCAN_UPARROW
+WWLIB_CHECK_KVK(0x74, kVK_PageUp);		// KEYSCAN_PGUP
+WWLIB_CHECK_KVK(0x7B, kVK_LeftArrow);		// KEYSCAN_LEFTARROW
+WWLIB_CHECK_KVK(0x7C, kVK_RightArrow);		// KEYSCAN_RIGHTARROW
+WWLIB_CHECK_KVK(0x77, kVK_End);		// KEYSCAN_END
+WWLIB_CHECK_KVK(0x7D, kVK_DownArrow);		// KEYSCAN_DOWNARROW
+WWLIB_CHECK_KVK(0x79, kVK_PageDown);		// KEYSCAN_PGDN
+WWLIB_CHECK_KVK(0x72, kVK_Help);		// KEYSCAN_INSERT
+WWLIB_CHECK_KVK(0x75, kVK_ForwardDelete);		// KEYSCAN_DELETE
+#undef WWLIB_CHECK_KVK
+#endif // WWLIB_COCOA_KVK_CHECKED
+
 int Set1_From_Virtual_Key(unsigned short key)
 {
 	for (int i = 0; i < SCAN_CODE_COUNT; ++i) {
@@ -216,10 +369,13 @@ unsigned int Modifiers_From_Cocoa(NSEventModifierFlags flags)
 }
 
 /*
-**	VK_EXT_metal_surface, declared here rather than included, so that this file needs no
-**	Vulkan headers and no link-time dependency on the loader: the entry point is resolved
-**	through vkGetInstanceProcAddr, which is itself found with dlsym() in whatever loader the
-**	process already has (libvulkan.dylib, or MoltenVK linked directly).
+**	VK_EXT_metal_surface. This file cannot *require* the Vulkan headers - WWLib has no Vulkan
+**	dependency and must compile without an SDK - so the extension is mirrored locally, and the
+**	mirror is checked against the real declarations whenever the headers happen to be
+**	available (the spike and the CI job both build with them). The entry point is resolved
+**	through vkGetInstanceProcAddr, found with dlsym() in whatever loader the process already
+**	has (libvulkan.dylib, or MoltenVK linked directly), so there is still no link-time
+**	dependency on the loader either way.
 */
 typedef void * VkInstanceOpaque;
 typedef unsigned long long VkSurfaceHandle;
@@ -240,6 +396,37 @@ const int VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT_Local = 1000217000;
 typedef int (*PFN_vkCreateMetalSurfaceEXT_Local)(VkInstanceOpaque,
                                                  const VkMetalSurfaceCreateInfoEXT_Local *,
                                                  const void *, VkSurfaceHandle *);
+
+#ifdef WWLIB_COCOA_HAVE_VULKAN_HEADERS
+/*
+**	The mirror against the real thing. Every one of these was a guess when this file was
+**	written on Linux; each static_assert is one guess turned into a compile-time fact on any
+**	machine that has the MoltenVK/Vulkan headers, including the CI runner.
+*/
+static_assert(VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT_Local ==
+                  static_cast<int>(VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT),
+              "the mirrored sType is not VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT");
+static_assert(sizeof(VkMetalSurfaceCreateInfoEXT_Local) == sizeof(VkMetalSurfaceCreateInfoEXT),
+              "VkMetalSurfaceCreateInfoEXT mirror is the wrong size");
+static_assert(offsetof(VkMetalSurfaceCreateInfoEXT_Local, sType) ==
+                  offsetof(VkMetalSurfaceCreateInfoEXT, sType),
+              "VkMetalSurfaceCreateInfoEXT mirror: sType at the wrong offset");
+static_assert(offsetof(VkMetalSurfaceCreateInfoEXT_Local, pNext) ==
+                  offsetof(VkMetalSurfaceCreateInfoEXT, pNext),
+              "VkMetalSurfaceCreateInfoEXT mirror: pNext at the wrong offset");
+static_assert(offsetof(VkMetalSurfaceCreateInfoEXT_Local, flags) ==
+                  offsetof(VkMetalSurfaceCreateInfoEXT, flags),
+              "VkMetalSurfaceCreateInfoEXT mirror: flags at the wrong offset");
+static_assert(offsetof(VkMetalSurfaceCreateInfoEXT_Local, pLayer) ==
+                  offsetof(VkMetalSurfaceCreateInfoEXT, pLayer),
+              "VkMetalSurfaceCreateInfoEXT mirror: pLayer at the wrong offset");
+static_assert(sizeof(VkSurfaceHandle) == sizeof(VkSurfaceKHR),
+              "VkSurfaceKHR is not 64 bits wide here, so the out parameter is the wrong size");
+static_assert(sizeof(VkInstanceOpaque) == sizeof(VkInstance),
+              "VkInstance is not pointer-sized here");
+static_assert(sizeof(PFN_vkCreateMetalSurfaceEXT_Local) == sizeof(PFN_vkCreateMetalSurfaceEXT),
+              "the mirrored entry-point type is not pointer-sized");
+#endif
 
 struct WindowState
 {
@@ -522,13 +709,24 @@ void * Window_Create(const WindowConfig & config)
 		TheLastError = "CAMetalLayer layer returned nil (no Metal device?)";
 		return nullptr;
 	}
+	id<MTLDevice> metal_device = MTLCreateSystemDefaultDevice();
+	if (metal_device == nil) {
+		TheLastError = "MTLCreateSystemDefaultDevice() returned nil: no Metal device";
+		return nullptr;
+	}
+	layer.device = metal_device;
+	layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
 	const CGFloat scale = [window backingScaleFactor];
 	layer.contentsScale = scale;
 	layer.drawableSize = CGSizeMake(config.Width * scale, config.Height * scale);
-	// The renderer owns the drawable; without this MoltenVK cannot acquire one.
-	layer.framebufferOnly = YES;
-	[view setWantsLayer:YES];
+	// NO, not YES: the swapchain the renderer asks MoltenVK for includes
+	// VK_IMAGE_USAGE_TRANSFER_DST_BIT, and a framebufferOnly layer's drawable textures cannot
+	// be the target of a blit or a readback.
+	layer.framebufferOnly = NO;
+	// A layer-hosting view: setLayer has to come before setWantsLayer, or AppKit takes the
+	// view to be layer-*backed* and replaces the layer with one of its own.
 	[view setLayer:layer];
+	[view setWantsLayer:YES];
 	[window setContentView:view];
 	[window makeFirstResponder:view];
 
@@ -722,31 +920,49 @@ bool Window_Create_Vulkan_Surface(void * window, void * vk_instance, void * out_
 	WindowState * state = State(window);
 	if (state == nullptr || vk_instance == nullptr || out_vk_surface == nullptr) return false;
 
-	PFN_vkGetInstanceProcAddr_Local get_proc =
-		reinterpret_cast<PFN_vkGetInstanceProcAddr_Local>(
-			dlsym(RTLD_DEFAULT, "vkGetInstanceProcAddr"));
+	// Real declarations when the translation unit has the Vulkan/MoltenVK headers, the local
+	// mirror otherwise. The two are asserted layout-identical above, so this branch is a
+	// matter of who declares the names, not of what is passed to the driver.
+#ifdef WWLIB_COCOA_HAVE_VULKAN_HEADERS
+	typedef PFN_vkGetInstanceProcAddr Get_Proc_Type;
+	typedef PFN_vkCreateMetalSurfaceEXT Create_Type;
+	typedef VkMetalSurfaceCreateInfoEXT Create_Info_Type;
+	typedef VkInstance Instance_Type;
+	typedef VkSurfaceKHR Surface_Type;
+	const int surface_stype = static_cast<int>(VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT);
+#else
+	typedef PFN_vkGetInstanceProcAddr_Local Get_Proc_Type;
+	typedef PFN_vkCreateMetalSurfaceEXT_Local Create_Type;
+	typedef VkMetalSurfaceCreateInfoEXT_Local Create_Info_Type;
+	typedef VkInstanceOpaque Instance_Type;
+	typedef VkSurfaceHandle Surface_Type;
+	const int surface_stype = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT_Local;
+#endif
+
+	Get_Proc_Type get_proc =
+		reinterpret_cast<Get_Proc_Type>(dlsym(RTLD_DEFAULT, "vkGetInstanceProcAddr"));
 	if (get_proc == nullptr) {
 		TheLastError = "vkGetInstanceProcAddr not found in this process; is the Vulkan "
 		               "loader or MoltenVK linked?";
 		return false;
 	}
-	PFN_vkCreateMetalSurfaceEXT_Local create =
-		reinterpret_cast<PFN_vkCreateMetalSurfaceEXT_Local>(
-			get_proc(vk_instance, "vkCreateMetalSurfaceEXT"));
+	Instance_Type instance = reinterpret_cast<Instance_Type>(vk_instance);
+	Create_Type create =
+		reinterpret_cast<Create_Type>(get_proc(instance, "vkCreateMetalSurfaceEXT"));
 	if (create == nullptr) {
 		TheLastError = "vkCreateMetalSurfaceEXT unavailable; the instance must enable "
 		               "VK_EXT_metal_surface";
 		return false;
 	}
 
-	VkMetalSurfaceCreateInfoEXT_Local info;
-	info.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT_Local;
+	Create_Info_Type info = Create_Info_Type();
+	info.sType = static_cast<decltype(info.sType)>(surface_stype);
 	info.pNext = nullptr;
 	info.flags = 0;
 	info.pLayer = state->Layer;
 
-	VkSurfaceHandle * surface = static_cast<VkSurfaceHandle *>(out_vk_surface);
-	const int result = create(vk_instance, &info, nullptr, surface);
+	Surface_Type * surface = static_cast<Surface_Type *>(out_vk_surface);
+	const int result = static_cast<int>(create(instance, &info, nullptr, surface));
 	if (result != 0) {
 		TheLastError = "vkCreateMetalSurfaceEXT failed (VkResult " + std::to_string(result) + ")";
 		return false;

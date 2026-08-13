@@ -12,6 +12,11 @@ project(zh-renderer-spike CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# The Objective-C++ sources (the Cocoa window backend, the Metal surface probe) use
+# static_assert messages and decltype, so the standard is pinned here rather than left to
+# whatever the Xcode clang of the day defaults to.
+set(CMAKE_OBJCXX_STANDARD 17)
+set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
@@ -169,12 +174,13 @@ if(SPIKE_HAVE_SDL2)
     endif()
 endif()
 
-# zh-window-spike-cocoa: the same driver against the native Cocoa/CAMetalLayer backend.
+# zh-window-spike-cocoa: the same driver against the native Cocoa/CAMetalLayer backend, and
+# zh-metal-surface-probe: the part of that path a machine with no windowing session can still
+# exercise (CAMetalLayer -> VK_EXT_metal_surface -> swapchain -> present).
 #
-# WRITTEN BLIND - neither this target nor the file it compiles has ever been configured,
-# compiled or run, because the session that wrote them had only Linux. It is what
-# tools/macos-window-check.sh builds, and finding out whether it even compiles is that
-# script's first job.
+# Both are compiled in CI by the `window-seam-macos` job in .github/workflows/native-port-ci.yml,
+# which is where platform_window_cocoa.mm - written blind on Linux by PR #32 - first met a
+# compiler. tools/macos-window-check.sh builds the same targets on a real Mac.
 if(APPLE)
     include(CheckLanguage)
     check_language(OBJCXX)
@@ -190,10 +196,17 @@ if(APPLE)
         target_include_directories(zh-window-spike-cocoa PRIVATE src "${WWLIB_PLATFORM_DIR}")
         target_link_libraries(zh-window-spike-cocoa PRIVATE Vulkan::Vulkan
             "-framework AppKit" "-framework QuartzCore" "-framework Metal"
-            "-framework CoreGraphics" "-framework Foundation")
+            "-framework CoreGraphics" "-framework Foundation" "-framework Carbon")
         target_compile_definitions(zh-window-spike-cocoa PRIVATE
             SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}"
-            SPIKE_WITH_PLATFORM_WINDOW)
+            SPIKE_WITH_PLATFORM_WINDOW
+            # Checks the backend's 104 kVK_* literals against HIToolbox's real constants at
+            # compile time. WWLib itself does not do this, because it must not need Carbon.
+            WWLIB_COCOA_VERIFY_KVK)
+
+        add_executable(zh-metal-surface-probe src/metal_surface_probe.mm)
+        target_link_libraries(zh-metal-surface-probe PRIVATE Vulkan::Vulkan
+            "-framework QuartzCore" "-framework Metal" "-framework Foundation")
     else()
         message(STATUS "no Objective-C++ compiler: zh-window-spike-cocoa not built")
     endif()
@@ -204,7 +217,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
                    zh-resource-lock-tests zh-throughput)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
-    foreach(target zh-window-spike zh-window-spike-cocoa)
+    foreach(target zh-window-spike zh-window-spike-cocoa zh-metal-surface-probe)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE
                 -Wall -Wextra -Wno-missing-field-initializers)
