@@ -169,6 +169,46 @@ jobs:
             native-build-report.md
             native-build.json
 
+  # The LAN packet's layout. LANMessage is pack(1) and is sent as raw bytes, so its size and member
+  # offsets are the wire format; it used to grow from 471 to 536 bytes off Windows because its text
+  # fields were wchar_t. This compiles it at 32 and 64 bits with both wchar_t widths and requires
+  # all four to agree, and requires the pre-port spelling to still fail.
+  lanmessage-layout:
+    name: LAN packet layout (32/64-bit)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
+    timeout-minutes: 20
+    steps:
+      - name: Install toolchain
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          # gcc-multilib is what supplies the 32-bit libstdc++ and libc headers clang needs for
+          # -m32; without it the 32-bit half of the comparison cannot be measured at all.
+          apt-get install -y --no-install-recommends \
+            clang-14 gcc-multilib g++-multilib python3 git ca-certificates zlib1g-dev
+          clang++-14 --version
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Provision the third-party headers
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ./scripts/ci/fetch-probe-deps.sh
+
+      - name: Compare the LANMessage layout across 32/64-bit and both wchar_t widths
+        run: |
+          set -o pipefail
+          {
+            echo '## LAN packet layout'
+            echo '```'
+            python3 scripts/ci/check-lanmessage-layout.py --clangxx clang++-14
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   # 3. Build the D3D8 -> Vulkan spike and render with it. Exit status is not the assertion:
   #    the framebuffer is read back and compared against the committed reference image, and the
   #    validation layer must be loaded and silent.

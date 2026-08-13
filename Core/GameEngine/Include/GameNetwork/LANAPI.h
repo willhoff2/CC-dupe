@@ -33,6 +33,9 @@
 #include "GameNetwork/NetworkDefs.h"
 #include "GameNetwork/LANPlayer.h"
 #include "GameNetwork/LANGameInfo.h"
+#include "GameNetwork/LANWireString.h"
+
+#include <stddef.h>
 
 //static const Int g_lanPlayerNameLength = 20;
 static const Int g_lanPlayerNameLength = 12; // reduced length because of game option length
@@ -63,7 +66,9 @@ public:
 	virtual void setIsActive(Bool isActive ) = 0;								///< Tell TheLAN whether or not the app is active.
 
 	// Possible types of chat messages
-	enum ChatType
+	// TheSuperHackers @port Both enumerations are members of LANMessage, so their width is part of
+	// the wire format and must not be left to the compiler.
+	enum ChatType CPP_11(: Int)
 	{
 		LANCHAT_NORMAL = 0,
 		LANCHAT_EMOTE,
@@ -89,7 +94,7 @@ public:
 	virtual void ResetGameStartTimer() = 0;
 
 	// Possible result codes passed to On functions
-	enum ReturnType
+	enum ReturnType CPP_11(: Int)
 	{
 		RET_OK,							// Any function
 		RET_TIMEOUT,				// OnGameJoin/Leave/Start, etc
@@ -139,11 +144,17 @@ public:
 
 /**
  * LAN message class
+ *
+ * TheSuperHackers @port This is sent as raw bytes (`queueSend(..., sizeof(LANMessage))`), so every
+ * member's width and offset is the wire format. Nothing in it may be a type whose size depends on
+ * the target: the Unicode fields are LANWireChar rather than WideChar, and every enumeration has a
+ * fixed underlying type. The assertions below hold the layout in place; see
+ * docs/porting/lanmessage-64bit.md.
  */
 #pragma pack(push, 1)
 struct LANMessage
 {
-	enum Type				          ///< What kind of message are we?
+	enum Type CPP_11(: Int)		          ///< What kind of message are we?
 	{
 		// Locating everybody
 		MSG_REQUEST_LOCATIONS,	///< Hey, where is everybody?
@@ -171,7 +182,7 @@ struct LANMessage
 		MSG_REQUEST_GAME_INFO,	///< For direct connect, get the game info from a specific IP Address
 	} messageType;
 
-	WideChar name[g_lanPlayerNameLength+1]; ///< My name, for convenience
+	LANWireChar name[g_lanPlayerNameLength+1]; ///< My name, for convenience
 	char userName[g_lanLoginNameLength+1];	///< login name, for convenience
 	char hostName[g_lanHostNameLength+1];		///< machine name, for convenience
 
@@ -188,13 +199,13 @@ struct LANMessage
 		// GameJoined is sent with REQUEST_GAME_LEAVE
 		struct
 		{
-			WideChar gameName[g_lanGameNameLength+1];
+			LANWireChar gameName[g_lanGameNameLength+1];
 		} GameToLeave;
 
 		// GameInfo if sent with GAME_ANNOUNCE
 		struct
 		{
-			WideChar gameName[g_lanGameNameLength+1];
+			LANWireChar gameName[g_lanGameNameLength+1];
 			Bool inProgress;
 			char options[m_lanMaxOptionsLength+1];
 			Bool isDirectConnect;
@@ -204,7 +215,7 @@ struct LANMessage
 		struct
 		{
 			UnsignedInt ip;
-			WideChar playerName[g_lanPlayerNameLength+1];
+			LANWireChar playerName[g_lanPlayerNameLength+1];
 		} PlayerInfo;
 
 		// GameToJoin is sent with REQUEST_JOIN
@@ -219,7 +230,7 @@ struct LANMessage
 		// GameJoined is sent with JOIN_ACCEPT
 		struct
 		{
-			WideChar gameName[g_lanGameNameLength+1];
+			LANWireChar gameName[g_lanGameNameLength+1];
 			UnsignedInt gameIP;
 			UnsignedInt playerIP;
 			Int slotPosition;
@@ -228,7 +239,7 @@ struct LANMessage
 		// GameNotJoined is sent with JOIN_DENY
 		struct
 		{
-			WideChar gameName[g_lanGameNameLength+1];
+			LANWireChar gameName[g_lanGameNameLength+1];
 			UnsignedInt gameIP;
 			UnsignedInt playerIP;
 			LANAPIInterface::ReturnType reason;
@@ -237,14 +248,14 @@ struct LANMessage
 		// Accept is sent with SET_ACCEPT
 		struct
 		{
-			WideChar gameName[g_lanGameNameLength+1];
+			LANWireChar gameName[g_lanGameNameLength+1];
 			Bool isAccepted;
 		} Accept;
 
 		// Accept is sent with MAP_AVAILABILITY
 		struct
 		{
-			WideChar gameName[g_lanGameNameLength+1];
+			LANWireChar gameName[g_lanGameNameLength+1];
 			UnsignedInt mapCRC;	// to make sure we're talking about the same map
 			Bool hasMap;
 		} MapStatus;
@@ -252,9 +263,9 @@ struct LANMessage
 		// Chat is sent with CHAT
 		struct
 		{
-			WideChar gameName[g_lanGameNameLength+1];
+			LANWireChar gameName[g_lanGameNameLength+1];
 			LANAPIInterface::ChatType chatType;
-			WideChar message[g_lanMaxChatLength+1];
+			LANWireChar message[g_lanMaxChatLength+1];
 		} Chat;
 
 		// GameOptions is sent with GAME_OPTIONS
@@ -268,6 +279,35 @@ struct LANMessage
 #pragma pack(pop)
 
 static_assert(sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE, "LANMessage struct cannot be larger than the max packet size");
+
+// TheSuperHackers @port The wire layout, spelled out. These numbers are what a 32-bit MSVC build has
+// always produced and are now what every target produces; a member that changes width or an
+// enumeration that loses its underlying type fails here, naming the packet, instead of silently
+// making two builds of the game unable to talk to each other.
+// scripts/ci/check-lanmessage-layout.py compiles this header at 32 and 64 bits, with a 2 byte and a
+// 4 byte wchar_t, and requires all four to agree.
+static const Int LANMESSAGE_WIRE_SIZE = 471;
+
+STATIC_ASSERT_ALWAYS(sizeof(LANMessage) == LANMESSAGE_WIRE_SIZE, "LANMessage must have its documented wire size on every target");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, messageType) == 0, "LANMessage::messageType must be at offset 0");
+STATIC_ASSERT_ALWAYS(sizeof(LANMessage::Type) == 4, "LANMessage::Type must be 4 bytes on the wire");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, name) == 4, "LANMessage::name must be at offset 4");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, userName) == 30, "LANMessage::userName must be at offset 30");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, hostName) == 32, "LANMessage::hostName must be at offset 32");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, StartTimer.seconds) == 34, "LANMessage payloads must start at offset 34");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, GameInfo.inProgress) == 68, "LANMessage::GameInfo::inProgress must be at offset 68");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, GameInfo.options) == 69, "LANMessage::GameInfo::options must be at offset 69");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, GameInfo.isDirectConnect) == 470, "LANMessage::GameInfo::isDirectConnect must be the last byte of the packet");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, PlayerInfo.playerName) == 38, "LANMessage::PlayerInfo::playerName must be at offset 38");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, GameToJoin.serial) == 46, "LANMessage::GameToJoin::serial must be at offset 46");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, GameJoined.slotPosition) == 76, "LANMessage::GameJoined::slotPosition must be at offset 76");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, GameNotJoined.reason) == 76, "LANMessage::GameNotJoined::reason must be at offset 76");
+STATIC_ASSERT_ALWAYS(sizeof(LANAPIInterface::ReturnType) == 4, "LANAPIInterface::ReturnType must be 4 bytes on the wire");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, MapStatus.hasMap) == 72, "LANMessage::MapStatus::hasMap must be at offset 72");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, Chat.chatType) == 68, "LANMessage::Chat::chatType must be at offset 68");
+STATIC_ASSERT_ALWAYS(sizeof(LANAPIInterface::ChatType) == 4, "LANAPIInterface::ChatType must be 4 bytes on the wire");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, Chat.message) == 72, "LANMessage::Chat::message must be at offset 72");
+STATIC_ASSERT_ALWAYS(offsetof(LANMessage, GameOptions.options) == 34, "LANMessage::GameOptions::options must be at offset 34");
 
 
 /**
