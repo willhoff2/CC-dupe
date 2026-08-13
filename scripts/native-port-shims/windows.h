@@ -162,8 +162,11 @@ DECLARE_HANDLE(HKEY);
 DECLARE_HANDLE(HKL);
 DECLARE_HANDLE(HHOOK);
 DECLARE_HANDLE(HRSRC);
-DECLARE_HANDLE(HGLOBAL);
-DECLARE_HANDLE(HLOCAL);
+// Not DECLARE_HANDLE: winnt.h really does typedef these to HANDLE, i.e. to void*, and code that
+// passes a T* straight to GlobalFree() -- SystemAllocator.h's deallocate(), profile.cpp -- relies
+// on the implicit conversion that a distinct handle struct would refuse.
+typedef HANDLE HGLOBAL;
+typedef HANDLE HLOCAL;
 DECLARE_HANDLE(HGDIOBJ);
 #ifndef HMONITOR_DECLARED
 #define HMONITOR_DECLARED
@@ -204,10 +207,19 @@ typedef struct _SYSTEMTIME {
 
 typedef struct _GUID { DWORD Data1; WORD Data2; WORD Data3; BYTE Data4[8]; } GUID;
 typedef GUID IID, CLSID, UUID;
+typedef short VARIANT_BOOL;
 typedef GUID* LPGUID;
 typedef const GUID& REFGUID;
 typedef const IID& REFIID;
 typedef const CLSID& REFCLSID;
+// <guiddef.h> defines these as inline memcmp comparisons; WebBrowser.cpp's QueryInterface uses
+// them on interface IIDs.
+inline bool operator==(const GUID& a, const GUID& b)
+{
+	return a.Data1 == b.Data1 && a.Data2 == b.Data2 && a.Data3 == b.Data3 &&
+	       __builtin_memcmp(a.Data4, b.Data4, sizeof(a.Data4)) == 0;
+}
+inline bool operator!=(const GUID& a, const GUID& b) { return !(a == b); }
 
 typedef struct _SECURITY_ATTRIBUTES {
 	DWORD nLength; LPVOID lpSecurityDescriptor; BOOL bInheritHandle;
@@ -237,6 +249,15 @@ typedef struct _OSVERSIONINFOA {
 	CHAR szCSDVersion[128];
 } OSVERSIONINFOA, *LPOSVERSIONINFOA;
 typedef OSVERSIONINFOA OSVERSIONINFO, *LPOSVERSIONINFO;
+
+// The fixed part of a Win32 VERSIONINFO resource. verchk.cpp memcpy()s one out of a PE image and
+// compares dwFileVersionMS/LS, so the field order and the 32-bit widths are load-bearing.
+typedef struct tagVS_FIXEDFILEINFO {
+	DWORD dwSignature, dwStrucVersion;
+	DWORD dwFileVersionMS, dwFileVersionLS, dwProductVersionMS, dwProductVersionLS;
+	DWORD dwFileFlagsMask, dwFileFlags, dwFileOS, dwFileType, dwFileSubtype;
+	DWORD dwFileDateMS, dwFileDateLS;
+} VS_FIXEDFILEINFO;
 
 typedef struct _MEMORYSTATUS {
 	DWORD dwLength, dwMemoryLoad;
@@ -335,6 +356,8 @@ typedef PTOP_LEVEL_EXCEPTION_FILTER LPTOP_LEVEL_EXCEPTION_FILTER;
 #define interface struct
 #define STDMETHOD(m)          virtual HRESULT STDMETHODCALLTYPE m
 #define STDMETHOD_(t, m)      virtual t STDMETHODCALLTYPE m
+#define STDMETHODIMP          HRESULT STDMETHODCALLTYPE
+#define STDMETHODIMP_(t)      t STDMETHODCALLTYPE
 #define PURE                  = 0
 #define THIS_
 #define THIS                  void
@@ -352,6 +375,9 @@ struct IUnknown {
 	virtual ULONG Release() = 0;
 };
 typedef IUnknown* LPUNKNOWN;
+extern "C" const IID IID_IUnknown;
+extern "C" const IID IID_IDispatch;
+extern "C" const IID IID_IClassFactory;
 
 // Minimal COM/GDI declarations the fetched DirectX 8 SDK headers expect from the platform SDK.
 struct IStream;
@@ -431,6 +457,17 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define HWND_TOPMOST             ((HWND)-1)
 #define HWND_NOTOPMOST           ((HWND)-2)
 #define TIME_ZONE_ID_INVALID     0xFFFFFFFF
+#define GMEM_FIXED               0x0000
+#define GMEM_MOVEABLE            0x0002
+#define GMEM_NOCOMPACT           0x0010
+#define GMEM_NODISCARD           0x0020
+#define GMEM_ZEROINIT            0x0040
+#define GMEM_MODIFY              0x0080
+#define GMEM_DISCARDABLE         0x0100
+#define GMEM_SHARE               0x2000
+#define GMEM_DDESHARE            0x2000
+#define GPTR                     (GMEM_FIXED | GMEM_ZEROINIT)
+#define GHND                     (GMEM_MOVEABLE | GMEM_ZEROINIT)
 #define VER_PLATFORM_WIN32s          0
 #define VER_PLATFORM_WIN32_WINDOWS   1
 #define VER_PLATFORM_WIN32_NT        2
@@ -518,6 +555,8 @@ LONG   InterlockedExchange(LONG volatile*, LONG);
 LONG   InterlockedExchangeAdd(LONG volatile*, LONG);
 LONG   InterlockedCompareExchange(LONG volatile*, LONG, LONG);
 HMODULE GetModuleHandleA(LPCSTR);
+UINT   GetSystemDirectoryA(LPSTR, UINT);
+UINT   GetWindowsDirectoryA(LPSTR, UINT);
 DWORD  GetModuleFileNameA(HMODULE, LPSTR, DWORD);
 HMODULE LoadLibraryA(LPCSTR);
 BOOL   FreeLibrary(HMODULE);
@@ -558,9 +597,17 @@ BOOL   GlobalMemoryStatusEx(LPMEMORYSTATUSEX);
 LPVOID VirtualAlloc(LPVOID, SIZE_T, DWORD, DWORD);
 BOOL   VirtualFree(LPVOID, SIZE_T, DWORD);
 HGLOBAL GlobalAlloc(UINT, SIZE_T);
+HGLOBAL GlobalReAlloc(HGLOBAL, SIZE_T, UINT);
+SIZE_T GlobalSize(HGLOBAL);
 LPVOID GlobalLock(HGLOBAL);
 BOOL   GlobalUnlock(HGLOBAL);
 HGLOBAL GlobalFree(HGLOBAL);
+// Version resource queries. Windows-only by construction -- they read a VERSIONINFO resource out
+// of a PE image -- so they are declared and never defined; see
+// docs/porting/crt-and-widechar-compat.md.
+DWORD  GetFileVersionInfoSizeA(LPCSTR, LPDWORD);
+BOOL   GetFileVersionInfoA(LPCSTR, DWORD, DWORD, LPVOID);
+BOOL   VerQueryValueA(LPCVOID, LPCSTR, LPVOID*, PUINT);
 void   OutputDebugStringA(LPCSTR);
 void   DebugBreak();
 BOOL   IsDebuggerPresent();
@@ -580,6 +627,8 @@ LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_F
 HRESULT CoInitialize(LPVOID);
 void    CoUninitialize();
 HRESULT CoCreateInstance(REFCLSID, LPUNKNOWN, DWORD, REFIID, void**);
+HRESULT OleInitialize(LPVOID);
+void    OleUninitialize();
 void*   CoTaskMemAlloc(SIZE_T);
 void    CoTaskMemFree(void*);
 
@@ -619,6 +668,18 @@ int     GetSystemMetrics(int);
 UINT    GetDoubleClickTime();
 int     GetDateFormatA(LCID, DWORD, const SYSTEMTIME*, LPCSTR, LPSTR, int);
 int     GetTimeFormatA(LCID, DWORD, const SYSTEMTIME*, LPCSTR, LPSTR, int);
+
+// TheSuperHackers @port The wide entry points that call sites ask for *by name*, i.e. where the
+// A/W aliasing macros below cannot help because the source already says ...W. LPWSTR is
+// wchar_t*, which is 4 bytes here against 2 on MSVC; the call sites pass WideChar buffers, which
+// have the same mismatch. That is not fixed by declaring these -- see
+// docs/porting/widechar-fallout.md -- it is only made visible at the boundary where it has to be
+// fixed.
+DWORD   GetModuleFileNameW(HMODULE, LPWSTR, DWORD);
+HMODULE GetModuleHandleW(LPCWSTR);
+int     GetDateFormatW(LCID, DWORD, const SYSTEMTIME*, LPCWSTR, LPWSTR, int);
+int     GetTimeFormatW(LCID, DWORD, const SYSTEMTIME*, LPCWSTR, LPWSTR, int);
+DWORD   FormatMessageW(DWORD, LPCVOID, DWORD, DWORD, LPWSTR, DWORD, va_list*);
 HDC     GetDC(HWND);
 int     ReleaseDC(HWND, HDC);
 BOOL    InvalidateRect(HWND, LPCRECT, BOOL);
@@ -629,6 +690,8 @@ BOOL    InvalidateRect(HWND, LPCRECT, BOOL);
 #define CreateMutex      CreateMutexA
 #define CreateSemaphore  CreateSemaphoreA
 #define GetModuleHandle  GetModuleHandleA
+#define GetSystemDirectory GetSystemDirectoryA
+#define GetWindowsDirectory GetWindowsDirectoryA
 #define GetModuleFileName GetModuleFileNameA
 #define LoadLibrary      LoadLibraryA
 #define FindResource     FindResourceA
@@ -647,6 +710,9 @@ BOOL    InvalidateRect(HWND, LPCRECT, BOOL);
 #define FindFirstFile    FindFirstFileA
 #define FindNextFile     FindNextFileA
 #define GetVersionEx     GetVersionExA
+#define GetFileVersionInfoSize GetFileVersionInfoSizeA
+#define GetFileVersionInfo GetFileVersionInfoA
+#define VerQueryValue    VerQueryValueA
 #define CreateProcess    CreateProcessA
 #define GetEnvironmentVariable GetEnvironmentVariableA
 #define GetCommandLine   GetCommandLineA

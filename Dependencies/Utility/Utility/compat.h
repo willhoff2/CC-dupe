@@ -91,6 +91,8 @@
 #define FALSE false
 #endif
 
+#include "fpu_compat.h"
+#include "mbstring_compat.h"
 #include "mem_compat.h"
 #include "string_compat.h"
 #include "tchar_compat.h"

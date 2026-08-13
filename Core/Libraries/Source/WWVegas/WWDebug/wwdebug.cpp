@@ -55,6 +55,7 @@
 #include <windows.h>
 #else
 #include <errno.h>
+#include <string.h>
 #endif
 
 static PrintFunc			_CurMessageHandler = nullptr;
@@ -68,7 +69,11 @@ static ProfileFunc		_CurProfileStopHandler = nullptr;
 
 void Convert_System_Error_To_String(int id, char* buffer, int buf_len)
 {
-#ifndef _UNIX
+	// TheSuperHackers @port The guard was #ifndef _UNIX while the <windows.h> include above is
+	// #ifdef _WIN32, so off Windows this called FormatMessage without a declaration for it. The
+	// POSIX branch is the errno counterpart of the Win32 one, matching Get_Last_System_Error()
+	// below, which already returns errno here rather than GetLastError().
+#ifdef _WIN32
 	FormatMessage(
 		FORMAT_MESSAGE_FROM_SYSTEM,
 		nullptr,
@@ -77,6 +82,17 @@ void Convert_System_Error_To_String(int id, char* buffer, int buf_len)
 		buffer,
 		buf_len,
 		nullptr);
+#else
+	if (buf_len <= 0)
+		return;
+
+	// strerror rather than strerror_r: the two strerror_r variants disagree on their return type
+	// across C libraries, and this is a debug-output path. FormatMessage is not reentrant either.
+	const char* message = strerror(id);
+	if (message == nullptr)
+		message = "";
+	strncpy(buffer, message, buf_len - 1);
+	buffer[buf_len - 1] = '\0';
 #endif
 }
 

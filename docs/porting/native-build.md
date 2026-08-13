@@ -18,6 +18,12 @@ compile.
   gated by `scripts/ci/check-native-build-baseline.py` against
   `docs/porting/ci-baselines/native-build-shimmed-level1-2.json`
 
+> The figures below are this slice's own measurement and are kept as its record. They have since
+> been superseded: [`crt-and-widechar-compat.md`](crt-and-widechar-compat.md) took levels 1+2 from
+> 679/717 objects and 376 unresolved symbols to 704/716 and 273, and corrected the translation-unit
+> denominator (the SDL2 backend and `GameMemoryNull.cpp` were being counted although the configured
+> build compiles neither). For current numbers see [`STATUS.md`](STATUS.md), which is generated.
+
 ## Measured, on Linux x86-64 with clang 14
 
 | | Level 1 (core libraries, no shims) | Levels 1+2 (adds GameEngine, shimmed) |

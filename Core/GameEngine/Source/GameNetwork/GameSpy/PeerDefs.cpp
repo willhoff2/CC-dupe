@@ -21,6 +21,10 @@
 // Author: Matthew D. Campbell, June 2002
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+
+// TheSuperHackers @port For CreateDirectory, which used to arrive through PreRTS.h. Directory
+// creation belongs to the filesystem seam.
+#include <windows.h>
 #include <set>
 
 #include "Common/GameState.h"

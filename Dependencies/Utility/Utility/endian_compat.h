@@ -23,6 +23,9 @@
 #define ENDIAN_COMPAT_H
 
 #include <Utility/stdint_adapter.h>
+// TheSuperHackers @port For size_t, which used to arrive from whatever the including translation
+// unit had pulled in first.
+#include <stddef.h>
 
 
 #if defined(__linux__) || defined(__CYGWIN__)

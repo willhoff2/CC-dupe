@@ -22,6 +22,15 @@ typedef struct _IMAGEHLP_MODULE {
 } IMAGEHLP_MODULE, *PIMAGEHLP_MODULE;
 
 typedef struct _ADDRESS { DWORD_PTR Offset; WORD Segment; DWORD Mode; } ADDRESS, *LPADDRESS;
+
+// The four StackWalk() callbacks. DbgHelpLoader.h takes them as parameters and stores matching
+// function pointers, so their signatures are part of the type-check even though a native build
+// never walks a Win32 stack. Crash reporting is cut scope; see
+// docs/porting/crt-and-widechar-compat.md.
+typedef BOOL (*PREAD_PROCESS_MEMORY_ROUTINE)(HANDLE, DWORD_PTR, PVOID, DWORD, PDWORD);
+typedef PVOID (*PFUNCTION_TABLE_ACCESS_ROUTINE)(HANDLE, DWORD_PTR);
+typedef DWORD_PTR (*PGET_MODULE_BASE_ROUTINE)(HANDLE, DWORD_PTR);
+typedef DWORD_PTR (*PTRANSLATE_ADDRESS_ROUTINE)(HANDLE, HANDLE, LPADDRESS);
 typedef struct _STACKFRAME {
 	ADDRESS AddrPC, AddrReturn, AddrFrame, AddrStack;
 	PVOID FuncTableEntry; DWORD_PTR Params[4];

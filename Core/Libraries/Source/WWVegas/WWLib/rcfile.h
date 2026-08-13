@@ -39,6 +39,10 @@
 #include "always.h"
 #include "WWFILE.h"
 #include "win.h"
+// TheSuperHackers @port For HMODULE/HRSRC/HGLOBAL: win.h includes the Windows headers only on
+// Windows. A resource embedded in a PE image is a Windows-only concept, so this class compiles off
+// Windows against the declarations and links only there.
+#include <windows.h>
 
 /*
 ** ResourceFileClass

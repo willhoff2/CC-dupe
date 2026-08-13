@@ -25,16 +25,18 @@ DEFAULT_DEPS_DIR = probe.DEFAULT_DEPS_DIR
 def target_sources(target):
     """The translation units the real build compiles for a probe target.
 
-    Opt-in backends the probe excludes (`probe.OPTIONAL_BACKENDS`) are excluded here too: counting
-    them would make the two measurements' denominators disagree, and their dependency is absent
-    from both include paths by design.
+    Filtered by the probe's own `is_measured_source`, so that the two agree on the denominator:
+    opt-in backends (`probe.OPTIONAL_BACKENDS`) and mutually exclusive implementations
+    (`probe.EXCLUSIVE_ALTERNATIVES`) are excluded from both. They did not agree before: this
+    function used to walk `source_dirs` unfiltered, which is why the SDL2 window backend showed
+    up in native-build.py's translation-unit count as a failure to find `SDL.h`.
     """
     if target.cmake_lists:
         return probe.cmake_sources(target)
     sources = []
     for directory in target.source_dirs:
         sources.extend(sorted(path for path in (REPO_ROOT / directory).rglob("*.cpp")
-                              if path.name not in probe.OPTIONAL_BACKENDS))
+                              if probe.is_measured_source(path)))
     return sources
 
 

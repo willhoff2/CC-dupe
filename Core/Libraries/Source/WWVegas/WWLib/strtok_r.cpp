@@ -48,7 +48,9 @@
 //   but the fact that you can't call a function that uses strtok()
 //   during a series of strtok() calls is really annoying.
 //
-#ifndef _UNIX
+// TheSuperHackers @port Windows-only, matching the declaration in strtok_r.h: everywhere else the
+// C library's own strtok_r is used.
+#if !defined(_UNIX) && defined(_WIN32)
 char *strtok_r(char *strptr, const char *delimiters, char **lasts)
 {
 	if (strptr)
