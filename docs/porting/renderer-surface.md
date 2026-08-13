@@ -172,6 +172,72 @@ about them, otherwise it silently stops counting those sites.
    `D3DXLoadSurfaceFromSurface`, the maths helpers). They are a separate library, not
    `IDirect3DDevice8`, and are already listed in section 3 as their own work item.
 
+## 0.6 Backend coverage of that surface, measured
+
+Routing being finished, the question is no longer "where are the D3D8 calls" but "how much of
+what the engine asks D3D8 for does the Vulkan backend actually serve". That is measured, not
+asserted: `spikes/renderer/tools/backend-coverage-scan.py` takes the *demand* from
+`d3d8-surface-scan.py` (the methods the engine reaches, the `D3DRS_*`/`D3DTSS_*`/`D3DTOP_*`/
+`D3DPT_*` values it sets) and the *supply* from the spike's own source — an entry point must be
+declared in `render_backend.h` and defined in `vulkan_backend.cpp` with a body that does
+something; a render state counts only when the backend *reads* it into a pipeline key, a uniform
+or a dynamic-state call, not when it merely stores it. `scripts/ci/check-backend-coverage.py`
+compares that against `backend-coverage-baseline.json` and fails on a regression, on a
+newly-reached method or state that nothing has classified, and on a stale mapping. Both run in
+the `D3D8 surface scanner` CI job, which uploads the full per-method scoreboard.
+
+Reproduce:
+
+```sh
+python3 spikes/renderer/tools/backend-coverage-scan.py   # the scoreboard
+python3 scripts/ci/check-backend-coverage.py             # the gate
+```
+
+The demand is 64 entry points (53 `IDirect3DDevice8`, 11 `IDirect3D8`; the earlier "62" predates
+`GetViewport` becoming visible to the scanner, and `GetDeviceCaps` exists on both interfaces).
+19 of the 64 are not the backend's to serve: 11 are `platform` (adapter and display enumeration,
+gamma, the cursor, the swapchain — the platform/window seam owns them), 6 are `caps`
+(`GetDeviceCaps`, `CheckDeviceType`, `ValidateDevice` and friends, which report a device's
+abilities rather than draw), and 2 are `device-model` (`TestCooperativeLevel`,
+`ResourceManagerDiscardBytes`, which have no Vulkan counterpart at all). That leaves 45 backend
+methods.
+
+| Measured coverage | Before this slice | After |
+|---|---:|---:|
+| Backend methods implemented | 23 / 45 | **30 / 45** |
+| Render states (`D3DRS_*`) the engine sets, served | 39 / 52 | **48 / 52** (+4 ignored by design) |
+| Texture-stage states (`D3DTSS_*`) served | 20 / 23 | **23 / 23** |
+| Cascade ops (`D3DTOP_*`) served | 17 / 17 | 17 / 17 |
+| Primitive types (`D3DPT_*`) served | 1 / 3 | **3 / 3** |
+| States/ops the engine sets that nothing serves | 16 | **0** |
+
+What closed: `D3DRS_BLENDOP`; the eight point states (`POINTSIZE`, `_MIN`, `_MAX`,
+`POINTSPRITEENABLE`, `POINTSCALEENABLE`, `POINTSCALE_A/B/C`) that are the whole of `W3DSnow`,
+which draws every particle as one `D3DPT_POINTLIST` vertex; `SetViewport`/`GetViewport`;
+`DrawPrimitive`, `DrawIndexedPrimitive` and `DrawPrimitiveUP` for every primitive type the engine
+issues, where the backend previously only served indexed triangle lists; `D3DTSS_ADDRESSW`,
+`D3DTSS_BORDERCOLOR`, `D3DTSS_MAXANISOTROPY`; and `GetRenderState`/`GetTransform` readback.
+
+The four render states counted as *ignored by design* carry a `COVERAGE-IGNORE:` line in
+`vulkan_backend.cpp` stating why: `D3DRS_CLIPPING` (Vulkan always clips), `D3DRS_DITHERENABLE`
+(dithering existed to hide 16-bit blending), `D3DRS_SOFTWAREVERTEXPROCESSING` (a D3D8 device-model
+switch) and `D3DRS_PATCHSEGMENTS` (N-patches, which the shipped drivers did not implement either).
+They are shadowed so `GetRenderState` still answers.
+
+The 15 backend methods still absent are the two features the spike has not started plus the
+render-target model: `Create{Pixel,Vertex}Shader` / `Delete*` / `Set{Pixel,Vertex}Shader*`
+(the 16 ps.1.1/vs.1.1 shaders), `SetRenderTarget`/`GetRenderTarget`/`GetDepthStencilSurface`/
+`CreateImageSurface`/`CopyRects`/`UpdateTexture` (offscreen targets and surface blits),
+`ProcessVertices` and `SetClipPlane`.
+
+Every newly claimed state and method above has a pixel assertion in `zh-fixedfunc-tests` — blend
+op per op against D3D8's own definition, a 16×16 point from one vertex, `gl_PointCoord` sprite
+coordinates split across a two-texel texture, a viewport that confines a pretransformed quad to
+half the target, a border colour sampled outside `[0,1]`, and a four-vertex strip that must cover
+two triangles and nothing more. All measured on Linux/lavapipe with the Khronos validation layer
+loaded and silent. The macOS CI job runs the same binaries on a paravirtualised GPU; it is a smoke
+test, not rasterisation parity, and no claim here was measured on Apple Silicon.
+
 ## 1. The surface, method by method
 
 Sites are (macro + direct). Difficulty: **1:1** = a direct Vulkan call; **wrapper** = needs

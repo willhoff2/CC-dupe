@@ -196,7 +196,7 @@
    "interface": "IDirect3DDevice8",
    "note": "primitive-type coverage is measured separately, see primitive_types",
    "sites": 4,
-   "status": "absent"
+   "status": "implemented"
   },
   "DrawPrimitive": {
    "category": "backend",
@@ -206,7 +206,7 @@
    "interface": "IDirect3DDevice8",
    "note": "non-indexed; W3DSnow's point-sprite batches are the engine's use",
    "sites": 2,
-   "status": "absent"
+   "status": "implemented"
   },
   "DrawPrimitiveUP": {
    "category": "backend",
@@ -216,7 +216,7 @@
    "interface": "IDirect3DDevice8",
    "note": "every engine site draws a 2-triangle strip from stack vertices",
    "sites": 2,
-   "status": "absent"
+   "status": "implemented"
   },
   "EndScene": {
    "category": "backend",
@@ -292,7 +292,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 2,
-   "status": "absent"
+   "status": "implemented"
   },
   "GetRenderTarget": {
    "category": "backend",
@@ -312,7 +312,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 3,
-   "status": "absent"
+   "status": "implemented"
   },
   "GetViewport": {
    "category": "backend",
@@ -322,7 +322,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 2,
-   "status": "absent"
+   "status": "implemented"
   },
   "IDirect3D8::CheckDepthStencilMatch": {
    "category": "caps",
@@ -636,7 +636,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 2,
-   "status": "absent"
+   "status": "implemented"
   },
   "ShowCursor": {
    "category": "platform",
@@ -675,8 +675,8 @@
  },
  "primitive_types": {
   "D3DPT_POINTLIST": {
-   "reason": "translated, but the pipeline key's topology is fixed",
-   "status": "stubbed",
+   "reason": "",
+   "status": "implemented",
    "uses": 1
   },
   "D3DPT_TRIANGLELIST": {
@@ -685,8 +685,8 @@
    "uses": 8
   },
   "D3DPT_TRIANGLESTRIP": {
-   "reason": "translated, but the pipeline key's topology is fixed",
-   "status": "stubbed",
+   "reason": "",
+   "status": "implemented",
    "uses": 17
   }
  },
@@ -723,12 +723,12 @@
   },
   "D3DRS_BLENDOP": {
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 3
   },
   "D3DRS_CLIPPING": {
-   "reason": "",
-   "status": "absent",
+   "reason": "Vulkan always clips to the view volume; there",
+   "status": "ignored",
    "uses": 1
   },
   "D3DRS_COLORVERTEX": {
@@ -757,8 +757,8 @@
    "uses": 2
   },
   "D3DRS_DITHERENABLE": {
-   "reason": "",
-   "status": "absent",
+   "reason": "no Vulkan equivalent. D3D8 dithered when",
+   "status": "ignored",
    "uses": 1
   },
   "D3DRS_EMISSIVEMATERIALSOURCE": {
@@ -812,48 +812,48 @@
    "uses": 2
   },
   "D3DRS_PATCHSEGMENTS": {
-   "reason": "",
-   "status": "absent",
+   "reason": "N-patch tessellation, which no D3D8 driver",
+   "status": "ignored",
    "uses": 1
   },
   "D3DRS_POINTSCALEENABLE": {
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 2
   },
   "D3DRS_POINTSCALE_A": {
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 1
   },
   "D3DRS_POINTSCALE_B": {
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 1
   },
   "D3DRS_POINTSCALE_C": {
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 1
   },
   "D3DRS_POINTSIZE": {
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 1
   },
   "D3DRS_POINTSIZE_MAX": {
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 1
   },
   "D3DRS_POINTSIZE_MIN": {
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 1
   },
   "D3DRS_POINTSPRITEENABLE": {
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 2
   },
   "D3DRS_RANGEFOGENABLE": {
@@ -867,8 +867,8 @@
    "uses": 1
   },
   "D3DRS_SOFTWAREVERTEXPROCESSING": {
-   "reason": "",
-   "status": "absent",
+   "reason": "a D3D8 device-model switch",
+   "status": "ignored",
    "uses": 1
   },
   "D3DRS_SPECULARENABLE": {
@@ -966,9 +966,9 @@
    "uses": 45
   },
   "D3DTSS_ADDRESSW": {
-   "field": "",
+   "field": "address_w",
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 2
   },
   "D3DTSS_ALPHAARG1": {
@@ -990,9 +990,9 @@
    "uses": 85
   },
   "D3DTSS_BORDERCOLOR": {
-   "field": "",
+   "field": "border_color",
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 1
   },
   "D3DTSS_BUMPENVLOFFSET": {
@@ -1062,9 +1062,9 @@
    "uses": 54
   },
   "D3DTSS_MAXANISOTROPY": {
-   "field": "",
+   "field": "max_anisotropy",
    "reason": "",
-   "status": "absent",
+   "status": "implemented",
    "uses": 1
   },
   "D3DTSS_MINFILTER": {
@@ -1094,15 +1094,15 @@
  },
  "totals": {
   "backend_methods": 45,
-  "backend_methods_implemented": 23,
+  "backend_methods_implemented": 30,
   "cascade_ops_implemented": 17,
   "cascade_ops_used": 17,
   "methods_reached": 64,
-  "primitive_types_implemented": 1,
+  "primitive_types_implemented": 3,
   "primitive_types_used": 3,
-  "render_states_implemented": 39,
+  "render_states_implemented": 48,
   "render_states_set": 52,
-  "stage_states_implemented": 20,
+  "stage_states_implemented": 23,
   "stage_states_set": 23
  }
 }

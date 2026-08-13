@@ -302,6 +302,23 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The other half of the scoreboard: the scan above measures what the engine asks D3D8 for,
+      # this measures what the Vulkan backend serves, method by method and state by state, and
+      # fails on any regression or on an unclassified new method or state.
+      - name: Gate the Vulkan backend's coverage of that surface
+        run: |
+          set -o pipefail
+          {
+            echo '## Vulkan backend coverage of the D3D8 surface'
+            echo '```'
+            python3 scripts/ci/check-backend-coverage.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Write the full coverage scoreboard
+        if: always()
+        run: python3 spikes/renderer/tools/backend-coverage-scan.py | tee backend-coverage.txt
+
       # docs/porting/STATUS.md is generated from the same baselines and allowlist these gates read,
       # so it can only go stale if someone edits it by hand or refreshes a baseline without
       # regenerating it. Both are failures.
@@ -313,7 +330,9 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: d3d8-surface-scan
-          path: d3d8-surface-scan.txt
+          path: |
+            d3d8-surface-scan.txt
+            backend-coverage.txt
 
   # 5. The OpenAL replacement for Miles, built through the *real* top-level CMake build: the
   #    non-Windows branch of the root CMakeLists supplies `milesstub` from cmake/openal.cmake, and

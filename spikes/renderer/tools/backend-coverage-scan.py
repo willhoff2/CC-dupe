@@ -21,7 +21,8 @@ table does:
                   absent       declared but never defined, or not declared at all
                 Methods whose map category is not `backend` are counted separately and
                 are not part of the backend coverage figure: `platform` belongs to the
-                window/display layer, `device-model` is a D3D8 device-model artefact
+                window/display layer, `caps` reports a device's abilities rather than
+                drawing with them, and `device-model` is a D3D8 device-model artefact
                 (device loss, managed-pool eviction) with nothing to implement.
 
   render states a `D3DRS_*` is `implemented` when the backend *reads*
@@ -327,7 +328,7 @@ def print_report(payload):
           f"IDirect3DDevice8, "
           f"{sum(1 for v in methods.values() if v['interface'] == 'IDirect3D8')} "
           "IDirect3D8)")
-    for category in ("backend", "platform", "device-model"):
+    for category in sorted({v["category"] for v in methods.values()}):
         n = sum(1 for v in methods.values() if v["category"] == category)
         print(f"  {category:13s} {n}")
     print(f"backend methods implemented: {counts['implemented']}/{len(backend_methods)}"
