@@ -2223,6 +2223,22 @@ VkPipeline VulkanBackend::Get_Or_Create_Pipeline(const PipelineKey& key,
 	VkPipelineInputAssemblyStateCreateInfo input_assembly{
 	    VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
 	input_assembly.topology = To_Vk_Topology(key.topology);
+	// Metal cannot turn primitive restart off, and MoltenVK reports
+	// VK_ERROR_FEATURE_NOT_PRESENT for a strip or fan pipeline that asks it to. D3D8 has
+	// no restart index at all, so restart is requested exactly where Metal forces it and
+	// nowhere else. The cost is that 0xffff inside a strip -- a legal D3D8 index --
+	// restarts it; the engine's strips come from index buffers orders of magnitude
+	// smaller than 65536 vertices.
+	switch (input_assembly.topology) {
+	case VK_PRIMITIVE_TOPOLOGY_LINE_STRIP:
+	case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP:
+	case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN:
+		input_assembly.primitiveRestartEnable = VK_TRUE;
+		break;
+	default:
+		input_assembly.primitiveRestartEnable = VK_FALSE;
+		break;
+	}
 
 	VkViewport viewport{0.0f, 0.0f, static_cast<float>(width_), static_cast<float>(height_), 0.0f, 1.0f};
 	VkRect2D scissor{{0, 0}, {width_, height_}};
