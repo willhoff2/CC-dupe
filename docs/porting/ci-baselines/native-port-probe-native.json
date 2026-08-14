@@ -8,8 +8,8 @@
     "miles-src",
     "miles-src/mss"
   ],
-  "clean": 647,
-  "total": 749,
+  "clean": 663,
+  "total": 751,
   "targets": {
     "Core/Libraries/Source/Compression": {
       "clean": 11,
@@ -32,11 +32,11 @@
       "total": 12
     },
     "Core/Libraries/Source/debug": {
-      "clean": 1,
-      "total": 20
+      "clean": 12,
+      "total": 22
     },
     "Core/Libraries/Source/profile": {
-      "clean": 0,
+      "clean": 5,
       "total": 6
     },
     "Core/GameEngine": {
