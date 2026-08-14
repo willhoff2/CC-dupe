@@ -21,8 +21,48 @@ on:
         description: "CMake preset"
 
 jobs:
+  gamedata:
+    # The replay run needs retail game data, which is not redistributable and so is not in the
+    # repository. A checkout without access to a copy of it cannot run this gate at all, and a
+    # gate that fails for a missing input says nothing about the code. Decide up front whether
+    # the data is reachable and skip the run with a reason if it is not, so that setting the
+    # variables and secrets later re-enables the gate with no change to this file.
+    name: Game data available?
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.probe.outputs.available }}
+    steps:
+      - name: Probe Game Data Configuration
+        id: probe
+        env:
+          ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          if [ -n "$ACCESS_KEY_ID" ] && [ -n "$SECRET_ACCESS_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Bucket credentials are set; running the replay check." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Replay check skipped: no game data"
+            echo
+            echo "\`R2_ACCESS_KEY_ID\` and \`R2_SECRET_ACCESS_KEY\` are not both set in this"
+            echo "repository, so there is nowhere to download the retail game data from and the"
+            echo "replay determinism gate cannot run. It is skipped rather than failed, because a"
+            echo "failure here would say nothing about the code under test."
+            echo
+            echo "**Replay determinism is therefore unverified on this pull request.** Run the"
+            echo "check locally with \`scripts/ci/run-replays-local.ps1\`, or configure hosted game"
+            echo "data to get the gate back — both are documented in"
+            echo "\`docs/porting/replay-check-gamedata.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build:
     name: ${{ inputs.preset }}
+    needs: gamedata
+    if: ${{ needs.gamedata.outputs.available == 'true' }}
     runs-on: windows-2022
     timeout-minutes: 15
     env:
