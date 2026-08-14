@@ -399,6 +399,8 @@ resident whether or not anything is locked. That is what the pool replaces.
 - the CPU-expansion path (no image-view swizzle, MoltenVK's case) takes a *second* block from
   the same pool for the duration of one unlock and returns it immediately, instead of holding a
   second per-resource allocation.
+- **zeroing on acquire changes what an unflagged lock sees**, and this is a real semantic
+  difference, not an implementation detail: see §7.7.
 - `ZH_SPIKE_STAGING_RETAIN=1` restores the old per-resource-lifetime behaviour. It exists so the
   before/after below is one binary and one workload, and so CI can assert that the pre-pool cost
   actually breaks the committed ceiling (§4.1.2).
@@ -521,7 +523,9 @@ against the real backend and asserts on read-back pixels and read-back bytes, no
 | **concurrent locks** | C4 | 4 threads × 8 lock/fill/unlock rounds on 4 textures against one shared pool; every texture must sample back its own thread's colour, so a block handed to two threads at once fails |
 | **pool recycling** | C1/C2 | 6 textures × 6 rounds = 36 sequential locks must cost **0** new allocations after the first, end with 0 bytes checked out, and still sample back correctly |
 
-All nine pass on lavapipe with zero validation messages, in both swizzle modes. Both modes run
+All nine pass on lavapipe with zero validation messages, in both swizzle modes, over 10 repeats
+of each mode, and again with the tests rebuilt `-fsanitize=thread` (3 runs, **0 ThreadSanitizer
+warnings**, which is the evidence for the pool's locking rather than the repeats). Both modes run
 in CI on Linux (`Renderer spike (Linux, lavapipe)`); the default mode runs on `macos-15`.
 `zh-staging-workload` (§4.1.1) is the second pixel assertion: its final read-back must match the
 pattern written through pooled blocks, so a pool that hands the same block to two live locks
@@ -586,14 +590,29 @@ None. No engine file is modified by this slice: the changes are `docs/porting/`,
    `Unlock` still submits from the calling thread on a single queue — an engine that unlocked
    from two threads at once would be serialised, not parallel, which matches D3D8's own
    single-threaded device but is worth knowing.
-7. **`P8`.** `Create_Lockable_Texture` refuses paletted textures: expansion needs the palette at
+7. **Pooling makes an unflagged lock return zeroes, not the previous contents.** A pooled block
+   carries whatever the last lock wrote, and a partial-rect unlock uploads rows the caller never
+   touched, so `Acquire_Staging` zeroes the requested bytes. That is safe but it is *not* D3D8:
+   D3D8 hands back the surface's current contents on a lock without `D3DLOCK_DISCARD`, so a
+   caller that locks a whole level and writes only some texels used to keep the rest and now
+   publishes zeroes. Measured directly with a throwaway harness: fill green, re-lock the whole
+   level, write the top half, unlock ⇒ the bottom half reads `(0,0,0,0)` pooled and
+   `(32,192,32,255)` under `ZH_SPIKE_STAGING_RETAIN=1`. Nothing in the spike or its gates depends
+   on the old behaviour, but the engine has exactly this pattern —
+   `W3DRadar::renderObjectList` locks the whole radar surface and only draws blips,
+   likewise `W3DRadar::setShroudLevel`, `W3DShroud::render` and
+   `Render2DSentenceClass::Build_Sentence*`. Before pooling moves behind the real
+   `SurfaceClass`, those locks need either a read-modify-write lock (read the image back into the
+   block, i.e. pay C3's stall) or an explicit discard at the call site. Same shape as the C8
+   decision in item 1 and blocked on the same missing piece; not chosen here.
+8. **`P8`.** `Create_Lockable_Texture` refuses paletted textures: expansion needs the palette at
    unlock time and a lockable P8 texture could have its palette replaced between locks. No lock
    site uses P8, so no policy was invented.
-8. **`D3DLOCK_READONLY` on an expanded format** returns failure rather than contracting BGRA8
+9. **`D3DLOCK_READONLY` on an expanded format** returns failure rather than contracting BGRA8
    back to L8/A8/A8L8. No engine site needs it; a Mac-only future one would.
-9. **Everything about MoltenVK is unverified by the author.** The CPU-expansion-at-unlock path,
-   the portability-subset assumption, and the whole macOS run are inference plus CI. There is no
-   Mac on this end. Specifically for the pool: the `macos-15` job *prints* the workload's staging
-   figures and does not gate on them, because the committed ceiling was measured against
-   lavapipe's allocation behaviour and MoltenVK's will differ. The macOS runner is also a VM with
-   a paravirtualised GPU, so nothing there is Apple Silicon hardware verification.
+10. **Everything about MoltenVK is unverified by the author.** The CPU-expansion-at-unlock path,
+    the portability-subset assumption, and the whole macOS run are inference plus CI. There is no
+    Mac on this end. Specifically for the pool: the `macos-15` job *prints* the workload's staging
+    figures and does not gate on them, because the committed ceiling was measured against
+    lavapipe's allocation behaviour and MoltenVK's will differ. The macOS runner is also a VM
+    with a paravirtualised GPU, so nothing there is Apple Silicon hardware verification.
