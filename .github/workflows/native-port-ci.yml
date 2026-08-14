@@ -172,6 +172,18 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The total is a ratchet, so a new Win32 dependency can hide behind a drop elsewhere. This
+      # pins the category by symbol name. See docs/porting/win32-file-api-seam.md.
+      - name: Gate the undefined Win32 API category
+        run: |
+          set -o pipefail
+          {
+            echo '## Undefined Win32 API symbols'
+            echo '```'
+            python3 scripts/ci/check-win32-undefined.py --results native-build.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the build report
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0

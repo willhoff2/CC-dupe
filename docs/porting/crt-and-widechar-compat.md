@@ -213,14 +213,17 @@ when a compat header stops working; this notices the two failure modes they cann
 
 ## Still open
 
-- The W entry points are declared, not implemented. Four of them are now unresolved symbols
-  (`GetModuleFileNameW`, `GetDateFormatW`, `GetTimeFormatW`, `FormatMessageW`) out of 43 in the
-  `Win32 API` category and 273 in total. This
-  needs the `WideChar`/`char16_t` decision from [`widechar-fallout.md`](widechar-fallout.md) first.
-- `GlobalAlloc`/`GlobalSize`/`GlobalFree` under `GameMemory.cpp` are still Win32. The call is a
-  page allocation, so `malloc` would do, but it is where every memory pool in the game comes from
-  and belongs to the memory seam.
-- `DeleteFile`/`CopyFile`/`CreateDirectory` are still Win32; filesystem seam.
+- The W entry points were declared, not implemented, when this slice landed: four of them
+  (`GetModuleFileNameW`, `GetDateFormatW`, `GetTimeFormatW`, `FormatMessageW`) were unresolved
+  symbols out of 43 in the `Win32 API` category and 273 in total. They are implemented over
+  `wchar_t` as it stands by [`win32-file-api-seam.md`](win32-file-api-seam.md); the
+  `WideChar`/`char16_t` decision in [`widechar-fallout.md`](widechar-fallout.md) is still open and
+  will change what those bytes mean, not whether the functions exist.
+- `GlobalAlloc`/`GlobalLock`/`GlobalFree` under `GameMemory.cpp` were still Win32; they are now
+  defined by [`win32-file-api-seam.md`](win32-file-api-seam.md) over `malloc`. `GlobalSize` has no
+  call site in the linked set.
+- `DeleteFile`/`CopyFile`/`CreateDirectory` were still Win32; also
+  [`win32-file-api-seam.md`](win32-file-api-seam.md).
 - `_PC_24` is dropped, so native arithmetic is not bit-identical to the Windows build.
 - Not in this slice, and left failing — the whole of what remains, 12 units by first diagnostic:
   3 on window/input types (`HWND`, `HKL`), 4 on GameSpy sockets/SNMP (`HOSTENT`, `recvfrom`,

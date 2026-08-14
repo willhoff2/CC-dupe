@@ -186,6 +186,17 @@ else()
         platform/platform_time.h
         platform/platform_window.h
     )
+    # The Win32 file/module/locale entry points themselves, defined under their own names so the
+    # call sites that spell them FindFirstFile()/CopyFile()/GetDateFormat() link unchanged. Only
+    # off Windows: there the real API is the implementation
+    # (docs/porting/win32-file-api-seam.md).
+    list(APPEND WWLIB_SRC
+        platform/platform_win32_compat.h
+        platform/platform_win32_file.cpp
+        platform/platform_win32_locale.cpp
+        platform/platform_win32_module.cpp
+        platform/platform_win32_stub.cpp
+    )
     # The window/event-loop/input backends (docs/porting/window-event-loop.md). The header
     # above is always listed because it is pure declarations; a backend is opt-in and off by
     # default, because it drags in SDL2 or Objective-C++ and nothing in the engine calls the

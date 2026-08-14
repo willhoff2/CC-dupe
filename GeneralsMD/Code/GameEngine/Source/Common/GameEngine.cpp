@@ -108,6 +108,12 @@
 
 #include "Common/version.h"
 
+#ifndef _WIN32
+// TheSuperHackers @port The window title goes through the window seam off Windows: there is no
+// HWND and no SetWindowText(). See docs/porting/win32-file-api-seam.md.
+#include "GameClient/PlatformWindowHost.h"
+#endif
+
 
 //-------------------------------------------------------------------------------------------------
 
@@ -234,12 +240,22 @@ static void updateWindowTitle()
 		AsciiString titleA;
 		titleA.translate(title);	//get ASCII version for Win 9x
 
+#ifdef _WIN32
 		extern HWND ApplicationHWnd;  ///< our application window handle
 		if (ApplicationHWnd) {
 			//Set it twice because Win 9x does not support SetWindowTextW.
 			::SetWindowText(ApplicationHWnd, titleA.str());
 			::SetWindowTextW(ApplicationHWnd, title.str());
 		}
+#else
+		// TheSuperHackers @port The window seam's title entry point takes narrow text, so the
+		// wide title goes out as the ASCII translation above; there is no Win 9x here to need
+		// both, and no wide entry point to follow it with. See
+		// docs/porting/window-event-loop.md.
+		if (ApplicationHWnd != NULL) {
+			WWPlatform::Window_Set_Title(ApplicationHWnd, titleA.str());
+		}
+#endif
 	}
 }
 
@@ -930,7 +946,11 @@ void GameEngine::update()
 
 // Horrible reference, but we really, really need to know if we are windowed.
 extern bool DX8Wrapper_IsWindowed;
+#ifdef _WIN32
 extern HWND ApplicationHWnd;
+#else
+// TheSuperHackers @port ApplicationHWnd is declared by the window seam off Windows, as a void *.
+#endif
 
 /** -----------------------------------------------------------------------------------------------
  * The "main loop" of the game engine. It will not return until the game exits.

@@ -62,6 +62,14 @@
 #include "Common/NameKeyGenerator.h"
 
 
+// TheSuperHackers @port The implementation below is Windows only from top to bottom: it is a client
+// of the Input Method Manager (imm32), which has no counterpart elsewhere -- composition, candidate
+// lists and the reading window all come from HIMC contexts and WM_IME_* messages. Text entry for a
+// language that needs an input method is therefore not available off Windows; the stub at the end of
+// this file takes its place and says so once at startup. Single player does not need it. See
+// docs/porting/win32-file-api-seam.md.
+#ifdef _WIN32
+
 //----------------------------------------------------------------------------
 //         Externals
 //----------------------------------------------------------------------------
@@ -1597,4 +1605,92 @@ void IMEManager::updateStatusWindow()
 {
 
 }
+
+#else	// !_WIN32
+
+//----------------------------------------------------------------------------
+//         Private Types
+//----------------------------------------------------------------------------
+
+//===============================
+// NullIMEManager
+//===============================
+
+/*
+**	The manager for a platform with no input method: never enabled, never composing, no candidates.
+**	Every caller already tests isEnabled()/isComposing() before it asks for anything -- the text
+**	entry gadgets do it on each keystroke -- so these answers switch IME off rather than breaking
+**	the callers. serviceIMEMessage() reports "not serviced", which is what the Windows path answers
+**	for a message that is not an IME message.
+*/
+class NullIMEManager : public IMEManagerInterface
+{
+
+	public:
+
+		NullIMEManager() : m_window(nullptr) {}
+		virtual ~NullIMEManager() override {}
+
+		virtual void					init() override;
+		virtual void					reset() override {}
+		virtual void					update() override {}
+
+		virtual void					attach( GameWindow *window ) override { m_window = window; }
+		virtual void					detach() override { m_window = nullptr; }
+		virtual void					enable() override {}
+		virtual void					disable() override {}
+		virtual Bool					isEnabled() override { return FALSE; }
+		virtual Bool					isAttachedTo( GameWindow *window ) override { return m_window == window; }
+		virtual GameWindow*		getWindow() override { return m_window; }
+		virtual Bool					isComposing() override { return FALSE; }
+		virtual void					getCompositionString( UnicodeString &string ) override { string.clear(); }
+		virtual Int						getCompositionCursorPosition() override { return 0; }
+		virtual Int						getIndexBase() override { return 1; }
+
+		virtual Int						getCandidateCount() override { return 0; }
+		virtual const UnicodeString* getCandidate( Int index ) override { return nullptr; }
+		virtual Int						getSelectedCandidateIndex() override { return -1; }
+		virtual Int						getCandidatePageSize() override { return 0; }
+		virtual Int						getCandidatePageStart() override { return 0; }
+
+		virtual Bool					serviceIMEMessage( void *windowsHandle,
+																		UnsignedInt message,
+																		Int wParam,
+																		Int lParam ) override { return FALSE; }
+		virtual Int						result() override { return 0; }
+
+	protected:
+
+		GameWindow					* m_window;
+};
+
+//----------------------------------------------------------------------------
+//         Public Data
+//----------------------------------------------------------------------------
+
+IMEManagerInterface *TheIMEManager = nullptr;
+
+//----------------------------------------------------------------------------
+//         Public Functions
+//----------------------------------------------------------------------------
+
+//============================================================================
+// NullIMEManager::init
+//============================================================================
+
+void NullIMEManager::init()
+{
+	DEBUG_LOG(( "IME: this platform has no input method manager; IME input is disabled" ));
+}
+
+//============================================================================
+// *CreateIMEManagerInterface
+//============================================================================
+
+IMEManagerInterface *CreateIMEManagerInterface()
+{
+	return NEW NullIMEManager;
+}
+
+#endif	// _WIN32
 
