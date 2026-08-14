@@ -54,6 +54,16 @@ reporting the ratio as progress.
 python3 scripts/ci/check-d3d8-surface.py
 CLANGXX=clang++-14 python3 scripts/native-layout-test.py
 python3 scripts/xfer-blob-audit.py
+CLANGXX=clang++-14 python3 scripts/ci/check-crt-compat.py
+```
+
+The window/input seam has a baseline of its own (`ci-baselines/window-input-scan.json`) and two
+structural gates; a measurement sweep runs all three:
+
+```sh
+python3 scripts/window-input-scan.py --check
+python3 scripts/ci/check-window-scancodes.py
+python3 scripts/ci/check-window-seam-wiring.py
 ```
 
 The native build and its gate, whose denominator must equal the probe's for the two to be
@@ -67,17 +77,26 @@ python3 scripts/ci/check-native-build-baseline.py --results docs/porting/ci-base
 ```
 
 The audio gates need the backend *built*, so they need the top-level CMake build (CMake >= 3.25,
-`libopenal-dev`), and `check-openal-symbols.py` needs both of its paths:
+`libopenal-dev`), and `check-openal-symbols.py` needs both of its paths. Use a build directory other
+than `build/native`: that one belongs to `scripts/native-build.py`, which configures it from
+`cmake/native/CMakeLists.txt`, so pointing `cmake -S .` at it after running the native build above
+fails with `The source "…/CMakeLists.txt" does not match the source "…/cmake/native/CMakeLists.txt"
+used to generate cache`. CI does not hit this only because the two run in separate jobs.
 
 ```sh
-CC=clang-14 CXX=clang++-14 cmake -S . -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
+CC=clang-14 CXX=clang++-14 cmake -S . -B build/native-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DRTS_BUILD_ZEROHOUR=ON -DRTS_BUILD_GENERALS=OFF
-cmake --build build/native --target core_openalaudiodevice
+cmake --build build/native-cmake --target core_openalaudiodevice
 python3 scripts/ci/check-openal-symbols.py \
   --header Core/Libraries/Source/OpenALAudioDevice/mss/mss.h \
-  --archive build/native/Core/Libraries/Source/OpenALAudioDevice/libcore_openalaudiodevice.a
+  --archive build/native-cmake/Core/Libraries/Source/OpenALAudioDevice/libcore_openalaudiodevice.a
 python3 scripts/audio-surface-scan.py --check
 ```
+
+Ubuntu 22.04 ships CMake 3.22, which the top-level `cmake_minimum_required(3.25)` rejects; the
+`audio-surface-scan.py --check` half of the pair still runs without a build, but the symbol gate does
+not. `pip install --user cmake` provides a new enough `~/.local/bin/cmake` without touching the
+system one.
 
 ## 6. Regenerate the status document
 
@@ -98,6 +117,10 @@ python3 scripts/porting-status.py --check  # what CI runs
   Without it the VC6 compatibility macros are undefined everywhere.
 - Keep `-fms-extensions`. Dropping it costs ~65 errors from `__int64` and `__forceinline` alone.
 - Report `clean / total`, never a bare percentage.
+- `scripts/ci/check-crt-compat.py` and `scripts/ci/check-bool-pointer.py` take their compiler from
+  the probe, i.e. from `CLANGXX`, whose default is plain `clang++`. On a box that only has
+  `clang++-14` they die with `FileNotFoundError: 'clang++'`, which is a missing env var and not a
+  gate failure — set `CLANGXX=clang++-14` as CI does.
 - The layout test's 32-bit check needs `g++-multilib`; without it that check is skipped, not failed,
   and the sweep is incomplete until you install it and see the ILP32 assertions actually pass.
 - Opt-in backends (`probe.OPTIONAL_BACKENDS`, currently the SDL2 window backend) are excluded from
