@@ -2,9 +2,7 @@
   "archives": 7,
   "clang_major": "14",
   "compile_failures": {
-    "Core/GameEngine/Source/Common/System/Debug.cpp": "unknown type name 'HWND'",
     "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp": "unknown type name 'HWND'",
-    "Core/GameEngine/Source/GameClient/Input/Keyboard.cpp": "unknown type name 'HKL'",
     "Core/GameEngine/Source/GameNetwork/DownloadManager.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
     "Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
     "Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp": "unknown type name 'AsnObjectIdentifier'",
@@ -17,9 +15,9 @@
   },
   "compiled": {
     "Core/GameEngine": {
-      "objects": 200,
-      "probe_clean": 200,
-      "total": 209
+      "objects": 203,
+      "probe_clean": 203,
+      "total": 210
     },
     "Core/Libraries/Source/Compression": {
       "objects": 11,
@@ -32,9 +30,9 @@
       "total": 3
     },
     "Core/Libraries/Source/WWVegas/WWLib": {
-      "objects": 66,
-      "probe_clean": 66,
-      "total": 66
+      "objects": 67,
+      "probe_clean": 67,
+      "total": 67
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
       "objects": 35,
@@ -64,17 +62,17 @@
   ],
   "link_binary_produced": true,
   "link_clean": true,
-  "objects": 704,
-  "probe_clean": 704,
-  "translation_units": 716,
+  "objects": 708,
+  "probe_clean": 708,
+  "translation_units": 718,
   "undefined_by_category": {
     "Defined in a layer not built here (renderer / audio / device / entry point)": 21,
-    "Defined in a translation unit that failed to compile": 40,
+    "Defined in a translation unit that failed to compile": 33,
     "Direct3D 8 / DirectX": 5,
-    "Engine C++ not built at this level": 9,
+    "Engine C++ not built at this level": 22,
     "GameSpy": 18,
     "Generated gitinfo (build-time, not a blocker)": 6,
-    "Other / unclassified": 18,
+    "Other / unclassified": 19,
     "Third-party library not linked (lzhl, zlib)": 9,
     "Well-known Dict keys (instantiated in GameEngineDevice)": 104,
     "Win32 API": 43
@@ -123,23 +121,16 @@
       "GameSpyStagingRoom::launchGame()",
       "GameSpyStagingRoom::reset()",
       "GameSpyStagingRoom::setPingString(AsciiString)",
-      "Keyboard::findKey(KeyDefType, KeyboardIO::StatusType)",
-      "Keyboard::getPrintableKey(KeyDefType, int)",
-      "Keyboard::isAlt()",
-      "Keyboard::isCtrl()",
-      "Keyboard::isShift()",
       "MainMenuInit(WindowLayout*, void*)",
       "MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)",
       "MainMenuShutdown(WindowLayout*, void*)",
       "MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)",
       "MainMenuUpdate(WindowLayout*, void*)",
       "PingerInterface::createNewPingerInterface()",
-      "ReleaseCrash",
       "TheGameEngine",
       "TheGameResultsQueue",
       "TheGameSpyPeerMessageQueue",
       "TheIMEManager",
-      "TheKeyboard",
       "ThePinger",
       "TheSubsystemList",
       "isThreadHosting",
@@ -153,13 +144,26 @@
       "D3DXVec4Transform(D3DXVECTOR4*, D3DXVECTOR4 const*, D3DXMATRIX const*)"
     ],
     "Engine C++ not built at this level": [
+      "FillStackAddresses(void**, unsigned int, unsigned int)",
       "GameSpyStagingRoom::GameSpyStagingRoom()",
       "MapObject::MapObject(Coord3D, AsciiString, float, int, Dict const*, ThingTemplate const*)",
       "MapObject::TheMapObjectListPtr",
       "MapObject::TheWorldDict",
+      "StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))",
       "TextureFilterClass::TextureFilterModeString",
       "WW3D::PreviousSyncTime",
       "WW3D::SyncTime",
+      "WWPlatform::Window_Client_Size(void*, int&, int&)",
+      "WWPlatform::Window_Create(WWPlatform::WindowConfig const&)",
+      "WWPlatform::Window_Destroy(void*)",
+      "WWPlatform::Window_Is_Active(void*)",
+      "WWPlatform::Window_Is_Minimised(void*)",
+      "WWPlatform::Window_Modifier_State(void*)",
+      "WWPlatform::Window_Poll_Event(void*, WWPlatform::WindowEvent&)",
+      "WWPlatform::Window_Set_Cursor_Clip(void*, bool)",
+      "WWPlatform::Window_Set_Mode(void*, int, int, bool)",
+      "WWPlatform::Window_Show(void*, bool)",
+      "WWPlatform::Window_Warp_Cursor(void*, int, int)",
       "_com_util::ConvertStringToBSTR(char const*)",
       "vtable for GameSpyStagingRoom"
     ],
@@ -207,6 +211,7 @@
       "PreAuthenticatePlayerPM",
       "SendGameSnapShotA",
       "SetPersistDataValuesA",
+      "g_LastErrorDump",
       "gcd_gamename",
       "gcd_secret_key",
       "getQR2HostingStatus"
@@ -374,6 +379,6 @@
       "itoa"
     ]
   },
-  "undefined_total": 273,
+  "undefined_total": 280,
   "with_shims": true
 }

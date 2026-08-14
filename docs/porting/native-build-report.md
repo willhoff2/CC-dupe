@@ -14,20 +14,18 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 |---|---:|---:|---:|
 | `Core/Libraries/Source/Compression` | 11 | 11 | 11 |
 | `Core/Libraries/Source/WWVegas/WWMath` | 35 | 35 | 35 |
-| `Core/Libraries/Source/WWVegas/WWLib` | 66 | 66 | 66 |
+| `Core/Libraries/Source/WWVegas/WWLib` | 67 | 67 | 67 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 | 3 | 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
-| `Core/GameEngine` | 200 | 209 | 200 |
+| `Core/GameEngine` | 203 | 210 | 203 |
 | `GeneralsMD/Code/GameEngine` | 377 | 380 | 377 |
-| **Total** | **704** | **716** | **704** |
+| **Total** | **708** | **718** | **708** |
 
-12 translation units produced no object file:
+10 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
-| `Core/GameEngine/Source/Common/System/Debug.cpp` | `unknown type name 'HWND'` |
 | `Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp` | `unknown type name 'HWND'` |
-| `Core/GameEngine/Source/GameClient/Input/Keyboard.cpp` | `unknown type name 'HKL'` |
 | `Core/GameEngine/Source/GameNetwork/DownloadManager.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp` | `unknown type name 'AsnObjectIdentifier'` |
@@ -40,22 +38,22 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 704 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 708 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 7 archives were linked into one binary with `--whole-archive` (binary produced: yes; clean link: yes). **273 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 7 archives were linked into one binary with `--whole-archive` (binary produced: yes; clean link: yes). **280 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
 | Well-known Dict keys (instantiated in GameEngineDevice) | 104 |
 | Win32 API | 43 |
-| Defined in a translation unit that failed to compile | 40 |
+| Defined in a translation unit that failed to compile | 33 |
+| Engine C++ not built at this level | 22 |
 | Defined in a layer not built here (renderer / audio / device / entry point) | 21 |
-| Other / unclassified | 18 |
+| Other / unclassified | 19 |
 | GameSpy | 18 |
 | Third-party library not linked (lzhl, zlib) | 9 |
-| Engine C++ not built at this level | 9 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
 | Direct3D 8 / DirectX | 5 |
 
@@ -100,12 +98,10 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 ### Defined in a translation unit that failed to compile
 
 - `DX8Wrapper_IsWindowed`
-- `ReleaseCrash`
 - `TheGameEngine`
 - `TheGameResultsQueue`
 - `TheGameSpyPeerMessageQueue`
 - `TheIMEManager`
-- `TheKeyboard`
 - `ThePinger`
 - `TheSubsystemList`
 - `MainMenuInit(WindowLayout*, void*)`
@@ -114,7 +110,28 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `MainMenuUpdate(WindowLayout*, void*)`
 - `setupGameStart(AsciiString, GameDifficulty)`
 - `DownloadMenuInit(WindowLayout*, void*)`
-- …and 25 more
+- `MainMenuShutdown(WindowLayout*, void*)`
+- `DownloadMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
+- …and 18 more
+
+### Engine C++ not built at this level
+
+- `FillStackAddresses(void**, unsigned int, unsigned int)`
+- `StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))`
+- `WWPlatform::Window_Show(void*, bool)`
+- `WWPlatform::Window_Create(WWPlatform::WindowConfig const&)`
+- `WWPlatform::Window_Destroy(void*)`
+- `WWPlatform::Window_Set_Mode(void*, int, int, bool)`
+- `WWPlatform::Window_Is_Active(void*)`
+- `WWPlatform::Window_Poll_Event(void*, WWPlatform::WindowEvent&)`
+- `WWPlatform::Window_Client_Size(void*, int&, int&)`
+- `WWPlatform::Window_Warp_Cursor(void*, int, int)`
+- `WWPlatform::Window_Is_Minimised(void*)`
+- `WWPlatform::Window_Modifier_State(void*)`
+- `WWPlatform::Window_Set_Cursor_Clip(void*, bool)`
+- `GameSpyStagingRoom::GameSpyStagingRoom()`
+- `TextureFilterClass::TextureFilterModeString`
+- …and 7 more
 
 ### Defined in a layer not built here (renderer / audio / device / entry point)
 
@@ -152,7 +169,7 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `PreAuthenticatePlayerPM`
 - `SendGameSnapShotA`
 - `SetPersistDataValuesA`
-- …and 3 more
+- …and 4 more
 
 ### GameSpy
 
@@ -184,18 +201,6 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `LZHLDestroyDecompressor`
 - `compress2`
 - `uncompress`
-
-### Engine C++ not built at this level
-
-- `GameSpyStagingRoom::GameSpyStagingRoom()`
-- `TextureFilterClass::TextureFilterModeString`
-- `WW3D::PreviousSyncTime`
-- `WW3D::SyncTime`
-- `MapObject::TheWorldDict`
-- `MapObject::TheMapObjectListPtr`
-- `MapObject::MapObject(Coord3D, AsciiString, float, int, Dict const*, ThingTemplate const*)`
-- `_com_util::ConvertStringToBSTR(char const*)`
-- `vtable for GameSpyStagingRoom`
 
 ### Generated gitinfo (build-time, not a blocker)
 

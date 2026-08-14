@@ -410,22 +410,23 @@ All figures from this session's own runs on Linux, clang 14, `-std=c++20 -m64`:
 
 | Measurement | Before | After |
 |---|---:|---:|
-| Probe-clean translation units, native | 621 / 742 | 625 / 744 |
-| Probe-clean translation units, shimmed | 650 / 742 | 654 / 744 |
-| `native-build.json` objects (shimmed, levels 1-2) | 663 / 717 | 667 / 719 |
-| Unresolved symbols at link | 522 | 530 |
+| Probe-clean translation units, native | 639 / 742 | 643 / 744 |
+| Probe-clean translation units, shimmed | 683 / 742 | 687 / 744 |
+| `native-build.json` objects (shimmed, levels 1-2) | 704 / 716 | 708 / 718 |
+| Unresolved symbols at link | 273 | 280 |
 
 The four newly clean translation units are `Debug.cpp` (`HWND`), `Keyboard.cpp` (`HKL`), and the
 two new files. `Win32Mouse.cpp` and `Win32DIKeyboard.cpp` also compile clean now, checked with the
 probe's own flags, but they live in `GameEngineDevice`, which no probe or build level covers yet,
 so they do not show up in either total.
 
-Unresolved symbols rose by 8, on purpose: `PlatformWindowHost.cpp` now references eleven
+Unresolved symbols rose by 7, on purpose: `PlatformWindowHost.cpp` now references eleven
 `WWPlatform::Window_*` functions, and `CORE_WWLIB_WINDOW_BACKEND` still defaults to `OFF`, so the
 SDL2 backend is not in the build. Turning it on would make the native build depend on SDL2 being
-installed, which is a decision for the slice that first links an executable. The other three are
-`FillStackAddresses`, `StackDumpFromAddresses` and `g_LastErrorDump`, which `Debug.cpp` reaches for
-now that it compiles; `StackDump.cpp` does not compile natively yet.
+installed, which is a decision for the slice that first links an executable. `Debug.cpp` adds
+`FillStackAddresses` and `StackDumpFromAddresses` now that it compiles, since `StackDump.cpp` does
+not compile natively yet; the rest of the movement is other files in the same link becoming
+compilable, and §3 of `docs/porting/native-build-report.md` is the authoritative list.
 
 ### What is not verified
 

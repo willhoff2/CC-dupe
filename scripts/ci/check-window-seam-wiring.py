@@ -140,7 +140,11 @@ def main():
     # A case label is not a handler: WINDOW_EVENT_TEXT and WINDOW_EVENT_NONE deliberately fall
     # into the no-op group, which the triage table records.
     events = set(EVENT_ENUMERATOR.findall(read(WINDOW_HEADER)))
-    handled = set(CASE_LABEL.findall(source))
+    labels = CASE_LABEL.findall(source)
+    handled = set(labels)
+    for event in sorted({e for e in handled if labels.count(e) > 1}):
+        failures.append("%s has %d case labels in PlatformWindowHost.cpp; a duplicate case value"
+                        " does not compile" % (event, labels.count(event)))
     if not events:
         failures.append("parsed no WINDOW_EVENT_* values out of platform_window.h")
     for event in sorted(events - handled):
