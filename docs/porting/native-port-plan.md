@@ -13,9 +13,15 @@ ParticleEditor), GameSpy online matchmaking, and binary/replay/save compatibilit
 `clang++ -fsyntax-only -std=c++20 -m64` (no Windows SDK, no Wine) and categorises every
 diagnostic. Baseline is in [`native-port-probe-report.md`](native-port-probe-report.md).
 
-Headline result: **106 of 147 translation units (72%) compile clean under native 64-bit
-clang**, with **88 errors** remaining in the other 41. The `Core/Libraries` slice is much
-closer to portable than the raw `windows.h` counts suggest.
+Headline result at the time of the first pass: **106 of 147 translation units compiled clean
+under native 64-bit clang**, with **88 errors** remaining in the other 41. The `Core/Libraries`
+slice is much closer to portable than the raw `windows.h` counts suggest.
+
+> **Superseded.** That 106/147 covered only the `Core/Libraries` slice, and later slices grew the
+> denominator; `review-and-decisions.md` records it as stale. The probe now covers nine targets:
+> **621 / 742** clean native and **650 / 742** shimmed (clang 14, commit `52e2872e7`). Read
+> [`STATUS.md`](STATUS.md), which is generated from the committed baselines, rather than this
+> paragraph.
 
 Findings worth recording:
 
