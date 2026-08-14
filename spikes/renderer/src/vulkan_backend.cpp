@@ -3610,7 +3610,7 @@ bool VulkanBackend::Update_Texture(TextureHandle* source, TextureHandle* destina
 		copy.imageExtent = {l.width, l.height, 1};
 		copies.push_back(copy);
 	}
-	vkCmdCopyBufferToImage(cmd, source->staging.buffer, destination->image.image,
+	vkCmdCopyBufferToImage(cmd, source->staging.buffer.buffer, destination->image.image,
 	                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	                       static_cast<uint32_t>(copies.size()), copies.data());
 	Transition(cmd, destination->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
