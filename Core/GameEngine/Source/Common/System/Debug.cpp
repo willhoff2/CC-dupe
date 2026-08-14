@@ -127,11 +127,14 @@ static int MessageBox( HWND, LPCSTR lpText, LPCSTR lpCaption, UINT uType )
 
 static int MessageBoxW( HWND, const WideChar *text, const WideChar *caption, UINT uType )
 {
-	// Enough of the message to identify it; the crash log carries the full text.
+	// Enough of the message to identify it; the crash log carries the full text. The conversion
+	// fails on any non-ASCII character in the "C" locale, and leaves the buffer unterminated.
 	char narrowText[ 1024 ];
 	char narrowCaption[ 256 ];
-	snprintf( narrowText, ARRAY_SIZE(narrowText), "%ls", text != nullptr ? text : L"" );
-	snprintf( narrowCaption, ARRAY_SIZE(narrowCaption), "%ls", caption != nullptr ? caption : L"" );
+	if( snprintf( narrowText, ARRAY_SIZE(narrowText), "%ls", text != nullptr ? text : L"" ) < 0 )
+		narrowText[ 0 ] = '\0';
+	if( snprintf( narrowCaption, ARRAY_SIZE(narrowCaption), "%ls", caption != nullptr ? caption : L"" ) < 0 )
+		narrowCaption[ 0 ] = '\0';
 
 	return WWPlatform::Dialog_Message_Box( narrowCaption, narrowText,
 		dialogButtonsFromType( uType ) );
