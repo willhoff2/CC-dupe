@@ -55,6 +55,11 @@ FETCHED_DEP_INCLUDES = [
     "miles-src",
     # The Miles headers live one level down; WWAudio includes them as <mss.h>.
     "miles-src/mss",
+    # stb_image_write_impl.cpp includes <stb_image_write.h>.
+    "stb-src",
+    # The FFmpeg video path includes <libavcodec/avcodec.h> and friends. Headers only: nothing
+    # here links the libraries. See docs/porting/video-and-harness-headers.md.
+    "ffmpeg-src",
 ]
 
 # Include dirs shared by every target.

@@ -19,12 +19,12 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
 | `Core/GameEngine` | 204 | 210 | 204 |
 | `GeneralsMD/Code/GameEngine` | 378 | 380 | 378 |
-| `Core/GameEngineDevice` | 26 | 70 | 26 |
+| `Core/GameEngineDevice` | 33 | 70 | 33 |
 | `GeneralsMD/Code/GameEngineDevice` | 14 | 39 | 14 |
 | `GeneralsMD/Code/Main` | 0 | 2 | 0 |
-| **Total** | **756** | **835** | **756** |
+| **Total** | **763** | **835** | **763** |
 
-79 translation units produced no object file:
+72 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
@@ -36,17 +36,11 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp` | `unknown type name 'HOSTENT'` |
 | `Core/GameEngineDevice/Source/MilesAudioDevice/MilesAudioManager.cpp` | `static_assert failed due to requirement 'sizeof (m_status) == sizeof(long)' "Must be size of long, because it is used wi` |
 | `Core/GameEngineDevice/Source/StdDevice/Common/StdLocalFileSystem.cpp` | `use of undeclared identifier 'unNormalized'; did you mean 'nonNormalized'?` |
-| `Core/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp` | `'bink.h' file not found` |
-| `Core/GameEngineDevice/Source/VideoDevice/FFmpeg/FFmpegFile.cpp` | `'Common/File.h' file not found` |
-| `Core/GameEngineDevice/Source/VideoDevice/FFmpeg/FFmpegVideoPlayer.cpp` | `'libavcodec/avcodec.h' file not found` |
 | `Core/GameEngineDevice/Source/W3DDevice/Common/System/W3DRadar.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/BaseHeightMap.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/CameraShakeSystem.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DPropDraw.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
-| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTankDraw.cpp` | `'bink.h' file not found` |
-| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTankTruckDraw.cpp` | `'bink.h' file not found` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTreeDraw.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
-| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTruckDraw.cpp` | `'bink.h' file not found` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/FlatHeightMap.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/GUICallbacks/W3DControlBar.cpp` | `unknown type name 'HFONT'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DCheckBox.cpp` | `unknown type name 'HFONT'` |
@@ -77,7 +71,6 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
-| `Core/GameEngineDevice/Source/W3DDevice/GameClient/stb_image_write_impl.cpp` | `'stb_image_write.h' file not found` |
 | `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/DownloadMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/MainMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/Common/System/W3DFunctionLexicon.cpp` | `unknown type name 'HFONT'` |
@@ -92,10 +85,10 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DBridgeBuffer.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DCustomEdging.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDebugIcons.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
-| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp` | `'bink.h' file not found` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplayString.cpp` | `unknown type name 'HFONT'` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplayStringManager.cpp` | `unknown type name 'HFONT'` |
-| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DGameClient.cpp` | `'bink.h' file not found` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DGameClient.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DRoadBuffer.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DScene.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DShroud.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
@@ -110,41 +103,23 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 756 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 763 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: no; clean link: no). **341 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: no; clean link: no). **334 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| Defined in a translation unit that failed to compile | 104 |
 | Well-known Dict keys: `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` failed to compile | 104 |
 | Defined in a layer not built here (renderer / audio) | 72 |
+| Defined in a translation unit that failed to compile | 68 |
 | GameSpy SDK (cut scope, not linked) | 33 |
+| Other / unclassified | 29 |
 | Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 |
 | Defined in a built translation unit behind a disabled #if (build option / platform) | 7 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
 | COM / OLE (browser embedding, cut scope) | 3 |
-
-### Defined in a translation unit that failed to compile
-
-- `ApplicationHInstance`
-- `TheGameResultsQueue`
-- `TheGameSpyPeerMessageQueue`
-- `ThePinger`
-- `TheProjectedShadowManager`
-- `TheSmudgeManager`
-- `TheTerrainTracksRenderObjClassSystem`
-- `TheW3DShadowManager`
-- `TheWin32Mouse`
-- `doSkyBoxSet(bool)`
-- `MainMenuInit(WindowLayout*, void*)`
-- `MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `MainMenuUpdate(WindowLayout*, void*)`
-- `setupGameStart(AsciiString, GameDifficulty)`
-- …and 89 more
 
 ### Well-known Dict keys: `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` failed to compile
 
@@ -184,6 +159,25 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `SurfaceClass::Lock(int*)`
 - …and 57 more
 
+### Defined in a translation unit that failed to compile
+
+- `ApplicationHInstance`
+- `TheGameResultsQueue`
+- `TheGameSpyPeerMessageQueue`
+- `ThePinger`
+- `TheProjectedShadowManager`
+- `TheSmudgeManager`
+- `TheTerrainTracksRenderObjClassSystem`
+- `TheW3DShadowManager`
+- `TheWin32Mouse`
+- `doSkyBoxSet(bool)`
+- `MainMenuInit(WindowLayout*, void*)`
+- `MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
+- `MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
+- `MainMenuUpdate(WindowLayout*, void*)`
+- `setupGameStart(AsciiString, GameDifficulty)`
+- …and 53 more
+
 ### GameSpy SDK (cut scope, not linked)
 
 - `CloseStatsConnection`
@@ -202,6 +196,25 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `gcd_gamename`
 - `gcd_secret_key`
 - …and 18 more
+
+### Other / unclassified
+
+- `av_frame_alloc`
+- `av_frame_clone`
+- `av_frame_free`
+- `av_freep`
+- `av_get_bytes_per_sample`
+- `av_malloc`
+- `av_packet_alloc`
+- `av_packet_free`
+- `av_packet_unref`
+- `av_read_frame`
+- `av_samples_get_buffer_size`
+- `av_seek_frame`
+- `av_strerror`
+- `avcodec_alloc_context3`
+- `avcodec_find_decoder`
+- …and 14 more
 
 ### Defined only in a backend this configuration excludes (SDL2 / Cocoa)
 

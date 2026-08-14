@@ -8,7 +8,6 @@ else()
 endif()
 
 target_link_libraries(z_generals PRIVATE
-    binkstub
     comctl32
     core_debug
     core_profile_legacy
@@ -24,6 +23,11 @@ target_link_libraries(z_generals PRIVATE
     z_gameenginedevice
     zi_always
 )
+
+# Windows-only dependency; see docs/porting/video-and-harness-headers.md.
+if(TARGET binkstub)
+    target_link_libraries(z_generals PRIVATE binkstub)
+endif()
 
 # TODO Originally referred to build host and user, replace with git info perhaps?
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/GeneratedVersion.h
