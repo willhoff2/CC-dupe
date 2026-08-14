@@ -2,9 +2,15 @@
 """Gate the native 64-bit build against a checked-in baseline.
 
 `scripts/native-build.py` measures how many translation units produce object files and how many
-symbols are unresolved once they are linked. Both are ratchets: objects must not go down, and
-unresolved symbols must not go up, or a future upstream merge quietly undoes the port work with
-nothing in CI to notice.
+symbols are unresolved once they are linked. These are ratchets: objects must not go down, and
+unresolved symbols, compile failures and probe-clean-but-uncompilable units must not go up, or a
+future upstream merge quietly undoes the port work with nothing in CI to notice.
+
+One baseline per (mode, level set), named after both, so `--level 1 --level 2 --level 3` with
+`--with-shims` ratchets against `native-build-shimmed-level1-2-3.json` and adding a level cannot be
+mistaken for progress against the smaller build's figures. Facts a bare objects/unresolved pair
+would hide are checked too: a changed denominator, a library that produced no archive at all, and a
+shrinking archive count -- unresolved symbols also fall when a whole library drops out of the link.
 
 Improvements are reported, not failed, and the baseline should be refreshed in the same PR that
 earns them:
@@ -90,6 +96,33 @@ def main():
     print(f"unresolved symbols {results['undefined_total']} "
           f"(baseline {baseline['undefined_total']})")
 
+    # A changed denominator is not progress, and it makes the objects ratchet alone unsafe: 40 more
+    # objects out of 40 more translation units is standing still. Say so, and ratchet the failure
+    # count as well, which a denominator change cannot flatter.
+    if results["translation_units"] != baseline["translation_units"]:
+        print(f"denominator change: {baseline['translation_units']} -> "
+              f"{results['translation_units']} translation units (files added or removed; the "
+              "objects figure must be read as clean/total, never as a percentage)")
+
+    base_failures = len(baseline["compile_failures"])
+    got_failures = len(results["compile_failures"])
+    print(f"compile failures {got_failures} (baseline {base_failures})")
+    if got_failures > base_failures:
+        failures.append(f"compile failures: {base_failures} in the baseline, {got_failures} now")
+    elif got_failures < base_failures:
+        improvements.append(f"compile failures: {base_failures} -> {got_failures}")
+
+    # An archive that stops existing takes its symbols out of the link, so unresolved symbols can
+    # *fall* because a whole library vanished. Both facts are checked so neither can hide.
+    if results["archives"] < baseline["archives"]:
+        failures.append(f"archives: {baseline['archives']} in the baseline, "
+                        f"{results['archives']} now")
+    lost = set(results.get("libraries_without_archive", [])) - \
+        set(baseline.get("libraries_without_archive", []))
+    if lost:
+        failures.append("every translation unit failed, so no archive was produced for: "
+                        + ", ".join(sorted(lost)))
+
     if results["objects"] < baseline["objects"]:
         failures.append(f"overall: {baseline['objects']} objects in the baseline, "
                         f"{results['objects']} now")
@@ -111,6 +144,19 @@ def main():
     if got_divergence > base_divergence:
         failures.append(f"probe-clean but uncompilable: {base_divergence} in the baseline, "
                         f"{got_divergence} now")
+
+    # Per-category before/after. Not a ratchet: the categories are re-derived from the sources and
+    # SDK headers on every run, so a renamed or better-attributed category would fail a gate for
+    # being more honest. The total above is the ratchet; this is the explanation of it.
+    base_categories = baseline["undefined_by_category"]
+    got_categories = results["undefined_by_category"]
+    print()
+    print(f"{'undefined symbols by cause':70s} {'now':>5s} {'base':>5s}")
+    for category in sorted(set(base_categories) | set(got_categories)):
+        before = base_categories.get(category)
+        now = got_categories.get(category)
+        print(f"{category[:70]:70s} {'-' if now is None else now:>5} "
+              f"{'-' if before is None else before:>5}")
 
     if improvements:
         print()

@@ -22,7 +22,7 @@ This script measures both, and the divergence between them and the probe:
 A playable binary is not a goal. An honest, reproducible blocker list is.
 
 Usage:
-    python3 scripts/native-build.py [--level 1|2] [--with-shims]
+    python3 scripts/native-build.py [--level 1|2|3] [--with-shims]
                                     [--report docs/porting/native-build-report.md]
                                     [--json out.json] [--jobs N] [--build-dir DIR]
 """
@@ -30,6 +30,7 @@ Usage:
 import argparse
 import collections
 import concurrent.futures
+import dataclasses
 import json
 import os
 import pathlib
@@ -49,9 +50,15 @@ SHIM_DIR = REPO_ROOT / "scripts" / "native-port-shims"
 CXX = os.environ.get("CLANGXX", "clang++")
 
 # Build order, bottom-up. Level 1 is the set with no engine dependencies; level 2 adds the game
-# engine proper, which depends on level 1. Anything above that (WW3D2, GameEngineDevice, Main) is
-# knowingly far off and is not built here -- the renderer seam and the window/event-loop work have
-# to land first.
+# engine proper, which depends on level 1; level 3 adds the device and entry-point layer.
+#
+# Level 3 is not expected to build cleanly and is not there to make the objects figure look better.
+# It exists because excluding it made two whole categories of unresolved symbol uninterpretable:
+# `TheKey_*` (104 symbols, instantiated only in GameEngineDevice's WorldHeightMap.cpp) and "defined
+# in a layer not built here" (21) were artefacts of the level-1-2 scope, not port work. Including
+# the layer converts each of them into either a resolved symbol or a compile failure attributable
+# to a named file. The renderer libraries (WW3D2, WWAudio, WWDownload) are still out: they are the
+# renderer seam's own measurement, and pulling them in here would mix two slices' figures.
 LEVELS = {
     1: [
         "Core/Libraries/Source/Compression",
@@ -64,7 +71,15 @@ LEVELS = {
         "Core/GameEngine",
         "GeneralsMD/Code/GameEngine",
     ],
+    3: [
+        "Core/GameEngineDevice",
+        "GeneralsMD/Code/GameEngineDevice",
+        "GeneralsMD/Code/Main",
+    ],
 }
+
+# Every target the probe knows about, in the probe's own definitions. Levels index into this.
+ALL_TARGETS = npt.TARGETS + npt.RENDERER_TARGETS
 
 
 def slug(target_name):
@@ -87,17 +102,60 @@ WIN32_DECL_RE = re.compile(
 )
 
 
-def win32_shim_symbols():
+# `extern char gcd_gamename[];`, `extern int foo;` -- the SDKs' global state, which is a symbol
+# reference like any other and used to land in "Other / unclassified".
+EXTERN_OBJECT_DECL_RE = re.compile(
+    r"^\s*extern\s+(?:\"C\"\s+)?[A-Za-z_][\w \t\*]*?\b([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*;", re.M)
+
+# `#define GenerateAuth GenerateAuthA` -- the SDKs' ANSI/wide selection macros. The engine calls
+# `GenerateAuth`, so the name that reaches the linker is one no header ever *declares*, only
+# defines a macro for. This is why `GenerateAuthA`, `SendGameSnapShotA`, `SetPersistDataValuesA`,
+# `GetPersistDataValuesA` and `PreAuthenticatePlayerCDA` looked unclassifiable.
+ALIAS_MACRO_RE = re.compile(r"^\s*#\s*define\s+(\w+)\s+(\w+)\s*$", re.M)
+
+DECL_KEYWORDS = {"if", "for", "while", "switch", "return", "sizeof", "defined", "typedef"}
+
+
+def declared_names_in(headers):
+    """Function and object names a set of declaration-only headers declares."""
     names = set()
-    if not SHIM_DIR.is_dir():
-        return names
-    for header in SHIM_DIR.rglob("*.h"):
-        text = header.read_text(errors="replace")
+    for header in headers:
+        try:
+            text = header.read_text(errors="replace")
+        except OSError:
+            continue
         for match in WIN32_DECL_RE.finditer(text):
             names.add(match.group(1))
-    # Keywords and macros the regex inevitably picks up.
-    names -= {"if", "for", "while", "switch", "return", "sizeof", "defined", "typedef"}
-    return names
+        for match in EXTERN_OBJECT_DECL_RE.finditer(text):
+            names.add(match.group(1))
+        for match in ALIAS_MACRO_RE.finditer(text):
+            names.update(match.groups())
+    return names - DECL_KEYWORDS
+
+
+def win32_shim_symbols():
+    if not SHIM_DIR.is_dir():
+        return set()
+    return declared_names_in(SHIM_DIR.rglob("*.h"))
+
+
+# The GameSpy SDK is cut scope (see docs/porting/native-port-plan.md), so nothing links it and
+# everything it declares is unresolved. Recognising those names from the fetched SDK's own headers
+# rather than from a `^(gs|peer|qr2|...)` prefix regex is what moves `GenerateAuthA`,
+# `PersistThink`, `NewGame` and the stats-connection cluster out of "Other / unclassified": they
+# are ordinary-looking names that happen to be GameSpy's.
+GAMESPY_INCLUDE_SUBDIRS = ("gamespy-src/include", "gamespy-src/include/gamespy")
+
+
+def gamespy_symbols(deps_dir):
+    if deps_dir is None:
+        return set()
+    headers = []
+    for subdir in GAMESPY_INCLUDE_SUBDIRS:
+        root = deps_dir / subdir
+        if root.is_dir():
+            headers.extend(root.rglob("*.h"))
+    return declared_names_in(headers)
 
 
 CATEGORY_PATTERNS = [
@@ -106,19 +164,21 @@ CATEGORY_PATTERNS = [
     ("Generated gitinfo (build-time, not a blocker)", re.compile(
         r"^Git(Revision|Tag|ShortSHA1|CommitAuthorName|CommitTimeStamp|UncommittedChanges|"
         r"HasLocalChanges)$")),
-    # DEFINE_KEY in Common/WellKnownKeys.h declares these everywhere and defines them only in the
-    # one translation unit that sets INSTANTIATE_WELL_KNOWN_KEYS -- GameEngineDevice's
-    # WorldHeightMap.cpp, which this build does not include. A macro, so the source scan below
-    # cannot see it.
-    ("Well-known Dict keys (instantiated in GameEngineDevice)", re.compile(r"^TheKey_\w+$")),
     ("Third-party library not linked (lzhl, zlib)", re.compile(
         r"^(LZHL\w+|compress2?|uncompress|deflate\w*|inflate\w*|zlib\w*|crc32|adler32)$")),
+    # `IID_IUnknown` / `IID_IBrowserDispatch`: the interface GUIDs the WOL/EABrowserDispatch
+    # embedding references. On Windows they come out of the generated IDL stubs and uuid.lib.
+    # Cut scope with the browser embedding itself, and a GUID constant either way, never code.
+    # `_com_util::`/`_bstr_t` are MSVC's `comutil.h` helpers, reached from the same embedding.
+    ("COM / OLE (browser embedding, cut scope)", re.compile(
+        r"^(?:(?:IID|CLSID|LIBID|DIID)_\w+$|_com_util::|_bstr_t|_variant_t)")),
     ("Direct3D 8 / DirectX", re.compile(
         r"^(Direct3DCreate8|D3DX\w+|DirectDrawCreate\w*|DirectInput\w*|DirectSound\w*|"
         r"IDirect3D\w*)")),
     ("Miles Sound System", re.compile(r"^AIL_")),
     ("Bink video", re.compile(r"^Bink")),
-    ("GameSpy", re.compile(r"^(gs|ghttp|peer|qr2|sb|GT2|gt2|gp|ci|sc)[A-Z]\w*")),
+    ("GameSpy SDK (cut scope, not linked)", re.compile(
+        r"^(gs|ghttp|peer|qr2|sb|GT2|gt2|gp|ci|sc)[A-Z]\w*")),
     ("x86 assembly / MSVC intrinsics", re.compile(
         r"^(_Interlocked\w+|__rdtsc|_lrotl|_lrotr|_byteswap_\w+|__cpuid\w*|_BitScan\w+|"
         r"_mm_\w+|__debugbreak|_ReturnAddress)$")),
@@ -126,18 +186,89 @@ CATEGORY_PATTERNS = [
 ]
 
 
-def categorise_symbol(mangled, demangled, win32_names, uncompiled_names, unbuilt_layer_names):
+# DEFINE_KEY in Common/WellKnownKeys.h declares `TheKey_*` everywhere and defines them only in the
+# translation unit that sets INSTANTIATE_WELL_KNOWN_KEYS. Macro-generated, so the source scan below
+# cannot see them, and their cause depends entirely on what happened to that one file -- which is
+# why they get their own lookup rather than a pattern.
+WELL_KNOWN_KEYS_RE = re.compile(r"^TheKey_\w+$")
+WELL_KNOWN_KEYS_MACRO = "INSTANTIATE_WELL_KNOWN_KEYS"
+
+
+# `typeinfo for X`, `vtable for X`, `VTT for X`, `typeinfo name for X`, `non-virtual thunk to
+# X::y()` -- the class, not the function, is what identifies these.
+SYMBOL_OWNER_PREFIX_RE = re.compile(
+    r"^(?:typeinfo(?: name)? for |vtable for |VTT for |construction vtable for |"
+    r"(?:non-virtual|virtual) thunk to |guard variable for )")
+
+
+def symbol_class(base):
+    """The class a demangled symbol belongs to, or None if it is not a member of one."""
+    name = SYMBOL_OWNER_PREFIX_RE.sub("", base).strip()
+    if "::" not in name:
+        return name if name != base else None
+    return name.split("::", 1)[0]
+
+
+@dataclasses.dataclass(frozen=True)
+class Attribution:
+    """Everything needed to say *why* a symbol is unresolved, gathered once per run."""
+
+    win32_names: frozenset
+    gamespy_names: frozenset
+    uncompiled_names: frozenset
+    unbuilt_layer_names: frozenset
+    built_definition_names: frozenset
+    excluded_backend_names: frozenset
+    uncompiled_classes: frozenset
+    unbuilt_layer_classes: frozenset
+    well_known_keys_category: str
+
+
+DISABLED_IF_CATEGORY = (
+    "Defined in a built translation unit behind a disabled #if (build option / platform)")
+EXCLUDED_BACKEND_CATEGORY = (
+    "Defined only in a backend this configuration excludes (SDL2 / Cocoa)")
+UNBUILT_LAYER_CATEGORY = "Defined in a layer not built here (renderer / audio)"
+
+
+def categorise_symbol(mangled, demangled, attribution):
     base = demangled.split("(", 1)[0].strip().removesuffix("[abi:cxx11]")
     plain = mangled.lstrip("_")
+    unqualified = base.rsplit("::", 1)[-1]
     for name, pattern in CATEGORY_PATTERNS:
         if pattern.search(mangled) or pattern.search(base) or pattern.search(plain):
             return name
-    if mangled in win32_names or plain in win32_names or base in win32_names:
+    if WELL_KNOWN_KEYS_RE.match(plain):
+        return attribution.well_known_keys_category
+    if {mangled, plain, base} & attribution.win32_names:
         return "Win32 API"
-    if base in uncompiled_names:
+    if {mangled, plain, base} & attribution.gamespy_names:
+        return "GameSpy SDK (cut scope, not linked)"
+    if base in attribution.uncompiled_names:
         return "Defined in a translation unit that failed to compile"
-    if base in unbuilt_layer_names:
-        return "Defined in a layer not built here (renderer / audio / device / entry point)"
+    # A name a *built* translation unit defines in its source text and that is still unresolved was
+    # preprocessed away: an `#if defined(RTS_DEBUG)` or a `#ifdef _WIN32` this configuration does
+    # not take. That is a build-configuration fact, not missing code, and it used to be filed as
+    # "engine C++ not built at this level", which was wrong -- the file *was* built.
+    if base in attribution.built_definition_names:
+        return DISABLED_IF_CATEGORY
+    # The unqualified fallback is only used here, where the file set is three files and the
+    # namespace-versus-file mismatch is real: the backends define `Window_Create` inside
+    # `namespace WWPlatform`, which the column-zero source scan sees unqualified.
+    if attribution.excluded_backend_names & {base, unqualified}:
+        return EXCLUDED_BACKEND_CATEGORY
+    if base in attribution.unbuilt_layer_names:
+        return UNBUILT_LAYER_CATEGORY
+    # Compiler-generated symbols -- `typeinfo for X`, `vtable for X`, thunks -- and members the
+    # source scan misses because their return type sits on the previous line, or because they are
+    # generated by a macro. No text scan can find them by name, but the class they belong to has
+    # methods defined somewhere, and that file is the answer.
+    owner = symbol_class(base)
+    if owner:
+        if owner in attribution.uncompiled_classes:
+            return "Defined in a translation unit that failed to compile"
+        if owner in attribution.unbuilt_layer_classes:
+            return UNBUILT_LAYER_CATEGORY
     if mangled.startswith("_Z") or "::" in demangled:
         return "Engine C++ not built at this level"
     return "Other / unclassified"
@@ -169,6 +300,70 @@ def defined_names_in(sources):
         names.update(FUNCTION_DEFINITION_RE.findall(text))
         names.update(OBJECT_DEFINITION_RE.findall(text))
     return names
+
+
+# `void W3DTankDraw::doDrawModule(...)`, `W3DTankDraw::~W3DTankDraw()` -- a member definition, at
+# any indentation, but never a call: a qualified call is a statement and ends in a semicolon.
+CLASS_MEMBER_DEFINITION_RE = re.compile(
+    r"^[ \t]*(?:[\w:<>&*\[\]]+[ \t]+)*([A-Za-z_]\w*)::~?[A-Za-z_]\w*[ \t]*\([^;]*$", re.M)
+
+
+def defined_classes_in(sources):
+    """Classes with at least one member defined by the given translation units."""
+    names = set()
+    for source in sources:
+        try:
+            text = source.read_text(errors="replace")
+        except OSError:
+            continue
+        names.update(CLASS_MEMBER_DEFINITION_RE.findall(text))
+    return names
+
+
+# Sources the probe and this build both exclude from every target: the opt-in SDL2 window backend,
+# the mutually exclusive memory implementation, and the Objective-C++ Cocoa backend (never a .cpp,
+# so no target ever listed it). Whatever they alone define is unresolved because of the
+# configuration, which is a different statement from "this layer is not built".
+EXCLUDED_BACKEND_DIRS = ("Core", "Generals", "GeneralsMD")
+
+
+def excluded_backend_sources():
+    wanted = set(npt.probe.OPTIONAL_BACKENDS) | set(npt.probe.EXCLUSIVE_ALTERNATIVES)
+    found = []
+    for directory in EXCLUDED_BACKEND_DIRS:
+        root = REPO_ROOT / directory
+        if not root.is_dir():
+            continue
+        found.extend(p for p in root.rglob("*.cpp") if p.name in wanted)
+        found.extend(root.rglob("*.mm"))
+    return found
+
+
+def well_known_keys_owner():
+    """The translation unit that instantiates the `TheKey_*` Dict keys, if any."""
+    for directory in EXCLUDED_BACKEND_DIRS:
+        root = REPO_ROOT / directory
+        for source in root.rglob("*.cpp"):
+            if WELL_KNOWN_KEYS_MACRO in source.read_text(errors="replace"):
+                return source
+    return None
+
+
+def well_known_keys_category(owner, failed, built_sources):
+    """Why `TheKey_*` is unresolved, named after the one file that decides it.
+
+    Before level 3 these 104 symbols were reported as "well-known Dict keys", which said nothing:
+    the only thing that matters is what happened to the single translation unit that instantiates
+    them. If it built, they resolve and this is never used.
+    """
+    if owner is None:
+        return f"Well-known Dict keys: no translation unit sets {WELL_KNOWN_KEYS_MACRO}"
+    relative = owner.relative_to(REPO_ROOT)
+    if owner in failed:
+        return f"Well-known Dict keys: `{relative}` failed to compile"
+    if owner not in built_sources:
+        return f"Well-known Dict keys: `{relative}` is not in the built levels"
+    return f"Well-known Dict keys: `{relative}` built but did not define them"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -219,8 +414,60 @@ def write_manifests(targets, manifest_dir, deps_dir, skip=None, with_shims=False
     return written
 
 
-def configure(build_dir, manifest_dir, targets):
-    slugs = ";".join(slug(t.name) for t in targets)
+# ---------------------------------------------------------------------------------------------
+# Third-party libraries the engine actually calls into
+# ---------------------------------------------------------------------------------------------
+
+# `LZHLCompress`, `compress2` and friends were reported as unresolved for one reason only: nothing
+# linked lzhl or zlib. That is a dependency, not port work, and counting it as a blocker inflated
+# every figure quoted from this build by nine symbols.
+#
+# lzhl is built from the sources cmake/lzhl.cmake pins and scripts/ci/fetch-probe-deps.sh fetches,
+# with cmake/lzhl.cmake's own file list (Lzhl_tcp.cpp is commented out there, so it is out here).
+# It is a *support* archive: deliberately not part of the objects/translation-unit denominators,
+# which measure the engine's own portability and must stay comparable with the probe's.
+LZHL_SUBDIR = "lzhl-src/CompLibHeader"
+LZHL_SOURCES = ("Huff.cpp", "Lz.cpp", "Lzhl.cpp")
+LZHL_SLUG = "thirdparty_lzhl"
+
+# zlib is a system package (`zlib1g-dev`), so it is linked with -lz rather than built.
+ZLIB_CANDIDATES = (
+    "/lib/x86_64-linux-gnu/libz.so.1",
+    "/usr/lib/x86_64-linux-gnu/libz.so.1",
+    "/usr/lib/aarch64-linux-gnu/libz.so.1",
+    "/usr/lib/libz.dylib",
+)
+
+
+def write_lzhl_manifest(manifest_dir, deps_dir):
+    """CMake fragment for lzhl. Returns its slug, or None when the sources are not provisioned."""
+    root = deps_dir / LZHL_SUBDIR
+    sources = [root / name for name in LZHL_SOURCES if (root / name).is_file()]
+    if len(sources) != len(LZHL_SOURCES):
+        return None
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Generated by scripts/native-build.py for lzhl. Do not edit.",
+        "set(NATIVE_SOURCES",
+        *[f'    "{s}"' for s in sources],
+        ")",
+        "set(NATIVE_INCLUDES",
+        f'    "{root}"',
+        f'    "{root.parent}"',
+        # The project force-includes Utility/CppMacros.h into every target, this one included.
+        f'    "{REPO_ROOT / "Dependencies" / "Utility"}"',
+        ")",
+    ]
+    (manifest_dir / f"{LZHL_SLUG}.cmake").write_text("\n".join(lines) + "\n")
+    return LZHL_SLUG
+
+
+def zlib_library():
+    return next((pathlib.Path(p) for p in ZLIB_CANDIDATES if pathlib.Path(p).exists()), None)
+
+
+def configure(build_dir, manifest_dir, targets, extra_slugs=()):
+    slugs = ";".join([slug(t.name) for t in targets] + list(extra_slugs))
     cmd = [
         "cmake", "-S", str(NATIVE_CMAKE_DIR), "-B", str(build_dir),
         f"-DCMAKE_CXX_COMPILER={CXX}",
@@ -341,17 +588,22 @@ def system_symbols():
     return names
 
 
-def unresolved_symbols(archives):
-    """Symbols the archives reference that neither they nor the system libraries define.
+def unresolved_symbols(archives, support_archives=(), extra_libraries=()):
+    """Symbols the engine archives reference that nothing linked into the binary defines.
 
     Read out of the archives with `nm` rather than scraped from linker diagnostics: ld demangles
     in its messages, which throws away the mangled name, and it reports only what its own archive
     ordering happened to require.
+
+    `support_archives` (lzhl) and `extra_libraries` (zlib) contribute definitions only: they are
+    dependencies, so what *they* reference is not this measurement's business.
     """
     defined = set()
     referenced_from = collections.defaultdict(set)
-    for archive in archives:
+    for archive in list(archives) + list(support_archives):
         defined |= nm_symbols(archive, "--defined-only", "--extern-only")
+    for library in extra_libraries:
+        defined |= nm_symbols(library, "-D", "--defined-only", "--extern-only")
     for archive in archives:
         for name in nm_symbols(archive, "--undefined-only"):
             referenced_from[name].add(archive.stem)
@@ -363,12 +615,13 @@ def unresolved_symbols(archives):
     }
 
 
-def link_probe(build_dir, archives):
+def link_probe(build_dir, archives, support_archives=(), link_zlib=False):
     """Run the linker over every archive, so "no linker has ever run" stops being true.
 
     `--whole-archive` forces every object in, since a trivial main() otherwise pulls in nothing,
     and `--warn-unresolved-symbols` lets it produce a binary anyway so the outcome is a result
-    rather than a wall of errors.
+    rather than a wall of errors. The third-party archives follow without `--whole-archive`: they
+    are dependencies, so only what the engine actually calls needs to come in.
     """
     stub = build_dir / "native_link_probe.cpp"
     stub.write_text(
@@ -381,8 +634,11 @@ def link_probe(build_dir, archives):
         CXX, "-std=c++20", "-o", str(out), str(stub),
         "-Wl,--warn-unresolved-symbols",
         "-Wl,--whole-archive", *[str(a) for a in archives], "-Wl,--no-whole-archive",
+        *[str(a) for a in support_archives],
         "-lstdc++", "-lm", "-lpthread", "-ldl",
     ]
+    if link_zlib:
+        cmd.append("-lz")
     proc = subprocess.run(cmd, capture_output=True, text=True)
     return proc.returncode == 0, out.exists(), proc.stdout + proc.stderr
 
@@ -474,10 +730,12 @@ def render_report(data, examples):
         ]
         lines += [f"- `{p}`" for p in divergence["probe_failed_compile_ok"]] + [""]
 
+    third_party = ", ".join("`" + name + "`" for name in data["third_party_linked"]) or "none"
     lines += [
         "## 3. Undefined symbols",
         "",
-        f"The {data['archives']} archives were linked into one binary with `--whole-archive` "
+        f"The {data['archives']} archives were linked into one binary with `--whole-archive`, "
+        f"plus the third-party libraries the engine calls into: {third_party} "
         f"(binary produced: {'yes' if data['link_binary_produced'] else 'no'}; clean link: "
         f"{'yes' if data['link_clean'] else 'no'}). **{data['undefined_total']} distinct symbols "
         "are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are "
@@ -529,7 +787,9 @@ def main():
 
     levels = sorted(set(args.level or [1]))
     wanted = [name for level in levels for name in LEVELS[level]]
-    targets = [t for t in npt.TARGETS if t.name in wanted]
+    # ALL_TARGETS, not npt.TARGETS: level 3's device and entry-point libraries live in the probe's
+    # RENDERER_TARGETS list, which is where the probe keeps everything never compiled off Windows.
+    targets = [t for t in ALL_TARGETS if t.name in wanted]
     missing = set(wanted) - {t.name for t in targets}
     if missing:
         raise SystemExit(f"probe has no target definition for: {', '.join(sorted(missing))}")
@@ -551,9 +811,23 @@ def main():
     target_by_source = {s: t for t in targets for s in sources_by_target[t.name]}
     all_sources = list(target_by_source)
 
+    lzhl_slug = write_lzhl_manifest(manifest_dir, deps_dir)
+    if lzhl_slug is None:
+        print("   warning: lzhl sources are not provisioned; LZHL* symbols will stay unresolved")
+    zlib_path = zlib_library()
+    if zlib_path is None:
+        print("   warning: no libz found; compress2/uncompress will stay unresolved")
+    extra_slugs = [lzhl_slug] if lzhl_slug else []
+
     print(f"== compiling {len(all_sources)} translation units")
-    configure(build_dir, manifest_dir, targets)
+    configure(build_dir, manifest_dir, targets, extra_slugs)
     failed, compile_diagnostics = build(build_dir, args.jobs)
+    # The third-party archive is built alongside but is not part of the measurement, so a failure
+    # there is a provisioning problem rather than a translation unit this port cannot compile.
+    support_failed = {s for s in failed if s not in target_by_source}
+    failed = {s for s in failed if s in target_by_source}
+    if support_failed:
+        print(f"   warning: {len(support_failed)} third-party sources failed to compile")
     print(f"   {len(all_sources) - len(failed)} objects, {len(failed)} failures")
 
     print("== re-running the probe over the same translation units")
@@ -573,32 +847,61 @@ def main():
         target = target_by_source.get(source)
         if target:
             skip[target.name].add(source)
-    write_manifests(targets, manifest_dir, deps_dir, skip=skip, with_shims=args.with_shims)
-    configure(build_dir, manifest_dir, targets)
+    # A library every one of whose translation units failed cannot become an archive at all --
+    # CMake rejects a target with no sources -- so it is dropped from the link with its name
+    # recorded, rather than being silently absent from the archive count.
+    link_targets = [t for t in targets
+                    if any(s not in failed for s in sources_by_target[t.name])]
+    empty_targets = [t.name for t in targets if t not in link_targets]
+    if empty_targets:
+        print(f"   no archive for: {', '.join(empty_targets)} (every unit failed)")
+    # A stale archive from an earlier run, or from a target just dropped, would be picked up by the
+    # rglob below and linked, so the link would not describe this build.
+    for stale in build_dir.rglob("*.a"):
+        stale.unlink()
+    write_manifests(link_targets, manifest_dir, deps_dir, skip=skip, with_shims=args.with_shims)
+    configure(build_dir, manifest_dir, link_targets, extra_slugs)
     second_failed, _ = build(build_dir, args.jobs)
+    second_failed = {s for s in second_failed if s in target_by_source}
     if second_failed:
         print(f"   warning: {len(second_failed)} further failures in the second pass")
 
-    archives = sorted(build_dir.rglob("*.a"))
-    print(f"== linking {len(archives)} archives")
-    link_ok, binary_produced, _ = link_probe(build_dir, archives)
-    symbols = unresolved_symbols(archives)
+    all_archives = sorted(build_dir.rglob("*.a"))
+    support_archives = [a for a in all_archives if a.stem.endswith(LZHL_SLUG)]
+    archives = [a for a in all_archives if a not in support_archives]
+    print(f"== linking {len(archives)} archives "
+          f"(+{len(support_archives)} third-party, zlib: {'yes' if zlib_path else 'no'})")
+    link_ok, binary_produced, _ = link_probe(build_dir, archives, support_archives,
+                                             link_zlib=zlib_path is not None)
+    extra_libraries = [zlib_path] if zlib_path else []
+    symbols = unresolved_symbols(archives, support_archives, extra_libraries)
     demangled = demangle(list(symbols))
-    win32_names = win32_shim_symbols()
-    uncompiled_names = defined_names_in(failed)
-    # Everything the probe knows about but this build does not include: the renderer, audio,
-    # device and entry-point layers, plus any level not selected. A symbol they define is out of
-    # scope here, not missing.
-    unbuilt = [t for t in npt.TARGETS + npt.RENDERER_TARGETS if t not in targets]
-    unbuilt_layer_names = defined_names_in(
-        [s for t in unbuilt for s in npt.target_sources(t)])
+
+    built_sources = [s for s in all_sources if s not in failed]
+    # Everything the probe knows about but this build does not include: the renderer and audio
+    # layers, plus any level not selected. A symbol they define is out of scope here, not missing.
+    unbuilt = [t for t in ALL_TARGETS if t not in targets]
+    unbuilt_sources = [s for t in unbuilt for s in npt.target_sources(t)]
+    keys_owner = well_known_keys_owner()
+    attribution = Attribution(
+        win32_names=frozenset(win32_shim_symbols()),
+        gamespy_names=frozenset(gamespy_symbols(deps_dir)),
+        uncompiled_names=frozenset(defined_names_in(failed)),
+        unbuilt_layer_names=frozenset(defined_names_in(unbuilt_sources)),
+        built_definition_names=frozenset(defined_names_in(built_sources)),
+        excluded_backend_names=frozenset(defined_names_in(excluded_backend_sources())),
+        uncompiled_classes=frozenset(defined_classes_in(failed)),
+        # A class whose members the failed files define is attributed to them first, so a class
+        # split across a built and an unbuilt file is not reported as merely out of scope.
+        unbuilt_layer_classes=frozenset(defined_classes_in(unbuilt_sources)),
+        well_known_keys_category=well_known_keys_category(keys_owner, failed, target_by_source),
+    )
 
     by_category = collections.Counter()
     per_category_names = collections.defaultdict(list)
     for symbol in sorted(symbols):
         name = demangled.get(symbol, symbol)
-        category = categorise_symbol(symbol, name, win32_names, uncompiled_names,
-                                     unbuilt_layer_names)
+        category = categorise_symbol(symbol, name, attribution)
         by_category[category] += 1
         per_category_names[category].append(name)
 
@@ -630,6 +933,13 @@ def main():
         "link_clean": link_ok,
         "link_binary_produced": binary_produced,
         "archives": len(archives),
+        # Libraries with no archive at all: every translation unit failed, so the link cannot see
+        # them. Tracked separately because "one fewer archive" otherwise looks like progress.
+        "libraries_without_archive": sorted(empty_targets),
+        # Linked, but deliberately outside every other figure here: dependencies, not translation
+        # units whose portability is being measured.
+        "third_party_linked": sorted(
+            [a.stem for a in support_archives] + (["z (system)"] if zlib_path else [])),
         "undefined_total": len(symbols),
         "undefined_by_category": dict(by_category.most_common()),
         # The categorised list is the deliverable, so it goes in the machine-readable output in

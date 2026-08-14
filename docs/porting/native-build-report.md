@@ -4,7 +4,7 @@ Produced by `scripts/native-build.py`. Unlike every other number in `docs/portin
 these come from real object files and a real linker invocation, not from
 `clang++ -fsyntax-only`.
 
-Toolchain: `Ubuntu clang version 14.0.0-1ubuntu1.1`, target `x86_64-pc-linux-gnu`, levels built: 1, 2.
+Toolchain: `Ubuntu clang version 14.0.0-1ubuntu1.1`, target `x86_64-pc-linux-gnu`, levels built: 1, 2, 3.
 
 Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only stand-ins for the Win32 headers, so a missing platform layer shows up as an undefined symbol rather than as a failed compile. That is the point: it moves the blockers from §1 to §3, where they can be counted individually.
 
@@ -19,9 +19,12 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
 | `Core/GameEngine` | 203 | 210 | 203 |
 | `GeneralsMD/Code/GameEngine` | 377 | 380 | 377 |
-| **Total** | **708** | **718** | **708** |
+| `Core/GameEngineDevice` | 26 | 70 | 26 |
+| `GeneralsMD/Code/GameEngineDevice` | 14 | 39 | 14 |
+| `GeneralsMD/Code/Main` | 0 | 2 | 0 |
+| **Total** | **748** | **829** | **748** |
 
-10 translation units produced no object file:
+81 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
@@ -32,32 +35,122 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/GameResultsThread.cpp` | `unknown type name 'HOSTENT'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PeerThread.cpp` | `no matching function for call to 'recvfrom'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp` | `unknown type name 'HOSTENT'` |
+| `Core/GameEngineDevice/Source/MilesAudioDevice/MilesAudioManager.cpp` | `static_assert failed due to requirement 'sizeof (m_status) == sizeof(long)' "Must be size of long, because it is used wi` |
+| `Core/GameEngineDevice/Source/StdDevice/Common/StdLocalFileSystem.cpp` | `use of undeclared identifier 'unNormalized'; did you mean 'nonNormalized'?` |
+| `Core/GameEngineDevice/Source/VideoDevice/Bink/BinkVideoPlayer.cpp` | `'bink.h' file not found` |
+| `Core/GameEngineDevice/Source/VideoDevice/FFmpeg/FFmpegFile.cpp` | `'Common/File.h' file not found` |
+| `Core/GameEngineDevice/Source/VideoDevice/FFmpeg/FFmpegVideoPlayer.cpp` | `'libavcodec/avcodec.h' file not found` |
+| `Core/GameEngineDevice/Source/W3DDevice/Common/System/W3DRadar.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/BaseHeightMap.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/CameraShakeSystem.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DPropDraw.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTankDraw.cpp` | `'bink.h' file not found` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTankTruckDraw.cpp` | `'bink.h' file not found` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTreeDraw.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTruckDraw.cpp` | `'bink.h' file not found` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/FlatHeightMap.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/GUICallbacks/W3DControlBar.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DCheckBox.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DComboBox.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DHorizontalSlider.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DListBox.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DProgressBar.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DRadioButton.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DStaticText.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DTabControl.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DTextEntry.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DVerticalSlider.cpp` | `unknown type name 'HFONT'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/HeightMap.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/TerrainTex.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DParticleSys.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DPropBuffer.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DScreenshot.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DShaderManager.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DSmudge.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DSnow.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DTerrainBackground.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DTerrainTracks.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DTerrainVisual.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DTreeBuffer.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DView.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `Core/GameEngineDevice/Source/W3DDevice/GameClient/stb_image_write_impl.cpp` | `'stb_image_write.h' file not found` |
 | `GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp` | `no member named 'SetWindowText' in the global namespace` |
 | `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/DownloadMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/MainMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/Common/System/W3DFunctionLexicon.cpp` | `unknown type name 'HFONT'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/W3DGameFont.cpp` | `unknown type name 'HFONT'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/W3DGameWindow.cpp` | `unknown type name 'HFONT'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/W3DGameWindowManager.cpp` | `unknown type name 'HFONT'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DProjectedShadow.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DShadow.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DVolumetricShadow.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DAssetManager.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DBibBuffer.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DBridgeBuffer.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DCustomEdging.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDebugIcons.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp` | `'bink.h' file not found` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplayString.cpp` | `unknown type name 'HFONT'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplayStringManager.cpp` | `unknown type name 'HFONT'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DGameClient.cpp` | `'bink.h' file not found` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DRoadBuffer.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DScene.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DShroud.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DStatusCircle.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DWebBrowser.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3dWaypointBuffer.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameLogic/W3DTerrainLogic.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
+| `GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp` | `static_assert failed due to requirement 'sizeof (m_status) == sizeof(long)' "Must be size of long, because it is used wi` |
+| `GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32OSDisplay.cpp` | `use of undeclared identifier 'MB_APPLMODAL'` |
+| `GeneralsMD/Code/Main/PlatformMain.cpp` | `static_assert failed due to requirement 'sizeof (m_status) == sizeof(long)' "Must be size of long, because it is used wi` |
+| `GeneralsMD/Code/Main/WinMain.cpp` | `'eh.h' file not found` |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 708 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 748 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 7 archives were linked into one binary with `--whole-archive` (binary produced: yes; clean link: yes). **280 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: yes; clean link: yes). **393 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| Well-known Dict keys (instantiated in GameEngineDevice) | 104 |
-| Win32 API | 43 |
-| Defined in a translation unit that failed to compile | 33 |
-| Engine C++ not built at this level | 22 |
-| Defined in a layer not built here (renderer / audio / device / entry point) | 21 |
-| Other / unclassified | 19 |
-| GameSpy | 18 |
-| Third-party library not linked (lzhl, zlib) | 9 |
+| Defined in a translation unit that failed to compile | 109 |
+| Well-known Dict keys: `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` failed to compile | 104 |
+| Defined in a layer not built here (renderer / audio) | 72 |
+| Win32 API | 44 |
+| GameSpy SDK (cut scope, not linked) | 33 |
+| Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 11 |
+| Defined in a built translation unit behind a disabled #if (build option / platform) | 6 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
 | Direct3D 8 / DirectX | 5 |
+| COM / OLE (browser embedding, cut scope) | 3 |
 
-### Well-known Dict keys (instantiated in GameEngineDevice)
+### Defined in a translation unit that failed to compile
+
+- `DX8Wrapper_IsWindowed`
+- `TheGameEngine`
+- `TheGameResultsQueue`
+- `TheGameSpyPeerMessageQueue`
+- `TheIMEManager`
+- `ThePinger`
+- `TheProjectedShadowManager`
+- `TheSmudgeManager`
+- `TheSubsystemList`
+- `TheTerrainTracksRenderObjClassSystem`
+- `TheW3DShadowManager`
+- `TheWin32Mouse`
+- `doSkyBoxSet(bool)`
+- `MainMenuInit(WindowLayout*, void*)`
+- `MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
+- …and 94 more
+
+### Well-known Dict keys: `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` failed to compile
 
 - `TheKey_InitialCameraPosition`
 - `TheKey_mapName`
@@ -76,6 +169,25 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `TheKey_objectSelectable`
 - …and 89 more
 
+### Defined in a layer not built here (renderer / audio)
+
+- `SetUnsignedIntInRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int)`
+- `LightClass::Notify_Added(SceneClass*)`
+- `LightClass::Notify_Removed(SceneClass*)`
+- `LightClass::Load(ChunkLoadClass&)`
+- `LightClass::Save(ChunkSaveClass&)`
+- `LightClass::LightClass(LightClass::LightType)`
+- `LightClass::~LightClass()`
+- `Line3DClass::Set_Opacity(float)`
+- `Line3DClass::Reset(Vector3 const&, Vector3 const&)`
+- `Line3DClass::Reset(Vector3 const&, Vector3 const&, float)`
+- `Line3DClass::Re_Color(float, float, float)`
+- `Line3DClass::Line3DClass(Vector3 const&, Vector3 const&, float, float, float, float, float)`
+- `ShaderClass::_PresetAdditiveShader`
+- `ShaderClass::_PresetAdditiveSpriteShader`
+- `SurfaceClass::Lock(int*)`
+- …and 57 more
+
 ### Win32 API
 
 - `CopyFileA`
@@ -93,31 +205,29 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `GetDateFormatA`
 - `GetDateFormatW`
 - `GetDoubleClickTime`
-- …and 28 more
+- …and 29 more
 
-### Defined in a translation unit that failed to compile
+### GameSpy SDK (cut scope, not linked)
 
-- `DX8Wrapper_IsWindowed`
-- `TheGameEngine`
-- `TheGameResultsQueue`
-- `TheGameSpyPeerMessageQueue`
-- `TheIMEManager`
-- `ThePinger`
-- `TheSubsystemList`
-- `MainMenuInit(WindowLayout*, void*)`
-- `MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `MainMenuUpdate(WindowLayout*, void*)`
-- `setupGameStart(AsciiString, GameDifficulty)`
-- `DownloadMenuInit(WindowLayout*, void*)`
-- `MainMenuShutdown(WindowLayout*, void*)`
-- `DownloadMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
+- `CloseStatsConnection`
+- `FreeGame`
+- `GenerateAuthA`
+- `GetChallenge`
+- `GetPersistDataValuesA`
+- `InitStatsConnection`
+- `IsStatsConnected`
+- `NewGame`
+- `PersistThink`
+- `PreAuthenticatePlayerCDA`
+- `PreAuthenticatePlayerPM`
+- `SendGameSnapShotA`
+- `SetPersistDataValuesA`
+- `gcd_gamename`
+- `gcd_secret_key`
 - …and 18 more
 
-### Engine C++ not built at this level
+### Defined only in a backend this configuration excludes (SDL2 / Cocoa)
 
-- `FillStackAddresses(void**, unsigned int, unsigned int)`
-- `StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))`
 - `WWPlatform::Window_Show(void*, bool)`
 - `WWPlatform::Window_Create(WWPlatform::WindowConfig const&)`
 - `WWPlatform::Window_Destroy(void*)`
@@ -129,78 +239,15 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `WWPlatform::Window_Is_Minimised(void*)`
 - `WWPlatform::Window_Modifier_State(void*)`
 - `WWPlatform::Window_Set_Cursor_Clip(void*, bool)`
-- `GameSpyStagingRoom::GameSpyStagingRoom()`
-- `TextureFilterClass::TextureFilterModeString`
-- …and 7 more
 
-### Defined in a layer not built here (renderer / audio / device / entry point)
+### Defined in a built translation unit behind a disabled #if (build option / platform)
 
 - `DX8Wrapper_PreserveFPU`
-- `TheProjectedShadowManager`
-- `TheSmudgeManager`
-- `MOTDSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `doSkyBoxSet(bool)`
-- `CreateGameEngine()`
-- `ReloadAllTextures()`
-- `oversizeTheTerrain(int)`
-- `OSDisplaySetBusyState(bool, bool)`
-- `testMinimumRequirements(ChipsetType*, CpuType*, int*, unsigned long long*, float*, float*, float*)`
-- `SetUnsignedIntInRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int)`
+- `FillStackAddresses(void**, unsigned int, unsigned int)`
+- `StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))`
 - `GetUnsignedIntFromRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int&)`
-- `TextureFilterClass::getTextureFilterMode(char const*)`
-- `WW3D::Get_Texture_Reduction()`
-- `MapObject::getWaypointID()`
-- …and 6 more
-
-### Other / unclassified
-
-- `CloseStatsConnection`
-- `FreeGame`
-- `GenerateAuthA`
-- `GetChallenge`
-- `GetPersistDataValuesA`
-- `IID_IBrowserDispatch`
-- `IID_IUnknown`
-- `InitStatsConnection`
-- `IsStatsConnected`
-- `NewGame`
-- `PersistThink`
-- `PreAuthenticatePlayerCDA`
-- `PreAuthenticatePlayerPM`
-- `SendGameSnapShotA`
-- `SetPersistDataValuesA`
-- …and 4 more
-
-### GameSpy
-
-- `gpAuthBuddyRequest`
-- `gpConnectA`
-- `gpConnectNewUserA`
-- `gpDeleteBuddy`
-- `gpDeleteProfile`
-- `gpDenyBuddyRequest`
-- `gpDestroy`
-- `gpDisconnect`
-- `gpGetBuddyStatus`
-- `gpGetInfo`
-- `gpInitialize`
-- `gpIsConnected`
-- `gpProcess`
-- `gpSendBuddyMessageA`
-- `gpSendBuddyRequestA`
-- …and 3 more
-
-### Third-party library not linked (lzhl, zlib)
-
-- `LZHLCompress`
-- `LZHLCompressorCalcMaxBuf`
-- `LZHLCreateCompressor`
-- `LZHLCreateDecompressor`
-- `LZHLDecompress`
-- `LZHLDestroyCompressor`
-- `LZHLDestroyDecompressor`
-- `compress2`
-- `uncompress`
+- `g_LastErrorDump`
+- `getQR2HostingStatus`
 
 ### Generated gitinfo (build-time, not a blocker)
 
@@ -219,9 +266,15 @@ The 7 archives were linked into one binary with `--whole-archive` (binary produc
 - `D3DXVECTOR4::D3DXVECTOR4(float, float, float, float)`
 - `D3DXVECTOR4::D3DXVECTOR4()`
 
+### COM / OLE (browser embedding, cut scope)
+
+- `IID_IBrowserDispatch`
+- `IID_IUnknown`
+- `_com_util::ConvertStringToBSTR(char const*)`
+
 ## Reproducing
 
 ```sh
 bash scripts/ci/fetch-probe-deps.sh
-python3 scripts/native-build.py --level 1 --level 2 --with-shims --report docs/porting/native-build-report.md --json native-build.json
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims --report docs/porting/native-build-report.md --json native-build.json
 ```
