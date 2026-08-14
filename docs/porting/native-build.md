@@ -16,13 +16,16 @@ compile.
 - Generated report: `docs/porting/native-build-report.md`
 - CI ratchet: the `Native build (Linux, clang 14, 64-bit)` job in `.github/workflows/native-port-ci.yml`,
   gated by `scripts/ci/check-native-build-baseline.py` against
-  `docs/porting/ci-baselines/native-build-shimmed-level1-2.json`
+  `docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json` (one baseline per mode and level
+  set: the file is named after what it measures, so adding a level cannot be read as progress
+  against the smaller build's figures)
 
-> The figures below are this slice's own measurement and are kept as its record. They have since
-> been superseded: [`crt-and-widechar-compat.md`](crt-and-widechar-compat.md) took levels 1+2 from
-> 679/717 objects and 376 unresolved symbols to 704/716 and 273, and corrected the translation-unit
-> denominator (the SDL2 backend and `GameMemoryNull.cpp` were being counted although the configured
-> build compiles neither). For current numbers see [`STATUS.md`](STATUS.md), which is generated.
+> The level 1 and levels 1+2 figures below are the original slice's own measurement and are kept as
+> its record; they were already superseded once by
+> [`crt-and-widechar-compat.md`](crt-and-widechar-compat.md) (679/717 objects and 376 unresolved to
+> 704/716 and 273, plus a corrected denominator: the SDL2 backend and `GameMemoryNull.cpp` were
+> counted although the configured build compiles neither). The **levels 1+2+3** section is the
+> current measurement and the one CI ratchets.
 
 ## Measured, on Linux x86-64 with clang 14
 
@@ -65,6 +68,77 @@ Only **10 distinct Win32 entry points** are actually referenced by the engine co
 That is the size of the platform layer at this level, and it is much smaller than the `windows.h`
 include count suggested.
 
+## Levels 1+2+3, measured 2026-08-14 on b9199724 with clang 14 (current)
+
+Level 3 adds `Core/GameEngineDevice`, `GeneralsMD/Code/GameEngineDevice` and `GeneralsMD/Code/Main`
+— the device layer and the entry point. It was added to stop two of the largest undefined-symbol
+categories being artefacts of the build's own scope, and lzhl and zlib are now linked.
+
+| | Levels 1+2 (previous baseline) | Levels 1+2+3 (this baseline) |
+|---|---:|---:|
+| Translation units | 718 | 829 |
+| Object files produced | 708 | 748 |
+| Probe-clean units | 708 | 748 |
+| **Probe-clean but failed to compile** | **0** | **0** |
+| Compile failures | 10 | 81 |
+| Archives linked | 7 | 9 |
+| Unresolved symbols after linking | 280 | 393 |
+
+Read that as clean/total, never as a percentage: the denominator moved by 111 translation units.
+Level 3 contributes 40 objects out of 111 units, and 71 of the 81 failures. `GeneralsMD/Code/Main`
+produces **no archive at all** — both its translation units fail (`eh.h`, and a `sizeof(long)`
+static assertion) — which is why the JSON carries `libraries_without_archive` and the gate fails if
+any *further* library joins it.
+
+The two libraries are linked separately from the engine archives and are excluded from the object,
+translation-unit and archive counts above: `liblzhl` is built from the pinned
+`_deps/lzhl-src/CompLibHeader` sources, zlib is the system `libz`. Measuring vendor code as port
+progress would be the same mistake as measuring the denominator.
+
+### What the 125 "artefact" symbols turned out to be
+
+| Levels 1+2 category | Symbols | Where they are now |
+|---|---:|---|
+| Well-known Dict keys | 104 | all 104 still unresolved, and all 104 blocked by **one named file**: `Core/GameEngineDevice/.../WorldHeightMap.cpp`, the only unit that sets `INSTANTIATE_WELL_KNOWN_KEYS`, fails on `TheD3D8RenderBackend` (renderer slice) |
+| Defined in a layer not built here | 21 | 2 resolved (`MOTDSystem`, `ReloadAllTextures`), 14 now attributed to a named failed unit, 3 still in the unbuilt `WW3D2` renderer, 2 behind a disabled `#if` |
+
+So of the 125, **2 were resolved by building the layer and 123 were real** — but none of them is
+"defined in a layer we chose not to build" any more: each is now attributable to a named file or a
+named cut. The category renaming is the deliverable here, not the total.
+
+### Undefined symbols, before and after, by cause
+
+| Cause | Levels 1+2 | Levels 1+2+3 |
+|---|---:|---:|
+| Defined in a translation unit that failed to compile | 33 | 109 |
+| Well-known Dict keys (now: `WorldHeightMap.cpp` failed to compile) | 104 | 104 |
+| Defined in a layer not built here (renderer / audio) | 21 | 72 |
+| Win32 API | 43 | 44 |
+| GameSpy SDK (cut scope, not linked) | 18 | 33 |
+| Defined only in a backend this configuration excludes (SDL2 / Cocoa) | — | 11 |
+| Defined in a built translation unit behind a disabled `#if` | — | 6 |
+| Generated gitinfo (build-time, not a blocker) | 6 | 6 |
+| Direct3D 8 / DirectX | 5 | 5 |
+| COM / OLE (browser embedding, cut scope) | — | 3 |
+| Engine C++ not built at this level | 22 | **0** |
+| Other / unclassified | 19 | **0** |
+| Third-party library not linked (lzhl, zlib) | 9 | **0** |
+| **Total** | **280** | **393** |
+
+The three zeroes are the point. `Other / unclassified` held `IID_IUnknown`/`IID_IBrowserDispatch`
+(COM GUIDs from the cut browser embedding; `_com_util::ConvertStringToBSTR` joins them from the
+fallback bucket) and the `GenerateAuthA`/`PersistThink`/`NewGame`/`*StatsConnection` cluster, which
+is GameSpy: those names
+are not prefixed `gp`/`qr2`/`sb`, so a prefix rule could never have found them. They are now matched
+against the declarations — including the SDK's own `#define GenerateAuth GenerateAuthA` aliases — in
+the fetched GameSpy headers, which is a fact about the SDK rather than a guess about a name. Nothing
+GameSpy was implemented; it is cut scope and is now labelled as such.
+
+`Engine C++ not built at this level` was the fallback bucket, and emptying it needed two things
+beyond a name scan: definitions whose return type sits on the previous line, and the symbols no text
+scan can ever find — `typeinfo for X`, `vtable for X`, thunks. Those are attributed through the
+*class*: whichever file defines `X`'s members answers for them.
+
 ## Two blockers this found that no syntax check could
 
 **`LANMessage` no longer fits its own packet.** 17 of the 53 failures are one static assertion:
@@ -100,14 +174,20 @@ alone so they stay comparable with the numbers already published.
   the sources. It never attributes a cause to a symbol none of those files mentions, but overloads
   and macro-generated definitions can be misfiled — the `TheKey_*` keys are exactly that case,
   handled explicitly.
-- **Levels 3+ are not built.** `WW3D2`, `GameEngineDevice` and `Main` need the renderer resource
-  seam and the window/event-loop replacement first.
+- **`WW3D2` is still not built.** Level 3 covers `GameEngineDevice` and `Main`; the renderer library
+  itself needs the renderer resource seam first, which is where the 72 "layer not built here"
+  symbols and `WorldHeightMap.cpp`'s `TheD3D8RenderBackend` failure lead.
+- **81 compile failures are reported, not fixed.** The Win32 surface (`HWND`/`HFONT`/`HRESULT`/
+  `SetWindowText`), the GameSpy socket units, the Bink/FFmpeg/stb video devices and `eh.h` belong to
+  other slices or to cut scope. This build's job is to count them and name them.
+- **The level-3 numbers are Linux only.** zlib is found by probing a list of platform library paths
+  that includes `/usr/lib/libz.dylib`; that macOS entry has never been executed and is written blind.
 
 ## Reproducing
 
 ```sh
 bash scripts/ci/fetch-probe-deps.sh
-python3 scripts/native-build.py --level 1 --level 2 --with-shims \
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims \
     --report docs/porting/native-build-report.md --json native-build.json
 python3 scripts/ci/check-native-build-baseline.py --results native-build.json
 ```

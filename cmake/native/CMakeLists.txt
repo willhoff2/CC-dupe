@@ -14,6 +14,10 @@
 #
 # What this is not: a playable build. There is no linked executable, no Windows compatibility
 # layer, and no expectation that every library builds. Targets that fail are the output.
+#
+# Some slugs in NATIVE_TARGETS are third-party support libraries (lzhl) rather than engine
+# libraries. They are built the same way but are excluded from the measurement by the driving
+# script: what matters here is only that the engine's calls into them can be resolved.
 
 cmake_minimum_required(VERSION 3.20)
 project(sage_native CXX)

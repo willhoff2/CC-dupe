@@ -60,10 +60,10 @@ The native build and its gate, whose denominator must equal the probe's for the 
 comparable:
 
 ```sh
-CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --with-shims \
+CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims \
   --report docs/porting/native-build-report.md \
-  --json docs/porting/ci-baselines/native-build-shimmed-level1-2.json
-python3 scripts/ci/check-native-build-baseline.py --results docs/porting/ci-baselines/native-build-shimmed-level1-2.json
+  --json docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json
+python3 scripts/ci/check-native-build-baseline.py --results docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json
 ```
 
 The audio gates need the backend *built*, so they need the top-level CMake build (CMake >= 3.25,
