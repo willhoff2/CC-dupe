@@ -202,18 +202,19 @@ The +149 in "layer not built here" is entirely `WW3D2`, and it is the next slice
 this one's; the total will not fall until the renderer library itself is built.
 
 `GeneralsMD/Code/Main` still produces **no archive**, now out of one unit rather than two.
-`PlatformMain.cpp` fails on two things this slice does not own:
+`PlatformMain.cpp` has exactly one remaining diagnostic, and it is not this slice's:
 
-1. `Core/GameEngineDevice/Include/VideoDevice/Bink/BinkVideoPlayer.h:49: 'bink.h' file not found`
-   — fatal, reached through `Win32GameEngine.h`, and `VideoDevice/**` belongs to the concurrent
-   Bink/FFmpeg slice.
-2. `MilesAudioManager.h:142: unknown type name 'HANDLE'` — the header uses the Win32 handle types
-   without a translation unit that supplies them, which is the Win32 API seam's question, not the
-   renderer's.
+```
+Core/GameEngineDevice/Include/VideoDevice/Bink/BinkVideoPlayer.h:49: fatal error: 'bink.h' file not found
+```
 
-So criterion "Main produces objects" is **not met**, and cannot be met from inside this slice
-without editing another slice's files. The `sizeof(long)` static assertion that was one of its
-three blockers is fixed.
+It is fatal, it is reached through `Win32GameEngine.h`, and `VideoDevice/**` belongs to the
+concurrent Bink/FFmpeg slice. The other two blockers are fixed: the `sizeof(long)` static assertion,
+and `MilesAudioManager.h`'s `HANDLE m_mutex`, which is now held as the `void*` that `HANDLE` is —
+the same treatment as `rts::ClientInstance::s_instanceLock`, and no Win32 type shim was touched.
+
+So criterion "Main produces objects" is **not met**, and cannot be met from inside this slice: it
+unblocks when the Bink slice lands.
 
 ## What this does not show
 
