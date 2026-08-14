@@ -5,9 +5,8 @@
 // pipeline is materialised lazily at draw time from a hash of that block. Nothing
 // here is engine-specific; it is the machinery every strategy in the write-up needs.
 //
-// What this file does NOT do, and a real backend must: mipmap generation, render
-// targets, depth-stencil readback, dynamic vertex buffer rings, DXT decode,
-// device-lost handling, multiple streams, or programmable ps.1.1 / vs.1.1 shaders.
+// What this file does NOT do, and a real backend must: mipmap generation,
+// depth-stencil readback, DXT decode, device-lost handling, or multiple streams.
 
 #include "render_backend.h"
 #include "state_translate.h"
@@ -28,6 +27,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -36,6 +36,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace spike {
@@ -239,6 +240,9 @@ struct LockableLevel {
 
 struct TextureHandle {
 	Image image;
+	// D3DUSAGE_RENDERTARGET: the image can be a colour attachment as well as sampled,
+	// and Get_Surface_Level hands out a SurfaceHandle for it.
+	bool render_target = false;
 
 	// --- lockable path (see docs/porting/renderer-resource-seam.md) ------------
 	bool lockable = false;
@@ -286,6 +290,49 @@ struct VertexBufferHandle {
 struct IndexBufferHandle {
 	Buffer buffer;
 	uint32_t count = 0;
+};
+
+// IDirect3DSurface8. Two shapes behind one handle, exactly as D3D8 has it:
+//   video memory   a view of an image the backend owns -- the default colour or
+//                  depth target, or level 0 of a render-target texture
+//   system memory  CreateImageSurface: host-visible bytes with no image at all,
+//                  which is the staging half of CopyRects
+struct SurfaceHandle {
+	Image* image = nullptr;        // null for a system-memory surface
+	TextureHandle* owner = nullptr; // null for the default targets
+	bool depth_stencil = false;
+	Buffer bits;                   // system-memory surface only
+	void* mapped = nullptr;
+	uint32_t width = 0;
+	uint32_t height = 0;
+	uint32_t pitch = 0;
+	uint32_t texel_bytes = 4;
+	VkFormat vk_format = VK_FORMAT_B8G8R8A8_UNORM;
+	// Tracked rather than assumed: a surface is an attachment, a transfer source, a
+	// transfer destination and a sampled image at different points in one frame, and
+	// every one of those is a different Vulkan layout.
+	VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+	// Whether anything has been drawn into it since Begin_Scene, which is what
+	// decides between a LOAD and a DONT_CARE render pass when it is bound again.
+	bool written_this_frame = false;
+
+	bool system_memory() const { return image == nullptr; }
+};
+
+// One parsed D3D8 shader token stream. The tokens travel to the shader as they
+// arrived; what the parse establishes is that the program is one the interpreter
+// can run, and how long it is.
+struct ShaderProgram {
+	bool pixel = false;
+	uint32_t version = 0;
+	uint32_t instruction_count = 0;
+	int32_t tokens[kMaxShaderInstructions][8]{};
+	// `def cN, x, y, z, w`: constants the shader carries itself, which D3D8 applies
+	// when the shader is set rather than through SetPixelShaderConstant.
+	std::vector<std::pair<uint32_t, std::array<float, 4>>> defs;
+	// The v-registers the D3DVSD_* declaration names, in declaration order. The k-th
+	// one is fed by the k-th element the bound FVF supplies, which is D3D8's mapping.
+	std::vector<uint32_t> declared_inputs;
 };
 
 class VulkanBackend final : public RenderBackend {
@@ -358,6 +405,32 @@ public:
 
 	bool Read_Back_Color_Target(std::string& out_rgba, SurfaceFormat& out_format) override;
 
+	TextureHandle* Create_Render_Target_Texture(uint32_t width, uint32_t height) override;
+	SurfaceHandle* Get_Surface_Level(TextureHandle* texture, uint32_t level) override;
+	SurfaceHandle* Get_Render_Target() override { return current_color_; }
+	SurfaceHandle* Get_Depth_Stencil_Target() override { return current_depth_; }
+	bool Set_Render_Target(SurfaceHandle* color, SurfaceHandle* depth_stencil) override;
+	SurfaceHandle* Create_Image_Surface(uint32_t width, uint32_t height,
+	                                    TextureFormat format) override;
+	bool Copy_Rects(SurfaceHandle* source, const LockRect* rects, uint32_t rect_count,
+	                SurfaceHandle* destination, const SurfacePoint* points) override;
+	bool Update_Texture(TextureHandle* source, TextureHandle* destination) override;
+	bool Surface_Bits(SurfaceHandle* surface, LockedRect& out) override;
+
+	void Set_Clip_Plane(uint32_t index, const float plane[4]) override;
+
+	ShaderHandle Create_Pixel_Shader(const uint32_t* function) override;
+	void Delete_Pixel_Shader(ShaderHandle shader) override;
+	void Set_Pixel_Shader(ShaderHandle shader) override;
+	void Set_Pixel_Shader_Constant(uint32_t start_register, const void* data,
+	                               uint32_t vector4_count) override;
+	ShaderHandle Create_Vertex_Shader(const uint32_t* declaration, const uint32_t* function,
+	                                  uint32_t usage) override;
+	void Delete_Vertex_Shader(ShaderHandle shader) override;
+	void Set_Vertex_Shader(ShaderHandle shader) override;
+	void Set_Vertex_Shader_Constant(uint32_t start_register, const void* data,
+	                                uint32_t vector4_count) override;
+
 	const char* Device_Description() const override { return device_description_.c_str(); }
 	uint32_t Pipeline_Count() const override {
 		return static_cast<uint32_t>(pipelines_.size());
@@ -422,6 +495,25 @@ private:
 	                VkImageLayout to, VkImageAspectFlags aspect,
 	                uint32_t mip_levels = 1);
 
+	// --- render-target machinery ------------------------------------------------
+	// A render pass per (has depth, load or discard) combination, and a framebuffer
+	// per attachment pair. D3D8's SetRenderTarget is a state setter with no notion of
+	// either, so both have to be cached behind it.
+	VkRenderPass Get_Or_Create_Render_Pass(bool has_depth, bool load_color);
+	VkFramebuffer Get_Or_Create_Framebuffer(VkRenderPass pass, SurfaceHandle* color,
+	                                        SurfaceHandle* depth);
+	// Ends and restarts the render pass around something that cannot be recorded
+	// inside one (a layout transition, a copy, a target switch).
+	void End_Current_Pass();
+	bool Begin_Current_Pass();
+	// Moves an image surface to `to`, recording into `cmd`, and remembers the layout.
+	void Transition_Surface(VkCommandBuffer cmd, SurfaceHandle* surface, VkImageLayout to);
+	// Records into the frame's command buffer when a scene is open, and into a
+	// one-shot submission otherwise, so a copy stays ordered against the draws.
+	VkCommandBuffer Begin_Transfer(bool& one_shot);
+	bool End_Transfer(VkCommandBuffer cmd, bool one_shot);
+	ShaderProgram* Find_Shader(ShaderHandle handle);
+
 	bool validation_ = false;
 	bool headless_ = true;
 	uint32_t width_ = 0, height_ = 0;
@@ -443,8 +535,20 @@ private:
 	VkFormat depth_format_ = VK_FORMAT_D32_SFLOAT_S8_UINT;
 	// Non-identity VkImageView component mappings; false under MoltenVK.
 	bool view_swizzle_ = true;
-	VkRenderPass render_pass_ = VK_NULL_HANDLE;
-	VkFramebuffer framebuffer_ = VK_NULL_HANDLE;
+	// The default targets as surfaces, so SetRenderTarget's save/restore -- which
+	// hands back whatever GetRenderTarget returned -- has something to name them by.
+	SurfaceHandle default_color_surface_;
+	SurfaceHandle default_depth_surface_;
+	SurfaceHandle* current_color_ = nullptr;
+	SurfaceHandle* current_depth_ = nullptr;
+	// The current colour target's size. Distinct from width_/height_, which stay the
+	// device's back-buffer size: a render-to-texture target is usually smaller, and
+	// the viewport, the scissor clamp and Clear all follow the *target*.
+	uint32_t target_width_ = 0, target_height_ = 0;
+	// {has depth, load colour} -> render pass, and attachment pair -> framebuffer.
+	std::unordered_map<uint32_t, VkRenderPass> render_passes_;
+	std::unordered_map<uint64_t, VkFramebuffer> framebuffers_;
+	std::vector<SurfaceHandle*> owned_surfaces_;
 
 	VkShaderModule vert_module_ = VK_NULL_HANDLE;
 	VkShaderModule frag_module_ = VK_NULL_HANDLE;
@@ -508,6 +612,20 @@ private:
 	float max_point_size_ = 1.0f;
 	VertexBufferHandle* bound_vb_ = nullptr;
 	IndexBufferHandle* bound_ib_ = nullptr;
+
+	// --- programmable shaders and clip planes ----------------------------------
+	// D3D8 shader handles are DWORDs the device hands out, so the backend owns the
+	// numbering. 0 is D3D8's "no shader", i.e. back to fixed function.
+	std::unordered_map<ShaderHandle, ShaderProgram> shaders_;
+	ShaderHandle next_shader_ = 1;
+	ShaderHandle bound_pixel_shader_ = kNullShader;
+	ShaderHandle bound_vertex_shader_ = kNullShader;
+	float pixel_shader_constants_[kMaxPixelShaderConstants][4]{};
+	float vertex_shader_constants_[kMaxVertexShaderConstants][4]{};
+	float clip_planes_[kMaxClipPlanes][4]{};
+	// VkPhysicalDeviceFeatures::shaderClipDistance; without it gl_ClipDistance may
+	// not be written at all, so the planes are dropped rather than mis-rendered.
+	bool clip_distance_ = false;
 	uint32_t index_base_offset_ = 0;
 	bool in_scene_ = false;
 
@@ -755,6 +873,9 @@ bool VulkanBackend::Pick_Device() {
 	enabled.samplerAnisotropy = available.samplerAnisotropy;
 	enabled.largePoints = available.largePoints;
 	enabled.fillModeNonSolid = available.fillModeNonSolid;
+	// D3D8's SetClipPlane needs gl_ClipDistance, which is a Vulkan *feature*.
+	enabled.shaderClipDistance = available.shaderClipDistance;
+	clip_distance_ = available.shaderClipDistance == VK_TRUE;
 	max_anisotropy_ = available.samplerAnisotropy == VK_TRUE
 	                      ? device_props.limits.maxSamplerAnisotropy
 	                      : 1.0f;
@@ -892,12 +1013,12 @@ void VulkanBackend::Transition(VkCommandBuffer cmd, VkImage image, VkImageLayout
 bool VulkanBackend::Create_Render_Targets() {
 	auto make_image = [&](VkFormat format, VkImageUsageFlags usage,
 	                      VkImageAspectFlags aspect, Image& out) -> bool {
-		out.width = width_;
-		out.height = height_;
+		if (out.width == 0) out.width = width_;
+		if (out.height == 0) out.height = height_;
 		VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
 		ici.imageType = VK_IMAGE_TYPE_2D;
 		ici.format = format;
-		ici.extent = {width_, height_, 1};
+		ici.extent = {out.width, out.height, 1};
 		ici.mipLevels = 1;
 		ici.arrayLayers = 1;
 		ici.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -927,8 +1048,11 @@ bool VulkanBackend::Create_Render_Targets() {
 		return true;
 	};
 
+	// TRANSFER_DST as well as SRC: CopyRects may copy *into* a render target, which
+	// is what the engine's shroud and reflection restore paths do.
 	if (!make_image(kColorFormat,
-	                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+	                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+	                    VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 	                VK_IMAGE_ASPECT_COLOR_BIT, color_target_)) {
 		return false;
 	}
@@ -939,19 +1063,50 @@ bool VulkanBackend::Create_Render_Targets() {
 		return false;
 	}
 
+	default_color_surface_ = SurfaceHandle{};
+	default_color_surface_.image = &color_target_;
+	default_color_surface_.width = width_;
+	default_color_surface_.height = height_;
+	default_color_surface_.vk_format = kColorFormat;
+	default_depth_surface_ = SurfaceHandle{};
+	default_depth_surface_.image = &depth_target_;
+	default_depth_surface_.depth_stencil = true;
+	default_depth_surface_.width = width_;
+	default_depth_surface_.height = height_;
+	default_depth_surface_.vk_format = depth_format_;
+	current_color_ = &default_color_surface_;
+	current_depth_ = &default_depth_surface_;
+	target_width_ = width_;
+	target_height_ = height_;
+	return true;
+}
+
+// The render pass carries no clear: the engine clears with an explicit
+// DX8Wrapper::Clear() inside Begin_Scene and D3D8's Clear() takes flags per call,
+// so it becomes vkCmdClearAttachments. What the pass does have to encode is
+// whether the target's existing contents survive -- which is the whole difference
+// between D3D8, where a target simply keeps its pixels across a SetRenderTarget
+// round trip, and Vulkan, where saying so is mandatory.
+VkRenderPass VulkanBackend::Get_Or_Create_Render_Pass(bool has_depth, bool load_color) {
+	const uint32_t key = (has_depth ? 1u : 0u) | (load_color ? 2u : 0u);
+	auto it = render_passes_.find(key);
+	if (it != render_passes_.end()) return it->second;
+
 	VkAttachmentDescription attachments[2]{};
 	attachments[0].format = kColorFormat;
 	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-	// DONT_CARE, not CLEAR: the engine clears with an explicit DX8Wrapper::Clear()
-	// call inside Begin_Scene, and D3D8's Clear() takes flags per call. Mapping it
-	// onto a render-pass load op would change semantics, so it becomes
-	// vkCmdClearAttachments instead.
-	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachments[0].loadOp = load_color ? VK_ATTACHMENT_LOAD_OP_LOAD
+	                                   : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	attachments[0].finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	// COLOR_ATTACHMENT_OPTIMAL both ends: the transition to a transfer source (for
+	// presentation, readback or CopyRects) or to a sampled image (for a
+	// render-to-texture the cascade then reads) is explicit, because which one it is
+	// depends on what the engine does next rather than on the pass.
+	attachments[0].initialLayout = load_color ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+	                                          : VK_IMAGE_LAYOUT_UNDEFINED;
+	attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 	attachments[1].format = depth_format_;
 	attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
@@ -968,25 +1123,109 @@ bool VulkanBackend::Create_Render_Targets() {
 	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 	subpass.colorAttachmentCount = 1;
 	subpass.pColorAttachments = &color_ref;
-	subpass.pDepthStencilAttachment = &depth_ref;
+	// D3D8 allows SetRenderTarget(surface, nullptr), which renders with no depth
+	// buffer at all; in Vulkan that is a different render pass.
+	subpass.pDepthStencilAttachment = has_depth ? &depth_ref : nullptr;
 
 	VkRenderPassCreateInfo rpci{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-	rpci.attachmentCount = 2;
+	rpci.attachmentCount = has_depth ? 2 : 1;
 	rpci.pAttachments = attachments;
 	rpci.subpassCount = 1;
 	rpci.pSubpasses = &subpass;
-	VK_CHECK(vkCreateRenderPass(device_, &rpci, nullptr, &render_pass_));
+	VkRenderPass pass = VK_NULL_HANDLE;
+	if (vkCreateRenderPass(device_, &rpci, nullptr, &pass) != VK_SUCCESS) {
+		return VK_NULL_HANDLE;
+	}
+	render_passes_[key] = pass;
+	return pass;
+}
 
-	VkImageView views[2] = {color_target_.view, depth_target_.view};
+VkFramebuffer VulkanBackend::Get_Or_Create_Framebuffer(VkRenderPass pass,
+                                                       SurfaceHandle* color,
+                                                       SurfaceHandle* depth) {
+	const uint64_t key = (reinterpret_cast<uint64_t>(color) * 1099511628211ull) ^
+	                     (reinterpret_cast<uint64_t>(depth) * 14695981039346656037ull) ^
+	                     (reinterpret_cast<uint64_t>(pass) << 1);
+	auto it = framebuffers_.find(key);
+	if (it != framebuffers_.end()) return it->second;
+
+	VkImageView views[2] = {color->image->view,
+	                        depth != nullptr ? depth->image->view : VK_NULL_HANDLE};
 	VkFramebufferCreateInfo fbci{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-	fbci.renderPass = render_pass_;
-	fbci.attachmentCount = 2;
+	fbci.renderPass = pass;
+	fbci.attachmentCount = depth != nullptr ? 2 : 1;
 	fbci.pAttachments = views;
-	fbci.width = width_;
-	fbci.height = height_;
+	// The colour target's size, not the device's: Vulkan allows an attachment larger
+	// than the framebuffer, which is what lets a small render-to-texture target keep
+	// using the device's depth buffer, the way D3D8 does.
+	fbci.width = color->width;
+	fbci.height = color->height;
 	fbci.layers = 1;
-	VK_CHECK(vkCreateFramebuffer(device_, &fbci, nullptr, &framebuffer_));
+	VkFramebuffer framebuffer = VK_NULL_HANDLE;
+	if (vkCreateFramebuffer(device_, &fbci, nullptr, &framebuffer) != VK_SUCCESS) {
+		return VK_NULL_HANDLE;
+	}
+	framebuffers_[key] = framebuffer;
+	return framebuffer;
+}
+
+void VulkanBackend::Transition_Surface(VkCommandBuffer cmd, SurfaceHandle* surface,
+                                       VkImageLayout to) {
+	if (surface == nullptr || surface->system_memory() || surface->layout == to) return;
+	const VkImageAspectFlags aspect =
+	    surface->depth_stencil ? (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
+	                           : VK_IMAGE_ASPECT_COLOR_BIT;
+	Transition(cmd, surface->image->image, surface->layout, to, aspect);
+	surface->layout = to;
+	if (surface->owner != nullptr) surface->owner->layout = to;
+}
+
+void VulkanBackend::End_Current_Pass() {
+	if (!in_scene_) return;
+	vkCmdEndRenderPass(frame_cmd_);
+}
+
+bool VulkanBackend::Begin_Current_Pass() {
+	if (!in_scene_) return true;
+	if (current_color_ == nullptr) return false;
+	Transition_Surface(frame_cmd_, current_color_,
+	                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	Transition_Surface(frame_cmd_, current_depth_,
+	                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+	VkRenderPass pass =
+	    Get_Or_Create_Render_Pass(current_depth_ != nullptr,
+	                              current_color_->written_this_frame);
+	if (pass == VK_NULL_HANDLE) return false;
+	VkFramebuffer framebuffer =
+	    Get_Or_Create_Framebuffer(pass, current_color_, current_depth_);
+	if (framebuffer == VK_NULL_HANDLE) return false;
+
+	VkRenderPassBeginInfo rpbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+	rpbi.renderPass = pass;
+	rpbi.framebuffer = framebuffer;
+	rpbi.renderArea = {{0, 0}, {target_width_, target_height_}};
+	vkCmdBeginRenderPass(frame_cmd_, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+	// Anything the pass records lands in the target, so a later pass on it has to
+	// LOAD rather than discard.
+	current_color_->written_this_frame = true;
 	return true;
+}
+
+VkCommandBuffer VulkanBackend::Begin_Transfer(bool& one_shot) {
+	if (in_scene_) {
+		// Inside the frame: the copy has to see the draws that came before it, so it
+		// is recorded into the same command buffer, between render passes.
+		one_shot = false;
+		End_Current_Pass();
+		return frame_cmd_;
+	}
+	one_shot = true;
+	return Begin_One_Shot();
+}
+
+bool VulkanBackend::End_Transfer(VkCommandBuffer cmd, bool one_shot) {
+	if (one_shot) return End_One_Shot(cmd);
+	return Begin_Current_Pass();
 }
 
 bool VulkanBackend::Create_Descriptor_Machinery() {
@@ -1299,6 +1538,16 @@ void VulkanBackend::Shutdown() {
 		delete ib;
 	}
 	owned_ibs_.clear();
+	for (auto* s : owned_surfaces_) {
+		// A system-memory surface's bytes stay mapped for its whole life, the same
+		// contract a lockable texture's staging memory has.
+		if (s->mapped != nullptr) vkUnmapMemory(device_, s->bits.memory);
+		free_buffer(s->bits);
+		delete s;
+	}
+	owned_surfaces_.clear();
+	current_color_ = nullptr;
+	current_depth_ = nullptr;
 
 	free_buffer(draw_uniforms_);
 	free_buffer(dummy_vertex_buffer_);
@@ -1312,8 +1561,10 @@ void VulkanBackend::Shutdown() {
 
 	if (acquire_fence_) vkDestroyFence(device_, acquire_fence_, nullptr);
 	if (swapchain_) vkDestroySwapchainKHR(device_, swapchain_, nullptr);
-	if (framebuffer_) vkDestroyFramebuffer(device_, framebuffer_, nullptr);
-	if (render_pass_) vkDestroyRenderPass(device_, render_pass_, nullptr);
+	for (auto& fb : framebuffers_) vkDestroyFramebuffer(device_, fb.second, nullptr);
+	framebuffers_.clear();
+	for (auto& rp : render_passes_) vkDestroyRenderPass(device_, rp.second, nullptr);
+	render_passes_.clear();
 	if (descriptor_pool_) vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
 	if (pipeline_layout_) vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
 	if (set_layout_) vkDestroyDescriptorSetLayout(device_, set_layout_, nullptr);
@@ -1544,7 +1795,10 @@ TextureHandle* VulkanBackend::Create_Texture(const TextureDesc& desc) {
 	ici.arrayLayers = 1;
 	ici.samples = VK_SAMPLE_COUNT_1_BIT;
 	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
-	ici.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	// TRANSFER_SRC as well: any D3D8 surface can be a CopyRects source, and the
+	// engine does blit out of ordinary textures.
+	ici.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+	            VK_IMAGE_USAGE_SAMPLED_BIT;
 	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	if (vkCreateImage(device_, &ici, nullptr, &handle->image.image) != VK_SUCCESS) {
 		delete handle;
@@ -2469,7 +2723,11 @@ VkPipeline VulkanBackend::Get_Or_Create_Pipeline(const PipelineKey& key,
 	gpci.pColorBlendState = &blend_state;
 	gpci.pDynamicState = &dynamic_state;
 	gpci.layout = pipeline_layout_;
-	gpci.renderPass = render_pass_;
+	// Compatible with, not identical to, the pass the draw runs in: the load op does
+	// not affect render-pass compatibility, the attachment set does.
+	VkRenderPass compatible = Get_Or_Create_Render_Pass(key.has_depth_attachment != 0, false);
+	if (compatible == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+	gpci.renderPass = compatible;
 	gpci.subpass = 0;
 
 	VkPipeline pipeline = VK_NULL_HANDLE;
@@ -2501,14 +2759,17 @@ void VulkanBackend::Begin_Scene() {
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	vkBeginCommandBuffer(frame_cmd_, &bi);
 
-	VkRenderPassBeginInfo rpbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-	rpbi.renderPass = render_pass_;
-	rpbi.framebuffer = framebuffer_;
-	rpbi.renderArea = {{0, 0}, {width_, height_}};
-	vkCmdBeginRenderPass(frame_cmd_, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+	// A new frame's targets start undefined: D3D8's back buffer is not guaranteed to
+	// survive a Present either, and the engine clears.
+	default_color_surface_.written_this_frame = false;
+	for (SurfaceHandle* surface : owned_surfaces_) surface->written_this_frame = false;
 
 	draw_index_ = 0;
 	in_scene_ = true;
+	if (!Begin_Current_Pass()) {
+		in_scene_ = false;
+		vkEndCommandBuffer(frame_cmd_);
+	}
 }
 
 void VulkanBackend::Clear(bool clear_color, bool clear_z_stencil, float r, float g,
@@ -2534,7 +2795,8 @@ void VulkanBackend::Clear(bool clear_color, bool clear_z_stencil, float r, float
 		++count;
 	}
 	if (count == 0) return;
-	VkClearRect rect{{{0, 0}, {width_, height_}}, 0, 1};
+	// The current target's extent, which after a SetRenderTarget is not the device's.
+	VkClearRect rect{{{0, 0}, {target_width_, target_height_}}, 0, 1};
 	vkCmdClearAttachments(frame_cmd_, count, clears, 1, &rect);
 }
 
@@ -2545,8 +2807,8 @@ VkRect2D VulkanBackend::Clamp_Scissor(const VkRect2D& rect) const {
 	int32_t y0 = rect.offset.y < 0 ? 0 : rect.offset.y;
 	int64_t x1 = static_cast<int64_t>(rect.offset.x) + rect.extent.width;
 	int64_t y1 = static_cast<int64_t>(rect.offset.y) + rect.extent.height;
-	if (x1 > width_) x1 = width_;
-	if (y1 > height_) y1 = height_;
+	if (x1 > target_width_) x1 = target_width_;
+	if (y1 > target_height_) y1 = target_height_;
 	if (x1 < x0) x1 = x0;
 	if (y1 < y0) y1 = y0;
 	return VkRect2D{{x0, y0},
@@ -2560,6 +2822,7 @@ void VulkanBackend::Fill_Draw_Uniforms(uint32_t primitive_type, const VertexLayo
 	// composite.
 	const Matrix4x4 world_view = Multiply(world_, view_);
 	Store_Matrix(Multiply(world_view, projection_), out.wvp, true);
+	Store_Matrix(world_, out.world);
 	Store_Matrix(world_view, out.world_view);
 	Store_Matrix(view_, out.view);
 	for (uint32_t i = 0; i < kMaxTexCoordSets; ++i)
@@ -2623,8 +2886,8 @@ void VulkanBackend::Fill_Draw_Uniforms(uint32_t primitive_type, const VertexLayo
 	out.fog_params[2] = Dword_To_Float(render_states_[D3DRS_FOGDENSITY]);
 
 	out.misc[0] = (render_states_[D3DRS_ALPHAREF] & 0xff) / 255.0f;
-	out.misc[1] = static_cast<float>(width_);
-	out.misc[2] = static_cast<float>(height_);
+	out.misc[1] = static_cast<float>(target_width_);
+	out.misc[2] = static_cast<float>(target_height_);
 
 	out.flags[0] = static_cast<int32_t>(render_states_[D3DRS_ALPHATESTENABLE]);
 	out.flags[1] = static_cast<int32_t>(render_states_[D3DRS_ALPHAFUNC]);
@@ -2668,6 +2931,48 @@ void VulkanBackend::Fill_Draw_Uniforms(uint32_t primitive_type, const VertexLayo
 	out.point_scale[1] = Dword_To_Float(render_states_[D3DRS_POINTSCALE_B]);
 	out.point_scale[2] = Dword_To_Float(render_states_[D3DRS_POINTSCALE_C]);
 	out.point_scale[3] = render_states_[D3DRS_POINTSCALEENABLE] != 0 ? 1.0f : 0.0f;
+
+	// --- programmable shaders -------------------------------------------------
+	const ShaderProgram* ps = nullptr;
+	const ShaderProgram* vs = nullptr;
+	if (bound_pixel_shader_ != kNullShader) {
+		auto it = shaders_.find(bound_pixel_shader_);
+		if (it != shaders_.end()) ps = &it->second;
+	}
+	if (bound_vertex_shader_ != kNullShader) {
+		auto it = shaders_.find(bound_vertex_shader_);
+		if (it != shaders_.end()) vs = &it->second;
+	}
+	if (ps != nullptr) {
+		std::memcpy(out.ps_program, ps->tokens, sizeof(out.ps_program));
+		out.shader_counts[0] = static_cast<int32_t>(ps->instruction_count);
+	}
+	if (vs != nullptr) {
+		std::memcpy(out.vs_program, vs->tokens, sizeof(out.vs_program));
+		out.shader_counts[1] = static_cast<int32_t>(vs->instruction_count);
+		// D3D8 maps the k-th D3DVSD_REG the declaration names onto the k-th vertex
+		// element the stream supplies, so the mapping needs the bound FVF and can only
+		// be resolved here, at draw time.
+		for (uint32_t i = 0; i < kMaxVertexShaderInputs; ++i)
+			out.vs_inputs[i / 4][i % 4] = -1;
+		uint32_t element = 0;
+		for (uint32_t va = 0; va < VA_COUNT && element < vs->declared_inputs.size(); ++va) {
+			if (!layout.supplies[va]) continue;
+			const uint32_t reg = vs->declared_inputs[element++];
+			if (reg < kMaxVertexShaderInputs)
+				out.vs_inputs[reg / 4][reg % 4] = static_cast<int32_t>(va);
+		}
+	}
+	std::memcpy(out.ps_constants, pixel_shader_constants_, sizeof(out.ps_constants));
+	std::memcpy(out.vs_constants, vertex_shader_constants_, sizeof(out.vs_constants));
+
+	// --- user clip planes -----------------------------------------------------
+	std::memcpy(out.clip_planes, clip_planes_, sizeof(out.clip_planes));
+	// The pipeline always declares kMaxClipPlanes clip distances, so a disabled plane
+	// has to be written as "inside" rather than left unwritten.
+	out.clip_enable[0] = clip_distance_
+	                         ? static_cast<int32_t>(render_states_[D3DRS_CLIPPLANEENABLE])
+	                         : 0;
 }
 
 bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHandle& vb) {
@@ -2702,6 +3007,7 @@ bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHand
 	key.stencil_mask = render_states_[D3DRS_STENCILMASK];
 	key.stencil_write_mask = render_states_[D3DRS_STENCILWRITEMASK];
 	key.depth_bias_enable = render_states_[D3DRS_ZBIAS] != 0 ? 1 : 0;
+	key.has_depth_attachment = current_depth_ != nullptr ? 1 : 0;
 
 	VkPipeline pipeline = Get_Or_Create_Pipeline(key, vb.layout);
 	if (pipeline == VK_NULL_HANDLE) return false;
@@ -2749,8 +3055,9 @@ bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHand
 	vkCmdBindPipeline(frame_cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 	// D3D8 has no pipeline object, so scissor, viewport and depth bias are dynamic
 	// here; baking them in would give every rectangle its own VkPipeline.
-	const VkRect2D scissor =
-	    scissor_enabled_ ? Clamp_Scissor(scissor_) : VkRect2D{{0, 0}, {width_, height_}};
+	const VkRect2D scissor = scissor_enabled_
+	                             ? Clamp_Scissor(scissor_)
+	                             : VkRect2D{{0, 0}, {target_width_, target_height_}};
 	vkCmdSetScissor(frame_cmd_, 0, 1, &scissor);
 	// D3D8's viewport is y-down from the top-left of the target and so is Vulkan's,
 	// so the rectangle carries over unchanged; the y flip lives in the projection
@@ -2858,7 +3165,7 @@ void VulkanBackend::Draw_Primitive_UP(uint32_t primitive_type, uint32_t primitiv
 
 void VulkanBackend::End_Scene(bool flip_frame) {
 	if (!in_scene_) return;
-	vkCmdEndRenderPass(frame_cmd_);
+	End_Current_Pass();
 	vkEndCommandBuffer(frame_cmd_);
 
 	VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -2898,6 +3205,9 @@ bool VulkanBackend::Present() {
 
 	VkCommandBuffer cmd = Begin_One_Shot();
 	if (cmd == VK_NULL_HANDLE) return false;
+	// The render pass leaves the target a colour attachment, because what happens to
+	// it next is the engine's business: presentation is one of several possibilities.
+	Transition_Surface(cmd, &default_color_surface_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	Transition(cmd, swapchain_images_[index], VK_IMAGE_LAYOUT_UNDEFINED,
 	           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
 	VkImageBlit blit{};
@@ -2935,6 +3245,7 @@ bool VulkanBackend::Read_Back_Color_Target(std::string& out_rgba, SurfaceFormat&
 
 	VkCommandBuffer cmd = Begin_One_Shot();
 	if (cmd == VK_NULL_HANDLE) return false;
+	Transition_Surface(cmd, &default_color_surface_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	VkBufferImageCopy copy{};
 	copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
 	copy.imageExtent = {width_, height_, 1};
@@ -2953,6 +3264,575 @@ bool VulkanBackend::Read_Back_Color_Target(std::string& out_rgba, SurfaceFormat&
 	out_format.width = width_;
 	out_format.height = height_;
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+// render targets, surfaces and blits
+//
+// This is the group where D3D8 and Vulkan disagree most. D3D8's SetRenderTarget
+// is a state setter: the target keeps its pixels, the viewport resets to the new
+// target, and nothing is said about layouts or passes. Vulkan has no state setter
+// at all -- a target change is a new render pass with a framebuffer, an explicit
+// load-or-discard decision and an image layout on both sides. What that costs
+// here is Get_Or_Create_Render_Pass/Framebuffer (two caches D3D8 does not need),
+// per-surface layout tracking, and ending and restarting the frame's pass around
+// every switch and every copy. See docs/porting/renderer-surface.md.
+// ---------------------------------------------------------------------------
+
+TextureHandle* VulkanBackend::Create_Render_Target_Texture(uint32_t width, uint32_t height) {
+	if (width == 0 || height == 0) return nullptr;
+	auto* handle = new TextureHandle();
+	handle->render_target = true;
+	handle->format = TextureFormat::A8R8G8B8;
+	handle->vk_format = kColorFormat;
+	handle->image.width = width;
+	handle->image.height = height;
+	handle->image.mip_levels = 1;
+
+	VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+	ici.imageType = VK_IMAGE_TYPE_2D;
+	ici.format = kColorFormat;
+	ici.extent = {width, height, 1};
+	ici.mipLevels = 1;
+	ici.arrayLayers = 1;
+	ici.samples = VK_SAMPLE_COUNT_1_BIT;
+	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+	// D3DUSAGE_RENDERTARGET on a texture means all four of these: the engine renders
+	// into it, samples it, copies out of it and copies into it.
+	ici.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+	            VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	if (vkCreateImage(device_, &ici, nullptr, &handle->image.image) != VK_SUCCESS) {
+		delete handle;
+		return nullptr;
+	}
+
+	VkMemoryRequirements req;
+	vkGetImageMemoryRequirements(device_, handle->image.image, &req);
+	uint32_t type = 0;
+	if (!Find_Memory_Type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, type)) {
+		delete handle;
+		return nullptr;
+	}
+	VkMemoryAllocateInfo mai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+	mai.allocationSize = req.size;
+	mai.memoryTypeIndex = type;
+	if (vkAllocateMemory(device_, &mai, nullptr, &handle->image.memory) != VK_SUCCESS ||
+	    vkBindImageMemory(device_, handle->image.image, handle->image.memory, 0) != VK_SUCCESS) {
+		delete handle;
+		return nullptr;
+	}
+
+	VkImageViewCreateInfo vci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+	vci.image = handle->image.image;
+	vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	vci.format = kColorFormat;
+	vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+	if (vkCreateImageView(device_, &vci, nullptr, &handle->image.view) != VK_SUCCESS) {
+		delete handle;
+		return nullptr;
+	}
+
+	// Cleared once, for the same reason a lockable texture is: D3D8 hands back a
+	// render target with undefined contents, and sampling it before the first render
+	// is legal there and a layout error here.
+	VkCommandBuffer cmd = Begin_One_Shot();
+	if (cmd == VK_NULL_HANDLE) {
+		delete handle;
+		return nullptr;
+	}
+	Transition(cmd, handle->image.image, VK_IMAGE_LAYOUT_UNDEFINED,
+	           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+	const VkClearColorValue black{{0.0f, 0.0f, 0.0f, 0.0f}};
+	const VkImageSubresourceRange all{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+	vkCmdClearColorImage(cmd, handle->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	                     &black, 1, &all);
+	Transition(cmd, handle->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+	if (!End_One_Shot(cmd)) {
+		delete handle;
+		return nullptr;
+	}
+	handle->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	owned_textures_.push_back(handle);
+	return handle;
+}
+
+SurfaceHandle* VulkanBackend::Get_Surface_Level(TextureHandle* texture, uint32_t level) {
+	if (texture == nullptr) return nullptr;
+	if (level != 0) {
+		// GetSurfaceLevel(n>0) would need a per-level image view and a per-level
+		// layout, and no engine render-target or CopyRects site asks for one.
+		std::fprintf(stderr, "Get_Surface_Level: only level 0 is served\n");
+		return nullptr;
+	}
+	// The same surface pointer every time: the engine compares the surface it saved
+	// against the one it restores, and the framebuffer cache is keyed on identity.
+	for (SurfaceHandle* existing : owned_surfaces_) {
+		if (existing->owner == texture) return existing;
+	}
+	auto* surface = new SurfaceHandle();
+	surface->image = &texture->image;
+	surface->owner = texture;
+	surface->width = texture->image.width;
+	surface->height = texture->image.height;
+	surface->vk_format = texture->vk_format;
+	surface->layout = texture->layout;
+	surface->pitch = texture->image.width * 4;
+	owned_surfaces_.push_back(surface);
+	return surface;
+}
+
+bool VulkanBackend::Set_Render_Target(SurfaceHandle* color, SurfaceHandle* depth_stencil) {
+	// D3D8 takes NULL for "keep the device's own": SetRenderTarget(surface, NULL)
+	// renders with no depth buffer, and the engine's save/restore passes back the
+	// surfaces GetRenderTarget/GetDepthStencilSurface returned.
+	SurfaceHandle* new_color = color != nullptr ? color : &default_color_surface_;
+	if (new_color->system_memory()) {
+		std::fprintf(stderr, "Set_Render_Target: a system-memory surface is not a target\n");
+		return false;
+	}
+	if (depth_stencil != nullptr &&
+	    (depth_stencil->system_memory() || !depth_stencil->depth_stencil)) {
+		return false;
+	}
+	if (new_color == current_color_ && depth_stencil == current_depth_) return true;
+
+	End_Current_Pass();
+	// Leaving a render-target texture: the cascade may sample it in the very next
+	// draw, which is the read-after-write D3D8 does not make the caller think about.
+	if (in_scene_ && current_color_ != nullptr && current_color_->owner != nullptr &&
+	    current_color_ != new_color) {
+		Transition_Surface(frame_cmd_, current_color_,
+		                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	}
+
+	current_color_ = new_color;
+	current_depth_ = depth_stencil;
+	target_width_ = new_color->width;
+	target_height_ = new_color->height;
+	// D3D8 resets the viewport to the whole of the new target.
+	viewport_ = ViewportRect{0, 0, target_width_, target_height_, 0.0f, 1.0f};
+	scissor_enabled_ = false;
+	return Begin_Current_Pass();
+}
+
+SurfaceHandle* VulkanBackend::Create_Image_Surface(uint32_t width, uint32_t height,
+                                                   TextureFormat format) {
+	const uint32_t texel_bytes = Source_Texel_Bytes(format);
+	if (width == 0 || height == 0 || texel_bytes == 0) {
+		std::fprintf(stderr, "Create_Image_Surface: unsupported format\n");
+		return nullptr;
+	}
+	auto* surface = new SurfaceHandle();
+	surface->width = width;
+	surface->height = height;
+	surface->texel_bytes = texel_bytes;
+	surface->pitch = width * texel_bytes;
+	surface->vk_format = Plan_For(format, view_swizzle_).vk;
+	const VkDeviceSize bytes = static_cast<VkDeviceSize>(surface->pitch) * height;
+	// D3DPOOL_SYSTEMMEM: host memory with no image behind it. Permanently mapped,
+	// because the engine locks it, keeps the pointer and copies out of it later.
+	if (!Allocate_Buffer(bytes,
+	                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+	                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+	                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+	                     surface->bits) ||
+	    vkMapMemory(device_, surface->bits.memory, 0, bytes, 0, &surface->mapped) !=
+	        VK_SUCCESS) {
+		delete surface;
+		return nullptr;
+	}
+	std::memset(surface->mapped, 0, static_cast<size_t>(bytes));
+	owned_surfaces_.push_back(surface);
+	return surface;
+}
+
+bool VulkanBackend::Surface_Bits(SurfaceHandle* surface, LockedRect& out) {
+	if (surface == nullptr || !surface->system_memory()) {
+		// LockRect on a video-memory surface would need the same submit-and-wait
+		// readback path a read-only texture lock has; no engine site does it.
+		return false;
+	}
+	out.bits = surface->mapped;
+	out.pitch = surface->pitch;
+	return true;
+}
+
+bool VulkanBackend::Copy_Rects(SurfaceHandle* source, const LockRect* rects,
+                               uint32_t rect_count, SurfaceHandle* destination,
+                               const SurfacePoint* points) {
+	if (source == nullptr || destination == nullptr || source == destination) return false;
+	if (source->vk_format != destination->vk_format) {
+		// D3D8 requires matching formats too; a mismatch here would silently
+		// reinterpret bytes.
+		std::fprintf(stderr, "Copy_Rects: source and destination formats differ\n");
+		return false;
+	}
+	const LockRect whole{0, 0, source->width, source->height};
+	const SurfacePoint origin{0, 0};
+	const uint32_t count = rects != nullptr ? rect_count : 1;
+	if (count == 0) return true;
+
+	// The all-host case needs no queue at all.
+	if (source->system_memory() && destination->system_memory()) {
+		for (uint32_t i = 0; i < count; ++i) {
+			const LockRect r = rects != nullptr ? rects[i] : whole;
+			const SurfacePoint p = points != nullptr ? points[i] : origin;
+			if (r.right > source->width || r.bottom > source->height ||
+			    p.x + (r.right - r.left) > destination->width ||
+			    p.y + (r.bottom - r.top) > destination->height) {
+				return false;
+			}
+			for (uint32_t y = r.top; y < r.bottom; ++y) {
+				const uint8_t* src = static_cast<const uint8_t*>(source->mapped) +
+				                     static_cast<size_t>(y) * source->pitch +
+				                     static_cast<size_t>(r.left) * source->texel_bytes;
+				uint8_t* dst = static_cast<uint8_t*>(destination->mapped) +
+				               static_cast<size_t>(p.y + (y - r.top)) * destination->pitch +
+				               static_cast<size_t>(p.x) * destination->texel_bytes;
+				std::memcpy(dst, src, static_cast<size_t>(r.right - r.left) *
+				                          source->texel_bytes);
+			}
+		}
+		return true;
+	}
+
+	bool one_shot = false;
+	VkCommandBuffer cmd = Begin_Transfer(one_shot);
+	if (cmd == VK_NULL_HANDLE) return false;
+	const VkImageLayout source_layout = source->layout;
+	const VkImageLayout destination_layout = destination->layout;
+	Transition_Surface(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	Transition_Surface(cmd, destination, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+	for (uint32_t i = 0; i < count; ++i) {
+		const LockRect r = rects != nullptr ? rects[i] : whole;
+		const SurfacePoint p = points != nullptr ? points[i] : origin;
+		const uint32_t w = r.right - r.left;
+		const uint32_t h = r.bottom - r.top;
+		if (r.right > source->width || r.bottom > source->height ||
+		    p.x + w > destination->width || p.y + h > destination->height) {
+			continue;
+		}
+		if (!source->system_memory() && !destination->system_memory()) {
+			VkImageCopy copy{};
+			copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+			copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+			copy.srcOffset = {static_cast<int32_t>(r.left), static_cast<int32_t>(r.top), 0};
+			copy.dstOffset = {static_cast<int32_t>(p.x), static_cast<int32_t>(p.y), 0};
+			copy.extent = {w, h, 1};
+			vkCmdCopyImage(cmd, source->image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			               destination->image->image,
+			               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+		} else if (source->system_memory()) {
+			// Host bytes into an image. bufferRowLength carries the source surface's
+			// pitch, and the offset carries the source rectangle's corner, so no
+			// intermediate copy of the rectangle is needed.
+			VkBufferImageCopy copy{};
+			copy.bufferOffset = static_cast<VkDeviceSize>(r.top) * source->pitch +
+			                    static_cast<VkDeviceSize>(r.left) * source->texel_bytes;
+			copy.bufferRowLength = source->pitch / source->texel_bytes;
+			copy.bufferImageHeight = source->height;
+			copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+			copy.imageOffset = {static_cast<int32_t>(p.x), static_cast<int32_t>(p.y), 0};
+			copy.imageExtent = {w, h, 1};
+			vkCmdCopyBufferToImage(cmd, source->bits.buffer, destination->image->image,
+			                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+		} else {
+			VkBufferImageCopy copy{};
+			copy.bufferOffset =
+			    static_cast<VkDeviceSize>(p.y) * destination->pitch +
+			    static_cast<VkDeviceSize>(p.x) * destination->texel_bytes;
+			copy.bufferRowLength = destination->pitch / destination->texel_bytes;
+			copy.bufferImageHeight = destination->height;
+			copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+			copy.imageOffset = {static_cast<int32_t>(r.left), static_cast<int32_t>(r.top), 0};
+			copy.imageExtent = {w, h, 1};
+			vkCmdCopyImageToBuffer(cmd, source->image->image,
+			                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			                       destination->bits.buffer, 1, &copy);
+		}
+	}
+
+	// Back to what each surface was in: a sampled texture keeps being sampled, and a
+	// render target keeps being rendered into, neither of which the copy changed.
+	if (source_layout != VK_IMAGE_LAYOUT_UNDEFINED)
+		Transition_Surface(cmd, source, source_layout);
+	if (destination_layout != VK_IMAGE_LAYOUT_UNDEFINED)
+		Transition_Surface(cmd, destination, destination_layout);
+	else if (destination->owner != nullptr)
+		Transition_Surface(cmd, destination, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	return End_Transfer(cmd, one_shot);
+}
+
+bool VulkanBackend::Update_Texture(TextureHandle* source, TextureHandle* destination) {
+	if (source == nullptr || destination == nullptr) return false;
+	// D3D8's UpdateTexture is the managed-pool copy: a D3DPOOL_SYSTEMMEM texture's
+	// levels into a D3DPOOL_DEFAULT texture's. The system-memory half here is a
+	// lockable texture, whose bytes already live in a host-visible buffer, so the
+	// copy is buffer-to-image and needs nothing from the video-memory source path.
+	if (!source->lockable) {
+		std::fprintf(stderr, "Update_Texture: the source must be a lockable texture\n");
+		return false;
+	}
+	if (source->expand_on_unlock) {
+		// Without a view swizzle the staging bytes are still in the D3D8 layout and
+		// only the CPU expansion pass produces what the image wants; that pass
+		// belongs to the resource seam's Unlock, not here.
+		std::fprintf(stderr, "Update_Texture: CPU-expanded formats are not served\n");
+		return false;
+	}
+	if (source->vk_format != destination->vk_format ||
+	    source->image.width != destination->image.width ||
+	    source->image.height != destination->image.height) {
+		return false;
+	}
+	const uint32_t levels = std::min(source->image.mip_levels, destination->image.mip_levels);
+	if (levels == 0 || source->levels.size() < levels) return false;
+
+	bool one_shot = false;
+	VkCommandBuffer cmd = Begin_Transfer(one_shot);
+	if (cmd == VK_NULL_HANDLE) return false;
+	Transition(cmd, destination->image.image, destination->layout,
+	           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+	           destination->image.mip_levels);
+	std::vector<VkBufferImageCopy> copies;
+	copies.reserve(levels);
+	for (uint32_t level = 0; level < levels; ++level) {
+		const LockableLevel& l = source->levels[level];
+		VkBufferImageCopy copy{};
+		copy.bufferOffset = l.offset;
+		copy.bufferRowLength = l.width;
+		copy.bufferImageHeight = l.height;
+		copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+		copy.imageExtent = {l.width, l.height, 1};
+		copies.push_back(copy);
+	}
+	vkCmdCopyBufferToImage(cmd, source->staging.buffer, destination->image.image,
+	                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	                       static_cast<uint32_t>(copies.size()), copies.data());
+	Transition(cmd, destination->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+	           destination->image.mip_levels);
+	destination->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	return End_Transfer(cmd, one_shot);
+}
+
+void VulkanBackend::Set_Clip_Plane(uint32_t index, const float plane[4]) {
+	if (index >= kMaxClipPlanes || plane == nullptr) return;
+	// D3D8's clip planes are in world space when the fixed-function pipeline
+	// transforms the vertices, which is the only case the engine has; the vertex
+	// shader evaluates them against the world-space position for that reason.
+	for (uint32_t i = 0; i < 4; ++i) clip_planes_[index][i] = plane[i];
+}
+
+// ---------------------------------------------------------------------------
+// ps.1.1 / vs.1.1
+//
+// The engine loads compiled D3D8 token streams from .pso/.vso files
+// (W3DShaderManager::LoadAndCreateD3DShader), so what arrives here is tokens, not
+// source. They are validated here and interpreted by the uber-shader, which is the
+// same choice the texture-stage cascade already makes.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Source operands per opcode. A table rather than the parameter-token high bit,
+// because the encoding of that bit in D3D8 (as opposed to D3D9) is not something
+// this spike can verify against a document it has.
+int Source_Count(uint32_t opcode, bool& has_destination) {
+	has_destination = true;
+	switch (opcode) {
+	case kSioNop: has_destination = false; return 0;
+	case kSioTex:
+	case kSioTexCoord:
+	case kSioTexKill: return 0;
+	case kSioMov:
+	case kSioRcp:
+	case kSioRsq:
+	case kSioExp:
+	case kSioLog:
+	case kSioExpp:
+	case kSioLogp:
+	case kSioFrc:
+	case kSioLit:
+	case kSioTexBem:
+	case kSioTexBemL: return 1;
+	case kSioAdd:
+	case kSioSub:
+	case kSioMul:
+	case kSioDp3:
+	case kSioDp4:
+	case kSioMin:
+	case kSioMax:
+	case kSioSlt:
+	case kSioSge:
+	case kSioDst:
+	case kSioM4x4:
+	case kSioM4x3:
+	case kSioM3x4:
+	case kSioM3x3:
+	case kSioM3x2: return 2;
+	case kSioMad:
+	case kSioLrp:
+	case kSioCnd: return 3;
+	default: return -1; // not interpretable
+	}
+}
+
+bool Parse_D3d8_Shader(const uint32_t* function, bool pixel, ShaderProgram& out) {
+	if (function == nullptr) return false;
+	out.pixel = pixel;
+	out.version = function[0];
+	const uint32_t magic = out.version >> 16;
+	if (magic != (pixel ? 0xffffu : 0xfffeu)) {
+		std::fprintf(stderr, "shader: not a %s token stream\n", pixel ? "pixel" : "vertex");
+		return false;
+	}
+	const uint32_t major = (out.version >> 8) & 0xff;
+	const uint32_t minor = out.version & 0xff;
+	if (major != 1 || minor > 1) {
+		// ps.1.4's phases and second address register, and anything 2.0 or later,
+		// are a different language; the engine ships neither.
+		std::fprintf(stderr, "shader: version %u.%u is not interpreted\n", major, minor);
+		return false;
+	}
+
+	const uint32_t* p = function + 1;
+	while (true) {
+		const uint32_t token = *p++;
+		const uint32_t opcode = token & kD3DSI_OpcodeMask;
+		if (opcode == kSioEnd) break;
+		if (opcode == kSioComment) {
+			p += (token & kD3DSI_CommentSizeMask) >> kD3DSI_CommentSizeShift;
+			continue;
+		}
+		if (opcode == kSioDef) {
+			const uint32_t dst = *p++;
+			std::array<float, 4> value{};
+			for (int i = 0; i < 4; ++i) {
+				float f = 0.0f;
+				std::memcpy(&f, p + i, sizeof(f));
+				value[static_cast<size_t>(i)] = f;
+			}
+			p += 4;
+			out.defs.emplace_back(dst & kD3DSP_RegnumMask, value);
+			continue;
+		}
+		bool has_destination = false;
+		const int sources = Source_Count(opcode, has_destination);
+		if (sources < 0) {
+			std::fprintf(stderr, "shader: opcode %u is not interpreted\n", opcode);
+			return false;
+		}
+		if (opcode == kSioNop) continue;
+		if (out.instruction_count >= kMaxShaderInstructions) {
+			std::fprintf(stderr, "shader: more than %u instructions\n",
+			             kMaxShaderInstructions);
+			return false;
+		}
+		int32_t* slot = out.tokens[out.instruction_count];
+		slot[0] = static_cast<int32_t>(token);
+		slot[1] = has_destination ? static_cast<int32_t>(*p++) : 0;
+		for (int i = 0; i < sources; ++i) slot[2 + i] = static_cast<int32_t>(*p++);
+		++out.instruction_count;
+	}
+	return out.instruction_count > 0;
+}
+
+} // namespace
+
+ShaderProgram* VulkanBackend::Find_Shader(ShaderHandle handle) {
+	auto it = shaders_.find(handle);
+	return it == shaders_.end() ? nullptr : &it->second;
+}
+
+ShaderHandle VulkanBackend::Create_Pixel_Shader(const uint32_t* function) {
+	ShaderProgram program;
+	if (!Parse_D3d8_Shader(function, true, program)) return kNullShader;
+	const ShaderHandle handle = next_shader_++;
+	shaders_[handle] = std::move(program);
+	return handle;
+}
+
+void VulkanBackend::Delete_Pixel_Shader(ShaderHandle shader) {
+	if (bound_pixel_shader_ == shader) bound_pixel_shader_ = kNullShader;
+	shaders_.erase(shader);
+}
+
+void VulkanBackend::Set_Pixel_Shader(ShaderHandle shader) {
+	// D3D8's SetPixelShader(0) is "back to the texture-stage cascade".
+	if (shader != kNullShader && Find_Shader(shader) == nullptr) return;
+	bound_pixel_shader_ = shader;
+	const ShaderProgram* program = shader != kNullShader ? Find_Shader(shader) : nullptr;
+	if (program == nullptr) return;
+	// `def` constants belong to the shader, and D3D8 applies them when it is set.
+	for (const auto& def : program->defs) {
+		if (def.first >= kMaxPixelShaderConstants) continue;
+		for (uint32_t i = 0; i < 4; ++i)
+			pixel_shader_constants_[def.first][i] = def.second[i];
+	}
+}
+
+void VulkanBackend::Set_Pixel_Shader_Constant(uint32_t start_register, const void* data,
+                                              uint32_t vector4_count) {
+	if (data == nullptr) return;
+	const auto* src = static_cast<const float*>(data);
+	for (uint32_t v = 0; v < vector4_count; ++v) {
+		const uint32_t reg = start_register + v;
+		if (reg >= kMaxPixelShaderConstants) return;
+		for (uint32_t i = 0; i < 4; ++i) pixel_shader_constants_[reg][i] = src[v * 4 + i];
+	}
+}
+
+ShaderHandle VulkanBackend::Create_Vertex_Shader(const uint32_t* declaration,
+                                                 const uint32_t* function, uint32_t usage) {
+	// D3DUSAGE_SOFTWAREPROCESSING is the engine's fallback when the device has no
+	// hardware vertex processing; the interpreter runs on the GPU either way.
+	(void)usage;
+	ShaderProgram program;
+	if (!Parse_D3d8_Shader(function, false, program)) return kNullShader;
+	if (declaration != nullptr) {
+		for (const uint32_t* p = declaration; *p != kD3DVSD_End; ++p) {
+			const uint32_t type = (*p >> kD3DVSD_TokenTypeShift) & 7u;
+			if (type == kD3DVSD_TokenEnd) break;
+			if (type != kD3DVSD_TokenStreamData) continue;
+			program.declared_inputs.push_back(*p & kD3DVSD_VertexRegMask);
+		}
+	}
+	if (program.declared_inputs.empty()) {
+		std::fprintf(stderr, "Create_Vertex_Shader: the declaration names no inputs\n");
+		return kNullShader;
+	}
+	const ShaderHandle handle = next_shader_++;
+	shaders_[handle] = std::move(program);
+	return handle;
+}
+
+void VulkanBackend::Delete_Vertex_Shader(ShaderHandle shader) {
+	if (bound_vertex_shader_ == shader) bound_vertex_shader_ = kNullShader;
+	shaders_.erase(shader);
+}
+
+void VulkanBackend::Set_Vertex_Shader(ShaderHandle shader) {
+	// The engine also passes plain FVF codes to SetVertexShader; those are not
+	// programs and the FVF path already handles them, so only handles it issued are
+	// accepted here.
+	if (shader != kNullShader && Find_Shader(shader) == nullptr) return;
+	bound_vertex_shader_ = shader;
+}
+
+void VulkanBackend::Set_Vertex_Shader_Constant(uint32_t start_register, const void* data,
+                                               uint32_t vector4_count) {
+	if (data == nullptr) return;
+	const auto* src = static_cast<const float*>(data);
+	for (uint32_t v = 0; v < vector4_count; ++v) {
+		const uint32_t reg = start_register + v;
+		if (reg >= kMaxVertexShaderConstants) return;
+		for (uint32_t i = 0; i < 4; ++i) vertex_shader_constants_[reg][i] = src[v * 4 + i];
+	}
 }
 
 RenderBackend* Create_Vulkan_Backend(bool enable_validation, bool headless) {

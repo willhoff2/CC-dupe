@@ -35,6 +35,96 @@ constexpr uint32_t kMaxTexCoordSets = 4;
 // D3D8's fixed-function pipeline supports 8 simultaneous lights; the engine's
 // LightEnvironmentClass caps itself at 4 (LightEnvironmentClass::MAX_LIGHTS).
 constexpr uint32_t kMaxLights = 4;
+// D3D8 exposes 6 user clip planes; DX8Wrapper::Set_DX8_Clip_Plane's only caller
+// (the water reflection plane) asks for plane 0 and is commented out.
+constexpr uint32_t kMaxClipPlanes = 6;
+
+// --- ps.1.1 / vs.1.1 ---------------------------------------------------------
+// Instruction slots per shader. The 16 shaders the engine ships are 158 lines of
+// assembly in total; the longest (Trees.nvv) is 11 instructions.
+constexpr uint32_t kMaxShaderInstructions = 32;
+// ps.1.1 has c0..c7; vs.1.1 has c0..c95 and the engine's Trees.nvv reaches c33.
+constexpr uint32_t kMaxPixelShaderConstants = 8;
+constexpr uint32_t kMaxVertexShaderConstants = 96;
+// v0..v15, four per ivec4 in the uniform block.
+constexpr uint32_t kMaxVertexShaderInputs = 16;
+
+// The D3D8 shader token bit fields, spelled as d3d8types.h defines them. The
+// uber-shader decodes the same fields, so these values are shared with
+// shaders/fixedfunc.vert and shaders/fixedfunc.frag by name.
+constexpr uint32_t kD3DSI_OpcodeMask = 0x0000ffffu;
+constexpr uint32_t kD3DSI_CommentSizeShift = 16;
+constexpr uint32_t kD3DSI_CommentSizeMask = 0x7fff0000u;
+constexpr uint32_t kD3DSP_RegnumMask = 0x00001fffu;
+constexpr uint32_t kD3DSP_WritemaskShift = 16;
+constexpr uint32_t kD3DSP_DstmodShift = 20;
+constexpr uint32_t kD3DSP_DstshiftShift = 24;
+constexpr uint32_t kD3DSP_RegtypeShift = 28;
+constexpr uint32_t kD3DSP_SwizzleShift = 16;
+constexpr uint32_t kD3DSP_SrcmodShift = 24;
+// D3DVS_ADDRMODE_RELATIVE: `c[a0.x + n]`. In vs.1.1 the address register is
+// implicitly a0.x and no extra address token follows (that arrived in vs.2.0).
+constexpr uint32_t kD3DVS_AddrmodeRelative = 1u << 13;
+
+// D3DSHADER_PARAM_REGISTER_TYPE, after the >> kD3DSP_RegtypeShift.
+enum D3DShaderRegisterType {
+	kRegTemp = 0,
+	kRegInput = 1,
+	kRegConst = 2,
+	kRegAddrOrTexture = 3, // a0 in a vertex shader, t0..t3 in a pixel shader
+	kRegRastOut = 4,       // oPos
+	kRegAttrOut = 5,       // oD0, oD1
+	kRegTexCrdOut = 6,     // oT0..oT3
+};
+
+// D3DSHADER_INSTRUCTION_OPCODE_TYPE, the subset the 16 shaders the engine ships
+// actually use plus the ones that cost one line each. Anything else makes
+// Create_Pixel_Shader/Create_Vertex_Shader fail rather than render something wrong.
+enum D3DShaderOpcode {
+	kSioNop = 0,
+	kSioMov = 1,
+	kSioAdd = 2,
+	kSioSub = 3,
+	kSioMad = 4,
+	kSioMul = 5,
+	kSioRcp = 6,
+	kSioRsq = 7,
+	kSioDp3 = 8,
+	kSioDp4 = 9,
+	kSioMin = 10,
+	kSioMax = 11,
+	kSioSlt = 12,
+	kSioSge = 13,
+	kSioExp = 14,
+	kSioLog = 15,
+	kSioLit = 16,
+	kSioDst = 17,
+	kSioLrp = 18,
+	kSioFrc = 19,
+	kSioM4x4 = 20,
+	kSioM4x3 = 21,
+	kSioM3x4 = 22,
+	kSioM3x3 = 23,
+	kSioM3x2 = 24,
+	kSioTexCoord = 64,
+	kSioTexKill = 65,
+	kSioTex = 66,
+	kSioTexBem = 67,
+	kSioTexBemL = 68,
+	kSioExpp = 78,
+	kSioLogp = 79,
+	kSioCnd = 80,
+	kSioDef = 81,
+	kSioComment = 0xfffe,
+	kSioEnd = 0xffff,
+};
+
+// D3DVSD_* declaration tokens (IDirect3DDevice8::CreateVertexShader's pDeclaration).
+constexpr uint32_t kD3DVSD_TokenTypeShift = 29;
+constexpr uint32_t kD3DVSD_TokenStreamData = 2;
+constexpr uint32_t kD3DVSD_TokenEnd = 7;
+constexpr uint32_t kD3DVSD_VertexRegMask = 0x0000001fu;
+constexpr uint32_t kD3DVSD_End = 0xffffffffu;
 
 // Only the render states the engine actually sets (53 of them; see
 // docs/porting/renderer-surface.md). The spike implements the ones needed to draw.
@@ -81,6 +171,10 @@ enum D3DRENDERSTATETYPE {
 	D3DRS_SPECULARMATERIALSOURCE = 146,
 	D3DRS_AMBIENTMATERIALSOURCE = 147,
 	D3DRS_EMISSIVEMATERIALSOURCE = 148,
+	// The bitmask that selects which SetClipPlane planes are applied. The engine
+	// never sets it in the live path (its two call sites in W3DWater.cpp are
+	// commented out), so it is here for Set_Clip_Plane's tests, not for demand.
+	D3DRS_CLIPPLANEENABLE = 152,
 	D3DRS_SOFTWAREVERTEXPROCESSING = 153,
 	// Point sprites: W3DSnow draws every snow particle as one D3DPT_POINTLIST vertex
 	// and lets D3D8 expand it, so these eight states are the whole snow system.

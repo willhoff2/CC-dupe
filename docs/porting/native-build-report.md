@@ -13,7 +13,7 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | Library | Objects produced | Translation units | Probe-clean |
 |---|---:|---:|---:|
 | `Core/Libraries/Source/Compression` | 11 | 11 | 11 |
-| `Core/Libraries/Source/WWVegas/WWMath` | 35 | 35 | 35 |
+| `Core/Libraries/Source/WWVegas/WWMath` | 36 | 36 | 36 |
 | `Core/Libraries/Source/WWVegas/WWLib` | 72 | 72 | 72 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 | 3 | 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
@@ -22,7 +22,7 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/GameEngineDevice` | 26 | 70 | 26 |
 | `GeneralsMD/Code/GameEngineDevice` | 14 | 39 | 14 |
 | `GeneralsMD/Code/Main` | 0 | 2 | 0 |
-| **Total** | **755** | **834** | **755** |
+| **Total** | **756** | **835** | **756** |
 
 79 translation units produced no object file:
 
@@ -110,11 +110,11 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 755 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 756 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: no; clean link: no). **346 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: no; clean link: no). **341 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
@@ -125,7 +125,6 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 | Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 |
 | Defined in a built translation unit behind a disabled #if (build option / platform) | 7 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
-| Direct3D 8 / DirectX | 5 |
 | COM / OLE (browser embedding, cut scope) | 3 |
 
 ### Defined in a translation unit that failed to compile
@@ -237,14 +236,6 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `GitShortSHA1`
 - `GitTag`
 - `GitUncommittedChanges`
-
-### Direct3D 8 / DirectX
-
-- `D3DXVec4Dot(D3DXVECTOR4 const*, D3DXVECTOR4 const*)`
-- `D3DXVec4Transform(D3DXVECTOR4*, D3DXVECTOR4 const*, D3DXMATRIX const*)`
-- `D3DXMATRIX::D3DXMATRIX(float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float)`
-- `D3DXVECTOR4::D3DXVECTOR4(float, float, float, float)`
-- `D3DXVECTOR4::D3DXVECTOR4()`
 
 ### COM / OLE (browser embedding, cut scope)
 

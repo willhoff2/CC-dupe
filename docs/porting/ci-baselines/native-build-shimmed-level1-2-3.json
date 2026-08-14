@@ -109,9 +109,9 @@
       "total": 72
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
-      "objects": 35,
-      "probe_clean": 35,
-      "total": 35
+      "objects": 36,
+      "probe_clean": 36,
+      "total": 36
     },
     "Core/Libraries/Source/WWVegas/WWSaveLoad": {
       "objects": 12,
@@ -150,20 +150,19 @@
   ],
   "link_binary_produced": false,
   "link_clean": false,
-  "objects": 755,
-  "probe_clean": 755,
+  "objects": 756,
+  "probe_clean": 756,
   "third_party_linked": [
     "libthirdparty_lzhl",
     "z (system)"
   ],
-  "translation_units": 834,
+  "translation_units": 835,
   "undefined_by_category": {
     "COM / OLE (browser embedding, cut scope)": 3,
     "Defined in a built translation unit behind a disabled #if (build option / platform)": 7,
     "Defined in a layer not built here (renderer / audio)": 72,
     "Defined in a translation unit that failed to compile": 104,
     "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": 12,
-    "Direct3D 8 / DirectX": 5,
     "GameSpy SDK (cut scope, not linked)": 33,
     "Generated gitinfo (build-time, not a blocker)": 6,
     "Well-known Dict keys: `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` failed to compile": 104
@@ -377,13 +376,6 @@
       "WWPlatform::Window_Show(void*, bool)",
       "WWPlatform::Window_Warp_Cursor(void*, int, int)"
     ],
-    "Direct3D 8 / DirectX": [
-      "D3DXMATRIX::D3DXMATRIX(float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float)",
-      "D3DXVECTOR4::D3DXVECTOR4()",
-      "D3DXVECTOR4::D3DXVECTOR4(float, float, float, float)",
-      "D3DXVec4Dot(D3DXVECTOR4 const*, D3DXVECTOR4 const*)",
-      "D3DXVec4Transform(D3DXVECTOR4*, D3DXVECTOR4 const*, D3DXMATRIX const*)"
-    ],
     "GameSpy SDK (cut scope, not linked)": [
       "CloseStatsConnection",
       "FreeGame",
@@ -534,6 +526,6 @@
       "TheKey_waypointPathLabel3"
     ]
   },
-  "undefined_total": 346,
+  "undefined_total": 341,
   "with_shims": true
 }

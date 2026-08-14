@@ -98,7 +98,7 @@
    "interface": "IDirect3DDevice8",
    "note": "surface-to-surface blit; the shadow and screenshot paths use it",
    "sites": 4,
-   "status": "absent"
+   "status": "implemented"
   },
   "CreateAdditionalSwapChain": {
    "category": "platform",
@@ -116,7 +116,7 @@
    "interface": "IDirect3DDevice8",
    "note": "system-memory surface, the staging half of CopyRects/UpdateTexture",
    "sites": 5,
-   "status": "absent"
+   "status": "implemented"
   },
   "CreateIndexBuffer": {
    "category": "backend",
@@ -136,7 +136,7 @@
    "interface": "IDirect3DDevice8",
    "note": "the 16 in-repo ps.1.1/vs.1.1 shaders; not started",
    "sites": 2,
-   "status": "absent"
+   "status": "implemented"
   },
   "CreateTexture": {
    "category": "backend",
@@ -166,7 +166,7 @@
    "interface": "IDirect3DDevice8",
    "note": "declaration-only FVF handles are served by Set_Vertex_Buffer's fvf; real vs.1.1 not started",
    "sites": 2,
-   "status": "absent"
+   "status": "implemented"
   },
   "DeletePixelShader": {
    "category": "backend",
@@ -176,7 +176,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 2,
-   "status": "absent"
+   "status": "implemented"
   },
   "DeleteVertexShader": {
    "category": "backend",
@@ -186,7 +186,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 2,
-   "status": "absent"
+   "status": "implemented"
   },
   "DrawIndexedPrimitive": {
    "category": "backend",
@@ -256,7 +256,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 5,
-   "status": "absent"
+   "status": "implemented"
   },
   "GetDeviceCaps": {
    "category": "caps",
@@ -302,7 +302,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 4,
-   "status": "absent"
+   "status": "implemented"
   },
   "GetTransform": {
    "category": "backend",
@@ -472,7 +472,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 2,
-   "status": "absent"
+   "status": "implemented"
   },
   "SetCursorPosition": {
    "category": "platform",
@@ -536,7 +536,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 3,
-   "status": "absent"
+   "status": "implemented"
   },
   "SetPixelShaderConstant": {
    "category": "backend",
@@ -546,7 +546,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 3,
-   "status": "absent"
+   "status": "implemented"
   },
   "SetRenderState": {
    "category": "backend",
@@ -566,7 +566,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 7,
-   "status": "absent"
+   "status": "implemented"
   },
   "SetStreamSource": {
    "category": "backend",
@@ -626,7 +626,7 @@
    "interface": "IDirect3DDevice8",
    "note": "",
    "sites": 3,
-   "status": "absent"
+   "status": "implemented"
   },
   "SetViewport": {
    "category": "backend",
@@ -662,7 +662,7 @@
    "interface": "IDirect3DDevice8",
    "note": "managed-pool sysmem-to-video copy; the lock/unlock path uploads directly instead",
    "sites": 6,
-   "status": "absent"
+   "status": "implemented"
   },
   "ValidateDevice": {
    "category": "caps",
@@ -1094,7 +1094,7 @@
  },
  "totals": {
   "backend_methods": 45,
-  "backend_methods_implemented": 30,
+  "backend_methods_implemented": 44,
   "cascade_ops_implemented": 17,
   "cascade_ops_used": 17,
   "methods_reached": 64,
