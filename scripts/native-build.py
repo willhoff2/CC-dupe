@@ -376,7 +376,10 @@ def well_known_keys_category(owner, failed, built_sources):
 # because it adds the directory anyway. Adding it here rather than in the probe keeps the probe's
 # published baselines stable; the divergence measurement is unaffected because the probe pass in
 # this script uses the same include set as the build it is compared against.
-EXTRA_DEP_INCLUDES = ["gamespy-src/include/gamespy"]
+# stb-src for the same reason: <stb_truetype.h> is what WWLib's GDI text entry points rasterise
+# glyphs with off Windows (docs/porting/gdi-font-seam.md), and the real CMake build gets it from
+# the `stb` interface target that cmake/stb.cmake fetches.
+EXTRA_DEP_INCLUDES = ["gamespy-src/include/gamespy", "stb-src"]
 
 
 def includes_for(target, deps_dir, with_shims):
@@ -518,17 +521,50 @@ def build(build_dir, jobs):
         if not obj_path.is_file():
             failed.add(pathlib.Path(source))
 
+    return failed, first_diagnostics(log.splitlines(), failed)
+
+
+def diagnostic_text(line):
+    """The message out of a clang diagnostic line, or None if the line is not one."""
+    if ": error:" not in line and ": fatal error:" not in line:
+        return None
+
+    return line.split(": error:", 1)[-1].split(": fatal error:", 1)[-1].strip()
+
+
+def first_diagnostics(lines, failed):
+    """The first error reported for each failed translation unit.
+
+    Matching the diagnostic line against the unit's own file name is not enough: plenty of units
+    fail only on an error inside a header they include, and the line then names the header. Those
+    used to be reported as an empty diagnostic, which loses the whole category from the report --
+    the renderer backend's TheD3D8RenderBackend errors are all of that shape. So the unit's block
+    of output is tracked instead (the build tool keeps a command's output contiguous and introduces
+    it by naming the source file) and the first error anywhere in the block is what gets reported.
+    """
     diagnostics = {}
-    lines = log.splitlines()
-    for source in failed:
-        for line in lines:
-            if source.name not in line:
-                continue
-            if ": error:" in line or ": fatal error:" in line:
-                diagnostics[source] = line.split(": error:", 1)[-1] \
-                    .split(": fatal error:", 1)[-1].strip()
+    by_name = {source.name: source for source in failed}
+
+    current = None
+    for line in lines:
+        message = diagnostic_text(line)
+        if message is None:
+            for name, source in by_name.items():
+                if name in line:
+                    current = source
+                    break
+            continue
+
+        for name, source in by_name.items():
+            if name in line:
+                diagnostics.setdefault(source, message)
+                current = source
                 break
-    return failed, diagnostics
+        else:
+            if current is not None:
+                diagnostics.setdefault(current, message)
+
+    return diagnostics
 
 
 def probe_sources(sources, target_by_source, deps_dir, jobs, with_shims=False):

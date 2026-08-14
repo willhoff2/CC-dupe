@@ -21,19 +21,7 @@
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTankTruckDraw.cpp": "'bink.h' file not found",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTreeDraw.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/Drawable/Draw/W3DTruckDraw.cpp": "'bink.h' file not found",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/FlatHeightMap.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/GUICallbacks/W3DControlBar.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DCheckBox.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DComboBox.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DHorizontalSlider.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DListBox.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DProgressBar.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DPushButton.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DRadioButton.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DStaticText.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DTabControl.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DTextEntry.cpp": "unknown type name 'HFONT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/GUI/Gadget/W3DVerticalSlider.cpp": "unknown type name 'HFONT'",
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/FlatHeightMap.cpp": "",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/HeightMap.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/TerrainTex.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
@@ -41,7 +29,7 @@
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DPropBuffer.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DScreenshot.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DShaderManager.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DSmudge.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DSmudge.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DSnow.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DTerrainBackground.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DTerrainTracks.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
@@ -50,14 +38,9 @@
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DView.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/stb_image_write_impl.cpp": "'stb_image_write.h' file not found",
+    "Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp": "",
     "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/DownloadMenu.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
     "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/MainMenu.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
-    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/Common/System/W3DFunctionLexicon.cpp": "unknown type name 'HFONT'",
-    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/W3DGameFont.cpp": "unknown type name 'HFONT'",
-    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/W3DGameWindow.cpp": "unknown type name 'HFONT'",
-    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/GUI/W3DGameWindowManager.cpp": "unknown type name 'HFONT'",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DProjectedShadow.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DShadow.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DVolumetricShadow.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
@@ -67,8 +50,6 @@
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DCustomEdging.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDebugIcons.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp": "'bink.h' file not found",
-    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplayString.cpp": "unknown type name 'HFONT'",
-    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplayStringManager.cpp": "unknown type name 'HFONT'",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DGameClient.cpp": "'bink.h' file not found",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DRoadBuffer.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DScene.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
@@ -89,8 +70,8 @@
       "total": 210
     },
     "Core/GameEngineDevice": {
-      "objects": 26,
-      "probe_clean": 26,
+      "objects": 39,
+      "probe_clean": 39,
       "total": 70
     },
     "Core/Libraries/Source/Compression": {
@@ -104,9 +85,9 @@
       "total": 3
     },
     "Core/Libraries/Source/WWVegas/WWLib": {
-      "objects": 72,
-      "probe_clean": 72,
-      "total": 72
+      "objects": 74,
+      "probe_clean": 74,
+      "total": 74
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
       "objects": 36,
@@ -124,8 +105,8 @@
       "total": 380
     },
     "GeneralsMD/Code/GameEngineDevice": {
-      "objects": 14,
-      "probe_clean": 14,
+      "objects": 20,
+      "probe_clean": 20,
       "total": 39
     },
     "GeneralsMD/Code/Main": {
@@ -150,18 +131,18 @@
   ],
   "link_binary_produced": false,
   "link_clean": false,
-  "objects": 756,
-  "probe_clean": 756,
+  "objects": 777,
+  "probe_clean": 777,
   "third_party_linked": [
     "libthirdparty_lzhl",
     "z (system)"
   ],
-  "translation_units": 835,
+  "translation_units": 837,
   "undefined_by_category": {
     "COM / OLE (browser embedding, cut scope)": 3,
     "Defined in a built translation unit behind a disabled #if (build option / platform)": 7,
-    "Defined in a layer not built here (renderer / audio)": 72,
-    "Defined in a translation unit that failed to compile": 104,
+    "Defined in a layer not built here (renderer / audio)": 84,
+    "Defined in a translation unit that failed to compile": 103,
     "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": 12,
     "GameSpy SDK (cut scope, not linked)": 33,
     "Generated gitinfo (build-time, not a blocker)": 6,
@@ -185,6 +166,7 @@
     "Defined in a layer not built here (renderer / audio)": [
       "DX8IndexBufferClass::DX8IndexBufferClass(unsigned short, DX8IndexBufferClass::UsageType)",
       "DX8VertexBufferClass::DX8VertexBufferClass(unsigned int, unsigned short, DX8VertexBufferClass::UsageType)",
+      "FontCharsClass::Get_Char_Spacing(wchar_t)",
       "HTreeClass::Get_Parent_Index(int) const",
       "LightClass::Clone() const",
       "LightClass::Get_Factory() const",
@@ -201,6 +183,17 @@
       "Line3DClass::Reset(Vector3 const&, Vector3 const&)",
       "Line3DClass::Reset(Vector3 const&, Vector3 const&, float)",
       "Line3DClass::Set_Opacity(float)",
+      "Render2DSentenceClass::Build_Sentence(wchar_t const*, int*, int*)",
+      "Render2DSentenceClass::Draw_Sentence(unsigned int)",
+      "Render2DSentenceClass::Get_Formatted_Text_Extents(wchar_t const*)",
+      "Render2DSentenceClass::Get_Text_Extents(wchar_t const*)",
+      "Render2DSentenceClass::Render()",
+      "Render2DSentenceClass::Render2DSentenceClass()",
+      "Render2DSentenceClass::Reset()",
+      "Render2DSentenceClass::Reset_Polys()",
+      "Render2DSentenceClass::Set_Font(FontCharsClass*)",
+      "Render2DSentenceClass::Set_Location(Vector2 const&)",
+      "Render2DSentenceClass::~Render2DSentenceClass()",
       "RenderObjClass::AT_MAX_LOD",
       "RenderObjClass::AT_MIN_LOD",
       "RenderObjClass::Add(SceneClass*)",
@@ -306,7 +299,6 @@
       "TheWin32Mouse",
       "W3DDisplay::m_3DScene",
       "W3DDisplay::m_assetManager",
-      "W3DGameWinDefaultDraw(GameWindow*, WinInstanceData*)",
       "W3DPropDraw::W3DPropDraw(Thing*, ModuleData const*)",
       "W3DPropDrawModuleData::W3DPropDrawModuleData()",
       "W3DPropDrawModuleData::buildFieldParse(MultiIniFieldParse&)",
@@ -526,6 +518,6 @@
       "TheKey_waypointPathLabel3"
     ]
   },
-  "undefined_total": 341,
+  "undefined_total": 352,
   "with_shims": true
 }

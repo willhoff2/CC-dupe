@@ -55,6 +55,8 @@ FETCHED_DEP_INCLUDES = [
     "miles-src",
     # The Miles headers live one level down; WWAudio includes them as <mss.h>.
     "miles-src/mss",
+    # stb, which CMake fetches for stb_image_write and stb_truetype (the font seam's rasteriser).
+    "stb-src",
 ]
 
 # Include dirs shared by every target.

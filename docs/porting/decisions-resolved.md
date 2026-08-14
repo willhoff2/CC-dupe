@@ -114,3 +114,6 @@ what the layout consumes), while the *implementation* should be the generalisabl
 native API per platform. That points at a single portable rasteriser used on every non-Windows
 platform, with GDI's metrics as the reference to compare against, and it means the acceptance
 criterion is a metrics comparison against the Windows build — not "text appears".
+
+That is what was built: `docs/porting/gdi-font-seam.md`, one stb_truetype rasteriser under the GDI
+names themselves, gated by `scripts/ci/check-font-metrics.py` against recorded GDI metrics.
