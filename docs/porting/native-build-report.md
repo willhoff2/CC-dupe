@@ -14,21 +14,20 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 |---|---:|---:|---:|
 | `Core/Libraries/Source/Compression` | 11 | 11 | 11 |
 | `Core/Libraries/Source/WWVegas/WWMath` | 35 | 35 | 35 |
-| `Core/Libraries/Source/WWVegas/WWLib` | 67 | 67 | 67 |
+| `Core/Libraries/Source/WWVegas/WWLib` | 72 | 72 | 72 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 | 3 | 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
-| `Core/GameEngine` | 203 | 210 | 203 |
-| `GeneralsMD/Code/GameEngine` | 377 | 380 | 377 |
+| `Core/GameEngine` | 204 | 210 | 204 |
+| `GeneralsMD/Code/GameEngine` | 378 | 380 | 378 |
 | `Core/GameEngineDevice` | 26 | 70 | 26 |
 | `GeneralsMD/Code/GameEngineDevice` | 14 | 39 | 14 |
 | `GeneralsMD/Code/Main` | 0 | 2 | 0 |
-| **Total** | **748** | **829** | **748** |
+| **Total** | **755** | **834** | **755** |
 
-81 translation units produced no object file:
+79 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
-| `Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp` | `unknown type name 'HWND'` |
 | `Core/GameEngine/Source/GameNetwork/DownloadManager.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp` | `unknown type name 'AsnObjectIdentifier'` |
@@ -79,7 +78,6 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` | `use of undeclared identifier 'TheD3D8RenderBackend'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/stb_image_write_impl.cpp` | `'stb_image_write.h' file not found` |
-| `GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp` | `no member named 'SetWindowText' in the global namespace` |
 | `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/DownloadMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/MainMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/Common/System/W3DFunctionLexicon.cpp` | `unknown type name 'HFONT'` |
@@ -112,43 +110,42 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 748 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 755 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: yes; clean link: yes). **393 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: no; clean link: no). **346 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| Defined in a translation unit that failed to compile | 109 |
+| Defined in a translation unit that failed to compile | 104 |
 | Well-known Dict keys: `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` failed to compile | 104 |
 | Defined in a layer not built here (renderer / audio) | 72 |
-| Win32 API | 44 |
 | GameSpy SDK (cut scope, not linked) | 33 |
-| Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 11 |
-| Defined in a built translation unit behind a disabled #if (build option / platform) | 6 |
+| Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 |
+| Defined in a built translation unit behind a disabled #if (build option / platform) | 7 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
 | Direct3D 8 / DirectX | 5 |
 | COM / OLE (browser embedding, cut scope) | 3 |
 
 ### Defined in a translation unit that failed to compile
 
-- `DX8Wrapper_IsWindowed`
-- `TheGameEngine`
+- `ApplicationHInstance`
 - `TheGameResultsQueue`
 - `TheGameSpyPeerMessageQueue`
-- `TheIMEManager`
 - `ThePinger`
 - `TheProjectedShadowManager`
 - `TheSmudgeManager`
-- `TheSubsystemList`
 - `TheTerrainTracksRenderObjClassSystem`
 - `TheW3DShadowManager`
 - `TheWin32Mouse`
 - `doSkyBoxSet(bool)`
 - `MainMenuInit(WindowLayout*, void*)`
 - `MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- …and 94 more
+- `MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
+- `MainMenuUpdate(WindowLayout*, void*)`
+- `setupGameStart(AsciiString, GameDifficulty)`
+- …and 89 more
 
 ### Well-known Dict keys: `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` failed to compile
 
@@ -188,25 +185,6 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `SurfaceClass::Lock(int*)`
 - …and 57 more
 
-### Win32 API
-
-- `CopyFileA`
-- `CreateDirectoryA`
-- `CreateStdDispatch`
-- `DeleteFileA`
-- `FindClose`
-- `FindFirstFileA`
-- `FindNextFileA`
-- `FindResourceA`
-- `FormatMessageW`
-- `FreeLibrary`
-- `GetCommandLineA`
-- `GetCurrentDirectoryA`
-- `GetDateFormatA`
-- `GetDateFormatW`
-- `GetDoubleClickTime`
-- …and 29 more
-
 ### GameSpy SDK (cut scope, not linked)
 
 - `CloseStatsConnection`
@@ -233,6 +211,7 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `WWPlatform::Window_Destroy(void*)`
 - `WWPlatform::Window_Set_Mode(void*, int, int, bool)`
 - `WWPlatform::Window_Is_Active(void*)`
+- `WWPlatform::Window_Set_Title(void*, char const*)`
 - `WWPlatform::Window_Poll_Event(void*, WWPlatform::WindowEvent&)`
 - `WWPlatform::Window_Client_Size(void*, int&, int&)`
 - `WWPlatform::Window_Warp_Cursor(void*, int, int)`
@@ -242,6 +221,7 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 
 ### Defined in a built translation unit behind a disabled #if (build option / platform)
 
+- `DX8Wrapper_IsWindowed`
 - `DX8Wrapper_PreserveFPU`
 - `FillStackAddresses(void**, unsigned int, unsigned int)`
 - `StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))`

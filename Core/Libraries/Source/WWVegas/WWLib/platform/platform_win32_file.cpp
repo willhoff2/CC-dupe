@@ -607,6 +607,110 @@ DWORD GetCurrentDirectoryA(DWORD size, LPSTR buffer)
 }
 
 
+/*
+**	Only the three attributes the port's <windows.h> defines are reported. The call sites test for
+**	existence (agg_def.cpp compares against 0xFFFFFFFF) and for the directory bit; nothing in
+**	scope reads the archive, system or temporary bits, so they are not invented from st_mode.
+*/
+DWORD GetFileAttributesA(LPCSTR path)
+{
+	if (path == nullptr || *path == 0) {
+		WWPlatform::Win32::Set_Last_Error(ERROR_PATH_NOT_FOUND);
+		return INVALID_FILE_ATTRIBUTES;
+	}
+
+	struct stat info;
+	if (stat(Resolved(path).c_str(), &info) != 0) {
+		WWPlatform::Win32::Set_Last_Error_From_Errno(errno);
+		return INVALID_FILE_ATTRIBUTES;
+	}
+
+	DWORD attributes = 0;
+	if (S_ISDIR(info.st_mode)) {
+		attributes |= FILE_ATTRIBUTE_DIRECTORY;
+	}
+	if ((info.st_mode & S_IWUSR) == 0) {
+		attributes |= FILE_ATTRIBUTE_READONLY;
+	}
+	return (attributes != 0) ? attributes : FILE_ATTRIBUTE_NORMAL;
+}
+
+
+/*
+**	GetFullPathName() is lexical on Windows: it prepends the current directory to a relative path
+**	and folds "." and ".." away without touching the disk, so a path that does not exist still
+**	normalizes. Path::Resolve() is deliberately not used here for that reason -- it looks the name
+**	up to recover the retail data's mixed case spelling, which would turn a normalization into a
+**	failed lookup. Separators come out in the platform spelling, which is what
+**	FileSystem::isPathInDirectory() compares against off Windows.
+*/
+DWORD GetFullPathNameA(LPCSTR path, DWORD size, LPSTR buffer, LPSTR * file_part)
+{
+	if (path == nullptr || *path == 0) {
+		WWPlatform::Win32::Set_Last_Error(ERROR_PATH_NOT_FOUND);
+		return 0;
+	}
+
+	std::string spelling(path);
+	std::replace(spelling.begin(), spelling.end(), '\\', '/');
+
+	if (spelling[0] != '/') {
+		char working[PATH_MAX];
+		if (getcwd(working, sizeof(working)) == nullptr) {
+			WWPlatform::Win32::Set_Last_Error_From_Errno(errno);
+			return 0;
+		}
+		spelling = std::string(working) + '/' + spelling;
+	}
+
+	/*
+	**	Fold the components. A ".." at the root stays at the root, as it does on Windows, and a
+	**	trailing separator is dropped unless the whole path is the root itself.
+	*/
+	std::vector<std::string> components;
+	for (size_t start = 0; start < spelling.size(); ) {
+		size_t end = spelling.find('/', start);
+		if (end == std::string::npos) {
+			end = spelling.size();
+		}
+		std::string component = spelling.substr(start, end - start);
+		start = end + 1;
+
+		if (component.empty() || component == ".") {
+			continue;
+		}
+		if (component == "..") {
+			if (!components.empty()) {
+				components.pop_back();
+			}
+			continue;
+		}
+		components.push_back(component);
+	}
+
+	std::string full;
+	for (size_t index = 0; index < components.size(); index++) {
+		full += '/';
+		full += components[index];
+	}
+	if (full.empty()) {
+		full = "/";
+	}
+
+	DWORD length = (DWORD)full.size();
+	if (buffer == nullptr || size <= length) {
+		return length + 1;
+	}
+
+	memcpy(buffer, full.c_str(), length + 1);
+	if (file_part != nullptr) {
+		char * separator = strrchr(buffer, '/');
+		*file_part = (separator != nullptr && separator[1] != 0) ? separator + 1 : nullptr;
+	}
+	return length;
+}
+
+
 BOOL SetCurrentDirectoryA(LPCSTR path)
 {
 	if (path == nullptr || *path == 0) {

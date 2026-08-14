@@ -2,7 +2,6 @@
   "archives": 9,
   "clang_major": "14",
   "compile_failures": {
-    "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp": "unknown type name 'HWND'",
     "Core/GameEngine/Source/GameNetwork/DownloadManager.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
     "Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
     "Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp": "unknown type name 'AsnObjectIdentifier'",
@@ -53,7 +52,6 @@
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp": "use of undeclared identifier 'TheD3D8RenderBackend'",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/stb_image_write_impl.cpp": "'stb_image_write.h' file not found",
-    "GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp": "no member named 'SetWindowText' in the global namespace",
     "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/DownloadMenu.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
     "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/MainMenu.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/Common/System/W3DFunctionLexicon.cpp": "unknown type name 'HFONT'",
@@ -86,8 +84,8 @@
   },
   "compiled": {
     "Core/GameEngine": {
-      "objects": 203,
-      "probe_clean": 203,
+      "objects": 204,
+      "probe_clean": 204,
       "total": 210
     },
     "Core/GameEngineDevice": {
@@ -106,9 +104,9 @@
       "total": 3
     },
     "Core/Libraries/Source/WWVegas/WWLib": {
-      "objects": 67,
-      "probe_clean": 67,
-      "total": 67
+      "objects": 72,
+      "probe_clean": 72,
+      "total": 72
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
       "objects": 35,
@@ -121,8 +119,8 @@
       "total": 12
     },
     "GeneralsMD/Code/GameEngine": {
-      "objects": 377,
-      "probe_clean": 377,
+      "objects": 378,
+      "probe_clean": 378,
       "total": 380
     },
     "GeneralsMD/Code/GameEngineDevice": {
@@ -150,26 +148,25 @@
   "libraries_without_archive": [
     "GeneralsMD/Code/Main"
   ],
-  "link_binary_produced": true,
-  "link_clean": true,
-  "objects": 748,
-  "probe_clean": 748,
+  "link_binary_produced": false,
+  "link_clean": false,
+  "objects": 755,
+  "probe_clean": 755,
   "third_party_linked": [
     "libthirdparty_lzhl",
     "z (system)"
   ],
-  "translation_units": 829,
+  "translation_units": 834,
   "undefined_by_category": {
     "COM / OLE (browser embedding, cut scope)": 3,
-    "Defined in a built translation unit behind a disabled #if (build option / platform)": 6,
+    "Defined in a built translation unit behind a disabled #if (build option / platform)": 7,
     "Defined in a layer not built here (renderer / audio)": 72,
-    "Defined in a translation unit that failed to compile": 109,
-    "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": 11,
+    "Defined in a translation unit that failed to compile": 104,
+    "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": 12,
     "Direct3D 8 / DirectX": 5,
     "GameSpy SDK (cut scope, not linked)": 33,
     "Generated gitinfo (build-time, not a blocker)": 6,
-    "Well-known Dict keys: `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` failed to compile": 104,
-    "Win32 API": 44
+    "Well-known Dict keys: `Core/GameEngineDevice/Source/W3DDevice/GameClient/WorldHeightMap.cpp` failed to compile": 104
   },
   "undefined_symbols": {
     "COM / OLE (browser embedding, cut scope)": [
@@ -178,6 +175,7 @@
       "_com_util::ConvertStringToBSTR(char const*)"
     ],
     "Defined in a built translation unit behind a disabled #if (build option / platform)": [
+      "DX8Wrapper_IsWindowed",
       "DX8Wrapper_PreserveFPU",
       "FillStackAddresses(void**, unsigned int, unsigned int)",
       "GetUnsignedIntFromRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int&)",
@@ -260,17 +258,15 @@
       "typeinfo for LightClass"
     ],
     "Defined in a translation unit that failed to compile": [
+      "ApplicationHInstance",
       "CreateGameEngine()",
-      "CreateIMEManagerInterface()",
-      "DX8Wrapper_IsWindowed",
       "DoResolutionDialog()",
       "DownloadMenuInit(WindowLayout*, void*)",
       "DownloadMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)",
       "DownloadMenuShutdown(WindowLayout*, void*)",
       "DownloadMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)",
       "DownloadMenuUpdate(WindowLayout*, void*)",
-      "GameEngine::isGameHalted()",
-      "GameEngine::isTimeFrozen()",
+      "GameResultsInterface::createNewGameResultsInterface()",
       "GameSpyGameSlot::setPingString(AsciiString)",
       "GameSpyPeerMessageQueueInterface::createNewMessageQueue()",
       "GameSpyStagingRoom::GameSpyStagingRoom()",
@@ -301,14 +297,11 @@
       "TerrainTracksRenderObjClass::addEdgeToTrack(float, float)",
       "TerrainTracksRenderObjClassSystem::bindTrack(RenderObjClass*, float, char const*)",
       "TerrainTracksRenderObjClassSystem::unbindTrack(TerrainTracksRenderObjClass*)",
-      "TheGameEngine",
       "TheGameResultsQueue",
       "TheGameSpyPeerMessageQueue",
-      "TheIMEManager",
       "ThePinger",
       "TheProjectedShadowManager",
       "TheSmudgeManager",
-      "TheSubsystemList",
       "TheTerrainTracksRenderObjClassSystem",
       "TheW3DShadowManager",
       "TheWin32Mouse",
@@ -380,6 +373,7 @@
       "WWPlatform::Window_Poll_Event(void*, WWPlatform::WindowEvent&)",
       "WWPlatform::Window_Set_Cursor_Clip(void*, bool)",
       "WWPlatform::Window_Set_Mode(void*, int, int, bool)",
+      "WWPlatform::Window_Set_Title(void*, char const*)",
       "WWPlatform::Window_Show(void*, bool)",
       "WWPlatform::Window_Warp_Cursor(void*, int, int)"
     ],
@@ -538,54 +532,8 @@
       "TheKey_waypointPathLabel1",
       "TheKey_waypointPathLabel2",
       "TheKey_waypointPathLabel3"
-    ],
-    "Win32 API": [
-      "CopyFileA",
-      "CreateDirectoryA",
-      "CreateStdDispatch",
-      "DeleteFileA",
-      "FindClose",
-      "FindFirstFileA",
-      "FindNextFileA",
-      "FindResourceA",
-      "FormatMessageW",
-      "FreeLibrary",
-      "GetCommandLineA",
-      "GetCurrentDirectoryA",
-      "GetDateFormatA",
-      "GetDateFormatW",
-      "GetDoubleClickTime",
-      "GetFileTime",
-      "GetFileVersionInfoA",
-      "GetFileVersionInfoSizeA",
-      "GetFullPathNameA",
-      "GetLastError",
-      "GetLocalTime",
-      "GetModuleFileNameA",
-      "GetModuleFileNameW",
-      "GetProcAddress",
-      "GetSystemDirectoryA",
-      "GetTimeFormatA",
-      "GetTimeFormatW",
-      "GetVersionExA",
-      "GlobalAlloc",
-      "GlobalFree",
-      "GlobalLock",
-      "GlobalMemoryStatus",
-      "GlobalUnlock",
-      "LoadLibraryA",
-      "LoadResource",
-      "LoadTypeLib",
-      "LockResource",
-      "OleInitialize",
-      "OleUninitialize",
-      "SetCurrentDirectoryA",
-      "SizeofResource",
-      "SysFreeString",
-      "VerQueryValueA",
-      "itoa"
     ]
   },
-  "undefined_total": 393,
+  "undefined_total": 346,
   "with_shims": true
 }

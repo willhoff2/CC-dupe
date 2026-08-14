@@ -17,14 +17,14 @@ Measured with clang 14. Vendor headers present: dx8-src, gamespy-src/include, lz
 |---|---:|---:|
 | `Core/Libraries/Source/Compression` | 11 / 11 | 11 / 11 |
 | `Core/Libraries/Source/WWVegas/WWMath` | 33 / 35 | 35 / 35 |
-| `Core/Libraries/Source/WWVegas/WWLib` | 65 / 71 | 71 / 71 |
+| `Core/Libraries/Source/WWVegas/WWLib` | 65 / 72 | 72 / 72 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 / 3 | 3 / 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 11 / 12 | 12 / 12 |
 | `Core/Libraries/Source/debug` | 1 / 20 | 4 / 20 |
 | `Core/Libraries/Source/profile` | 0 / 6 | 5 / 6 |
 | `Core/GameEngine` | 180 / 210 | 193 / 210 |
 | `GeneralsMD/Code/GameEngine` | 343 / 380 | 359 / 380 |
-| **total** | **647 / 748** | **693 / 748** |
+| **total** | **647 / 749** | **694 / 749** |
 
 ## D3D8 call surface
 

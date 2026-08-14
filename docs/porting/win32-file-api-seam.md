@@ -16,23 +16,25 @@ changes at all.
 ## 1. Measured
 
 All figures below were produced on Linux/x86-64 with clang 14 by
-`scripts/native-build.py --level 1 --level 2 --with-shims` and `scripts/native-port-probe.py`, in
-this PR, and are the committed baselines. Nothing here was measured on macOS or arm64.
+`scripts/native-build.py --level 1 --level 2 --level 3 --with-shims` and
+`scripts/native-port-probe.py`, in this PR **after rebasing onto the level 3 baseline from #44**,
+and are the committed baselines. Nothing here was measured on macOS or arm64.
 
-| | before | after |
+| | before (`main`) | after |
 |---|---:|---:|
-| Undefined symbols in the `Win32 API` category | **43** | **0** |
-| Undefined symbols, total | 280 | **234** |
-| Object files (shimmed, levels 1-2) | 708 / 718 | **714 / 722** |
-| Translation units that fail to compile | 10 | **8** |
-| Probe-clean, shimmed | 687 / 744 | **693 / 748** |
-| Probe-clean, native (no shims) | 643 / 744 | **647 / 748** |
+| Undefined symbols in the `Win32 API` category | **44** | **0** |
+| Undefined symbols, total | 393 | **346** |
+| Object files (shimmed, levels 1-2-3) | 748 / 829 | **755 / 834** |
+| Probe-clean, shimmed | 687 / 744 | **694 / 749** |
+| Probe-clean, native (no shims) | 643 / 744 | **647 / 749** |
 
-The four new translation units account for four of the units added to the totals; the other 46
-symbols that left the report are the 43 Win32 names plus three that were only unresolved because
-`GameEngine.cpp` did not compile.
+The measurement was originally taken at levels 1-2, where the category was 43 and the total 280.
+Rebasing onto level 3 raised the category to 44: `GetFullPathNameA` is reached only through
+`GameEngineDevice`'s `Win32LocalFileSystem::normalizePath()`, so it was invisible at the level the
+slice was first measured at, and its own gate caught it (section 5).
 
-The 43 symbols, as classified by `native-build.py` before this slice:
+The 44 symbols, as classified by `native-build.py` before this slice (the 43 seen at levels 1-2,
+plus `GetFullPathNameA` at level 3):
 
 ```
 CopyFileA            FindClose               GetDateFormatW      GetTimeFormatA   LockResource
@@ -42,7 +44,8 @@ DeleteFileA          FindResourceA           GetFileVersionInfoA GlobalAlloc    
 FormatMessageW       GetCommandLineA         GetFileVersionInfoSizeA              SizeofResource
 FreeLibrary          GetCurrentDirectoryA    GetLastError        GlobalFree       SysFreeString
 GetDateFormatA       GetLocalTime            GetModuleFileNameA  GlobalLock       VerQueryValueA
-GetModuleFileNameW   GetProcAddress          GetSystemDirectoryA GlobalMemoryStatus
+GetFullPathNameA     GetModuleFileNameW      GetProcAddress      GetSystemDirectoryA
+GlobalMemoryStatus
 LoadLibraryA         LoadResource            LoadTypeLib         GlobalUnlock     itoa
 ```
 
@@ -51,7 +54,7 @@ LoadLibraryA         LoadResource            LoadTypeLib         GlobalUnlock   
 | File | Defines |
 |---|---|
 | `platform/platform_win32_compat.h` | the shared internals: last-error storage, `errno` ↔ Win32 error mapping, `time_t` → `FILETIME`, the wildcard matcher, `Report_Stub()` |
-| `platform/platform_win32_file.cpp` | `GetLastError`, `SetLastError`, `FindFirstFileA`, `FindNextFileA`, `FindClose`, `DeleteFileA`, `CopyFileA`, `CreateDirectoryA`, `GetCurrentDirectoryA`, `SetCurrentDirectoryA`, `GetFileTime` |
+| `platform/platform_win32_file.cpp` | `GetLastError`, `SetLastError`, `FindFirstFileA`, `FindNextFileA`, `FindClose`, `DeleteFileA`, `CopyFileA`, `CreateDirectoryA`, `GetCurrentDirectoryA`, `SetCurrentDirectoryA`, `GetFullPathNameA`, `GetFileAttributesA`, `GetFileTime` |
 | `platform/platform_win32_module.cpp` | `LoadLibraryA`, `FreeLibrary`, `GetProcAddress`, `GetModuleFileNameA/W`, `GetSystemDirectoryA`, `GetCommandLineA`, `GlobalAlloc`/`Lock`/`Unlock`/`Free`, `GetVersionExA`, `GlobalMemoryStatus`, `GetLocalTime`, `GetDoubleClickTime`, `itoa` |
 | `platform/platform_win32_locale.cpp` | `GetDateFormatA/W`, `GetTimeFormatA/W`, `FormatMessageW` |
 | `platform/platform_win32_stub.cpp` | the deliberate failures: PE resources, VERSIONINFO, OLE (section 6) |
@@ -130,6 +133,22 @@ distinction the game cannot express.
 
 ## 5. The rest of the surface
 
+* **`GetFullPathNameA`** is what `Win32LocalFileSystem::normalizePath()` is built on, and it appeared
+  in the `Win32 API` category only once the build reached level 3 (`GameEngineDevice`), which is why
+  it arrived after the rest. It is **lexical**, as Win32's is: a relative path is prefixed with the
+  current directory, `.` and `..` are folded away by string manipulation, and the disk is never
+  touched — so a path that does not exist still normalizes, which is exactly what the caller wants
+  when it is about to create the file. `Path::Resolve()` is deliberately *not* used here: resolving
+  looks the name up to recover the retail data's on-disk case, which would turn a normalization of
+  an absent path into a failure. Both halves of Win32's two-call buffer protocol are honoured — a
+  null or too-small buffer returns the required size *including* the terminator, a sufficient one
+  returns the length *excluding* it — and `lpFilePart` points at the last component or is null for a
+  directory. Separators come out in the platform spelling, matching what
+  `FileSystem::isPathInDirectory()` compares against off Windows.
+* **`GetFileAttributesA`** reports only the three attributes the port's `<windows.h>` defines
+  (`DIRECTORY` from `stat`, `READONLY` from the write bit, `NORMAL` otherwise) and
+  `INVALID_FILE_ATTRIBUTES` when the name does not exist, which is the existence test `agg_def.cpp`
+  performs. Archive/system/hidden are not invented from `st_mode`.
 * **Modules** — `LoadLibraryA`/`FreeLibrary`/`GetProcAddress` are `dlopen`/`dlclose`/`dlsym`, with
   a Windows DLL name (`foo.dll`) also tried as `libfoo.so`/`libfoo.dylib` and as the bare name.
   `GetModuleFileNameA(nullptr, ...)` is `Path::Get_Executable_Path()`; a non-null `HMODULE` is not
@@ -211,7 +230,42 @@ It runs in `native-port-ci.yml`'s `native-build` job, right after the baseline g
   **This is a loud stub, not a port** — typing Japanese, Chinese or Korean into the chat box will
   not work off Windows until someone writes the Cocoa (`NSTextInputClient`) implementation.
 
-## 9. Still open
+## 9. What has actually run
+
+The first version of this slice could only claim "it links". `scripts/native-win32-file-test.py`
+compiles the file half of the seam together with
+`platform/tests/win32_file_api_test.cpp` and runs it against a real directory tree, so the
+enumeration semantics in section 3 are now observed rather than argued. **45 assertions, 0
+failures** on Linux/x86-64 with clang 14; it runs in `native-port-ci.yml`'s `native-build` job.
+
+What it pins down:
+
+| Claim | Assertion |
+|---|---|
+| `*.big` is the asset scan's pattern | matches exactly the three archives, and reports each name with its **on-disk** case, not the caller's |
+| `*.*` is everything | includes the extensionless name, the subdirectory, and `.`/`..` |
+| `*.` means "no extension" | matches the extensionless name, matches nothing with a dot |
+| a literal name | enumerates only itself |
+| nothing matches | `INVALID_HANDLE_VALUE` **and** `ERROR_FILE_NOT_FOUND`, which is what the callers test |
+| case-insensitive lookup | `ini.BIG` finds `INI.big` on a case-**sensitive** filesystem |
+| `FILE_ATTRIBUTE_DIRECTORY` | set on the subdirectory and on `.`/`..`, clear on files |
+| find data | carries the size and a non-zero last-write `FILETIME` |
+| `GetFullPathName` | folds `..`, folds `.`, normalizes a path whose components do not exist, makes a relative path absolute, and both halves of the buffer protocol agree (`required == length + 1`) |
+| `lpFilePart` | points at the last component |
+| `CopyFile` | copies; refuses to overwrite with `fail_if_exists`; overwrites without it |
+| `DeleteFile`/`CreateDirectory` | succeed, then fail on the second call with `ERROR_ALREADY_EXISTS` for the directory |
+| `GetCurrentDirectory` | same buffer protocol as `GetFullPathName` |
+
+The fixture is built with `std::filesystem`, not with the seam: a test that created its own tree
+through the API under test would pass by agreeing with itself. A deliberately wrong expectation was
+introduced once to confirm the test fails when the behaviour differs.
+
+What it does **not** cover: the module and locale halves, the `FILETIME` epoch (the engine only
+compares these against each other), 8.3 alternate names, and anything on macOS or arm64 — the test
+is written to build on Windows too, where the real API is the implementation and it becomes a
+conformance check, but that has not been run.
+
+## 10. Still open
 
 * **The wide-character decision is untouched, by instruction.** `GetDateFormatW`,
   `GetTimeFormatW`, `FormatMessageW` and `GetModuleFileNameW` are implemented over `wchar_t` as the
@@ -220,10 +274,11 @@ It runs in `native-port-ci.yml`'s `native-build` job, right after the baseline g
   is all they produce, and wrong the moment a non-ASCII locale string appears. When
   `widechar-fallout.md`'s `WideChar`/`char16_t` question is answered, the four `Copy_Out_Wide`/
   `Narrow` helpers in `platform_win32_locale.cpp` are the only places that need to change.
-* **Nothing here has run.** These are definitions that link; the native binary still does not run,
-  and no call was executed on any platform. In particular the enumeration order, the `*.`
-  behaviour and the `FILETIME` conversions are argued from the Win32 documentation and the call
-  sites, not observed. **Everything in this slice was measured on Linux/x86-64 only; the macOS
+* **The `FILETIME` conversions and the module/locale halves have still not run.** Section 10 covers
+  what the behaviour test now executes; the rest of the surface — `GetFileVersionInfo`,
+  `GetDateFormat`, `LoadLibrary`/`GetProcAddress`, the `FILETIME` values' epoch — is still argued
+  from the Win32 documentation and the call sites rather than observed, and the native binary as a
+  whole still does not run. **Everything in this slice was measured on Linux/x86-64 only; the macOS
   branches (`st_birthtime`, `_NSGetArgv`, `sysctl`, `.dylib` naming) are written blind and
   unverified** — the `macos-15` CI job compiles the Cocoa window path but does not build WWLib's
   compatibility layer yet.
