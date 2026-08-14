@@ -441,12 +441,14 @@ struct WindowState
 	bool Minimised;
 	bool Closed;
 	bool Cursor_Clipped;
+	bool Resizable;
 	int Width;
 	int Height;
 
 	WindowState()
 		: Window(nil), View(nil), Layer(nil), Last_Modifier_Flags(0), Active(false),
-		  Minimised(false), Closed(false), Cursor_Clipped(false), Width(0), Height(0)
+		  Minimised(false), Closed(false), Cursor_Clipped(false), Resizable(false), Width(0),
+		  Height(0)
 	{
 		for (int i = 0; i < 256; ++i) Key_Down[i] = false;
 	}
@@ -473,10 +475,33 @@ unsigned int Now_Ms()
 */
 void Mouse_Position_In_Client(WindowState * state, NSEvent * event, int & x, int & y)
 {
-	NSPoint point = [state->View convertPoint:[event locationInWindow] fromView:nil];
+	NSPoint in_window = [event locationInWindow];
+	// An event with no window - which is what AppKit delivers whenever the pointer is outside
+	// every window of this process - carries screen coordinates instead, so converting it as a
+	// window point offsets the result by the window's origin.
+	if ([event window] == nil) {
+		const NSRect on_screen = NSMakeRect(in_window.x, in_window.y, 1.0, 1.0);
+		in_window = [state->Window convertRectFromScreen:on_screen].origin;
+	}
+	NSPoint point = [state->View convertPoint:in_window fromView:nil];
 	NSRect bounds = [state->View bounds];
 	x = static_cast<int>(point.x);
 	y = static_cast<int>(bounds.size.height - point.y);
+}
+
+/*
+**	The engine's fullscreen is a screen-sized WS_POPUP, which on macOS is a borderless window -
+**	but a borderless window is still an ordinary layer-0 window, and the menu bar (level 24), the
+**	Control Center items (25) and the Dock (20) all composite above it. Raising the level alone
+**	still leaves the Dock's and the menu bar's space reserved, so the presentation options are
+**	what actually gets them out of the way.
+*/
+void Apply_Fullscreen(NSWindow * window)
+{
+	[NSApp setPresentationOptions:NSApplicationPresentationHideDock |
+	                              NSApplicationPresentationHideMenuBar];
+	[window setLevel:NSMainMenuWindowLevel + 1];
+	[window setFrame:[[NSScreen mainScreen] frame] display:YES];
 }
 
 void Push(WindowState * state, const WindowEvent & event)
@@ -732,8 +757,7 @@ void * Window_Create(const WindowConfig & config)
 	[window makeFirstResponder:view];
 
 	if (config.Fullscreen) {
-		[window setLevel:NSMainMenuWindowLevel + 1];
-		[window setFrame:[[NSScreen mainScreen] frame] display:YES];
+		Apply_Fullscreen(window);
 	}
 
 	TheWindow = new WindowState();
@@ -742,6 +766,7 @@ void * Window_Create(const WindowConfig & config)
 	TheWindow->Layer = layer;
 	TheWindow->Width = config.Width;
 	TheWindow->Height = config.Height;
+	TheWindow->Resizable = config.Resizable;
 
 	[window makeKeyAndOrderFront:nil];
 	[NSApp activateIgnoringOtherApps:YES];
@@ -755,6 +780,8 @@ void Window_Destroy(void * window)
 {
 	WindowState * state = State(window);
 	if (state == nullptr) return;
+	// Otherwise a process that exits from fullscreen leaves the Dock and the menu bar hidden.
+	[NSApp setPresentationOptions:NSApplicationPresentationDefault];
 	[state->Window orderOut:nil];
 	[state->Window close];
 	delete state;
@@ -823,10 +850,14 @@ bool Window_Set_Mode(void * window, int width, int height, bool fullscreen)
 	if (state == nullptr) return false;
 	if (fullscreen) {
 		[state->Window setStyleMask:NSWindowStyleMaskBorderless];
-		[state->Window setFrame:[[NSScreen mainScreen] frame] display:YES];
+		Apply_Fullscreen(state->Window);
 	} else {
-		[state->Window setStyleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-		                            NSWindowStyleMaskMiniaturizable];
+		NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+		                          NSWindowStyleMaskMiniaturizable;
+		if (state->Resizable) style |= NSWindowStyleMaskResizable;
+		[state->Window setStyleMask:style];
+		[NSApp setPresentationOptions:NSApplicationPresentationDefault];
+		[state->Window setLevel:NSNormalWindowLevel];
 		[state->Window setContentSize:NSMakeSize(width, height)];
 		[state->Window center];
 	}

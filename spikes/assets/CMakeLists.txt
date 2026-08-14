@@ -61,6 +61,42 @@ target_compile_options(zh-asset-inspect PRIVATE
 # tool's own bounds checks catch it instead.
 target_compile_definitions(zh-asset-inspect PRIVATE NDEBUG)
 
+# zh-path-probe points the engine's own directory seam (WWPlatform::Path, the code that replaced
+# the FindFirstFile()/FindNextFile() loops) at a real data directory. Same deal as above: the
+# seam is compiled unmodified, so what it reports is the engine's behaviour, not a stand-in's.
+add_executable(zh-path-probe
+    src/path_probe.cpp
+    "${REPO_ROOT}/Core/Libraries/Source/WWVegas/WWLib/platform/platform_path.cpp"
+    "${REPO_ROOT}/Core/Libraries/Source/WWVegas/WWLib/wwstring.cpp"
+    "${REPO_ROOT}/Core/Libraries/Source/WWVegas/WWLib/Vector.cpp"
+    # BooleanVectorClass in Vector.cpp calls the bit helpers that live here.
+    "${REPO_ROOT}/Core/Libraries/Source/WWVegas/WWLib/jshell.cpp")
+
+# Off Windows the probe also drives the Win32 file seam directly, under the names the engine's own
+# asset scan still calls: FindFirstFile()/FindNextFile()/GetFileAttributes(). scripts/native-port-shims
+# is what supplies <windows.h>; without it platform_win32_compat.h compiles the seam to nothing.
+if(NOT WIN32)
+    target_sources(zh-path-probe PRIVATE
+        "${REPO_ROOT}/Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_file.cpp")
+    target_include_directories(zh-path-probe PRIVATE "${REPO_ROOT}/scripts/native-port-shims")
+    target_compile_definitions(zh-path-probe PRIVATE
+        ZH_PATH_PROBE_WIN32_SEAM WIN32_LEAN_AND_MEAN _REENTRANT)
+endif()
+
+target_include_directories(zh-path-probe PRIVATE
+    "${REPO_ROOT}/Dependencies/Utility"
+    "${REPO_ROOT}/Core/Libraries/Include"
+    "${REPO_ROOT}/Core/Libraries/Source/WWVegas"
+    "${REPO_ROOT}/Core/Libraries/Source/WWVegas/WWLib"
+    "${REPO_ROOT}/Core/Libraries/Source/WWVegas/WWDebug")
+
+target_compile_options(zh-path-probe PRIVATE
+    -fms-extensions
+    -include Utility/CppMacros.h
+    -Wno-implicit-exception-spec-mismatch)
+
+target_compile_definitions(zh-path-probe PRIVATE NDEBUG)
+
 # The `sizes` command reports sizeof() for every on-disk structure, and `w3d` refuses to call a
 # parse successful when ChunkHeader is not 8 bytes, so building this against a tree whose
 # WWLib/bittype.h still spells uint32 as `unsigned long` reproduces the 16-byte failure rather

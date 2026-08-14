@@ -223,6 +223,18 @@ if(APPLE)
         add_executable(zh-metal-surface-probe src/metal_surface_probe.mm)
         target_link_libraries(zh-metal-surface-probe PRIVATE Vulkan::Vulkan
             "-framework QuartzCore" "-framework Metal" "-framework Foundation")
+
+        # The window/Retina/input/fullscreen numbers, which need a real display and a real
+        # backingScaleFactor of 2 - so this target only ever runs on a Mac session, never in CI.
+        add_executable(zh-macos-window-metrics
+            src/macos_window_metrics.mm
+            "${WWLIB_PLATFORM_DIR}/platform/platform_window_cocoa.mm")
+        target_include_directories(zh-macos-window-metrics PRIVATE src "${WWLIB_PLATFORM_DIR}")
+        target_link_libraries(zh-macos-window-metrics PRIVATE Vulkan::Vulkan
+            "-framework AppKit" "-framework QuartzCore" "-framework Metal"
+            "-framework CoreGraphics" "-framework ApplicationServices"
+            "-framework Foundation" "-framework Carbon")
+        target_compile_definitions(zh-macos-window-metrics PRIVATE WWLIB_COCOA_VERIFY_KVK)
     else()
         message(STATUS "no Objective-C++ compiler: zh-window-spike-cocoa not built")
     endif()
@@ -233,7 +245,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
                    zh-resource-lock-tests zh-staging-workload zh-throughput)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
-    foreach(target zh-window-spike zh-window-spike-cocoa zh-metal-surface-probe)
+    foreach(target zh-window-spike zh-window-spike-cocoa zh-metal-surface-probe
+                   zh-macos-window-metrics)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE
                 -Wall -Wextra -Wno-missing-field-initializers)
