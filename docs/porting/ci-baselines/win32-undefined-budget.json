@@ -1,8 +1,13 @@
 {
-  "allowed": [],
+  "allowed": [
+    "GetCursorPos",
+    "ScreenToClient",
+    "SetCursor"
+  ],
   "category": "Win32 API",
   "levels": [
     1,
-    2
+    2,
+    3
   ]
 }
