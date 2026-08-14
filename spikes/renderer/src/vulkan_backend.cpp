@@ -33,6 +33,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -211,10 +212,21 @@ std::vector<uint32_t> Read_Spirv(const std::string& path) {
 
 } // namespace
 
-// One mip level of a lockable texture: where in the persistent staging buffer its
-// texels live, and the pitch handed to the caller. Tightly packed rows, so the
-// pitch is the level width in bytes -- D3D8 does not promise any particular pitch,
-// only that the caller uses the one it is given.
+// A host-visible, mapped block of staging memory the pool hands to a lock and takes
+// back at the matching unlock. `capacity` is what was allocated (rounded up to a
+// size class so blocks are interchangeable); `size` is what the lock asked for.
+struct StagingBlock {
+	Buffer buffer;
+	void* mapped = nullptr;
+	VkDeviceSize size = 0;
+	VkDeviceSize capacity = 0;
+	bool valid() const { return mapped != nullptr; }
+};
+
+// One mip level of a lockable texture: where in its staging block the texels live,
+// and the pitch handed to the caller. Tightly packed rows, so the pitch is the level
+// width in bytes -- D3D8 does not promise any particular pitch, only that the caller
+// uses the one it is given.
 struct LockableLevel {
 	VkDeviceSize offset = 0;
 	uint32_t pitch = 0;
@@ -237,15 +249,19 @@ struct TextureHandle {
 	// not necessarily the VkFormat the image has.
 	uint32_t src_texel_bytes = 4;
 	uint32_t dst_texel_bytes = 4;
-	// Permanently mapped, permanently owned: a D3D8 lock may hand out a pointer that
-	// outlives the Lock call (class C4) or even the Unlock (class C7).
-	Buffer staging;
+	// Staging for the whole mip chain, taken from the pool at the first Lock and
+	// returned at the last matching Unlock, so a resource nobody is locking costs no
+	// host-visible memory. A D3D8 lock may hand out a pointer that outlives the Lock
+	// call (class C4): the block is held while *any* level of the chain is locked,
+	// which is exactly that lifetime. `retain_staging` pins the block for the
+	// resource's lifetime instead, which is what classes C7 and C8 need.
+	StagingBlock staging;
 	void* staging_mapped = nullptr;
-	// Second staging buffer, only when the device has no view swizzle and the format
-	// has to be expanded on the CPU: the caller writes L8/A8/A8L8/X8R8G8B8 into
-	// `staging`, Unlock expands into this, and this is what the image is copied from.
-	Buffer upload;
-	void* upload_mapped = nullptr;
+	bool retain_staging = false;
+	uint32_t locked_levels = 0;
+	// Bytes the CPU-expanded upload block needs (whole chain as BGRA8). Only the
+	// no-view-swizzle path uses it, and only for the duration of one unlock's copy.
+	VkDeviceSize upload_size = 0;
 	std::vector<LockableLevel> levels;
 	VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
 };
@@ -321,7 +337,10 @@ public:
 	bool Lock_Vertex_Buffer(VertexBufferHandle* vb, size_t offset, size_t size,
 	                        uint32_t flags, void** out_bits) override;
 	bool Unlock_Vertex_Buffer(VertexBufferHandle* vb) override;
-	ResourceStats Get_Resource_Stats() const override { return resource_stats_; }
+	ResourceStats Get_Resource_Stats() const override {
+		std::lock_guard<std::mutex> guard(resource_mutex_);
+		return resource_stats_;
+	}
 
 	void Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream) override;
 	void Set_Index_Buffer(IndexBufferHandle* ib, uint32_t index_base_offset) override;
@@ -379,6 +398,10 @@ private:
 	bool Upload_Buffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage,
 	                   Buffer& out);
 	bool Find_Memory_Type(uint32_t type_bits, VkMemoryPropertyFlags props, uint32_t& out);
+	// --- staging pool (docs/porting/renderer-resource-seam.md §4.1) -------------
+	bool Acquire_Staging(VkDeviceSize size, StagingBlock& out);
+	void Release_Staging(StagingBlock& block);
+	bool Ensure_Texture_Staging(TextureHandle* texture);
 	VkCommandBuffer Begin_One_Shot();
 	bool End_One_Shot(VkCommandBuffer cmd);
 
@@ -444,6 +467,14 @@ private:
 	// one frame in flight.
 	uint64_t frame_counter_ = 0;
 	uint64_t completed_frame_ = 0;
+
+	// Free staging blocks, and the mutex that makes the lock path callable from the
+	// engine's loader thread as well as the render thread (class C4). It guards the
+	// pool, the per-resource lock bookkeeping, the stats and the one-shot command
+	// submissions the lock path makes.
+	std::vector<StagingBlock> staging_free_;
+	mutable std::mutex resource_mutex_;
+	bool staging_retain_ = false;
 
 	std::vector<TextureHandle*> owned_textures_;
 	std::vector<VertexBufferHandle*> owned_vbs_;
@@ -704,6 +735,12 @@ bool VulkanBackend::Pick_Device() {
 	// Lets a swizzle-capable device (any Linux driver) run the CPU expansion path
 	// that MoltenVK forces, so the two are covered by the same tests.
 	if (std::getenv("ZH_SPIKE_NO_VIEW_SWIZZLE") != nullptr) view_swizzle_ = false;
+
+	// The pre-pool behaviour, kept as a mode rather than deleted: every lockable
+	// resource pins its staging block for its whole lifetime. That is what classes
+	// C7 (pointer used after Unlock) and C8 (read-write hand-out to arbitrary engine
+	// code) rely on, and it is the "before" the pooled numbers are measured against.
+	staging_retain_ = std::getenv("ZH_SPIKE_STAGING_RETAIN") != nullptr;
 
 	// D3D8 states that need a Vulkan *feature*, not just a pipeline field:
 	// D3DRS_POINTSIZE > 1 needs largePoints, D3DTSS_MAXANISOTROPY needs
@@ -1234,17 +1271,23 @@ void VulkanBackend::Shutdown() {
 		i = Image{};
 	};
 
+	auto free_staging_block = [&](StagingBlock& b) {
+		if (b.mapped != nullptr) vkUnmapMemory(device_, b.buffer.memory);
+		free_buffer(b.buffer);
+		b = StagingBlock{};
+	};
+
 	for (auto* t : owned_textures_) {
 		free_image(t->image);
-		// A lockable texture's staging memory stays mapped for its whole life; the
-		// unmap only happens here.
-		if (t->staging_mapped != nullptr) vkUnmapMemory(device_, t->staging.memory);
-		if (t->upload_mapped != nullptr) vkUnmapMemory(device_, t->upload.memory);
-		free_buffer(t->staging);
-		free_buffer(t->upload);
+		// A block still held here belongs to a resource that was never unlocked, or
+		// one whose block is pinned for C7/C8. Everything else is in the pool.
+		free_staging_block(t->staging);
+		t->staging_mapped = nullptr;
 		delete t;
 	}
 	owned_textures_.clear();
+	for (StagingBlock& b : staging_free_) free_staging_block(b);
+	staging_free_.clear();
 	for (auto* vb : owned_vbs_) {
 		if (vb->mapped != nullptr) vkUnmapMemory(device_, vb->buffer.memory);
 		free_buffer(vb->buffer);
@@ -1652,11 +1695,105 @@ uint32_t Source_Texel_Bytes(TextureFormat format) {
 	}
 }
 
+// Staging blocks are rounded up to a power-of-two size class, with a 4 KiB floor, so
+// a block freed by one lock can serve the next lock of a different resource. The
+// price is at most 2x the requested bytes per block; the gain is that the number of
+// host-visible allocations stops scaling with the number of locks.
+VkDeviceSize Staging_Size_Class(VkDeviceSize bytes) {
+	VkDeviceSize capacity = 4096;
+	while (capacity < bytes) capacity *= 2;
+	return capacity;
+}
+
 } // namespace
+
+// Caller holds resource_mutex_.
+bool VulkanBackend::Acquire_Staging(VkDeviceSize size, StagingBlock& out) {
+	if (size == 0) return false;
+	++resource_stats_.staging_acquires;
+
+	// Smallest free block that fits: keeps a 1 MiB block available for the next lock
+	// that actually needs 1 MiB instead of spending it on a 1 KiB one.
+	size_t best = staging_free_.size();
+	for (size_t i = 0; i < staging_free_.size(); ++i) {
+		if (staging_free_[i].capacity < size) continue;
+		if (best == staging_free_.size() ||
+		    staging_free_[i].capacity < staging_free_[best].capacity) {
+			best = i;
+		}
+	}
+	if (best != staging_free_.size()) {
+		out = staging_free_[best];
+		staging_free_.erase(staging_free_.begin() + static_cast<long>(best));
+		out.size = size;
+		++resource_stats_.staging_reuses;
+		--resource_stats_.staging_pool_blocks;
+		resource_stats_.staging_pool_bytes -= out.capacity;
+	} else {
+		StagingBlock block;
+		block.capacity = Staging_Size_Class(size);
+		block.size = size;
+		const VkMemoryPropertyFlags host = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+		                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+		if (!Allocate_Buffer(block.capacity,
+		                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+		                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		                     host, block.buffer) ||
+		    vkMapMemory(device_, block.buffer.memory, 0, block.capacity, 0,
+		                &block.mapped) != VK_SUCCESS) {
+			return false;
+		}
+		++resource_stats_.staging_allocations;
+		resource_stats_.staging_bytes += block.capacity;
+		out = block;
+	}
+
+	// D3D8 hands out lockable surface bits whose contents are undefined, but a pooled
+	// block carries the previous lock's texels, and a partial-rect unlock copies rows
+	// the caller never wrote. Zeroing the block on acquire keeps a lock from
+	// publishing another resource's pixels. It is the pool's one added CPU cost.
+	std::memset(out.mapped, 0, static_cast<size_t>(out.size));
+
+	resource_stats_.staging_live_bytes += out.capacity;
+	++resource_stats_.staging_live_blocks;
+	if (resource_stats_.staging_live_bytes > resource_stats_.staging_live_peak_bytes) {
+		resource_stats_.staging_live_peak_bytes = resource_stats_.staging_live_bytes;
+	}
+	if (resource_stats_.staging_live_blocks > resource_stats_.staging_live_blocks_peak) {
+		resource_stats_.staging_live_blocks_peak = resource_stats_.staging_live_blocks;
+	}
+	return true;
+}
+
+// Caller holds resource_mutex_.
+void VulkanBackend::Release_Staging(StagingBlock& block) {
+	if (!block.valid()) return;
+	resource_stats_.staging_live_bytes -= block.capacity;
+	--resource_stats_.staging_live_blocks;
+	++resource_stats_.staging_pool_blocks;
+	resource_stats_.staging_pool_bytes += block.capacity;
+	staging_free_.push_back(block);
+	block = StagingBlock{};
+}
+
+// Caller holds resource_mutex_. Gives the texture a staging block if it does not
+// already hold one, i.e. if this is the first level of the chain being locked.
+bool VulkanBackend::Ensure_Texture_Staging(TextureHandle* texture) {
+	if (texture->staging.valid()) return true;
+	VkDeviceSize needed = 0;
+	for (const LockableLevel& l : texture->levels) {
+		needed += static_cast<VkDeviceSize>(l.pitch) * l.height;
+	}
+	if (!Acquire_Staging(needed, texture->staging)) return false;
+	texture->staging_mapped = texture->staging.mapped;
+	if (texture->retain_staging) ++resource_stats_.staging_retained_blocks;
+	return true;
+}
 
 TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t height,
                                                       TextureFormat format,
                                                       uint32_t mip_count) {
+	std::lock_guard<std::mutex> guard(resource_mutex_);
 	const uint32_t src_texel_bytes = Source_Texel_Bytes(format);
 	if (width == 0 || height == 0 || mip_count == 0 || src_texel_bytes == 0) {
 		std::fprintf(stderr,
@@ -1718,8 +1855,9 @@ TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t h
 		return nullptr;
 	}
 
-	// The staging buffer holds the whole mip chain, because a texture-loader lock
-	// (class C4) locks every level at once and keeps all the pointers.
+	// Staging covers the whole mip chain in one block, because a texture-loader lock
+	// (class C4) locks every level at once and keeps all the pointers. The block
+	// itself is not taken until the first Lock.
 	VkDeviceSize staging_size = 0;
 	VkDeviceSize upload_size = 0;
 	handle->levels.resize(mip_count);
@@ -1735,36 +1873,13 @@ TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t h
 		upload_size += static_cast<VkDeviceSize>(level_width) * level_height * 4;
 	}
 
-	const VkMemoryPropertyFlags host =
-	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-	if (!Allocate_Buffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-	                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-	                     host, handle->staging) ||
-	    vkMapMemory(device_, handle->staging.memory, 0, staging_size, 0,
-	                &handle->staging_mapped) != VK_SUCCESS) {
-		delete handle;
-		return nullptr;
-	}
-	std::memset(handle->staging_mapped, 0, static_cast<size_t>(staging_size));
-	++resource_stats_.staging_allocations;
-	resource_stats_.staging_bytes += staging_size;
-
 	// No view swizzle (MoltenVK): the caller still writes D3D8's L8/A8/A8L8/X8R8G8B8
-	// layout, so Unlock has to expand into a *second* host-visible buffer that the
-	// image is actually copied from. That doubles the resident staging memory for
-	// those formats and adds a CPU pass over every unlocked rectangle.
-	if (handle->expand_on_unlock) {
-		if (!Allocate_Buffer(upload_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, host,
-		                     handle->upload) ||
-		    vkMapMemory(device_, handle->upload.memory, 0, upload_size, 0,
-		                &handle->upload_mapped) != VK_SUCCESS) {
-			delete handle;
-			return nullptr;
-		}
-		std::memset(handle->upload_mapped, 0, static_cast<size_t>(upload_size));
-		++resource_stats_.staging_allocations;
-		resource_stats_.staging_bytes += upload_size;
-	}
+	// layout, so Unlock has to expand into a *second* host-visible block that the
+	// image is actually copied from. That block is taken from the same pool for the
+	// duration of the unlock's copy, so it costs a concurrent block rather than a
+	// second permanent allocation, and it still adds a CPU pass over the rectangle.
+	handle->upload_size = upload_size;
+	handle->retain_staging = staging_retain_;
 
 	VkImageViewCreateInfo vci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
 	vci.image = handle->image.image;
@@ -1808,6 +1923,7 @@ TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t h
 
 bool VulkanBackend::Lock_Texture(TextureHandle* texture, uint32_t level,
                                  const LockRect* rect, uint32_t flags, LockedRect& out) {
+	std::lock_guard<std::mutex> guard(resource_mutex_);
 	if (texture == nullptr || !texture->lockable || level >= texture->levels.size()) {
 		return false;
 	}
@@ -1819,6 +1935,10 @@ bool VulkanBackend::Lock_Texture(TextureHandle* texture, uint32_t level,
 	if (r.right > l.width || r.bottom > l.height || r.left >= r.right || r.top >= r.bottom) {
 		return false;
 	}
+
+	// The staging block arrives here rather than at creation: an unlocked resource
+	// holds no host-visible memory at all.
+	if (!Ensure_Texture_Staging(texture)) return false;
 
 	if ((flags & LOCK_READONLY) != 0) {
 		if (texture->expand_on_unlock) {
@@ -1846,7 +1966,7 @@ bool VulkanBackend::Lock_Texture(TextureHandle* texture, uint32_t level,
 		copy.imageExtent = {l.width, l.height, 1};
 		vkCmdCopyImageToBuffer(cmd, texture->image.image,
 		                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		                       texture->staging.buffer, 1, &copy);
+		                       texture->staging.buffer.buffer, 1, &copy);
 		Transition(cmd, texture->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
 		           texture->image.mip_levels);
@@ -1858,6 +1978,7 @@ bool VulkanBackend::Lock_Texture(TextureHandle* texture, uint32_t level,
 	l.locked = true;
 	l.lock_flags = flags;
 	l.lock_rect = r;
+	++texture->locked_levels;
 	// The pointer is into the persistent mapping, offset to the rectangle's first
 	// texel, exactly as D3D8 documents pBits for a sub-rect lock.
 	out.bits = static_cast<uint8_t*>(texture->staging_mapped) + l.offset +
@@ -1868,36 +1989,55 @@ bool VulkanBackend::Lock_Texture(TextureHandle* texture, uint32_t level,
 }
 
 bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
+	std::lock_guard<std::mutex> guard(resource_mutex_);
 	if (texture == nullptr || !texture->lockable || level >= texture->levels.size()) {
 		return false;
 	}
 	LockableLevel& l = texture->levels[level];
 	if (!l.locked) return false;
 	l.locked = false;
+	if (texture->locked_levels > 0) --texture->locked_levels;
+	// Once no level of the chain is locked the block goes back to the pool, unless the
+	// resource is retained: a class C7/C8 caller keeps reading `pBits` after Unlock,
+	// which only a pinned block can serve.
+	const bool release_after = texture->locked_levels == 0 && !texture->retain_staging;
+	auto release_staging = [&]() {
+		if (!release_after) return;
+		Release_Staging(texture->staging);
+		texture->staging_mapped = nullptr;
+	};
 
 	// A read-only lock uploads nothing. This is why the write-only/read-only
 	// distinction matters: it is the difference between a copy and no copy.
-	if ((l.lock_flags & LOCK_READONLY) != 0) return true;
+	if ((l.lock_flags & LOCK_READONLY) != 0) {
+		release_staging();
+		return true;
+	}
 
 	const LockRect r = l.lock_rect;
 	const uint32_t rect_width = r.right - r.left;
 	const uint32_t rect_height = r.bottom - r.top;
 
-	VkBuffer source = texture->staging.buffer;
+	VkBuffer source = texture->staging.buffer.buffer;
 	VkDeviceSize source_offset = l.offset + static_cast<VkDeviceSize>(r.top) * l.pitch +
 	                             static_cast<VkDeviceSize>(r.left) * texture->src_texel_bytes;
 	uint32_t row_length = l.pitch / texture->src_texel_bytes;
 
+	StagingBlock upload_block;
 	if (texture->expand_on_unlock) {
-		// CPU channel expansion, row by row, into the second staging buffer. Only the
+		// CPU channel expansion, row by row, into a pooled upload block. Only the
 		// locked rectangle is expanded, so a partial-rect unlock does not cost a pass
 		// over the whole level.
+		if (!Acquire_Staging(texture->upload_size, upload_block)) {
+			release_staging();
+			return false;
+		}
 		VkDeviceSize level_upload_offset = 0;
 		for (uint32_t i = 0; i < level; ++i) {
 			level_upload_offset += static_cast<VkDeviceSize>(texture->levels[i].width) *
 			                       texture->levels[i].height * 4;
 		}
-		auto* dst = static_cast<uint8_t*>(texture->upload_mapped) + level_upload_offset;
+		auto* dst = static_cast<uint8_t*>(upload_block.mapped) + level_upload_offset;
 		const auto* src = static_cast<const uint8_t*>(texture->staging_mapped) + l.offset;
 		std::vector<uint8_t> row;
 		for (uint32_t y = 0; y < rect_height; ++y) {
@@ -1910,14 +2050,18 @@ bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
 			            row.data(), row.size());
 		}
 		++resource_stats_.cpu_expansions;
-		source = texture->upload.buffer;
+		source = upload_block.buffer.buffer;
 		source_offset = level_upload_offset +
 		                (static_cast<VkDeviceSize>(r.top) * l.width + r.left) * 4;
 		row_length = l.width;
 	}
 
 	VkCommandBuffer cmd = Begin_One_Shot();
-	if (cmd == VK_NULL_HANDLE) return false;
+	if (cmd == VK_NULL_HANDLE) {
+		Release_Staging(upload_block);
+		release_staging();
+		return false;
+	}
 	Transition(cmd, texture->image.image, texture->layout,
 	           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
 	           texture->image.mip_levels);
@@ -1933,7 +2077,12 @@ bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
 	Transition(cmd, texture->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
 	           texture->image.mip_levels);
-	if (!End_One_Shot(cmd)) return false;
+	// End_One_Shot waits the queue idle, so by the time it returns the copy has read
+	// every byte it needs and both blocks are safe to hand to the next lock.
+	const bool submitted = End_One_Shot(cmd);
+	Release_Staging(upload_block);
+	release_staging();
+	if (!submitted) return false;
 	texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	++resource_stats_.texture_upload_regions;
 	++resource_stats_.upload_submits;
@@ -1966,8 +2115,8 @@ VertexBufferHandle* VulkanBackend::Create_Dynamic_Vertex_Buffer(size_t bytes,
 		delete handle;
 		return nullptr;
 	}
-	++resource_stats_.staging_allocations;
-	resource_stats_.staging_bytes += total;
+	++resource_stats_.dynamic_buffer_allocations;
+	resource_stats_.dynamic_buffer_bytes += total;
 	owned_vbs_.push_back(handle);
 	return handle;
 }

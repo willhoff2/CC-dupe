@@ -18,6 +18,11 @@
 //   C5  dynamic ring stream      DISCARD then NOOVERWRITE within one frame, two
 //                                draws from the two sub-ranges, both visible
 //
+// Since the staging pool landed there are three more, all about the pool rather than
+// about a new class: C4 filled from a second thread, two threads locking different
+// resources at the same time, and a run of transient locks whose host-visible cost
+// must not grow with the number of locks.
+//
 // Not covered here, and stated as such in the document: C6 (static buffer fill,
 // which is C1 without the image), C7 (a pointer used after Unlock, which needs the
 // shroud's whole render path) and C8 (SurfaceClass handing the pointer to arbitrary
@@ -31,10 +36,12 @@
 
 #include "render_backend.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace spike;
@@ -453,6 +460,202 @@ Outcome Case_Mip_Chain_Lock(Harness& h) {
 }
 
 // ---------------------------------------------------------------------------
+// C4 across threads: the part §7.6 said was asserted by nothing. The engine locks
+// every level from Begin_Load on the DX8 thread, fills them from Load() on the
+// loader thread, and unlocks from End_Load back on the DX8 thread.
+// ---------------------------------------------------------------------------
+
+const uint32_t kLevelColor[5] = {0xffff0000u, 0xff00ff00u, 0xff0000ffu, 0xffffff00u,
+                                 0xff00ffffu};
+
+// Fills every level of a locked chain with its flat colour, through the pitches the
+// lock returned. Runs on whichever thread calls it.
+void Fill_Chain(const LockedRect* locked, uint32_t levels, uint32_t base_size) {
+	for (uint32_t level = 0; level < levels; ++level) {
+		const uint32_t size = base_size >> level ? base_size >> level : 1u;
+		for (uint32_t y = 0; y < size; ++y) {
+			auto* row = reinterpret_cast<uint32_t*>(
+			    static_cast<uint8_t*>(locked[level].bits) +
+			    static_cast<size_t>(y) * locked[level].pitch);
+			for (uint32_t x = 0; x < size; ++x) row[x] = kLevelColor[level];
+		}
+	}
+}
+
+Outcome Case_Mip_Chain_Cross_Thread(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	constexpr uint32_t kLevels = 5;
+	TextureHandle* tex =
+	    g.Create_Lockable_Texture(kTexWidth, kTexHeight, TextureFormat::A8R8G8B8, kLevels);
+	if (tex == nullptr) return Fail("Create_Lockable_Texture failed");
+
+	LockedRect locked[kLevels];
+	for (uint32_t level = 0; level < kLevels; ++level) {
+		if (!g.Lock_Texture(tex, level, nullptr, LOCK_NONE, locked[level])) {
+			return Fail("Lock_Texture failed for a mip level");
+		}
+	}
+	// The loader thread, which never calls the backend at all: it only writes through
+	// pointers another thread locked. Host-coherent memory plus the join is the whole
+	// synchronisation, which is what the engine's task hand-off already provides.
+	std::thread loader([&]() { Fill_Chain(locked, kLevels, kTexWidth); });
+	loader.join();
+	for (uint32_t level = 0; level < kLevels; ++level) {
+		if (!g.Unlock_Texture(tex, level)) return Fail("Unlock_Texture failed for a level");
+	}
+
+	h.Reset_State();
+	g.Set_Texture(0, tex);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_MIPFILTER, D3DTEXF_POINT);
+	h.Begin();
+	h.Draw_Textured_Quad(0.0f, 0.0f, 4.0f, 4.0f); // 16x16 into 4x4 px: level 2
+	h.End();
+	if (!h.Read_Back()) return Fail("read back failed");
+	const Rgba actual = h.Pixel(2, 2);
+	if (!Near(actual, From_Argb(kLevelColor[2]))) {
+		return Fail("level 2 filled on the loader thread sampled back as " + To_String(actual));
+	}
+	return Pass("5 levels locked on this thread, filled on another, unlocked here, "
+	            "level 2 correct");
+}
+
+// Two threads locking, filling and unlocking *different* resources at the same time.
+// D3D8's runtime serialised this internally; the backend does the same with one
+// mutex over the lock path, and this case is what proves the pool cannot hand the
+// same block to both threads.
+Outcome Case_Concurrent_Locks(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	constexpr uint32_t kThreads = 4;
+	constexpr uint32_t kRounds = 8;
+	TextureHandle* tex[kThreads] = {};
+	for (uint32_t t = 0; t < kThreads; ++t) {
+		tex[t] = g.Create_Lockable_Texture(kTexWidth, kTexHeight, TextureFormat::A8R8G8B8, 1);
+		if (tex[t] == nullptr) return Fail("Create_Lockable_Texture failed");
+	}
+
+	std::atomic<uint32_t> failures{0};
+	std::vector<std::thread> threads;
+	for (uint32_t t = 0; t < kThreads; ++t) {
+		threads.emplace_back([&, t]() {
+			for (uint32_t round = 0; round < kRounds; ++round) {
+				LockedRect locked;
+				if (!g.Lock_Texture(tex[t], 0, nullptr, LOCK_NONE, locked)) {
+					++failures;
+					return;
+				}
+				// The last round writes the colour the pixel check looks for; the
+				// earlier ones exist to churn the pool.
+				const uint32_t colour =
+				    round + 1 == kRounds ? kLevelColor[t] : 0xff101010u + round;
+				for (uint32_t y = 0; y < kTexHeight; ++y) {
+					auto* row = reinterpret_cast<uint32_t*>(
+					    static_cast<uint8_t*>(locked.bits) +
+					    static_cast<size_t>(y) * locked.pitch);
+					for (uint32_t x = 0; x < kTexWidth; ++x) row[x] = colour;
+				}
+				if (!g.Unlock_Texture(tex[t], 0)) {
+					++failures;
+					return;
+				}
+			}
+		});
+	}
+	for (std::thread& thread : threads) thread.join();
+	if (failures.load() != 0) return Fail("a threaded lock/unlock returned failure");
+
+	// Each texture must hold its own thread's last colour: a block handed to two
+	// threads at once, or stats racing, shows up as the wrong colour here.
+	for (uint32_t t = 0; t < kThreads; ++t) {
+		h.Reset_State();
+		g.Set_Texture(0, tex[t]);
+		h.Begin();
+		h.Draw_Textured_Quad(0.0f, 0.0f, static_cast<float>(kWidth),
+		                     static_cast<float>(kHeight));
+		h.End();
+		if (!h.Read_Back()) return Fail("read back failed");
+		const Rgba actual = h.Pixel(kWidth / 2, kHeight / 2);
+		if (!Near(actual, From_Argb(kLevelColor[t]))) {
+			char detail[176];
+			std::snprintf(detail, sizeof(detail),
+			              "texture %u written by thread %u sampled back as %s", t, t,
+			              To_String(actual).c_str());
+			return Fail(detail);
+		}
+	}
+	return Pass("4 threads x 8 lock/fill/unlock rounds on 4 textures, every texture "
+	            "holds its own thread's pixels");
+}
+
+// ---------------------------------------------------------------------------
+// The pool itself: a run of transient locks must not allocate per lock.
+// ---------------------------------------------------------------------------
+
+Outcome Case_Pool_Recycles_Staging(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	constexpr uint32_t kTextures = 6;
+	constexpr uint32_t kRounds = 6;
+	TextureHandle* tex[kTextures] = {};
+	for (uint32_t i = 0; i < kTextures; ++i) {
+		tex[i] = g.Create_Lockable_Texture(32, 32, TextureFormat::A8R8G8B8, 1);
+		if (tex[i] == nullptr) return Fail("Create_Lockable_Texture failed");
+	}
+	const ResourceStats before = g.Get_Resource_Stats();
+
+	for (uint32_t round = 0; round < kRounds; ++round) {
+		for (uint32_t i = 0; i < kTextures; ++i) {
+			LockedRect locked;
+			if (!g.Lock_Texture(tex[i], 0, nullptr, LOCK_NONE, locked)) {
+				return Fail("Lock_Texture failed");
+			}
+			for (uint32_t y = 0; y < 32; ++y) {
+				auto* row = reinterpret_cast<uint32_t*>(
+				    static_cast<uint8_t*>(locked.bits) +
+				    static_cast<size_t>(y) * locked.pitch);
+				for (uint32_t x = 0; x < 32; ++x) row[x] = kLevelColor[i % 5];
+			}
+			if (!g.Unlock_Texture(tex[i], 0)) return Fail("Unlock_Texture failed");
+		}
+	}
+	const ResourceStats after = g.Get_Resource_Stats();
+	const uint32_t locks = kTextures * kRounds;
+	const uint32_t new_allocations = after.staging_allocations - before.staging_allocations;
+	// Locks never overlap here, so one block serves all of them. Anything above 1 is
+	// the pool failing to recycle; the check is <= 1 rather than == 0 because the
+	// first lock may legitimately need a block the pool does not have yet.
+	if (new_allocations > 1) {
+		char detail[176];
+		std::snprintf(detail, sizeof(detail),
+		              "%u sequential locks caused %u host-visible allocations", locks,
+		              new_allocations);
+		return Fail(detail);
+	}
+	if (after.staging_live_bytes != 0) {
+		return Fail("staging bytes are still checked out after every unlock");
+	}
+
+	// ...and the pixels still have to be right, because a pool that recycles too
+	// eagerly shows up as the wrong texture's texels.
+	h.Reset_State();
+	g.Set_Texture(0, tex[2]);
+	h.Begin();
+	h.Draw_Textured_Quad(0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight));
+	h.End();
+	if (!h.Read_Back()) return Fail("read back failed");
+	if (!Near(h.Pixel(kWidth / 2, kHeight / 2), From_Argb(kLevelColor[2]))) {
+		return Fail("a recycled block published the wrong texels");
+	}
+
+	char detail[192];
+	std::snprintf(detail, sizeof(detail),
+	              "%u locks over %u textures cost %u new allocation(s); %u of %u "
+	              "acquires reused a pooled block",
+	              locks, kTextures, new_allocations,
+	              after.staging_reuses - before.staging_reuses,
+	              after.staging_acquires - before.staging_acquires);
+	return Pass(detail);
+}
+
+// ---------------------------------------------------------------------------
 // C5: dynamic ring stream. DynamicVBAccessClass::WriteLockClass and the six
 //     call sites that stream through it, plus W3DSnowManager::renderSubBox.
 // ---------------------------------------------------------------------------
@@ -666,16 +869,33 @@ int main(int argc, char** argv) {
 	report("C2 partial-rect write", Case_Partial_Rect_Write(harness));
 	report("C3 read-back", Case_Read_Back_Lock(harness));
 	report("C4 mip-chain lock", Case_Mip_Chain_Lock(harness));
+	report("C4 cross-thread fill", Case_Mip_Chain_Cross_Thread(harness));
+	report("C4 concurrent locks", Case_Concurrent_Locks(harness));
 	report("C5 dynamic ring stream", Case_Dynamic_Ring_Stream(harness));
 	report("L8 lock (no swizzle)", Case_L8_Lock(harness));
+	report("staging pool recycling", Case_Pool_Recycles_Staging(harness));
 
 	// The cost model in docs/porting/renderer-resource-seam.md, measured rather than
 	// estimated, for exactly the work the cases above did.
 	const ResourceStats stats = backend->Get_Resource_Stats();
 	std::printf("\n== what the D3D8 lock contract cost ==\n");
-	std::printf("  host-visible allocations kept for resource lifetime: %u (%llu bytes)\n",
+	std::printf("  staging blocks the pool ever allocated:               %u (%llu bytes)\n",
 	            stats.staging_allocations,
 	            static_cast<unsigned long long>(stats.staging_bytes));
+	std::printf("  dynamic vertex-buffer memory (not poolable):          %u (%llu bytes)\n",
+	            stats.dynamic_buffer_allocations,
+	            static_cast<unsigned long long>(stats.dynamic_buffer_bytes));
+	std::printf("  staging peak checked out at once:                    %llu bytes in "
+	            "%u block(s)\n",
+	            static_cast<unsigned long long>(stats.staging_live_peak_bytes),
+	            stats.staging_live_blocks_peak);
+	std::printf("  staging still checked out now:                       %llu bytes\n",
+	            static_cast<unsigned long long>(stats.staging_live_bytes));
+	std::printf("  pool: %u free block(s), %llu bytes, %u/%u acquires reused, %u pinned\n",
+	            stats.staging_pool_blocks,
+	            static_cast<unsigned long long>(stats.staging_pool_bytes),
+	            stats.staging_reuses, stats.staging_acquires,
+	            stats.staging_retained_blocks);
 	std::printf("  buffer-to-image copy regions issued from Unlock:     %u\n",
 	            stats.texture_upload_regions);
 	std::printf("  queue submits caused by locks:                       %u\n",
