@@ -24,11 +24,16 @@
 //
 // (c) 2003 Electronic Arts
 //
-// Implementation of internal code
+// Internal functions
 //////////////////////////////////////////////////////////////////////////////
 
 #include "debug.h"
+
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include "platform/debug_platform.h"
+#endif
 
 void DebugInternalAssert(const char *file, int line, const char *expr)
 {
@@ -36,19 +41,33 @@ void DebugInternalAssert(const char *file, int line, const char *expr)
   // module only we know how long stuff can get
   char buf[512];
   wsprintf(buf,"File %s, line %i:\n%s",file,line,expr);
+#ifdef _WIN32
   MessageBox(nullptr,buf,"Internal assert failed",
                         MB_OK|MB_ICONSTOP|MB_TASKMODAL|MB_SETFOREGROUND);
 
   // stop right now!
   TerminateProcess(GetCurrentProcess(),666);
+#else
+  DebugPlatform::ReportFatal("Internal assert failed",buf);
+
+  // stop right now!
+  DebugPlatform::TerminateProcess(666);
+#endif
 }
 
 void *DebugAllocMemory(unsigned numBytes)
 {
+#ifdef _WIN32
   HGLOBAL h=GlobalAlloc(GMEM_FIXED,numBytes);
   if (!h)
     DCRASH_RELEASE("Debug mem alloc failed");
   return (void *)h;
+#else
+  void *p=DebugPlatform::Alloc(numBytes);
+  if (!p)
+    DCRASH_RELEASE("Debug mem alloc failed");
+  return p;
+#endif
 }
 
 void *DebugReAllocMemory(void *oldPtr, unsigned newSize)
@@ -60,10 +79,15 @@ void *DebugReAllocMemory(void *oldPtr, unsigned newSize)
   // Shrinking to 0 size is basically freeing memory
   if (!newSize)
   {
+#ifdef _WIN32
     GlobalFree((HGLOBAL)oldPtr);
+#else
+    DebugPlatform::Free(oldPtr);
+#endif
     return nullptr;
   }
 
+#ifdef _WIN32
   // now try GlobalReAlloc first
   HGLOBAL h=GlobalReAlloc((HGLOBAL)oldPtr,newSize,0);
   if (!h)
@@ -79,10 +103,22 @@ void *DebugReAllocMemory(void *oldPtr, unsigned newSize)
   }
 
   return (void *)h;
+#else
+  // realloc() has no equivalent of GlobalReAlloc()'s refusal to grow a fixed block, so there is
+  // no fallback path to write here.
+  void *p=DebugPlatform::ReAlloc(oldPtr,newSize);
+  if (!p)
+    DCRASH_RELEASE("Debug mem realloc failed");
+  return p;
+#endif
 }
 
 void DebugFreeMemory(void *ptr)
 {
   if (ptr)
+#ifdef _WIN32
     GlobalFree((HGLOBAL)ptr);
+#else
+    DebugPlatform::Free(ptr);
+#endif
 }

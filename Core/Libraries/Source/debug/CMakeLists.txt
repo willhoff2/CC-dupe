@@ -21,6 +21,16 @@ set(DEBUG_SRC
     "internal.h"
 )
 
+if(NOT WIN32)
+    # Stand-ins for the Win32 memory, file, console, debugger-output and process calls this
+    # library makes, plus the backtrace()/dladdr() stack walk that replaces DbgHelp.
+    # docs/porting/debug-and-profile-libs.md.
+    list(APPEND DEBUG_SRC
+        platform/debug_platform.cpp
+        platform/debug_platform.h
+    )
+endif()
+
 add_library(core_debug STATIC)
 
 target_sources(core_debug PRIVATE ${DEBUG_SRC})

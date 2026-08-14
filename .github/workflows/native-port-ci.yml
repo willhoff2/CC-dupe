@@ -208,6 +208,92 @@ jobs:
             native-build-report.md
             native-build.json
 
+  # 2b. The debug and profile libraries, which are the crash-reporting and profiling layer. The
+  #     probe above only asks whether they parse; this compiles every translation unit CMake puts
+  #     in core_debug and core_profile_legacy, links the debug library, and RUNS a test that
+  #     captures a backtrace and asserts the symbolised frames name the test's own functions. The
+  #     stack walk being present at link time and the stack walk actually working are different
+  #     claims, and a native crash with no stack is the thing this seam exists to prevent.
+  #     docs/porting/debug-and-profile-libs.md.
+  debug-profile-seam:
+    name: Debug/profile seam (Linux, clang 14)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
+    timeout-minutes: 20
+    steps:
+      - name: Install toolchain
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            clang-14 python3 git ca-certificates binutils
+          clang++-14 --version
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Gate the stack walk symbols and both libraries' translation units
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Debug/profile seam (Linux)'
+            echo '```'
+            python3 scripts/ci/check-stackwalk-symbols.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Capture and symbolise a real native backtrace
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Native backtrace (Linux x86-64)'
+            echo '```'
+            python3 scripts/native-stackwalk-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # 2c. The same two checks on Apple Silicon, which is the target that made this slice necessary:
+  #     the Windows path is 32-bit x86 assembly and DbgHelp, and arm64 has neither, so the
+  #     backtrace()/dladdr() implementation has to be proven where it will run rather than
+  #     asserted from Linux.
+  debug-profile-seam-macos:
+    name: Debug/profile seam (macOS arm64)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Apple's nm has no --defined-only/-C in the GNU spelling the checker uses, but the LLVM nm
+      # in the Xcode toolchain does, and clang++ is Apple clang.
+      - name: Gate the stack walk symbols and both libraries' translation units
+        run: |
+          set -o pipefail
+          NM="$(xcrun --find llvm-nm)"
+          export NM
+          {
+            echo '## Debug/profile seam (macOS arm64)'
+            echo '```'
+            python3 scripts/ci/check-stackwalk-symbols.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Capture and symbolise a real native backtrace
+        run: |
+          set -o pipefail
+          {
+            echo '## Native backtrace (macOS arm64)'
+            echo '```'
+            python3 scripts/native-stackwalk-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   # The LAN packet's layout. LANMessage is pack(1) and is sent as raw bytes, so its size and member
   # offsets are the wire format; it used to grow from 471 to 536 bytes off Windows because its text
   # fields were wchar_t. This compiles it at 32 and 64 bits with both wchar_t widths and requires

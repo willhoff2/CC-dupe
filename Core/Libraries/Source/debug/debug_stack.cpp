@@ -29,9 +29,18 @@
 
 #include "debug.h"
 #include "debug_stack.h"
-#include <windows.h>
 #include "WWLib/stringex.h"
+
+#ifdef _WIN32
+#include <windows.h>
 #include <imagehlp.h>
+#else
+#include "platform/debug_platform.h"
+#include <stdio.h>
+#include <string.h>
+#endif
+
+#ifdef _WIN32
 
 // Definitions to allow run-time linking to the dbghelp.dll functions.
 
@@ -118,6 +127,24 @@ static void InitDbghelp()
   }
 }
 
+#else // !_WIN32
+
+/*
+  There is no dbghelp.dll off Windows and nothing to load: backtrace() and dladdr() are in libc,
+  so this is a no-op that keeps the call sites below identical on both platforms.
+*/
+static void InitDbghelp()
+{
+}
+
+/// Formats one address the way the Win32 path's wsprintf("%08x") does, but pointer wide.
+static unsigned FormatAddress(char *buf, DebugStackAddr addr)
+{
+  return (unsigned)sprintf(buf,"%016llx",(unsigned long long)addr);
+}
+
+#endif // _WIN32
+
 //////////////////////////////////////////////////////////////////////////////
 
 DebugStackwalk::Signature::Signature(const Signature &src)
@@ -135,18 +162,41 @@ DebugStackwalk::Signature& DebugStackwalk::Signature::operator=(const Signature&
   return *this;
 }
 
-unsigned DebugStackwalk::Signature::GetAddress(int n) const
+DebugStackAddr DebugStackwalk::Signature::GetAddress(int n) const
 {
   DFAIL_IF_MSG(n<0||n>=MAX_ADDR,n << "/" << MAX_ADDR) return 0;
   return m_addr[n];
 }
 
-void DebugStackwalk::Signature::GetSymbol(unsigned addr, char *buf, unsigned bufSize)
+void DebugStackwalk::Signature::GetSymbol(DebugStackAddr addr, char *buf, unsigned bufSize)
 {
   DFAIL_IF(!buf) return;
   DFAIL_IF(bufSize<64||bufSize>=0x80000000) return;
 
   InitDbghelp();
+
+#ifndef _WIN32
+
+  char *bufEnd=buf+bufSize;
+  *buf=0;
+  buf+=FormatAddress(buf,addr);
+
+  char module[256],symbol[512];
+  unsigned long long relMod=0,relSym=0;
+  if (!DebugPlatform::ResolveAddress(addr,module,sizeof(module),&relMod,
+                                          symbol,sizeof(symbol),&relSym))
+  {
+    strcpy(buf," (unknown module)");
+    return;
+  }
+
+  // Same field order as the Win32 path: address, module+offset, symbol+offset. There is no file
+  // and line: that needs the DWARF tables, so the module relative offset is what an external
+  // addr2line/atos has to be fed instead.
+  snprintf(buf,bufEnd-buf," %s+0x%llx, %s+0x%llx",module,relMod,symbol,relSym);
+  return;
+
+#else
 
   char *bufEnd=buf+bufSize;
   *buf=0;
@@ -204,9 +254,11 @@ void DebugStackwalk::Signature::GetSymbol(unsigned addr, char *buf, unsigned buf
   if ((unsigned int)(bufEnd-buf)<strlen(p)+16)
     return;
   buf+=wsprintf(buf,", %s:%i+0x%x",p,line.LineNumber,displacement);
+
+#endif // !_WIN32
 }
 
-void DebugStackwalk::Signature::GetSymbol(unsigned addr,
+void DebugStackwalk::Signature::GetSymbol(DebugStackAddr addr,
                                           char *bufMod, unsigned sizeMod, unsigned *relMod,
                                           char *bufSym, unsigned sizeSym, unsigned *relSym,
                                           char *bufFile, unsigned sizeFile, unsigned *linePtr, unsigned *relLine)
@@ -225,6 +277,30 @@ void DebugStackwalk::Signature::GetSymbol(unsigned addr,
   DFAIL_IF(bufMod&&sizeMod<16) return;
   DFAIL_IF(bufSym&&sizeSym<16) return;
   DFAIL_IF(bufFile&&sizeFile<16) return;
+
+#ifndef _WIN32
+
+  unsigned long long relModWide=0,relSymWide=0;
+  if (!DebugPlatform::ResolveAddress(addr,bufMod,sizeMod,&relModWide,
+                                          bufSym,sizeSym,&relSymWide))
+  {
+    if (bufMod)
+      strcpy(bufMod,"(unknown mod)");
+    if (bufSym)
+      strcpy(bufSym,"(unknown)");
+    return;
+  }
+  if (relMod)
+    *relMod=(unsigned)relModWide;
+  if (relSym)
+    *relSym=(unsigned)relSymWide;
+
+  // No file/line without the DWARF tables. Say so rather than reporting a bogus zero.
+  if (bufFile)
+    strcpy(bufFile,"(no dwarf)");
+  return;
+
+#else
 
   // determine module
   unsigned modBase=gDbg._SymGetModuleBase((HANDLE)GetCurrentProcessId(),addr);
@@ -297,6 +373,8 @@ void DebugStackwalk::Signature::GetSymbol(unsigned addr,
         *relLine=displacement;
     }
   }
+
+#endif // !_WIN32
 }
 
 Debug& operator<<(Debug &dbg, const DebugStackwalk::Signature &sig)
@@ -327,12 +405,22 @@ DebugStackwalk::~DebugStackwalk()
 
 void *DebugStackwalk::GetDbghelpHandle()
 {
+#ifdef _WIN32
   return g_dbghelp;
+#else
+  // Nothing is loaded at run time off Windows; the caller uses this only to name the DLL it
+  // found, and there is no DLL.
+  return nullptr;
+#endif
 }
 
 bool DebugStackwalk::IsOldDbghelp()
 {
+#ifdef _WIN32
   return g_oldDbghelp;
+#else
+  return false;
+#endif
 }
 
 int DebugStackwalk::StackWalk(Signature &sig, struct _CONTEXT *ctx)
@@ -340,6 +428,21 @@ int DebugStackwalk::StackWalk(Signature &sig, struct _CONTEXT *ctx)
   InitDbghelp();
 
   sig.m_numAddr=0;
+
+#ifndef _WIN32
+
+  // There is no _CONTEXT to walk from off Windows: the crash path here runs inside a signal
+  // handler, on the faulting thread, so the current stack *is* the faulting stack.
+  (void)ctx;
+
+  void *frames[Signature::MAX_ADDR];
+  unsigned count=DebugPlatform::CaptureStack(frames,Signature::MAX_ADDR,1);
+  for (unsigned k=0;k<count;++k)
+    sig.m_addr[sig.m_numAddr++]=(DebugStackAddr)(unsigned long)frames[k];
+
+  return sig.m_numAddr;
+
+#else
 
   // bail out if no stack walk available
   if (!gDbg._StackWalk)
@@ -402,4 +505,6 @@ int DebugStackwalk::StackWalk(Signature &sig, struct _CONTEXT *ctx)
   }
 
 	return sig.m_numAddr;
+
+#endif // !_WIN32
 }

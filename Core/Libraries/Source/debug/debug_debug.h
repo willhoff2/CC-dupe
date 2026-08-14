@@ -731,8 +731,8 @@ DLOG( "My HResult is: " << Debug::HResult(SomeHRESULTValue) << "\n" );
   void WriteBuildInfo();
 
 private:
-#if defined(__GNUC__) && defined(_WIN32)
-  // For GCC/MinGW-w64 targeting Windows, allow constructor functions to call init methods
+#if defined(__GNUC__) || defined(__clang__)
+  // For GCC/clang, allow the constructor-attribute functions to call the init methods
   friend void GccPreStaticInit();
   friend void GccPostStaticInit();
 #endif
@@ -872,7 +872,7 @@ private:
   CmdInterfaceListEntry *firstCmdGroup;
 
   /// \internal current stack frame (used by SkipNext)
-  static unsigned curStackFrame;
+  static DebugStackAddr curStackFrame;
 
   /** \internal
 
@@ -920,7 +920,7 @@ private:
     FrameHashEntry *next;
 
     /// frame address
-    unsigned frameAddr;
+    DebugStackAddr frameAddr;
 
     /// frame type (FrameTypeAssert, FrameTypeCheck, or FrameTypeLog)
     unsigned frameType;
@@ -960,7 +960,7 @@ private:
     \param addr frame address
     \return FrameHashEntry found or 0 if nothing found
   */
-  __forceinline FrameHashEntry *LookupFrame(unsigned addr)
+  __forceinline FrameHashEntry *LookupFrame(DebugStackAddr addr)
   {
     for (FrameHashEntry *e=frameHash[addr%FRAME_HASH_SIZE];e;e=e->next)
       if (e->frameAddr==addr)
@@ -980,7 +980,7 @@ private:
     \param line line number
     \return the entry just added
   */
-  FrameHashEntry *AddFrameEntry(unsigned addr, unsigned type,
+  FrameHashEntry *AddFrameEntry(DebugStackAddr addr, unsigned type,
                                 const char *fileOrGroup, int line);
 
   /** \internal
@@ -1002,7 +1002,7 @@ private:
     \param line line number
     \return the entry just added (or the already existing entry)
   */
-  FrameHashEntry *GetFrameEntry(unsigned addr, unsigned type,
+  FrameHashEntry *GetFrameEntry(DebugStackAddr addr, unsigned type,
                                 const char *fileOrGroup, int line)
   {
     FrameHashEntry *e=LookupFrame(addr);

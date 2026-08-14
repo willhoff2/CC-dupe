@@ -32,7 +32,11 @@
 #include "internal.h"
 #include "internal_io.h"
 #include <stdlib.h>
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include "platform/debug_platform.h"
+#endif
 #include <WWLib/WWCommon.h>
 #include <new>      // needed for placement new prototype
 
@@ -47,9 +51,15 @@ DebugIOFlat::OutputStream::OutputStream(const char *filename, unsigned maxSize):
   m_buffer=(char *)DebugAllocMemory(m_bufferSize);
 
   if (!m_limitedFileSize)
+#ifdef _WIN32
     m_fileHandle=CreateFile(m_fileName,GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,
                             FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,
                             nullptr);
+#else
+    // FILE_FLAG_WRITE_THROUGH has no portable equivalent, and this library already flushes at
+    // every line, so the log is as complete after a crash as it was on Windows.
+    m_fileHandle=DebugPlatform::CreateAlways(m_fileName);
+#endif
 }
 
 DebugIOFlat::OutputStream::~OutputStream()
@@ -65,7 +75,11 @@ void DebugIOFlat::OutputStream::Delete(const char *path)
 {
   Flush();
   if (!m_limitedFileSize)
+#ifdef _WIN32
     CloseHandle(m_fileHandle);
+#else
+    DebugPlatform::CloseFile(m_fileHandle);
+#endif
 
   if (path&&*path)
   {
@@ -74,7 +88,11 @@ void DebugIOFlat::OutputStream::Delete(const char *path)
     char *ext=strrchr(m_fileName,'.');
     if (!ext)
       ext=m_fileName+strlen(m_fileName);
+#ifdef _WIN32
     char *fileNameOnly=strrchr(m_fileName,'\\');
+#else
+    char *fileNameOnly=strrchr(m_fileName,'/');
+#endif
     fileNameOnly=fileNameOnly?fileNameOnly+1:m_fileName;
 
     unsigned pathLen=strlen(path);
@@ -82,7 +100,11 @@ void DebugIOFlat::OutputStream::Delete(const char *path)
     {
       // absolute path?
       char help[512];
+#ifdef _WIN32
       if (path[0]&&(path[1]==':'||(path[0]=='\\'&&path[1]=='\\')))
+#else
+      if (path[0]=='/')
+#endif
       {
         strlcpy(help, path, ARRAY_SIZE(help));
         strlcat(help, fileNameOnly, ARRAY_SIZE(help));
@@ -98,10 +120,15 @@ void DebugIOFlat::OutputStream::Delete(const char *path)
         wsprintf(help+strlen(help),"(%i)%s",run,ext);
       else
         strlcat(help, ext, ARRAY_SIZE(help));
+#ifdef _WIN32
       if (CopyFile(m_fileName,help,TRUE))
         break;
       if (GetLastError()!=ERROR_FILE_EXISTS)
         break;
+#else
+      if (DebugPlatform::CopyFileNoOverwrite(m_fileName,help)!=DebugPlatform::COPY_EXISTS)
+        break;
+#endif
     }
   }
 
@@ -173,13 +200,18 @@ void DebugIOFlat::OutputStream::Flush()
   if (!m_limitedFileSize)
   {
     // simple flush to file
+#ifdef _WIN32
     DWORD written;
     WriteFile(m_fileHandle,m_buffer,m_bufferUsed,&written,nullptr);
+#else
+    DebugPlatform::WriteFile(m_fileHandle,m_buffer,m_bufferUsed);
+#endif
     m_bufferUsed=0;
   }
   else
   {
     // create file, write ring buffer
+#ifdef _WIN32
     m_fileHandle=CreateFile(m_fileName,GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,
                             FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,
                             nullptr);
@@ -192,6 +224,17 @@ void DebugIOFlat::OutputStream::Flush()
       WriteFile(m_fileHandle,m_buffer,m_nextChar,&written,nullptr);
     }
     CloseHandle(m_fileHandle);
+#else
+    m_fileHandle=DebugPlatform::CreateAlways(m_fileName);
+    if (m_bufferUsed<m_bufferSize)
+      DebugPlatform::WriteFile(m_fileHandle,m_buffer,m_bufferUsed);
+    else
+    {
+      DebugPlatform::WriteFile(m_fileHandle,m_buffer+m_nextChar,m_bufferUsed-m_nextChar);
+      DebugPlatform::WriteFile(m_fileHandle,m_buffer,m_nextChar);
+    }
+    DebugPlatform::CloseFile(m_fileHandle);
+#endif
   }
 }
 
@@ -236,32 +279,54 @@ void DebugIOFlat::ExpandMagic(const char *src, const char *splitName, char *buf)
       *dst++='-';
 
     char help[256];
+#ifdef _WIN32
     DWORD size=sizeof(help);
+#endif
     *help=0;
 
     switch(*src++)
     {
       case 'e':
       case 'E':
+#ifdef _WIN32
         GetModuleFileName(nullptr,help,sizeof(help));
+#else
+        DebugPlatform::GetExecutablePath(help,sizeof(help));
+#endif
         break;
       case 'm':
       case 'M':
+#ifdef _WIN32
         GetComputerName(help,&size);
+#else
+        DebugPlatform::GetComputerName(help,sizeof(help));
+#endif
         break;
       case 'u':
       case 'U':
+#ifdef _WIN32
         GetUserName(help,&size);
+#else
+        DebugPlatform::GetUserName(help,sizeof(help));
+#endif
         break;
       case 't':
       case 'T':
         {
+#ifdef _WIN32
           SYSTEMTIME systime;
           GetLocalTime(&systime);
 
           wsprintf(help,"%04i%02i%02i-%02i%02i-%02i",
                    systime.wYear,systime.wMonth,systime.wDay,
                    systime.wHour,systime.wMinute,systime.wSecond);
+#else
+          unsigned year,month,day,hour,minute,second,milliseconds;
+          DebugPlatform::GetLocalTime(year,month,day,hour,minute,second,milliseconds);
+
+          wsprintf(help,"%04i%02i%02i-%02i%02i-%02i",
+                   year,month,day,hour,minute,second);
+#endif
         }
         break;
       case 'n':

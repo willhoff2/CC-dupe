@@ -38,6 +38,8 @@ class DebugExceptionhandler
   // nobody can instantiate us
   DebugExceptionhandler();
 
+#ifdef _WIN32
+
   /** \internal
 
     \brief Log exception location.
@@ -65,7 +67,11 @@ class DebugExceptionhandler
   */
   static void LogFPURegisters(Debug &dbg, struct _EXCEPTION_POINTERS *exptr);
 
+#endif // _WIN32
+
 public:
+
+#ifdef _WIN32
 
   /** \internal
 
@@ -82,4 +88,22 @@ public:
     \brief System exception filter
   */
   static long __stdcall ExceptionFilter(struct _EXCEPTION_POINTERS* pExPtrs);
+
+#else // !_WIN32
+
+  /** \internal
+
+    \brief Last chance handler for the fatal signals.
+
+    This is what stands in for ExceptionFilter() off Windows: same log, same real stack walk, but
+    without anything that needs a Win32 EXCEPTION_RECORD (no register or FPU dump, no exception
+    code, no minidump, no dialog). Called on the faulting thread, from the signal handler, and
+    returns so that the signal can be re-raised with the default disposition.
+
+    \param signalNumber the signal that was raised
+    \param signalName its name, for the log
+  */
+  static void FatalSignalHandler(int signalNumber, const char *signalName);
+
+#endif // _WIN32
 };
