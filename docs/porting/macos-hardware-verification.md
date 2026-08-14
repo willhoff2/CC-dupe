@@ -5,10 +5,14 @@ Everything in the repo's macOS path was written on Linux and checked on a paravi
 real machine with a real display and a real Metal driver. It separates what was **measured** from
 what is **inferred**, and it ends with what a Mac still did not verify.
 
-Measured revision: `0ed283a4db5bc2bb19996cba3ac6b4730aaa8e54`
-(`build(port): Measure the native build through level 3 and link lzhl and zlib (#44)`), i.e.
-**before** PR #45, which is the file API seam and is *not* merged. Everything about file enumeration
-below is therefore the pre-#45 state.
+The window, Retina, input, fullscreen and Metal measurements were taken on
+`0ed283a4db5bc2bb19996cba3ac6b4730aaa8e54`
+(`build(port): Measure the native build through level 3 and link lzhl and zlib (#44)`), i.e. before
+PR #45 (the Win32 file API seam) merged. The branch was then rebased onto
+`4525a20e2`, which contains #45 and #47, and everything that the file seam or the native build could
+have moved was **re-measured** there: section 6 (assets) and section 7 (the launch boundary) are
+post-#45 numbers, and section 6.1 measures the #45 seam itself, which did not exist when this slice
+started. Sections 1-5 touch no code that #45 or #47 changed.
 
 ## 0. The machine and the toolchain, as reported by the tools that ran
 
@@ -221,7 +225,7 @@ inference is the obvious one: on a notched Mac a screen-sized borderless window 
 unless the game either insets to the safe area or opts into the "content fills the notch area"
 behaviour deliberately. Not fixed: which of those is right is a UI-layout decision, not a seam bug.
 
-## 6. Retail assets on the pre-#45 seam (measured)
+## 6. Retail assets (measured, re-measured post-#45)
 
 Retail Zero Hour data is present on this machine at `~/devin-work/zh-data`, treated as read-only
 input. `spikes/assets/src/path_probe.cpp` (new) compiles the *real*
@@ -229,7 +233,9 @@ input. `spikes/assets/src/path_probe.cpp` (new) compiles the *real*
 that directory.
 
 ```
-./build/assets/zh-path-probe ~/devin-work/zh-data
+cmake -S spikes/assets -B build/assets-hw -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build/assets-hw --target zh-path-probe -j8
+./build/assets-hw/zh-path-probe ~/devin-work/zh-data
 ```
 
 | Call | Result |
@@ -246,7 +252,9 @@ that directory.
 | `Enumerate("<dir>\Data\Cursors", "*.ani")` | 52 entries — a backslash-separated directory works |
 | `Enumerate("<dir>\Data\Cursors", "*.no-such-extension")` | false, matching `FindFirstFile`'s `INVALID_HANDLE_VALUE` for an empty match set |
 
-All 12 checks pass. **The caveat is the important part:** this volume is APFS
+All 12 checks pass, on the pre-#45 revision and again after the rebase onto #45 — `Path` is a
+separate seam from #45's `FindFirstFile()` and the counts are unchanged. **The caveat is the
+important part:** this volume is APFS
 case-*insensitive* (verified directly — `AbC.txt` and `abc.txt` collapse to one file), and the probe
 reports it:
 
@@ -271,6 +279,44 @@ The archives themselves also settle the case question for their contents. Readin
 **This is archive parsing and path lookup, not gameplay.** Nothing here says the game can load a
 map, and nothing here should be read as saying so.
 
+### 6.1 The #45 `FindFirstFile()` seam, on the retail archives (measured)
+
+PR #45 merged while this branch was in review, so the entry points the engine's asset scan actually
+calls — `FindFirstFileA`/`FindNextFileA`/`FindClose`/`GetFileAttributesA` in
+`WWLib/platform/platform_win32_file.cpp` — now exist off Windows. Its own behaviour test
+(`scripts/native-win32-file-test.py`, 45 checks, 0 failures on this Mac with AppleClang 16) runs
+against a synthetic tree it creates. `zh-path-probe` now also drives those same entry points against
+the retail directory, compiled with the `scripts/native-port-shims` `<windows.h>`:
+
+| Call | Result |
+|---|---|
+| `FindFirstFile("<dir>\*")` | 55 entries |
+| `FindFirstFile("<dir>\*.big")` | 20, first `AudioEnglishZH.big` |
+| `"<dir>\*.BIG"` | 20 — same set |
+| `"<dir>\*big"` | 20 |
+| `"<dir>\Speech*.big"` | 2 |
+| `"<dir>/*.big"` | 20 — a forward-slash spec matches the backslash one |
+| `"<dir>\*."` | 8 — Win32's "names with no extension", which includes `.` and `..` |
+| `"<dir>\*.no-such-extension"` | `INVALID_HANDLE_VALUE`, `GetLastError()` = 2 (`ERROR_FILE_NOT_FOUND`) |
+| `"<dir>\NoSuchDirectory\*.big"` | `INVALID_HANDLE_VALUE`, `GetLastError()` = 3 (`ERROR_PATH_NOT_FOUND`) |
+| exact name `AudioEnglishZH.big` | one entry, 58,326,522 bytes, `dwFileAttributes` 0x00000080 (`FILE_ATTRIBUTE_NORMAL`), `cFileName` is the on-disk spelling |
+| `AUDIOENGLISHZH.BIG` | resolves, `cFileName` comes back `AudioEnglishZH.big` |
+| `GetFileAttributes("<dir>\Data")` | 0x00000010 (`FILE_ATTRIBUTE_DIRECTORY`) |
+
+All 14 checks pass. Two differences from `Path::Enumerate` on the same directory are real and both
+are the seam being *more* Win32-like, not less:
+
+* `*` returns **55** here versus **53** through `Path`, because `FindFirstFile()` returns `.` and
+  `..` first when the pattern matches them and `Path::Enumerate` does not. Verified in the source
+  (`platform_win32_file.cpp` inserts them ahead of the sorted names) as well as in the counts;
+* the first `*.big` entry differs — `AudioEnglishZH.big` here, `MusicZH.big` through `Path` —
+  because the seam sorts case-insensitively and `Path::Enumerate` returns `readdir()` order. Any
+  call site that depends on archive load order therefore sees a different order through the two
+  seams. Not fixed: which order the engine needs is a question for whoever owns the asset scan.
+
+The same case-insensitivity caveat applies as above: `AUDIOENGLISHZH.BIG` resolving proves APFS folds
+case, not that the seam would fold it on a case-sensitive volume.
+
 ## 7. What a launch attempt actually does (measured)
 
 There is no native executable to launch, and that is the measured boundary rather than a limitation
@@ -281,17 +327,23 @@ Mac through level 3 with the shims is the closest thing to a launch that exists 
 ```
 arch -arm64 /usr/bin/python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims \
     --jobs 8 --build-dir build/native-macos-arm64 \
-    --json  /Users/willhoff/devin-work/artifacts/native-build-macos-arm64.json \
-    --report /Users/willhoff/devin-work/artifacts/native-build-macos-arm64.md
+    --json  <artifacts>/native-build-macos-arm64-post45.json \
+    --report <artifacts>/native-build-macos-arm64-post45.md
 ```
 
+Re-measured after the rebase onto `4525a20e2` (i.e. with #45's file/module/locale seam and #47's
+debug/profile libraries in the tree):
+
 ```
-== compiling 829 translation units
-   739 objects, 90 failures
+== compiling 834 translation units
+   746 objects, 88 failures
    no archive for: GeneralsMD/Code/Main (every unit failed)
 == linking 9 archives (+1 third-party, zlib: no)
-objects 739/829, probe-clean 739, probe-clean-but-uncompilable 0, undefined symbols 794
+objects 746/834, probe-clean 746, probe-clean-but-uncompilable 0, undefined symbols 772
 ```
+
+(The pre-rebase run of the same command reported `829` translation units, `739` objects, `90`
+failures and `794` undefined symbols. Those figures are superseded by the ones above.)
 
 Host `arm64-apple-darwin25.6.0`, `Apple clang version 16.0.0`, archives confirmed arm64 with `lipo`.
 The boundary is the *link*, not a crash: `link_binary_produced` is `false`, no `main` exists, and the
@@ -317,14 +369,15 @@ be distrusted; the numbers above are from after it.
 
 | | Linux baseline | this Mac |
 |---|---|---|
-| translation units | 829 | 829 |
-| objects | 748 | 739 |
-| compile failures | 81 | 90 |
+| translation units | 834 | 834 |
+| objects | 755 | 746 |
+| compile failures | 79 | 88 |
 | archives | 9 | 9 |
-| undefined symbols | 393 | 794 |
-| link produced a binary | yes | no |
+| undefined symbols | 346 | 772 |
+| link produced a binary | no | no |
 
-Every one of the 81 Linux failures also fails here, plus **9 macOS-only** ones. They are not random:
+Every one of the 79 Linux failures also fails here (the set difference the other way is empty), plus
+**9 macOS-only** ones — the same nine as before the rebase. They are not random:
 
 | translation unit | diagnostic |
 |---|---|
@@ -361,14 +414,35 @@ found`) which is an artefact of the reconstruction, so it is not reported as the
 | `flake8 --max-line-length=100 scripts/` | 914 violations, **0** of them in a file this branch touches; the touched files are clean |
 | `actionlint .github/workflows/*.yml` | non-zero, all pre-existing: ShellCheck `SC2086`-class notes plus an undefined `needs.detect-changes` in `ci.yml`. No workflow was edited here |
 | `./scripts/ci/fetch-probe-deps.sh` | provisions `dx8-src`, `gamespy-src`, `lzhl-src`, `miles-src` — after the BSD-grep fix below; it could not run on macOS at all before |
-| `native-port-probe.py` native / shimmed | runs; 637/744 and 679/744. `check-probe-baseline.py` refuses the comparison, correctly — see section 9 item 8 |
+| `native-port-probe.py` native / shimmed | runs; 657/751 and 695/751 after the rebase (637/744 and 679/744 before it). `check-probe-baseline.py` refuses the comparison, correctly: *"baseline was measured with clang 14, these results with clang 16; the counts are compiler-version dependent and not comparable"* — see section 9 item 8 |
 | `check-d3d8-surface.py` | pass |
 | `check-openal-symbols.py` | 101 declared, **101 defined**, pass — after the Mach-O fix below. Needed `brew install openal-soft` and `-I$(brew --prefix openal-soft)/include`, since macOS ships `OpenAL/al.h`, not `AL/al.h` |
 | `audio-surface-scan.py --check` | pass, 101 entry points/prototypes, 10 unreferenced definitions |
-| `native-layout-test.py` | pass, all three checks: LP64 reference clean, the ILP32 (`-m32`, `arm-apple-darwin`) reference clean, negative control fails in 221 layout assertions |
+| `native-layout-test.py` | pass: LP64 reference clean, negative control fails in 221 layout assertions, ILP32 reference **skipped** — see below |
+| `native-win32-file-test.py` (#45's own gate) | pass, 45 checks, 0 failures, with AppleClang 16 |
 | `xfer-blob-audit.py` | exit 0 |
 | `window-input-scan.py --check` | pass, 656 references across 24 `HWND` files |
 | `check-spike-render.py` | pass on the real Metal driver with the validation layer loaded and silent — section 4 |
+
+The ILP32 check in `native-layout-test.py` cannot run on this Mac, and it was **reporting that as a
+layout failure**. `-m32` targets 32-bit ARM here, and the macOS SDK's `<fenv.h>` for that target
+defines only `FE_TONEAREST`, so `Utility/fpu_compat.h`'s `FE_DOWNWARD`/`FE_UPWARD`/`FE_TOWARDZERO`
+are undeclared and the compile dies on headers, six errors before any `static_assert` is reached.
+Measured on `origin/main` in a separate worktree, so it is pre-existing and not this branch's doing:
+
+```
+[2/3] 32-bit reference layout ...
+.../Utility/fpu_compat.h:73:8: error: use of undeclared identifier 'FE_DOWNWARD'
+...
+FAILED: 32-bit layout check failed; negative control failed for the wrong reason
+```
+
+(The negative control fails on `main` for a second, unrelated reason: its regex only knew clang 14's
+`static_assert failed` wording. That fix is in this branch.) The `multilib_available()` guard exists
+exactly so a missing 32-bit toolchain reads as a skip rather than a layout failure, but it probed
+`<utility>` only, which `-m32` does find on macOS. It now also probes the `<fenv.h>` rounding modes
+the layout TU actually needs, so the check skips here and still runs on Linux, where glibc defines
+them. **The ILP32 reference layout is therefore unverified on macOS** — item 12 in section 9.
 
 The `check-openal-symbols.py` result was a **failure until a portability fix**: it reported all 101
 AIL_* entry points undefined, because Mach-O prefixes every C symbol with `_`, so `nm` prints
@@ -391,15 +465,20 @@ was ELF-shaped. This is the same class of bug as section 7.1 and is the third on
    `CGAssociateMouseAndMouseCursorPosition`; nothing here checked what that feels like to a user;
 7. **performance.** Not one frame-time number in this document is a claim about playability;
 8. **the probe baselines.** `check-probe-baseline.py` correctly refuses to compare: the checked-in
-   baselines were measured with clang 14 and this machine has AppleClang 16 (native 637/744 vs
-   baseline 643/744, shimmed 679/744 vs 687/744). The differences are AppleClang-16 and
+   baselines were measured with clang 14 and this machine has AppleClang 16 (after the rebase:
+   native 657/751, shimmed 695/751). The differences are AppleClang-16 and
    macOS-SDK effects — missing `malloc.h`, `commctrl.h`, `gscommon.h` — and **not** a regression
    measurement. Comparing macOS to those baselines needs a macOS baseline file, which is a decision
    for whoever owns the CI gate;
 9. **the two macOS-only compile failures in section 7.2 whose diagnostic was not captured**
    (`W3DModelDraw.cpp`, `W3DBufferManager.cpp`) — measured as failing, cause unrecorded;
 10. **anything about gameplay, Wine, the tools, online play or replays** — all out of this slice's
-    scope.
+    scope;
+11. **whether the retail archives load in archive-name order**. The #45 seam sorts and
+    `Path::Enumerate` does not (section 6.1); which order the asset scan needs was not established;
+12. **the ILP32 reference layout on macOS.** `-m32` targets 32-bit ARM, whose SDK `<fenv.h>` lacks
+    the rounding modes `Utility/fpu_compat.h` uses, so the check skips here rather than passing
+    (section 8). Only Linux exercises it.
 
 ## 10. Honest note on scope
 
@@ -415,6 +494,11 @@ requirement`. Both made a gate fail for a reason that had nothing to do with the
 `native-build.py` has two more of the same kind: its link probe passed GNU `ld` flags
 (`--whole-archive`, `-lstdc++`, `-ldl`) that `ld64` does not accept, so the link could not run on
 macOS at all, and its failure detection is the bug in section 7.1. `check-openal-symbols.py`
-compared ELF-shaped symbol names against Mach-O's underscore-prefixed ones (section 8). `-m32` on
-this host retargets to `arm-apple-darwin` and the ILP32 reference compiles there, so the layout gate
-needed only the diagnostic-wording fix to pass on macOS.
+compared ELF-shaped symbol names against Mach-O's underscore-prefixed ones (section 8), and
+`native-layout-test.py`'s multilib guard probed a header that `-m32` does find on macOS, so an
+unrunnable ILP32 check reported itself as a layout failure (section 8). Every one of these made a
+gate lie about the code under test; none of them changes the engine.
+
+The branch was rebased onto `main` after the first round of measurements, which brought in #45's file
+API seam. Sections 6.1 and the re-measured numbers in sections 6-8 are the response to that: the
+figures superseded by the rebase are named as superseded rather than quietly overwritten.

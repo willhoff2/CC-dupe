@@ -72,6 +72,17 @@ add_executable(zh-path-probe
     # BooleanVectorClass in Vector.cpp calls the bit helpers that live here.
     "${REPO_ROOT}/Core/Libraries/Source/WWVegas/WWLib/jshell.cpp")
 
+# Off Windows the probe also drives the Win32 file seam directly, under the names the engine's own
+# asset scan still calls: FindFirstFile()/FindNextFile()/GetFileAttributes(). scripts/native-port-shims
+# is what supplies <windows.h>; without it platform_win32_compat.h compiles the seam to nothing.
+if(NOT WIN32)
+    target_sources(zh-path-probe PRIVATE
+        "${REPO_ROOT}/Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_file.cpp")
+    target_include_directories(zh-path-probe PRIVATE "${REPO_ROOT}/scripts/native-port-shims")
+    target_compile_definitions(zh-path-probe PRIVATE
+        ZH_PATH_PROBE_WIN32_SEAM WIN32_LEAN_AND_MEAN _REENTRANT)
+endif()
+
 target_include_directories(zh-path-probe PRIVATE
     "${REPO_ROOT}/Dependencies/Utility"
     "${REPO_ROOT}/Core/Libraries/Include"

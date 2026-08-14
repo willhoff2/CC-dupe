@@ -105,11 +105,16 @@ def compile_tu(tu_path, bits, extra_includes=(), verbose=False):
 
 
 def multilib_available(tmp, verbose=False):
-    """Whether -m32 has libstdc++ headers, asked directly instead of pattern-matched out of a
-    failure. The diagnostic differs between compilers and versions, and guessing it wrong turns a
-    missing g++-multilib into a reported layout failure."""
+    """Whether a 32-bit compile has the headers the layout TU needs, asked directly instead of
+    pattern-matched out of a failure. The diagnostic differs between compilers and versions, and
+    guessing it wrong turns a missing toolchain into a reported layout failure.
+
+    <fenv.h>'s rounding modes are part of the question, not decoration: Utility/fpu_compat.h uses
+    FE_DOWNWARD, and the macOS SDK's 32-bit ARM <fenv.h> defines only FE_TONEAREST, so on a Mac the
+    32-bit compile fails on headers rather than on any layout assertion."""
     probe = tmp / "multilib_probe.cpp"
-    probe.write_text("#include <utility>\nint main() { return 0; }\n")
+    probe.write_text("#include <utility>\n#include <fenv.h>\n"
+                     "int main() { return FE_DOWNWARD | FE_UPWARD | FE_TOWARDZERO; }\n")
     cmd = [CXX, "-std=c++17", "-fsyntax-only", "-m32", str(probe)]
     if verbose:
         print("  $", " ".join(cmd))
@@ -140,7 +145,8 @@ def main():
         if rc == 0:
             print("      PASS - identical assertions hold under ILP32 (the Windows layout)")
         elif not multilib_available(tmp, verbose=args.verbose):
-            print("      SKIP - no 32-bit libstdc++ headers (install g++-multilib)")
+            print("      SKIP - the 32-bit target has no usable C/C++ headers here "
+                  "(on Linux: install g++-multilib)")
         else:
             failures.append("32-bit layout check failed")
             print(out)
