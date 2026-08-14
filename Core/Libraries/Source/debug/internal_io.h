@@ -29,7 +29,11 @@
 
 #pragma once
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include "platform/debug_platform.h"
+#endif
 
 /// \internal \brief con debug I/O class
 class DebugIOCon: public DebugIOInterface
@@ -82,7 +86,11 @@ class DebugIOFlat: public DebugIOInterface
     char *m_fileName;
 
     /// output file handle (only if unlimited output buffer size)
+#ifdef _WIN32
     HANDLE m_fileHandle;
+#else
+    DebugPlatform::FileHandle m_fileHandle;
+#endif
 
     /// file size limited?
     bool m_limitedFileSize;
@@ -223,8 +231,13 @@ public:
 /// \internal \brief net debug I/O class
 class DebugIONet: public DebugIOInterface
 {
-  /// our pipe handle
+  /// our pipe handle (always invalid off Windows: there is no named pipe seam, see
+  /// docs/porting/debug-and-profile-libs.md)
+#ifdef _WIN32
   HANDLE m_pipe;
+#else
+  DebugPlatform::FileHandle m_pipe;
+#endif
 
 public:
   explicit DebugIONet();

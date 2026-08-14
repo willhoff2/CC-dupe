@@ -28,8 +28,15 @@
 //////////////////////////////////////////////////////////////////////////////
 #include "debug.h"
 #include "internal_except.h"
+
+#ifdef _WIN32
 #include <windows.h>
 #include <commctrl.h>
+#else
+#include "platform/debug_platform.h"
+#endif
+
+#ifdef _WIN32
 
 DebugExceptionhandler::DebugExceptionhandler()
 {
@@ -412,3 +419,71 @@ LONG __stdcall DebugExceptionhandler::ExceptionFilter(struct _EXCEPTION_POINTERS
   // Now die
   return EXCEPTION_EXECUTE_HANDLER;
 }
+
+#else // !_WIN32
+
+/*
+  Off Windows this file is almost entirely absent, and that is the deliberate decision:
+
+  - There are no structured exceptions, so there is no EXCEPTION_RECORD, no exception code and
+    nothing to translate the 20-odd EXCEPTION_* explanations from.
+  - There is no CONTEXT, so the register and FPU dumps and the "bytes around EIP" hex dump have no
+    input. The signal handler could read some of that out of a ucontext_t, but the field names are
+    per-architecture and per-OS and nothing in the port needs them yet.
+  - There is no minidump: MiniDumpWriteDump has no portable equivalent, and writing a fake .dmp
+    that no debugger can open would be worse than writing none. Native builds have core files
+    instead, which the OS writes for us once the signal is re-raised.
+  - There is no crash dialog: this library sits below the window seam.
+
+  What is left is the part that actually matters for debugging the port, and it is real: the log,
+  the build info, and a symbolised stack walk of the faulting thread.
+*/
+
+DebugExceptionhandler::DebugExceptionhandler()
+{
+  // don't do anything here!
+}
+
+void DebugExceptionhandler::FatalSignalHandler(int signalNumber, const char *signalName)
+{
+  // we should not be calling ourselves!
+  static bool inExceptionFilter;
+  if (inExceptionFilter)
+  {
+    DebugPlatform::ReportFatal("Fatal error","Exception in exception handler");
+    return;
+  }
+  inExceptionFilter=true;
+
+  Debug &dbg=Debug::Instance;
+
+  // we're logging an exception
+  ++dbg.disableAssertsEtc;
+  if (dbg.curType!=DebugIOInterface::StringType::MAX)
+    dbg.FlushOutput();
+  dbg.StartOutput(DebugIOInterface::StringType::Exception,"");
+
+  dbg << "\n" << Debug::RepeatChar('=',80) << "\n";
+  dbg << signalName << " (signal " << signalNumber << "):\n"
+         "The process received a fatal signal. There is no Win32 exception record here, so no\n"
+         "exception code, register dump, FPU dump or minidump is available; the stack below is\n"
+         "the real stack of the faulting thread.\n\n";
+
+  dbg.WriteBuildInfo();
+  dbg << "\n\n";
+
+  DebugStackwalk::Signature sig;
+  dbg.m_stackWalk.StackWalk(sig);
+  dbg << sig << "\n";
+
+  dbg.FlushOutput();
+
+  // shut down real Debug module now
+  // (atexit code never gets called in the crash case)
+  Debug::StaticExit();
+
+  // and let the default disposition finish the job, so the OS still writes a core file and a
+  // debugger still sees the original signal on the original stack.
+}
+
+#endif // _WIN32

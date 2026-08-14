@@ -792,4 +792,6 @@ ProfileFuncLevel::ProfileFuncLevel()
 #endif // !defined HAS_PROFILE
 
 ProfileFuncLevel ProfileFuncLevel::Instance;
+#ifdef _WIN32
 HANDLE ProfileFastCS::testEvent=::CreateEvent(nullptr,FALSE,FALSE,"");
+#endif

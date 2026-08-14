@@ -30,7 +30,12 @@
 #include "profile.h"
 #include "internal.h"
 #include <new>
+#ifdef _WIN32
 #include "mmsystem.h"
+#else
+#include <stdlib.h>
+#include <string.h>
+#endif
 
 // yuk, I'm doing this so weird because the destructor
 // of cmd must never be called...
@@ -40,6 +45,45 @@ static ProfileCmdInterface &cmd=*(ProfileCmdInterface *)new
 // we have this here so that our command interface will always
 // be linked in as well...
 static bool __RegisterDebugCmdGroup_Profile=Debug::AddCommands("profile",&cmd);
+
+#ifndef _WIN32
+
+// The GlobalAlloc family is a Win16 leftover; on Win32 GMEM_FIXED allocations are plain pointers
+// already, so malloc/realloc/free is what the Windows code below ends up doing anyway.
+
+void *ProfileAllocMemory(unsigned numBytes)
+{
+  void *p=malloc(numBytes);
+  if (!p)
+    DCRASH_RELEASE("Debug mem alloc failed");
+  return p;
+}
+
+void *ProfileReAllocMemory(void *oldPtr, unsigned newSize)
+{
+  if (!oldPtr)
+    return newSize?ProfileAllocMemory(newSize):nullptr;
+
+  // Shrinking to 0 size is basically freeing memory
+  if (!newSize)
+  {
+    free(oldPtr);
+    return nullptr;
+  }
+
+  void *p=realloc(oldPtr,newSize);
+  if (!p)
+    DCRASH_RELEASE("Debug mem realloc failed");
+  return p;
+}
+
+void ProfileFreeMemory(void *ptr)
+{
+  if (ptr)
+    free(ptr);
+}
+
+#else
 
 void *ProfileAllocMemory(unsigned numBytes)
 {
@@ -85,6 +129,8 @@ void ProfileFreeMemory(void *ptr)
     GlobalFree((HGLOBAL)ptr);
 }
 
+#endif // !_WIN32
+
 //////////////////////////////////////////////////////////////////////////////
 
 static _int64 GetClockCyclesFast()
@@ -99,6 +145,14 @@ static _int64 GetClockCyclesFast()
 
   // this must not take a very huge CPU hit...
 
+#ifndef _WIN32
+  /*
+    Nothing to calibrate: off Windows ProfileGetTime() reads the monotonic clock seam, whose tick
+    rate is a known constant rather than an unknown CPU frequency. So this is exact instead of
+    measured, and it does not burn 60 msec of startup spinning on timeGetTime() either.
+  */
+  return static_cast<_int64>(WWPlatform::Get_Performance_Frequency());
+#else
   // measure clock cycles 3 times for 20 msec each
   // then take the 2 counts that are closest, average
   _int64 n[3];
@@ -148,6 +202,7 @@ static _int64 GetClockCyclesFast()
   // return result
   // (rounded to the next MHz)
   return ((avg/2+500000)/1000000)*1000000;
+#endif // !_WIN32
 }
 
 unsigned Profile::m_rec;

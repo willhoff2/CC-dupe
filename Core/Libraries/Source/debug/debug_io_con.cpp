@@ -31,11 +31,26 @@
 #include "internal.h"
 #include "internal_io.h"
 #include <stdlib.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include "platform/debug_platform.h"
+#endif
 #include <new>      // needed for placement new prototype
 
 DebugIOCon::DebugIOCon():
   m_inputUsed(0), m_inputRead(0)
 {
+#ifndef _WIN32
+  /*
+    There is no AllocConsole() off Windows: a process either inherited a terminal from whoever
+    started it or it has none, and it cannot conjure one up. So this backend never owns the
+    console, which is exactly the case Read() below already refuses to read in.
+  */
+  m_allocatedConsole=false;
+  if (DebugPlatform::HasConsole())
+    Write(StringType::Other,nullptr,"\n\nEA/Debug console open\n\n");
+#else
   // check: is there already a console window open?
   m_allocatedConsole=AllocConsole()!=0;
   if (m_allocatedConsole)
@@ -62,13 +77,19 @@ DebugIOCon::DebugIOCon():
 
     Write(StringType::Other,nullptr,"\n\nEA/Debug console open\n\n");
   }
+#endif
 }
 
 DebugIOCon::~DebugIOCon()
 {
   // close console if we allocated it
   if (m_allocatedConsole)
+#ifdef _WIN32
     FreeConsole();
+#else
+    // cannot happen, see the constructor
+    ((void)0);
+#endif
 }
 
 int DebugIOCon::Read(char *buf, int maxchar)
@@ -82,6 +103,13 @@ int DebugIOCon::Read(char *buf, int maxchar)
   // for the process that is using that console.
   if (!m_allocatedConsole)
     return 0;
+
+#ifndef _WIN32
+
+  // unreachable off Windows, see the constructor
+  return 0;
+
+#else
 
   // are we doing a continuous read?
   if (m_inputRead)
@@ -181,6 +209,8 @@ int DebugIOCon::Read(char *buf, int maxchar)
   }
 
   return 0;
+
+#endif // !_WIN32
 }
 
 void DebugIOCon::Write(StringType type, const char *src, const char *str)
@@ -188,8 +218,12 @@ void DebugIOCon::Write(StringType type, const char *src, const char *str)
   if (type==StringType::StructuredCmdReply||!str)
     return;
 
+#ifdef _WIN32
   DWORD dwDummy;
   WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),str,strlen(str),&dwDummy,nullptr);
+#else
+  DebugPlatform::ConsoleWrite(str);
+#endif
 }
 
 void DebugIOCon::Execute(class Debug& dbg, const char *cmd, bool structuredCmd,
@@ -205,6 +239,11 @@ void DebugIOCon::Execute(class Debug& dbg, const char *cmd, bool structuredCmd,
   {
     if (argn>0&&m_allocatedConsole)
     {
+#ifndef _WIN32
+      // unreachable: m_allocatedConsole is never true off Windows, there being no AllocConsole()
+      // to own a console with, and no way to resize a terminal we did not create.
+      ((void)0);
+#else
       // resize our console area
       HANDLE h=GetStdHandle(STD_OUTPUT_HANDLE);
       COORD newSize;
@@ -217,6 +256,7 @@ void DebugIOCon::Execute(class Debug& dbg, const char *cmd, bool structuredCmd,
       SetConsoleWindowInfo(h,TRUE,&sr);
       SetConsoleScreenBufferSize(h,newSize);
       SetConsoleWindowInfo(h,TRUE,&sr);
+#endif
     }
   }
 }

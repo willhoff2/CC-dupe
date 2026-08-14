@@ -30,21 +30,41 @@
 #include "debug.h"
 #include "internal.h"
 #include "internal_io.h"
+#ifdef _WIN32
 #include <windows.h>
+#endif
 #include <new>      // needed for placement new prototype
+
+/*
+  This backend talks to the Win32-only 'netserv' debug server over a named pipe. Off Windows it is
+  a deliberate stub: named pipes have no portable equivalent, the peer does not exist on macOS or
+  Linux, and building a socket protocol for it is not on the path to running the game. Every entry
+  point behaves as if no connection was ever made, and 'net add' says why. See
+  docs/porting/debug-and-profile-libs.md.
+*/
 
 DebugIONet::DebugIONet()
 {
+#ifndef _WIN32
+  m_pipe=DebugPlatform::INVALID_FILE_HANDLE;
+#endif
 }
 
 DebugIONet::~DebugIONet()
 {
+#ifdef _WIN32
   if (m_pipe!=INVALID_HANDLE_VALUE)
     CloseHandle(m_pipe);
+#endif
 }
 
 int DebugIONet::Read(char *buf, int maxchar)
 {
+#ifndef _WIN32
+  (void)buf;
+  (void)maxchar;
+  return 0;
+#else
   if (m_pipe==INVALID_HANDLE_VALUE)
     return 0;
 
@@ -58,10 +78,17 @@ int DebugIONet::Read(char *buf, int maxchar)
   SetNamedPipeHandleState(m_pipe,&mode,nullptr,nullptr);
 
   return read;
+#endif
 }
 
 void DebugIONet::Write(StringType type, const char *src, const char *str)
 {
+#ifndef _WIN32
+  (void)type;
+  (void)src;
+  (void)str;
+  return;
+#else
   if (m_pipe==INVALID_HANDLE_VALUE)
     return;
 
@@ -78,6 +105,7 @@ void DebugIONet::Write(StringType type, const char *src, const char *str)
   WriteFile(m_pipe,&len,4,&dummy,nullptr);
   if (len)
     WriteFile(m_pipe,str,len,&dummy,nullptr);
+#endif
 }
 
 void DebugIONet::EmergencyFlush()
@@ -95,6 +123,12 @@ void DebugIONet::Execute(class Debug& dbg, const char *cmd, bool structuredCmd,
   }
   else if (strcmp(cmd,"add") == 0)
   {
+#ifndef _WIN32
+    (void)argn;
+    (void)argv;
+    dbg << "net I/O is not available on this platform: it needs the Win32 'netserv' server and a "
+           "named pipe, neither of which exists here. Use the 'flat' or 'con' I/O instead.\n";
+#else
     const char *machine=argn?argv[0]:".";
 
     char buf[256];
@@ -117,6 +151,7 @@ void DebugIONet::Execute(class Debug& dbg, const char *cmd, bool structuredCmd,
     GetComputerName(comp,&mode);
     wsprintf(buf,"Client at %s\n",comp);
     Write(Other,nullptr,buf);
+#endif
   }
 }
 

@@ -29,12 +29,22 @@
 #include "debug.h"
 #include "internal.h"
 #include "internal_io.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include "platform/debug_platform.h"
+#endif
 #include <new>      // needed for placement new prototype
 
 void DebugIOOds::Write(StringType type, const char *src, const char *str)
 {
   if (type!=StringType::StructuredCmdReply&&str)
+#ifdef _WIN32
     OutputDebugString(str);
+#else
+    // there is no debugger output channel off Windows; stderr is the closest thing
+    DebugPlatform::WriteDebuggerString(str);
+#endif
 }
 
 DebugIOInterface *DebugIOOds::Create()

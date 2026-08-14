@@ -146,6 +146,11 @@ which is enough to symbolise offline.
   library, which is not in the probe's default target set and did not block this slice. Its
   `SetUnhandledExceptionFilter` and `TerminateProcess` are a separate, self-contained Win32 crash
   reporter that duplicates `StackDump`. Untouched; deleting or porting it is a later decision.
+  **Since ported**: the legacy `debug` and `profile` libraries now build off Windows, and their
+  stack walk is a real `backtrace()`/`dladdr()` implementation that CI captures and symbolises on
+  Linux x86-64 and macOS arm64. See [`debug-and-profile-libs.md`](debug-and-profile-libs.md); the
+  paragraph below about crash reporting being a stub still describes `StackDump.cpp` and the
+  minidump, both of which are unchanged.
 - **The other four `CreateMutex` sites** (`WWLib/mutex.cpp`, `WWAudio/SoundSceneObj.cpp`,
   `WWDebug/wwmemlog.cpp`, `MilesAudioDevice/MilesAudioManager.cpp`). These are *intra-process*
   locks that happen to use a kernel mutex, not single-instance detection. They belong to the

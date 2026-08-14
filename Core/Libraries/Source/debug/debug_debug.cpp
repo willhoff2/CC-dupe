@@ -32,7 +32,11 @@
 #include "internal_except.h"
 #include "internal_io.h"
 #include <stdlib.h>
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include "platform/debug_platform.h"
+#endif
 #include <WWLib/WWCommon.h>
 #include <new>      // needed for placement new prototype
 
@@ -53,15 +57,15 @@ void *Debug::PreStatic=&Debug::PreStaticInit;
 #pragma data_seg(".CRT$XCY")
 void *Debug::PostStatic=&Debug::PostStaticInit;
 #pragma data_seg()
-#elif defined(__GNUC__) && defined(_WIN32)
-// For GCC/MinGW-w64 targeting Windows, use constructor attributes
+#elif defined(__GNUC__) || defined(__clang__)
+// For GCC/clang (MinGW-w64 as well as the ELF and Mach-O targets), use constructor attributes.
 // Use priority 101 for PreStatic (very early) and 65434 for PostStatic (very late)
 void __attribute__((constructor(101))) GccPreStaticInit() { Debug::PreStaticInit(); }
 void __attribute__((constructor(65434))) GccPostStaticInit() { Debug::PostStaticInit(); }
 void *Debug::PreStatic = nullptr;
 void *Debug::PostStatic = nullptr;
 #else
-#error "Unsupported compiler or platform. This code requires MSVC or GCC/MinGW-w64 targeting Windows."
+#error "Unsupported compiler. This code requires MSVC, GCC or clang."
 #endif
 
 Debug::LogDescription::LogDescription(const char *fileOrGroup, const char *description)
@@ -73,7 +77,7 @@ Debug::LogDescription::LogDescription(const char *fileOrGroup, const char *descr
 Debug Debug::Instance;
 
 // more class static members
-unsigned Debug::curStackFrame;
+DebugStackAddr Debug::curStackFrame;
 
 // this constructor is empty on purpose because all construction
 // work is done in PreStaticInit (and some in PostStaticInit)
@@ -118,7 +122,14 @@ void Debug::PreStaticInit()
   Instance.m_fillChar=' ';
 
   /// install exception handler
+#ifdef _WIN32
   SetUnhandledExceptionFilter(DebugExceptionhandler::ExceptionFilter);
+#else
+  // There is no unhandled exception filter off Windows. The equivalent last-chance hook is a
+  // handler for the fatal signals, which logs the same crash report minus everything that needs
+  // a Win32 EXCEPTION_RECORD. See DebugExceptionhandler::FatalSignalHandler.
+  DebugPlatform::InstallFatalSignalHandlers(DebugExceptionhandler::FatalSignalHandler);
+#endif
 }
 
 void Debug::PostStaticInit()
@@ -136,25 +147,44 @@ void Debug::PostStaticInit()
 
   /// exec dbgcmd file
   char ioBuffer[2048];
+#ifdef _WIN32
   GetModuleFileName(nullptr,ioBuffer,sizeof(ioBuffer));
+#else
+  DebugPlatform::GetExecutablePath(ioBuffer,sizeof(ioBuffer));
+#endif
   char *q=strrchr(ioBuffer,'.');
   if (q)
     strcpy(q,".dbgcmd");
+#ifdef _WIN32
   HANDLE h=CreateFile(ioBuffer,GENERIC_READ,0,nullptr,OPEN_EXISTING,
                       FILE_ATTRIBUTE_NORMAL,nullptr);
   if (h==INVALID_HANDLE_VALUE)
     h=CreateFile("default.dbgcmd",GENERIC_READ,0,nullptr,OPEN_EXISTING,
                       FILE_ATTRIBUTE_NORMAL,nullptr);
   if (h!=INVALID_HANDLE_VALUE)
+#else
+  DebugPlatform::FileHandle h=DebugPlatform::OpenExisting(ioBuffer);
+  if (h==DebugPlatform::INVALID_FILE_HANDLE)
+    h=DebugPlatform::OpenExisting("default.dbgcmd");
+  if (h!=DebugPlatform::INVALID_FILE_HANDLE)
+#endif
   {
     char cmdBuffer[512];
     unsigned long ioCur=0,ioUsed=0,cmdCur=0;
+#ifdef _WIN32
     ReadFile(h,ioBuffer,sizeof(ioBuffer),&ioUsed,nullptr);
+#else
+    ioUsed=DebugPlatform::ReadFile(h,ioBuffer,sizeof(ioBuffer));
+#endif
     for (;;)
     {
       if (ioCur==ioUsed)
       {
+#ifdef _WIN32
         ReadFile(h,ioBuffer,sizeof(ioBuffer),&ioUsed,nullptr);
+#else
+        ioUsed=DebugPlatform::ReadFile(h,ioBuffer,sizeof(ioBuffer));
+#endif
         ioCur=0;
       }
       if (ioCur==ioUsed||ioBuffer[ioCur]=='\n'||ioBuffer[ioCur]=='\r')
@@ -175,7 +205,11 @@ void Debug::PostStaticInit()
         ioCur++;
       }
     }
+#ifdef _WIN32
     CloseHandle(h);
+#else
+    DebugPlatform::CloseFile(h);
+#endif
   }
   else
   {
@@ -205,7 +239,12 @@ void Debug::PostStaticInit()
       "get reliable stack and symbol information.\n\n";
 
     char buf[256];
+#ifdef _WIN32
     GetModuleFileName((HMODULE)DebugStackwalk::GetDbghelpHandle(),buf,sizeof(buf));
+#else
+    // unreachable: there is no dbghelp.dll to be old, so IsOldDbghelp() is always false
+    *buf=0;
+#endif
     Instance <<
       "Hint: The DLL got loaded as:\n" << buf << "\n" << RepeatChar('=',79) << "\n\n";
 
@@ -292,7 +331,13 @@ void Debug::InstallExceptionHandler()
   // MinGW-w64 doesn't support _set_se_translator, use Vectored Exception Handler
   AddVectoredExceptionHandler(1, LocalVectoredExceptionHandler);
 #else
-  #error "Unsupported compiler for exception handling"
+  /*
+    Deliberate stub. This installs a *per-thread* translator that turns a Win32 structured
+    exception into something the C++ exception machinery can catch; there is no equivalent off
+    Windows, because there are no structured exceptions to translate. The process wide fatal
+    signal handlers installed in PreStaticInit() are what catches a native crash instead, and
+    they cannot be per-thread. See docs/porting/debug-and-profile-libs.md.
+  */
 #endif
 }
 
@@ -305,8 +350,15 @@ bool Debug::SkipNext()
 
   // do not implement this function inline, we do need
   // a valid frame pointer here!
-  unsigned help;
-#if defined(_MSC_VER)
+  DebugStackAddr help;
+#if !defined(_WIN32)
+  /*
+    The two Windows paths below read the return address straight out of the frame the frame
+    pointer points at, which only works on x86-32. The builtin is what that expression means, it
+    works on arm64, and it does not need a frame pointer to be there.
+  */
+  help=(DebugStackAddr)(unsigned long)__builtin_return_address(0);
+#elif defined(_MSC_VER)
   _asm
   {
     mov eax,[ebp+4]   // return address
@@ -411,6 +463,10 @@ bool Debug::AssertDone()
     // show dialog box only if running windowed
     if (IsWindowed())
     {
+#ifndef _WIN32
+      // unreachable: IsWindowed() is always false off Windows, see below
+      ((void)0);
+#else
       /// @todo replace MessageBox with custom dialog w/ 4 options: abort, skip 1, skip all, break
 
       // now display message, wait for user input
@@ -445,6 +501,7 @@ bool Debug::AssertDone()
         default:
           ((void)0);
       }
+#endif // !_WIN32
     }
     else
     {
@@ -685,6 +742,10 @@ bool Debug::CrashDone(bool die)
     {
       if (IsWindowed())
       {
+#ifndef _WIN32
+        // unreachable: IsWindowed() is always false off Windows, see below
+        ((void)0);
+#else
         /// @todo replace MessageBox with custom dialog w/ 4 options: abort, skip 1, skip all, break
 
         // now display message, wait for user input
@@ -719,6 +780,7 @@ bool Debug::CrashDone(bool die)
           default:
             ((void)0);
         }
+#endif // !_WIN32
       }
       else
       {
@@ -746,8 +808,12 @@ bool Debug::CrashDone(bool die)
     else
 #endif
     {
+#ifdef _WIN32
       MessageBox(nullptr,help,"Game crash",
                           MB_OK|MB_ICONSTOP|MB_TASKMODAL|MB_SETFOREGROUND);
+#else
+      DebugPlatform::ReportFatal("Game crash",help);
+#endif
       curFrameEntry=nullptr;
       _exit(1);
     }
@@ -931,8 +997,17 @@ Debug& Debug::operator<<(const MemDump &dump)
   for (unsigned i=0;i<dump.m_numItems;i+=itemPerLine,cur+=itemPerLine*dump.m_bytePerItem)
   {
     // address
+#ifdef _WIN32
     char buf[9];
     sprintf(buf,"%08x",dump.m_absAddr?unsigned(cur):cur-dump.m_startPtr);
+#else
+    // a pointer does not fit in the 8 digits the 32 bit Windows build prints
+    char buf[17];
+    if (dump.m_absAddr)
+      sprintf(buf,"%016llx",(unsigned long long)(unsigned long)cur);
+    else
+      sprintf(buf,"%08x",unsigned(cur-dump.m_startPtr));
+#endif
     operator<<(buf);
 
     // items
@@ -947,7 +1022,11 @@ Debug& Debug::operator<<(const MemDump &dump)
         for (unsigned l=dump.m_bytePerItem;l;--l)
           operator<<("  ");
       }
+#ifdef _WIN32
       else if (IsBadReadPtr(curByte,dump.m_bytePerItem))
+#else
+      else if (DebugPlatform::IsBadReadPtr(curByte,dump.m_bytePerItem))
+#endif
       {
         for (unsigned l=dump.m_bytePerItem;l;--l)
           operator<<("??");
@@ -972,7 +1051,11 @@ Debug& Debug::operator<<(const MemDump &dump)
     {
       if (k+i>=dump.m_numItems)
         break;
+#ifdef _WIN32
       else if (IsBadReadPtr(curByte,dump.m_bytePerItem))
+#else
+      else if (DebugPlatform::IsBadReadPtr(curByte,dump.m_bytePerItem))
+#endif
       {
         for (unsigned l=dump.m_bytePerItem;l;--l)
           operator<<("?");
@@ -1010,9 +1093,9 @@ bool Debug::IsLogEnabled(const char *fileOrGroup)
   // to be used from the D_ISLOG macros only and those guarantee
   // that we are having real static strings let's use
   // that strings address as frame address...
-  FrameHashEntry *e=Instance.LookupFrame((unsigned)fileOrGroup);
+  FrameHashEntry *e=Instance.LookupFrame((DebugStackAddr)(unsigned long)fileOrGroup);
   if (!e)
-    e=Instance.AddFrameEntry((unsigned)fileOrGroup,FrameTypeLog,fileOrGroup,0);
+    e=Instance.AddFrameEntry((DebugStackAddr)(unsigned long)fileOrGroup,FrameTypeLog,fileOrGroup,0);
   if (e->status==Unknown)
     Instance.UpdateFrameStatus(*e);
   return e->status==NoSkip;
@@ -1195,7 +1278,7 @@ void Debug::Update()
   }
 }
 
-Debug::FrameHashEntry* Debug::AddFrameEntry(unsigned addr, unsigned type,
+Debug::FrameHashEntry* Debug::AddFrameEntry(DebugStackAddr addr, unsigned type,
                                             const char *fileOrGroup, int line)
 {
   __ASSERT(LookupFrame(addr)==nullptr);
@@ -1228,7 +1311,11 @@ Debug::FrameHashEntry* Debug::AddFrameEntry(unsigned addr, unsigned type,
   else
   {
     // no, just add file name (without path though)
+#ifdef _WIN32
     e->fileOrGroup=fileOrGroup?strrchr(fileOrGroup,'\\'):nullptr;
+#else
+    e->fileOrGroup=fileOrGroup?strrchr(fileOrGroup,'/'):nullptr;
+#endif
     e->fileOrGroup=e->fileOrGroup?e->fileOrGroup+1:fileOrGroup;
   }
 
@@ -1332,12 +1419,19 @@ void Debug::AddOutput(const char *str, unsigned remainingLen)
       // add timestamp now?
       if (ioBuffer[curType].lastWasCR)
       {
+        char ts[40];
+#ifdef _WIN32
         SYSTEMTIME systime;
         GetLocalTime(&systime);
 
-        char ts[40];
         wsprintf(ts,"[%02i:%02i.%02i.%03i] ",systime.wHour,systime.wMinute,
                       systime.wSecond,systime.wMilliseconds);
+#else
+        unsigned year,month,day,hour,minute,second,milliseconds;
+        DebugPlatform::GetLocalTime(year,month,day,hour,minute,second,milliseconds);
+
+        wsprintf(ts,"[%02i:%02i.%02i.%03i] ",hour,minute,second,milliseconds);
+#endif
 
         unsigned tsLen=strlen(ts);
         memcpy(ioBuffer[curType].buffer+ioBuffer[curType].used,ts,tsLen+1);
@@ -1414,12 +1508,18 @@ void Debug::FlushOutput(bool defaultLog)
 #ifdef HAS_LOGS
     // then force output to a very simple default log file
     // (non-Release builds only)
+#ifdef _WIN32
     HANDLE h=CreateFile("default.log",GENERIC_WRITE,0,nullptr,
                         OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
     SetFilePointer(h,0,nullptr,FILE_END);
     DWORD dwDummy;
     WriteFile(h,ioBuffer[curType].buffer,strlen(ioBuffer[curType].buffer),&dwDummy,nullptr);
     CloseHandle(h);
+#else
+    DebugPlatform::FileHandle h=DebugPlatform::OpenAppend("default.log");
+    DebugPlatform::WriteFile(h,ioBuffer[curType].buffer,strlen(ioBuffer[curType].buffer));
+    DebugPlatform::CloseFile(h);
+#endif
 #endif
   }
 
@@ -1646,18 +1746,32 @@ void Debug::ExecCommand(const char *cmdstart, const char *cmdend)
   DebugFreeMemory(strbuf);
 }
 
+#ifdef _WIN32
 // little helper to get app window
 static BOOL CALLBACK EnumThreadWndProc(HWND hwnd, LPARAM lParam)
 {
   *(HWND *)lParam=hwnd;
   return FALSE;
 }
+#endif
 
 bool Debug::IsWindowed()
 {
   // use cached result if possible
   if (m_isWindowed)
     return m_isWindowed>0;
+
+#ifndef _WIN32
+  /*
+    This asks Win32 for the calling thread's window and looks at its style bits. There is no
+    window enumeration to do that with off Windows, and this library sits below the window seam,
+    so it cannot ask it either. Reporting 'not windowed' is the honest answer and it is also the
+    useful one: the windowed paths are the ones that pop up a modal dialog and wait for a click,
+    which a native build has no way to show and no one to click it.
+  */
+  m_isWindowed=-1;
+  return false;
+#else
 
   // find main app window
   HWND appHWnd=nullptr;
@@ -1672,6 +1786,7 @@ bool Debug::IsWindowed()
   // we assume full screen if WS_CAPTION is not set
   m_isWindowed=(GetWindowLong(appHWnd,GWL_STYLE)&WS_CAPTION)?1:-1;
   return m_isWindowed>0;
+#endif // !_WIN32
 }
 
 //////////////////////////////////////////////////////////////////////////////

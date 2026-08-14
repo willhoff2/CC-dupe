@@ -34,7 +34,13 @@
 #include "internal_highlevel.h"
 #include "internal_cmd.h"
 #include "internal_result.h"
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <WWLib/platform/platform_time.h>
+// for wsprintf() and the CRT spellings this library shares with the debug library
+#include "../debug/platform/debug_platform.h"
+#endif
 
 #if !(defined(_MSC_VER) && _MSC_VER < 1300)
 #include <atomic>
@@ -46,7 +52,9 @@ class ProfileFastCS
   ProfileFastCS(const ProfileFastCS&) FUNCTION_DELETE;
   ProfileFastCS& operator=(const ProfileFastCS&) FUNCTION_DELETE;
 
+#ifdef _WIN32
 	static HANDLE testEvent;
+#endif
 
 #if defined(_MSC_VER) && _MSC_VER < 1300
 	volatile unsigned m_Flag;
@@ -137,9 +145,20 @@ void *ProfileAllocMemory(unsigned numBytes);
 void *ProfileReAllocMemory(void *oldPtr, unsigned newSize);
 void ProfileFreeMemory(void *ptr);
 
+/*
+  On Windows this is a raw RDTSC read and the unit of every number the profiler prints is one CPU
+  clock cycle. Off Windows it is the engine's monotonic clock seam instead, whose tick is one
+  microsecond, so the unit becomes one microsecond: arm64 has no userspace cycle counter (PMCCNTR
+  is privileged), and there is no point reading TSC on x86-64 only. Two consequences, both
+  documented in docs/porting/debug-and-profile-libs.md: the resolution drops from sub-nanosecond to
+  one microsecond, which is coarser than many of the functions being measured, and Profile's
+  "clock cycles per second" becomes the clock's tick rate rather than the CPU frequency.
+*/
 __forceinline void ProfileGetTime(__int64 &t)
 {
-#if defined(_MSC_VER) && _MSC_VER < 1300
+#if !defined(_WIN32)
+  t = static_cast<__int64>(WWPlatform::Get_Performance_Counter());
+#elif defined(_MSC_VER) && _MSC_VER < 1300
   _asm
   {
     mov ecx,[t]
