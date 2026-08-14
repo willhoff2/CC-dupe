@@ -1,0 +1,38 @@
+{
+  "_comment": "Ceiling for the staging pool's host-visible cost, enforced by scripts/ci/check-staging-cost.py. Measured figures are the run that produced this file; the ceilings carry headroom for size-class rounding.",
+  "frames": 12,
+  "modes": {
+    "swizzle": {
+      "frames": 12,
+      "staging_allocations": 10,
+      "staging_resident_bytes": 2048001,
+      "staging_peak_bytes": 2048001,
+      "staging_steady_state_bytes": 409601,
+      "measured": {
+        "staging_allocations": 8,
+        "staging_resident_bytes": 1638400,
+        "staging_peak_bytes": 1638400,
+        "staging_steady_state_bytes": 327680,
+        "staging_reuse_rate": 0.9826,
+        "texture_locks": 653,
+        "buffer_locks": 480
+      }
+    },
+    "no_swizzle": {
+      "frames": 12,
+      "staging_allocations": 11,
+      "staging_resident_bytes": 2129921,
+      "staging_peak_bytes": 2129921,
+      "staging_steady_state_bytes": 409601,
+      "measured": {
+        "staging_allocations": 9,
+        "staging_resident_bytes": 1703936,
+        "staging_peak_bytes": 1703936,
+        "staging_steady_state_bytes": 327680,
+        "staging_reuse_rate": 0.9819,
+        "texture_locks": 653,
+        "buffer_locks": 480
+      }
+    }
+  }
+}

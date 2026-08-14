@@ -100,10 +100,35 @@ struct LockRect {
 // estimated. The resource-lock tests print these so the cost model in the doc is
 // measured on at least one implementation.
 struct ResourceStats {
-	// Host-visible allocations that exist for the lifetime of a resource, because a
-	// D3D8 lock may hand out a pointer that outlives the call (class C4/C7).
+	// The staging pool behind Lock_Texture: host-visible blocks that are recycled
+	// across locks instead of one permanent allocation per resource. Nothing is freed
+	// before Shutdown, so `staging_bytes` is the pool's resident cost: the sum of
+	// every block it ever had to allocate.
 	uint32_t staging_allocations = 0;
 	uint64_t staging_bytes = 0;
+	// What the pool holds free right now, what is checked out to a lock right now,
+	// and the worst moment so far -- the peak is the number a frame's worth of
+	// overlapping locks actually costs.
+	uint32_t staging_pool_blocks = 0;
+	uint64_t staging_pool_bytes = 0;
+	uint64_t staging_live_bytes = 0;
+	uint64_t staging_live_peak_bytes = 0;
+	uint32_t staging_live_blocks = 0;
+	uint32_t staging_live_blocks_peak = 0;
+	// Lock calls that needed a block, and how many of those the free list served.
+	// staging_allocations == staging_acquires - staging_reuses, always.
+	uint32_t staging_acquires = 0;
+	uint32_t staging_reuses = 0;
+	// Blocks pinned for a resource's lifetime rather than recycled: ZH_SPIKE_STAGING_
+	// RETAIN, the pre-pool behaviour, kept so the two can be measured against each
+	// other.
+	uint32_t staging_retained_blocks = 0;
+	// Dynamic vertex-buffer memory, which is host-visible for the resource's whole
+	// life by design (D3D8's D3DUSAGE_DYNAMIC ring) and so is *not* poolable. Counted
+	// separately because it would otherwise be mistaken for staging that failed to
+	// recycle.
+	uint32_t dynamic_buffer_allocations = 0;
+	uint64_t dynamic_buffer_bytes = 0;
 	// vkCmdCopyBufferToImage regions issued from Unlock, and the submits they cost.
 	uint32_t texture_upload_regions = 0;
 	uint32_t upload_submits = 0;
