@@ -33,6 +33,7 @@ public:
 class CComModule
 {
 public:
-	HRESULT Init(void*, HINSTANCE) { return S_OK; }
+	// The real CComModule::Init takes the object map, the instance and an optional library id.
+	HRESULT Init(void*, HINSTANCE, const void* = 0) { return S_OK; }
 	void Term() {}
 };

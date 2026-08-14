@@ -6,7 +6,7 @@
       "message_pump": 7,
       "mode_change": 8,
       "placement": 5,
-      "polled_input": 10,
+      "polled_input": 11,
       "window_handle": 29,
       "wndproc": 9
     },
@@ -305,6 +305,7 @@
     ],
     "GetDoubleClickTime": [
       "Core/GameEngine/Source/GameClient/GUI/Gadget/GadgetListBox.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_module.cpp",
       "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp"
     ],
     "GetKeyState": [
@@ -476,7 +477,7 @@
       "Core/Libraries/Source/debug/test2/test2.cpp",
       "GeneralsMD/Code/Main/WinMain.cpp"
     ],
-    "VK_[A-Z0-9_]+": [
+    "VK_(?!STRUCTURE_TYPE_|USE_PLATFORM_|FORMAT_|IMAGE_|API_VERSION|EXT_|KHR_|MVK_|SUCCESS|NULL_HANDLE|TRUE|FALSE|HEADER_VERSION|PRESENT_MODE_|COLOR_SPACE_|COMPOSITE_ALPHA_|SHARING_MODE_|ERROR_|SUBOPTIMAL|INCOMPLETE|WHOLE_SIZE|QUEUE_|MAX_|UUID_|LOD_CLAMP_|ATTACHMENT_UNUSED|REMAINING_)[A-Z0-9_]+": [
       "Core/GameEngine/Source/GameClient/GUI/Gadget/GadgetTextEntry.cpp",
       "Core/GameEngine/Source/GameClient/GUI/IMEManager.cpp",
       "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp",
@@ -526,7 +527,7 @@
       "message_pump": 6,
       "placement": 4,
       "polled_input": 10,
-      "window_handle": 55,
+      "window_handle": 57,
       "wndproc": 33
     },
     "generals": {
@@ -542,6 +543,7 @@
       "message_pump": 13,
       "mode_change": 50,
       "placement": 8,
+      "polled_input": 1,
       "window_handle": 42,
       "wndproc": 74
     },
@@ -599,7 +601,7 @@
   "symbols": {
     "in_scope": {
       "AdjustWindowRect": 2,
-      "ApplicationHWnd": 74,
+      "ApplicationHWnd": 76,
       "BeginPaint": 2,
       "ClientToScreen": 4,
       "ClipCursor": 3,
@@ -613,7 +615,7 @@
       "GetAsyncKeyState": 6,
       "GetClientRect": 4,
       "GetCursorPos": 3,
-      "GetDoubleClickTime": 2,
+      "GetDoubleClickTime": 3,
       "GetKeyState": 2,
       "GetKeyboardLayout": 2,
       "GetMessage": 2,
@@ -647,7 +649,7 @@
       "Toggle_Windowed": 5,
       "TranslateMessage": 2,
       "UpdateWindow": 2,
-      "VK_[A-Z0-9_]+": 13,
+      "VK_(?!STRUCTURE_TYPE_|USE_PLATFORM_|FORMAT_|IMAGE_|API_VERSION|EXT_|KHR_|MVK_|SUCCESS|NULL_HANDLE|TRUE|FALSE|HEADER_VERSION|PRESENT_MODE_|COLOR_SPACE_|COMPOSITE_ALPHA_|SHARING_MODE_|ERROR_|SUBOPTIMAL|INCOMPLETE|WHOLE_SIZE|QUEUE_|MAX_|UUID_|LOD_CLAMP_|ATTACHMENT_UNUSED|REMAINING_)[A-Z0-9_]+": 13,
       "WM_[A-Z0-9_]+": 272,
       "WNDCLASS": 1,
       "WNDPROC": 1,
@@ -706,7 +708,7 @@
       "Toggle_Windowed": 3,
       "TranslateMessage": 11,
       "UpdateWindow": 45,
-      "VK_[A-Z0-9_]+": 73,
+      "VK_(?!STRUCTURE_TYPE_|USE_PLATFORM_|FORMAT_|IMAGE_|API_VERSION|EXT_|KHR_|MVK_|SUCCESS|NULL_HANDLE|TRUE|FALSE|HEADER_VERSION|PRESENT_MODE_|COLOR_SPACE_|COMPOSITE_ALPHA_|SHARING_MODE_|ERROR_|SUBOPTIMAL|INCOMPLETE|WHOLE_SIZE|QUEUE_|MAX_|UUID_|LOD_CLAMP_|ATTACHMENT_UNUSED|REMAINING_)[A-Z0-9_]+": 73,
       "WM_[A-Z0-9_]+": 734,
       "WNDCLASS": 6,
       "WNDPROC": 13,
@@ -720,8 +722,8 @@
       "message_pump": 25,
       "mode_change": 53,
       "placement": 21,
-      "polled_input": 29,
-      "window_handle": 150,
+      "polled_input": 30,
+      "window_handle": 152,
       "wndproc": 342
     },
     "out_of_scope": {
