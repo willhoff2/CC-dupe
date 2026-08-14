@@ -6,6 +6,7 @@
 !.github
 !.gitmodules
 !.agents
+!.githooks
 
 *.user
 *.ncb

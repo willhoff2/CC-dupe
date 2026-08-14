@@ -33,6 +33,11 @@ under `DX8Wrapper` all work. Extend `scripts/native-port-shims/` rather than `#i
   areas and pre-rebase figures do not transfer.
 - Announce LLM-generated code as generated and state the extent of human polishing, per
   `CONTRIBUTING.md`.
+- Run `./scripts/install-git-hooks.sh` once per clone. Its `commit-msg` hook rejects the subjects the
+  **Validate Title and Commits** job rejects — conventional type, optional `(scope)`, colon, one
+  space, capitalised description — so a bad subject fails at commit time rather than after the push.
+  It cannot police commits made in the GitHub web UI (`Update <file>`, `Apply suggestion ...`):
+  squash-merge those so the PR title becomes the subject.
 
 ## Exit criteria
 
