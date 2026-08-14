@@ -3598,21 +3598,26 @@ bool VulkanBackend::Update_Texture(TextureHandle* source, TextureHandle* destina
 	Transition(cmd, destination->image.image, destination->layout,
 	           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
 	           destination->image.mip_levels);
-	std::vector<VkBufferImageCopy> copies;
+	Transition(cmd, source->image.image, source->layout,
+	           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+	           source->image.mip_levels);
+	std::vector<VkImageCopy> copies;
 	copies.reserve(levels);
 	for (uint32_t level = 0; level < levels; ++level) {
 		const LockableLevel& l = source->levels[level];
-		VkBufferImageCopy copy{};
-		copy.bufferOffset = l.offset;
-		copy.bufferRowLength = l.width;
-		copy.bufferImageHeight = l.height;
-		copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
-		copy.imageExtent = {l.width, l.height, 1};
+		VkImageCopy copy{};
+		copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+		copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+		copy.extent = {l.width, l.height, 1};
 		copies.push_back(copy);
 	}
-	vkCmdCopyBufferToImage(cmd, source->staging.buffer.buffer, destination->image.image,
-	                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	                       static_cast<uint32_t>(copies.size()), copies.data());
+	vkCmdCopyImage(cmd, source->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	               destination->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	               static_cast<uint32_t>(copies.size()), copies.data());
+	Transition(cmd, source->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+	           source->image.mip_levels);
+	source->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	Transition(cmd, destination->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
 	           destination->image.mip_levels);
