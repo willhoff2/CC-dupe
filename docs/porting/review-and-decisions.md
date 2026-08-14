@@ -5,6 +5,10 @@ A skeptical review of the port work so far (PRs #1–#4 and everything under `do
 `Core/Libraries/Source/OpenALAudioDevice/`). Every number below was re-measured from the source,
 not copied from the existing documents. Where I could not measure something, it says so.
 
+**Several of the questions in section 2 have since been answered.** The answers, and what each one
+commits future slices to, are in [`decisions-resolved.md`](decisions-resolved.md); read that before
+reopening anything here.
+
 Measurement environment: Ubuntu 22.04, clang 14.0.0, x86-64, 8 cores. Tree measured is
 `682b413d9` (the merge of PRs #1–#4) unless stated otherwise, with the pinned vendor headers
 (dx8, gamespy, miles, lzhl) present in `build/docker/_deps`.
