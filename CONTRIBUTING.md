@@ -120,6 +120,16 @@ unify:
 
 For the optional scope behind the type pick a suitable word that describes the overall area that the change touches.
 
+The **Validate Title and Commits** CI job enforces this on the Pull Request title and on every non-merge commit in it. To catch a bad commit subject locally, before the push, install the tracked hooks once per clone:
+
+```
+./scripts/install-git-hooks.sh
+```
+
+This sets `core.hooksPath` to `.githooks`, whose `commit-msg` hook rejects any subject the CI job would reject. It reads the allowed types from `.github/workflows/valid-tags.txt`, the same file the CI job reads, so the two cannot disagree. Merge commits and `fixup!`/`squash!` markers are exempt, as they are in CI. Use `git commit --no-verify` to bypass it.
+
+A hook cannot cover commits authored in the GitHub web interface — editing a file or accepting a review suggestion in the browser produces `Update <file>` or `Apply suggestion ...` and never runs a local hook. **Squash and Merge** those Pull Requests, so the Pull Request title becomes the commit subject and the web-UI subjects disappear.
+
 Good:
 ```
 bugfix(system): Fix uninitialized memory access in Get_OS_Info

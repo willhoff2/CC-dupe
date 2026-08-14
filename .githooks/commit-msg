@@ -1,0 +1,55 @@
+#!/bin/sh
+# Reject a commit subject the "Validate Title and Commits" CI job would reject, at commit time
+# instead of after the push. The allowed tags are read from the same file that job reads, so the
+# two cannot drift apart.
+#
+# Install with: ./scripts/install-git-hooks.sh
+#
+# Not enforceable here: commits authored in the GitHub web UI ("Update <file>", "Apply
+# suggestion") never touch a local hook. Squash-merge those PRs so the PR title becomes the commit
+# subject, per CONTRIBUTING.md's merging rules.
+
+set -e
+
+MSG_FILE="$1"
+REPO_ROOT=$(git rev-parse --show-toplevel)
+TAGS_FILE="$REPO_ROOT/.github/workflows/valid-tags.txt"
+
+if [ ! -f "$TAGS_FILE" ]; then
+	echo "commit-msg: $TAGS_FILE not found; skipping the conventional-commit check" >&2
+	exit 0
+fi
+
+# First line that is not a comment: the subject git will actually record.
+SUBJECT=$(sed -e '/^#/d' -e '/./,$!d' "$MSG_FILE" | head -n 1)
+
+# Merges are exempt because the CI job passes --no-merges; autosquash markers are exempt because
+# the commit they fix up is the one that gets validated.
+case "$SUBJECT" in
+	"") exit 0 ;;
+	Merge\ *|Revert\ \"*|fixup!\ *|squash!\ *|amend!\ *) exit 0 ;;
+esac
+
+TAG_REGEX=$(tr -d '\r' < "$TAGS_FILE" | sed '/^$/d' | paste -sd '|' -)
+
+# Same shape as the CI regex: type or type(scope), colon, one space, then an upper-case sentence.
+if printf '%s' "$SUBJECT" | grep -Eq "^($TAG_REGEX)(\([^)]+\))?: [A-Z].*$"; then
+	exit 0
+fi
+
+cat >&2 <<EOF
+commit-msg: rejected this subject, and CI would reject it too:
+
+  $SUBJECT
+
+Use a conventional-commit subject: an allowed type, an optional (scope), a colon, one space,
+then a description starting with a capital letter:
+
+  fix(system): Fix uninitialized memory access in Get_OS_Info
+  docs(port): Refresh the native build baseline
+
+Allowed types: $(tr '\n' ' ' < "$TAGS_FILE" | sed 's/  */, /g; s/, $//')
+
+See CONTRIBUTING.md, "Pull request documentation". To commit anyway: git commit --no-verify
+EOF
+exit 1
