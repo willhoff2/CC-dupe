@@ -80,7 +80,13 @@ struct PlayingAudio
 		, m_cleanupAudioEventRTS(true)
 	{}
 
-	static_assert(sizeof(m_status) == sizeof(long), "Must be size of long, because it is used with Interlocked functions");
+	// TheSuperHackers @port The Interlocked functions operate on LONG, which is 32 bits wherever
+	// they exist - it is not `long`, which is 64 bits under LP64, so the old assert on
+	// sizeof(long) failed off Windows while saying nothing about the actual contract. The member
+	// stays a 4-byte Int-backed enum, so the layout is unchanged on Windows; Int is asserted
+	// against instead of LONG because this header is included by translation units that have not
+	// pulled in the Win32 types.
+	static_assert(sizeof(m_status) == sizeof(Int), "Must be size of Int (== Win32 LONG), because it is used with Interlocked functions");
 };
 
 struct ProviderInfo
