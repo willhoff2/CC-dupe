@@ -195,6 +195,8 @@ void handleEvent(const WWPlatform::WindowEvent & event)
 		// what fed KeyboardIO. Here the same queue does both jobs.
 		case WWPlatform::WINDOW_EVENT_KEY_DOWN:
 		case WWPlatform::WINDOW_EVENT_KEY_UP:
+		case WWPlatform::WINDOW_EVENT_KEY_DOWN:
+		case WWPlatform::WINDOW_EVENT_KEY_UP:
 			// DirectInput's buffered device data reports transitions only, and Keyboard::checkKeyRepeat()
 			// synthesises the engine's own repeats, so the platform's auto-repeats are dropped here.
 			if (event.Scan_Code != 0 && !event.Repeat)
