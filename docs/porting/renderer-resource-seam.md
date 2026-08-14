@@ -337,11 +337,12 @@ audited: 3 sites in the seam, an unbounded number outside it.
 The interfaces stay as they are. `DX8Wrapper` keeps handing out resource pointers; the Vulkan
 backend implements the resource objects behind them. Concretely, per lockable resource:
 
-- **one host-visible, host-coherent, permanently mapped buffer sized for the whole mip chain**,
-  laid out level by level, tightly packed, `Pitch = level_width × source_texel_bytes`. It is
-  allocated at resource creation and unmapped only at destruction. This is what makes C4 (all
-  levels mapped at once, across threads and frames), C7 (pointer valid after unlock) and C8
-  (read-write) work without changing a line of engine code.
+- **one host-visible, host-coherent, mapped buffer sized for the whole mip chain**, laid out
+  level by level, tightly packed, `Pitch = level_width × source_texel_bytes`. It is held for as
+  long as any level of the resource is locked — and, for C7 and C8, for the resource's lifetime.
+  This is what makes C4 (all levels mapped at once, across threads and frames), C7 (pointer
+  valid after unlock) and C8 (read-write) work without changing a line of engine code. It comes
+  from the pool of §4.1 rather than from a per-resource allocation; that is invisible to callers.
 - **a device-local `VK_IMAGE_TILING_OPTIMAL` image** with `TRANSFER_DST | TRANSFER_SRC |
   SAMPLED` usage. `TRANSFER_SRC` exists only for C3.
 - `Lock(level, rect, flags)` returns `mapped + level_offset + top×pitch + left×texel_bytes` and
@@ -349,43 +350,118 @@ backend implements the resource objects behind them. Concretely, per lockable re
 - `Unlock(level)` issues one `vkCmdCopyBufferToImage` for the locked rectangle only, with the
   layout transitions around it, and nothing else.
 
-So the D3D8 contract costs, per lockable resource: **1 host-visible allocation the size of the
-mip chain, held for the resource's lifetime** (2 for the CPU-expanded formats, see §4.3), and
-**1 buffer→image copy + 2 layout transitions per unlock**. Per *read-only* lock it costs an
-image→buffer copy, a queue submit and a fence wait, i.e. a full CPU/GPU sync point.
+So the D3D8 contract costs, per *lock*: **a pooled host-visible block the size of the mip chain,
+held until the last level is unlocked** (a second one, transiently, for the CPU-expanded
+formats, see §4.3), and **1 buffer→image copy + 2 layout transitions per unlock**. Per
+*read-only* lock it costs an image→buffer copy, a queue submit and a fence wait, i.e. a full
+CPU/GPU sync point. §4.1 has what the pool costs across a frame's worth of locks.
 
-Measured, by `zh-resource-lock-tests` on lavapipe, for the six cases in §5 — 5 lockable
-textures, 1 dynamic vertex buffer, 13 unlocks, 1 read-only lock:
+Measured, by `zh-resource-lock-tests` on lavapipe, for the nine cases in §5 — which now include
+two cross-thread cases and a recycling case, so 79 acquires over the run:
 
 ```
-host-visible allocations kept for resource lifetime: 7 (5380 bytes)
-buffer-to-image copy regions issued from Unlock:     13
-queue submits caused by locks:                       19
+staging blocks the pool ever allocated:               1 (4096 bytes)
+dynamic vertex-buffer memory (not poolable):          1 (672 bytes)
+staging peak checked out at once:                    4096 bytes in 1 block(s)
+staging still checked out now:                       0 bytes
+pool: 1 free block(s), 4096 bytes, 78/79 acquires reused, 0 pinned
+buffer-to-image copy regions issued from Unlock:     86
+queue submits caused by locks:                       103
 read-back stalls (submit + fence wait inside Lock):  1
 CPU channel expansions at unlock:                    0
 dynamic ring: 2 DISCARD, 1 NOOVERWRITE, 336 bytes, 0 wrap stalls
 ```
 
-and with `ZH_SPIKE_NO_VIEW_SWIZZLE=1`, which is MoltenVK's case: 8 allocations / 6404 bytes and
-1 CPU expansion — the extra 1024 bytes being the second staging buffer for the 16×16 L8
-texture, i.e. exactly `width × height × 4`.
+One 4 KiB block serves all 79 lock acquisitions in the suite. With `ZH_SPIKE_NO_VIEW_SWIZZLE=1`,
+which is MoltenVK's case: 2 blocks / 8192 bytes and 1 CPU expansion, the second block being the
+expansion buffer for the 16×16 L8 texture, taken from the same pool and returned at unlock.
 
-### 4.1 Memory, extrapolated honestly
+### 4.1 Memory: pooled, and measured
 
-The per-resource rule is: **staging bytes = the D3D8 texture's own byte size**, ×2 for a format
-that needs CPU expansion where the view cannot swizzle. For a 256×256 A8R8G8B8 texture with a
-full mip chain that is 349 KiB. The game's resident texture set is not measured here, because
-the game does not run on this path yet and a number invented from map file sizes would be
-worthless; what *can* be said is which classes could give the memory back:
+The per-resource rule *was*: **staging bytes = the D3D8 texture's own byte size**, ×2 for a
+format that needs CPU expansion where the view cannot swizzle, held from creation to
+destruction. For a 256×256 A8R8G8B8 texture with a full mip chain that is 349 KiB per texture,
+resident whether or not anything is locked. That is what the pool replaces.
 
-- C1, C2, C3 and C6 could allocate staging from a pool at `Lock` and return it at `Unlock`, so
-  their steady-state cost is one pool sized for the largest concurrent lock, not one allocation
-  per resource. This is a straightforward extension the spike does not implement.
-- C4 must hold the mapping from `Begin_Load` to `End_Load`, so its cost is bounded by the
-  loader's in-flight task count, not by the texture set.
-- C7 (1 surface, the shroud) and C8 (every `SurfaceClass` the engine keeps) must hold it for the
-  resource's lifetime. C8 is the unbounded one, and it is unbounded because `SurfaceClass::Lock`
-  cannot say whether its callers read.
+**Pool policy**, in `vulkan_backend.cpp`, entirely behind the unchanged lock/unlock signatures:
+
+- staging is a **pool of mapped host-visible blocks in power-of-two size classes from 4 KiB**
+  up. `Lock` takes the smallest free block that fits the whole mip chain of the resource being
+  locked and zeroes the requested bytes; `Unlock` returns it to the free list once the last
+  locked level of that resource is unlocked. Nothing is unmapped or freed until shutdown, so a
+  reused block costs no `vkAllocateMemory` and no `vkMapMemory`.
+- **one block per resource, not per level**: a C4 caller locks every level at once and keeps the
+  pointers, so the block has to cover the chain and stay checked out until the final unlock.
+  That is what makes the pool safe for C4 without the caller noticing.
+- **C7/C8 resources keep their block for their lifetime**, because their callers may read after
+  unlock. They are the two classes the pool cannot help, and they are the whole steady-state
+  cost below.
+- the CPU-expansion path (no image-view swizzle, MoltenVK's case) takes a *second* block from
+  the same pool for the duration of one unlock and returns it immediately, instead of holding a
+  second per-resource allocation.
+- `ZH_SPIKE_STAGING_RETAIN=1` restores the old per-resource-lifetime behaviour. It exists so the
+  before/after below is one binary and one workload, and so CI can assert that the pre-pool cost
+  actually breaks the committed ceiling (§4.1.2).
+
+#### 4.1.1 What a frame's worth of locks costs
+
+`spikes/renderer/src/staging_workload.cpp` (`zh-staging-workload`) drives the pool with the
+class mix §3 measured, not with a best case: per frame 18 C1 whole-level writes, 4 C2 sub-rect
+writes, 9 C3 read-back locks, 8 C4 levels across a held mip chain and 39 C5 ring locks, plus 12
+C6 static fills once at load and 5 retained C7/C8-like surfaces held for the run. 12 frames,
+**653 texture locks and 480 buffer locks**, ending in a rendered read-back that must match the
+pattern the pool handed out (`pixels_ok`), with the validation layer loaded and silent.
+
+Measured on Linux/lavapipe (`llvmpipe`, LLVM 20.1.2), same binary, same workload:
+
+| | before (per-resource lifetime) | after (pooled) |
+|---|---:|---:|
+| host-visible staging allocations | 17 | **8** |
+| resident staging bytes (allocated, never returned before shutdown) | 2,854,912 | **1,638,400** |
+| peak bytes checked out at once | 2,854,912 | **1,638,400** |
+| steady state: bytes still checked out at a frame boundary | 2,854,912 | **327,680** |
+| block reuse rate | 0.0% (17 acquires, 0 reused) | **98.3%** (461 acquires, 453 reused) |
+| allocations per texture lock | 0.026 | **0.012** |
+
+and with `ZH_SPIKE_NO_VIEW_SWIZZLE=1`, i.e. MoltenVK's expansion path forced on: 18 → **9**
+allocations, 2,969,600 → **1,703,936** resident bytes, 2,904,064 → **327,680** steady state,
+reuse 98.2% (497 acquires, 488 reused), 36 CPU expansions. Both modes: 0 validation messages,
+`pixels_ok`.
+
+Read those numbers precisely:
+
+- **steady state** is what is still *checked out* when a frame ends: in pooled mode the five
+  retained C7/C8-like surfaces and nothing else, 327,680 bytes, i.e. **8.7× less pinned memory
+  than the per-resource design**, and it does not grow with the number of transient resources.
+  This is the figure §7.3 called unknown.
+- **resident** is what the process still owns: checked-out blocks plus the free list, because a
+  returned block stays allocated and mapped for reuse. 1,638,400 bytes here — 8 blocks, the
+  largest being the 256×256 mip chain a C4 loader holds — against 2,854,912. The pool trades
+  fragmentation for allocation calls deliberately: fewer, bigger, recycled blocks.
+- **allocations stop**: 8 allocations serve 461 acquires. A regression that reintroduces
+  per-lock allocation shows up as the allocation count tracking the lock count, which is what
+  the gate keys on.
+- **dynamic (C5) buffers are accounted separately** (16 allocations, 3,912,000 bytes here) and
+  are deliberately *not* pooled: they are the ring of §4.2, host-visible by design.
+- this is 12 frames of a *representative mix at spike scale*, not the game's resident set. The
+  game still does not run on this path; §7.4 stands.
+
+#### 4.1.2 The gate
+
+`scripts/ci/check-staging-cost.py` runs the workload in both swizzle modes and fails if
+allocations, resident bytes, peak bytes or steady-state bytes exceed
+`docs/porting/ci-baselines/staging-cost-ceiling.json` (the measured figures + 25% on bytes, +2
+on allocation counts), if allocations per texture lock exceed 0.05, if the reuse rate drops
+below 0.90, if `pixels_ok` is false, or if the validation layer says anything. `--self-check`,
+which is what CI runs, additionally runs the *pre-pool* mode and requires that it **violates**
+that ceiling — so the gate is known to catch the regression it exists for rather than merely to
+pass. It does, on all four byte/allocation limits.
+
+Which classes give memory back, restated against the implementation: C1, C2, C3 and C6 return
+their block at unlock (the 98% reuse is mostly them); C4 holds one block per in-flight load
+task, bounded by the loader's task count rather than the texture set; C7 (1 surface, the shroud)
+and C8 (every `SurfaceClass` the engine keeps) still hold for the resource's lifetime, and C8 is
+the unbounded one, because `SurfaceClass::Lock` cannot say whether its callers read (§7.1).
 
 The dynamic (C5) buffers are different: they are already host-visible in D3D8, and the extra
 cost is only the renaming copies. With 3 regions per buffer (§4.2), the ≈1 MiB of dynamic
@@ -402,7 +478,7 @@ copies and no submits.
 | `D3DLOCK_READONLY` | `vkCmdCopyImageToBuffer` for the locked level, submit, `vkWaitForFences`, then hand out the pointer. Unavoidably a stall. |
 | `D3DLOCK_NO_DIRTY_UPDATE` | ignored. It is a hint about `UpdateTexture`'s dirty-region tracking; the seam has no `UpdateTexture` (§1) and always copies the region the caller locked. |
 | `D3DLOCK_NOSYSLOCK` | ignored. It is about the Win32 critical section D3D8 held during a lock. |
-| no flags at all on a texture/surface | must be assumed read-write (C8), because D3D8 has no `WRITEONLY`. The persistent staging copy is what makes that assumption cheap: reads hit the staging bytes, which hold whatever was last written through them. **This is a real semantic gap: a C8 caller that reads a surface the GPU wrote (a render target) would see the staging copy, not the GPU's result.** No C8 caller in the 19 files does that; callers outside them were not audited. |
+| no flags at all on a texture/surface | must be assumed read-write (C8), because D3D8 has no `WRITEONLY`. A retained staging copy is what makes that assumption cheap: reads hit the staging bytes, which hold whatever was last written through them, so a C8 resource keeps its pooled block for its lifetime (§4.1). **This is a real semantic gap: a C8 caller that reads a surface the GPU wrote (a render target) would see the staging copy, not the GPU's result.** No C8 caller in the 19 files does that; the callers outside them are now counted — 21 sites, 18 of which read, 5 of which read a surface the GPU can have written (§7.1). |
 
 ### 4.3 MoltenVK
 
@@ -441,41 +517,75 @@ against the real backend and asserts on read-back pixels and read-back bytes, no
 | mip-chain lock | C4 | all 5 levels of a 16×16 texture locked simultaneously, filled afterwards from the kept pointers, unlocked, then level 2 sampled and identified by colour |
 | dynamic ring stream | C5 | `DISCARD` then `NOOVERWRITE` in one frame, two draws from the two sub-ranges, both correct (so the append did not disturb the first range); then `DISCARD` in the next frame renames to a different region with no wrap stall |
 | L8 lock | MoltenVK | a byte-per-texel L8 ramp written as L8 and sampled as (L,L,L,1), on both the swizzled and the CPU-expanded path |
+| **cross-thread fill** | C4 | all 5 levels locked on the main thread, filled on a second thread through the kept `LockedRect` pointers, joined, unlocked on the original thread, level 2 sampled back — the loader's actual thread hand-off |
+| **concurrent locks** | C4 | 4 threads × 8 lock/fill/unlock rounds on 4 textures against one shared pool; every texture must sample back its own thread's colour, so a block handed to two threads at once fails |
+| **pool recycling** | C1/C2 | 6 textures × 6 rounds = 36 sequential locks must cost **0** new allocations after the first, end with 0 bytes checked out, and still sample back correctly |
 
-All six pass on lavapipe with zero validation messages, in both swizzle modes. Both modes run
+All nine pass on lavapipe with zero validation messages, in both swizzle modes. Both modes run
 in CI on Linux (`Renderer spike (Linux, lavapipe)`); the default mode runs on `macos-15`.
+`zh-staging-workload` (§4.1.1) is the second pixel assertion: its final read-back must match the
+pattern written through pooled blocks, so a pool that hands the same block to two live locks
+fails on pixels rather than on a counter.
 
 Not proven: C6 (static buffer fill — mechanically C1 without the image), C7 (needs the shroud's
-`CopyRects` path) and C8 (needs a caller audit, not a test). The C4 case runs the lock, the fill
-and the unlock in the engine's *order* but on one thread; the cross-thread part of C4 is
-asserted by nothing.
+`CopyRects` path) and C8 (needs a caller audit, not a test; §7.1 has the audit). Cross-thread C4
+is now asserted, on lavapipe, with the mapping host-coherent and never remapped and the hand-off
+ordered by a `std::thread` join — which is the loader's ordering, not weaker.
 
 ## 6. Effect on the Windows build
 
 None. No engine file is modified by this slice: the changes are `docs/porting/`,
-`spikes/renderer/` (a standalone CMake project that is not part of the game build) and
-`.github/workflows/native-port-ci.yml`. `d3d8-resource-scan.py`, which the existing CI ratchet
-uses, is untouched and still prints 213.
+`spikes/renderer/` (a standalone CMake project that is not part of the game build),
+`scripts/ci/check-staging-cost.py` and `.github/workflows/native-port-ci.yml`. The
+`SurfaceClass::Lock` audit (§7.1) reads engine sources and changes none of them.
+`d3d8-resource-scan.py`, which the existing CI ratchet uses, is untouched and still prints 213.
 
 ## 7. What is not resolved
 
-1. **The C8 read hazard.** `SurfaceClass::Lock` is a read-write hand-out with callers outside
-   the scanned set. A caller that reads back a surface the GPU wrote would get the staging copy.
-   Closing this properly means auditing `SurfaceClass::Lock` callers and splitting the method
-   into read and write variants — an engine change, deliberately not made here.
+1. **The C8 read hazard — audited, and it needs a decision this slice did not take.**
+   `spikes/renderer/tools/surface-lock-audit.py` (`--check` in CI, counts committed in
+   `surface-lock-audit.json`) counts every `SurfaceClass::Lock` caller: **26 sites, 5 inside the
+   19 files that hold a direct D3D8 lock and 21 outside them**. Of the 21 outside, **18 read
+   through the returned pointer** (mechanical upper bound: a null check or passing the pointer to
+   a callee counts as a read), and **5 read a surface whose contents can have come from the
+   GPU**:
+   `W3DScreenshot.cpp:200` (`W3D_TakeCompressedScreenshot`), and `WW3D::Make_Screen_Shot` /
+   `WW3D::Update_Movie_Capture` in both `Generals` and `GeneralsMD` `ww3d.cpp`. All 5 have the
+   same shape: create a plain surface, `DX8Wrapper::_Copy_DX8_Rects` the back buffer into it,
+   `Lock` with no flags, read every pixel. The other 13 read only bytes the CPU itself wrote
+   (radar/shroud read-modify-write, `Blit_Char`, palette remap), which the staging copy serves
+   correctly.
+   **The decision, not taken here:** those 5 need an unflagged C8 lock on a blit destination to
+   perform the C3 image→buffer read-back, and the seam cannot tell that case from an ordinary
+   write-only C8 lock without either (a) making every C8 lock read back — a stall on locks that
+   do not need one, (b) tracking "the GPU wrote this resource since the last lock" as a
+   dirty bit on the resource, or (c) splitting `SurfaceClass::Lock` into read and write variants,
+   an engine change. It also depends on `CopyRects`/blit, which is an unimplemented backend
+   method owned by another slice, so the pool cannot close it alone. Raised, not chosen.
 2. **`WriteLockClass`'s pass-through flags.** 2 lock sites take their flags from ~200 callers.
    Their effective flag distribution is unmeasured.
-3. **Staging pooling.** The spike allocates per resource for the resource's lifetime, which is
-   correct but not frugal. The pooled variant for C1/C2/C3/C6 is designed (§4.1) and unwritten,
-   so the real resident cost of this design in a running game is unknown.
-4. **No number for the game's resident lockable-texture bytes**, for the same reason: the game
-   does not run on this path.
+3. ~~**Staging pooling.**~~ Written and measured: §4.1. Pooled, recycled, 98% block reuse, and a
+   CI ceiling that the pre-pool behaviour provably breaks. What remains open is the *policy* at
+   game scale: the size classes are powers of two from 4 KiB with no trimming, so the resident
+   figure is a high-water mark that never shrinks. Whether a running game wants trimming is
+   unmeasurable until the game runs on this path.
+4. **Still no number for the game's resident lockable-texture bytes.** §4.1.1 measures a
+   representative *mix* at spike scale (653 texture locks over 12 frames), not the game's texture
+   set: the game does not run on this path, so the per-frame counts come from the 95 measured
+   lock sites and the resource sizes are the spike's own.
 5. **The dynamic-ring wrap case.** `kDynamicRingRegions = 3` is derived from
    frames-in-flight + 1, not measured against the engine's worst-case per-frame dynamic usage.
    The spike counts wraps but never provoked one, so the "grow the ring" branch is untested.
-6. **C4 across threads.** Locked, filled and unlocked in the engine's order but on one thread.
-   The mapping is host-coherent and never remapped, so cross-thread writes should need no extra
-   synchronisation beyond what the loader already does — should, not shown.
+6. ~~**C4 across threads.**~~ Now shown, on lavapipe: `C4 cross-thread fill` (lock on one
+   thread, fill on another, unlock back on the first) and `C4 concurrent locks` (4 threads
+   locking, filling and unlocking their own textures against one shared pool) both assert on
+   sampled pixels, with the validation layer silent. The backend serialises lock/unlock and the
+   pool's free list under one mutex; the mapping stays host-coherent and is never remapped, so
+   the fill itself needs no synchronisation beyond the hand-off the loader already has. Two
+   caveats: lavapipe is a software device and its coherency is trivially satisfied, and
+   `Unlock` still submits from the calling thread on a single queue — an engine that unlocked
+   from two threads at once would be serialised, not parallel, which matches D3D8's own
+   single-threaded device but is worth knowing.
 7. **`P8`.** `Create_Lockable_Texture` refuses paletted textures: expansion needs the palette at
    unlock time and a lockable P8 texture could have its palette replaced between locks. No lock
    site uses P8, so no policy was invented.
@@ -483,4 +593,7 @@ uses, is untouched and still prints 213.
    back to L8/A8/A8L8. No engine site needs it; a Mac-only future one would.
 9. **Everything about MoltenVK is unverified by the author.** The CPU-expansion-at-unlock path,
    the portability-subset assumption, and the whole macOS run are inference plus CI. There is no
-   Mac on this end.
+   Mac on this end. Specifically for the pool: the `macos-15` job *prints* the workload's staging
+   figures and does not gate on them, because the committed ceiling was measured against
+   lavapipe's allocation behaviour and MoltenVK's will differ. The macOS runner is also a VM with
+   a paravirtualised GPU, so nothing there is Apple Silicon hardware verification.

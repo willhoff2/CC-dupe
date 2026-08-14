@@ -1,0 +1,255 @@
+{
+ "_comment": [
+  "Committed result of spikes/renderer/tools/surface-lock-audit.py, which counts every",
+  "SurfaceClass::Lock caller and separates the ones outside the 19 files that contain a",
+  "direct D3D8 lock call.  `stores`/`loads` are mechanical: a load is any use of the",
+  "returned pointer that is not a store through it, so null checks and pass-to-callee",
+  "count as loads and the number is an upper bound on real texel reads.",
+  "`gpu_provenance` means the locked surface can hold pixels the GPU wrote (a back",
+  "buffer or render target copied in with _Copy_DX8_Rects); load + gpu_provenance is the",
+  "hazard renderer-resource-seam.md 7.1 describes.  --check fails if these counts move,",
+  "so a new SurfaceClass::Lock caller forces a class decision."
+ ],
+ "expected": {
+  "sites_total": 26,
+  "sites_outside_audited_files": 21,
+  "readers_outside_audited_files": 18,
+  "gpu_written_readers": 5
+ },
+ "sites": [
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/Common/System/W3DRadar.cpp",
+   "line": 701,
+   "function": "W3DRadar::renderObjectList",
+   "stores": 0,
+   "loads": 4,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/Common/System/W3DRadar.cpp",
+   "line": 1080,
+   "function": "W3DRadar::buildTerrainTexture",
+   "stores": 0,
+   "loads": 0,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/Common/System/W3DRadar.cpp",
+   "line": 1298,
+   "function": "W3DRadar::clearShroud",
+   "stores": 0,
+   "loads": 1,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/Common/System/W3DRadar.cpp",
+   "line": 1369,
+   "function": "W3DRadar::setShroudLevel",
+   "stores": 0,
+   "loads": 1,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/Common/System/W3DRadar.cpp",
+   "line": 1412,
+   "function": "W3DRadar::beginSetShroudLevel",
+   "stores": 0,
+   "loads": 1,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/Common/System/W3DRadar.cpp",
+   "line": 1578,
+   "function": "W3DRadar::notifyViewChanged",
+   "stores": 0,
+   "loads": 4,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/GameClient/BaseHeightMap.cpp",
+   "line": 1744,
+   "function": "BaseHeightMapRenderObjClass::initDestAlphaLUT",
+   "stores": 1,
+   "loads": 2,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DProfilerFrameCapture.cpp",
+   "line": 228,
+   "function": "W3DProfilerFrameCapture::Capture",
+   "stores": 0,
+   "loads": 2,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DScreenshot.cpp",
+   "line": 200,
+   "function": "W3D_TakeCompressedScreenshot",
+   "stores": 0,
+   "loads": 2,
+   "gpu_provenance": true,
+   "audited_file": false
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp",
+   "line": 981,
+   "function": "WaterRenderObjClass::ReAcquireResources",
+   "stores": 0,
+   "loads": 1,
+   "gpu_provenance": false,
+   "audited_file": true
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp",
+   "line": 1130,
+   "function": "WaterRenderObjClass::init",
+   "stores": 0,
+   "loads": 1,
+   "gpu_provenance": false,
+   "audited_file": true
+  },
+  {
+   "file": "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp",
+   "line": 2972,
+   "function": "WaterRenderObjClass::setupFlatWaterShader",
+   "stores": 0,
+   "loads": 1,
+   "gpu_provenance": false,
+   "audited_file": true
+  },
+  {
+   "file": "Core/Libraries/Source/WWVegas/WW3D2/metalmap.cpp",
+   "line": 311,
+   "function": "MetalMapManagerClass::Update_Textures",
+   "stores": 6,
+   "loads": 0,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/Libraries/Source/WWVegas/WW3D2/render2dsentence.cpp",
+   "line": 908,
+   "function": "Render2DSentenceClass::Build_Sentence_Centered",
+   "stores": 0,
+   "loads": 2,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/Libraries/Source/WWVegas/WW3D2/render2dsentence.cpp",
+   "line": 1097,
+   "function": "Render2DSentenceClass::Build_Sentence_Not_Centered",
+   "stores": 0,
+   "loads": 2,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Core/GameEngine/Source/GameClient/MapUtil.cpp",
+   "line": 1294,
+   "function": "parseMapPreviewChunk",
+   "stores": 0,
+   "loads": 1,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Generals/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DAssetManager.cpp",
+   "line": 587,
+   "function": "W3DAssetManager::Remap_Palette",
+   "stores": 0,
+   "loads": 6,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Generals/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DShroud.cpp",
+   "line": 579,
+   "function": "W3DShroud::render",
+   "stores": 1,
+   "loads": 2,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Generals/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DShroud.cpp",
+   "line": 662,
+   "function": "W3DShroud::render",
+   "stores": 2,
+   "loads": 0,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "Generals/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+   "line": 1383,
+   "function": "WW3D::Make_Screen_Shot",
+   "stores": 0,
+   "loads": 4,
+   "gpu_provenance": true,
+   "audited_file": false
+  },
+  {
+   "file": "Generals/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+   "line": 1733,
+   "function": "WW3D::Update_Movie_Capture",
+   "stores": 0,
+   "loads": 4,
+   "gpu_provenance": true,
+   "audited_file": false
+  },
+  {
+   "file": "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DAssetManager.cpp",
+   "line": 617,
+   "function": "W3DAssetManager::Remap_Palette",
+   "stores": 0,
+   "loads": 6,
+   "gpu_provenance": false,
+   "audited_file": false
+  },
+  {
+   "file": "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DShroud.cpp",
+   "line": 579,
+   "function": "W3DShroud::render",
+   "stores": 1,
+   "loads": 2,
+   "gpu_provenance": false,
+   "audited_file": true
+  },
+  {
+   "file": "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DShroud.cpp",
+   "line": 662,
+   "function": "W3DShroud::render",
+   "stores": 2,
+   "loads": 0,
+   "gpu_provenance": false,
+   "audited_file": true
+  },
+  {
+   "file": "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+   "line": 1386,
+   "function": "WW3D::Make_Screen_Shot",
+   "stores": 0,
+   "loads": 4,
+   "gpu_provenance": true,
+   "audited_file": false
+  },
+  {
+   "file": "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+   "line": 1736,
+   "function": "WW3D::Update_Movie_Capture",
+   "stores": 0,
+   "loads": 4,
+   "gpu_provenance": true,
+   "audited_file": false
+  }
+ ]
+}

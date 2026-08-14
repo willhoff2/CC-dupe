@@ -22,6 +22,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 find_package(Vulkan REQUIRED)
+# The lock path is callable from more than one thread (usage class C4), so the tests
+# that prove it need a threading library.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
 
 option(SPIKE_USE_SDL2 "Build the on-screen presentation path with SDL2" ON)
 set(SPIKE_HAVE_SDL2 OFF)
@@ -116,8 +120,20 @@ add_executable(zh-resource-lock-tests
     src/vulkan_backend.cpp)
 add_dependencies(zh-resource-lock-tests spike-shaders)
 target_include_directories(zh-resource-lock-tests PRIVATE src)
-target_link_libraries(zh-resource-lock-tests PRIVATE Vulkan::Vulkan)
+target_link_libraries(zh-resource-lock-tests PRIVATE Vulkan::Vulkan Threads::Threads)
 target_compile_definitions(zh-resource-lock-tests PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+
+# Staging workload: replays a frame's worth of locks in the measured usage-class mix
+# and prints the host-visible cost as JSON. scripts/ci/check-staging-cost.py enforces a
+# ceiling on it, and threads need pthreads on Linux.
+add_executable(zh-staging-workload
+    src/staging_workload.cpp
+    src/state_translate.cpp
+    src/vulkan_backend.cpp)
+add_dependencies(zh-staging-workload spike-shaders)
+target_include_directories(zh-staging-workload PRIVATE src)
+target_link_libraries(zh-staging-workload PRIVATE Vulkan::Vulkan Threads::Threads)
+target_compile_definitions(zh-staging-workload PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
 
 # Throughput baseline: draw calls/sec and state changes/sec, so the Mac has a Linux
 # number to be compared against.
@@ -214,7 +230,7 @@ endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     foreach(target zh-renderer-spike zh-caps-probe zh-feature-probe zh-fixedfunc-tests
-                   zh-resource-lock-tests zh-throughput)
+                   zh-resource-lock-tests zh-staging-workload zh-throughput)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
     foreach(target zh-window-spike zh-window-spike-cocoa zh-metal-surface-probe)

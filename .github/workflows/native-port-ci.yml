@@ -314,6 +314,26 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: Staging cost ceiling
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+          XDG_RUNTIME_DIR: /tmp/xdgrt
+        run: |
+          set -o pipefail
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          unset DISPLAY
+          {
+            echo '## Staging cost (Linux, lavapipe)'
+            echo '```'
+            # --self-check also runs the pre-pool per-resource-staging behaviour and
+            # requires that it BREAKS this ceiling, so the gate is known to catch a
+            # regression rather than only to pass.
+            python3 scripts/ci/check-staging-cost.py \
+              --binary build/spike/zh-staging-workload \
+              --self-check
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Re-derive the resource-seam counts
         run: |
           set -o pipefail
@@ -321,6 +341,7 @@ jobs:
             echo '## D3D8 resource seam'
             echo '```'
             python3 spikes/renderer/tools/d3d8-lock-scan.py --check
+            python3 spikes/renderer/tools/surface-lock-audit.py --check
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -571,6 +592,23 @@ jobs:
             echo '## D3D8 Lock/Unlock usage classes (macOS arm64, MoltenVK)'
             echo '```'
             build/spike/zh-resource-lock-tests
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The same workload the Linux job gates on, run for its numbers only: MoltenVK's
+      # allocation sizes and its lack of image-view swizzle move the byte counts, and the
+      # committed ceiling was measured on lavapipe. Printed, not asserted.
+      - name: Staging cost (numbers only, not gated)
+        run: |
+          set -eux -o pipefail
+          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
+          export VK_ICD_FILENAMES
+          export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
+          export DYLD_LIBRARY_PATH="$(brew --prefix vulkan-validationlayers)/lib:$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
+          {
+            echo '## Staging cost (macOS arm64, MoltenVK) -- reported, not gated'
+            echo '```'
+            build/spike/zh-staging-workload --frames 12
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
