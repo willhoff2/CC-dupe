@@ -273,7 +273,34 @@ Two things the blind version had wrong, both found this way:
 * the view was made layer-*backed* (`setWantsLayer:` before `setLayer:`), which lets AppKit replace
   the layer with one of its own. Layer-hosting requires the opposite order.
 
-### What is still unverified, and needs a Mac with a display
+### What a real Mac then measured
+
+Items 1, 2, 3 and 5 below were the runner's gaps; a real Apple Silicon Mac with a Retina display has
+since closed most of them. The measurements, the commands and the caveats are in
+[macos-hardware-verification.md](macos-hardware-verification.md); in summary, on an M1 Pro with a
+`backingScaleFactor` 2.00 built-in display, macOS 26.6.1, AppleClang 16, MoltenVK 1.4.2:
+
+* the window is on-screen, front of its app and `NSWindowOcclusionStateVisible` per
+  `CGWindowListCopyWindowInfo`, with the title it was given, and survives `Window_Set_Mode`;
+* Retina is *not* half-resolution: 800x600 points -> `contentsScale` 2.00, `drawableSize`
+  1600x1200, swapchain `currentExtent` 1600x1200; 1024x768 -> 2048x1536; fullscreen 1728x1117 ->
+  3456x2234;
+* the scan-code table and the mouse flip are right for synthetic `CGEvent`/`NSEvent` injection
+  (`A` -> `0x1E`, `LeftArrow` -> `0xCB`, `F1` -> `0x3B`, wheel -> 120, client corners exact in
+  windowed, resized and fullscreen windows) — *synthetic*, not a human at the keyboard;
+* borderless fullscreen hides the Dock and the menu bar, and the notch is handled;
+* two bugs were found and fixed there: mouse events with `windowNumber == 0` were converted in the
+  wrong coordinate space, and fullscreen did not raise the window above the Dock or restore the
+  presentation options afterwards.
+
+Still not verified even with the hardware: a desktop screenshot (no Screen Recording grant for the
+worker), physical human input, a non-US layout, an external or non-Retina display, a scale change,
+`VK_ERROR_OUT_OF_DATE_KHR` from the compositor, cursor-clip feel, and performance. One structural
+finding is written up rather than fixed: `Window_Client_Size()` and mouse coordinates are Cocoa
+points while the render target is backing pixels, so on a 2x display the engine sees 800x600 for a
+1600x1200 framebuffer.
+
+### The runner's gaps, as they stood before that Mac session
 
 1. **that anything is visible.** The runner has no attached display. Window ordering, activation
    actually raising the app, and fullscreen covering the menu bar are all uncovered;

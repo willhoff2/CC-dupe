@@ -27,6 +27,7 @@ Usage:
 import argparse
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -84,6 +85,9 @@ typedef const char *   LPCSTR;
 typedef unsigned int   UINT;
 typedef unsigned long  ULONG;
 """
+
+
+ASSERTION_FAILURE_RE = re.compile(r"error: static.assert(?:ion)? failed")
 
 
 def compile_tu(tu_path, bits, extra_includes=(), verbose=False):
@@ -151,8 +155,12 @@ def main():
             if f.is_file() and f.name != "bittype.h":
                 (poison / "WWLib" / f.name).symlink_to(f)
         (poison / "WWLib" / "bittype.h").write_text(POISONED_BITTYPE)
-        rc, out = compile_tu(tu, 64, extra_includes=(poison, poison / "WWLib"), verbose=args.verbose)
-        assertion_errors = out.count("error: static_assert failed")
+        rc, out = compile_tu(tu, 64, extra_includes=(poison, poison / "WWLib"),
+                             verbose=args.verbose)
+        # Clang up to 15 says "static_assert failed"; clang 16 and AppleClang 16 say
+        # "static assertion failed due to requirement ...". Matching only the older spelling
+        # turns a correctly firing negative control into a reported failure.
+        assertion_errors = len(ASSERTION_FAILURE_RE.findall(out))
         if rc == 0:
             failures.append("negative control compiled - the assertions cannot fire")
             print("      FAIL - poisoned build compiled clean; the assertions are inert")

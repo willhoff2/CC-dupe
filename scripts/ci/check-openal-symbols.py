@@ -35,7 +35,13 @@ def defined(archive):
     for line in out.splitlines():
         parts = line.split()
         if len(parts) >= 3 and parts[1] in ("T", "t", "W"):
-            names.add(parts[2])
+            name = parts[2]
+            # Mach-O gives every C symbol a leading underscore, so on macOS the whole AIL_* surface
+            # reads as undefined against an ELF-shaped comparison. `_AIL_startup` and `AIL_startup`
+            # are the same entry point.
+            if sys.platform == "darwin" and name.startswith("_"):
+                name = name[1:]
+            names.add(name)
     return names
 
 

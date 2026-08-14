@@ -484,9 +484,6 @@ def configure(build_dir, manifest_dir, targets, extra_slugs=()):
         raise SystemExit("cmake configure failed")
 
 
-FAILED_OBJ_RE = re.compile(r"^FAILED: (\S+\.o)\b")
-
-
 def build(build_dir, jobs):
     """Build everything, keeping going past failures.
 
@@ -508,21 +505,28 @@ def build(build_dir, jobs):
             if match:
                 obj_to_source[match.group(1)] = entry["file"]
 
+    # Which object files exist, rather than which lines the build tool printed: Ninja announces a
+    # failure as "FAILED: <obj>" and GNU make as "make[3]: *** [<obj>] Error 1", so scraping one
+    # generator's wording silently reports zero failures under the other. A missing object is a
+    # failure under both. (macOS has no ninja by default, which is where this first showed up: 87
+    # translation units produced no object and the run still claimed "0 failures".)
     failed = set()
+    for obj, source in obj_to_source.items():
+        obj_path = pathlib.Path(obj)
+        if not obj_path.is_absolute():
+            obj_path = build_dir / obj_path
+        if not obj_path.is_file():
+            failed.add(pathlib.Path(source))
+
     diagnostics = {}
     lines = log.splitlines()
-    for index, line in enumerate(lines):
-        match = FAILED_OBJ_RE.match(line)
-        if not match:
-            continue
-        source = pathlib.Path(obj_to_source.get(match.group(1), match.group(1)))
-        failed.add(source)
-        for following in lines[index + 1:index + 40]:
-            if ": error:" in following or ": fatal error:" in following:
-                diagnostics[source] = following.split(": error:", 1)[-1] \
+    for source in failed:
+        for line in lines:
+            if source.name not in line:
+                continue
+            if ": error:" in line or ": fatal error:" in line:
+                diagnostics[source] = line.split(": error:", 1)[-1] \
                     .split(": fatal error:", 1)[-1].strip()
-                break
-            if FAILED_OBJ_RE.match(following):
                 break
     return failed, diagnostics
 
@@ -630,13 +634,25 @@ def link_probe(build_dir, archives, support_archives=(), link_zlib=False):
         "int main() { return 0; }\n"
     )
     out = build_dir / "native_link_probe"
-    cmd = [
-        CXX, "-std=c++20", "-o", str(out), str(stub),
-        "-Wl,--warn-unresolved-symbols",
-        "-Wl,--whole-archive", *[str(a) for a in archives], "-Wl,--no-whole-archive",
-        *[str(a) for a in support_archives],
-        "-lstdc++", "-lm", "-lpthread", "-ldl",
-    ]
+    if sys.platform == "darwin":
+        # ld64 has none of the GNU spellings: -all_load is --whole-archive, -undefined warning is
+        # --warn-unresolved-symbols, libSystem carries dlopen and pthreads, and -lstdc++ is a
+        # deprecated shim rather than the C++ library. Without this branch the link cannot run on
+        # macOS at all and the result is a flag error rather than a symbol list.
+        cmd = [
+            CXX, "-std=c++20", "-o", str(out), str(stub),
+            "-Wl,-undefined,warning", "-Wl,-all_load",
+            *[str(a) for a in archives], *[str(a) for a in support_archives],
+            "-lc++", "-lm",
+        ]
+    else:
+        cmd = [
+            CXX, "-std=c++20", "-o", str(out), str(stub),
+            "-Wl,--warn-unresolved-symbols",
+            "-Wl,--whole-archive", *[str(a) for a in archives], "-Wl,--no-whole-archive",
+            *[str(a) for a in support_archives],
+            "-lstdc++", "-lm", "-lpthread", "-ldl",
+        ]
     if link_zlib:
         cmd.append("-lz")
     proc = subprocess.run(cmd, capture_output=True, text=True)

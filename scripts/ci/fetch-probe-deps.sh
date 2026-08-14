@@ -14,8 +14,9 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 deps_dir="${1:-$repo_root/build/docker/_deps}"
 
 # Reads GIT_REPOSITORY / GIT_TAG out of a cmake/<name>.cmake file so the pins stay in one place.
+# sed rather than grep -oP: -P and \K are GNU extensions, and BSD grep (macOS) rejects them.
 pin() { # <cmake file> <field>
-    grep -oP "^\s*${2}\s+\K\S+" "$repo_root/cmake/$1"
+    sed -nE "s/^[[:space:]]*${2}[[:space:]]+([^[:space:]]+).*/\1/p" "$repo_root/cmake/$1"
 }
 
 clone_at() { # <url> <commit> <dest>
