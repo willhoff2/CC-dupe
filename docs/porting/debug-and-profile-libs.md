@@ -203,8 +203,9 @@ The denominators grew by two because this slice adds two files the probe walks:
 `platform/debug_platform.cpp` and `tests/native_stackwalk_test.cpp`, both of which are clean.
 
 All 15 translation units the build actually compiles — the 10 in `core_debug` and the 5 in
-`core_profile_legacy` — are clean natively, up from 1 and 0. Repository totals move 643 / 744 →
-659 / 746 native and 687 / 744 → 696 / 746 shimmed.
+`core_profile_legacy` — are clean natively, up from 1 and 0. Repository totals move 647 / 749 →
+663 / 751 native and 694 / 749 → 703 / 751 shimmed (re-measured after rebasing onto `main` with the
+Win32 file-API seam, #45, merged).
 
 The 10 remaining native failures in `debug` are all sample and tool programs that no CMake target
 builds and that this slice deliberately leaves on Wine: `test1/` … `test6/` (five of them fail only
