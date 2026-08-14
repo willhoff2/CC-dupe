@@ -47,11 +47,15 @@
 #pragma once
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
+#ifdef _WIN32
+
 #ifndef DIRECTINPUT_VERSION
 #	define DIRECTINPUT_VERSION	0x800
 #endif
 
 #include <dinput.h>
+
+#endif // _WIN32
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "GameClient/Keyboard.h"
@@ -89,9 +93,11 @@ protected:
 	void openKeyboard();  ///< create direct input keyboard
 	void closeKeyboard();  ///< release direct input keyboard
 
+#ifdef _WIN32
 	// direct input data members
 	LPDIRECTINPUT8 m_pDirectInput;  ///< pointer to direct input interface
 	LPDIRECTINPUTDEVICE8 m_pKeyboardDevice;  ///< pointer to keyboard device
+#endif
 
 };
 

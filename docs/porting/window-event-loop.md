@@ -15,7 +15,7 @@ python3 scripts/window-input-scan.py --check       # what CI runs
 |---|---|
 | The seam (`platform_window.h`) and its SDL2 backend | built and run; a real X11 window presented 240 Vulkan frames, read back and pixel-checked, 0 validation messages |
 | The Cocoa/`CAMetalLayer`/MoltenVK backend (`platform_window_cocoa.mm`) | **written blind, now executed.** On a `macos-15` arm64 runner it compiles, creates an `NSWindow`, gets a `VkSurfaceKHR` through `vkCreateMetalSurfaceEXT`, presents 240 frames, survives a mode change to 1024x768 and reads the pixels back with 0 validation messages. What remains unverified is a display: see [section 4](#4-what-is-still-unverified-macos) |
-| The engine actually using the seam | not done, and not attempted — see [What this does not do](#what-this-does-not-do) |
+| The engine's non-Windows window/message/input path going through the seam | wired and compiled on Linux (clang 14, `-m64`, C++20); **never linked and never run**, because the renderer and audio device layers do not compile natively yet — see [6. The engine wiring](#6-the-engine-wiring) |
 
 ## 1. The Win32 surface being replaced
 
@@ -33,14 +33,21 @@ the files. That exclusion changes no figure in the table below.
 
 | Category | In-scope refs | In-scope files | Out-of-scope refs | Out-of-scope files |
 |---|---:|---:|---:|---:|
-| `window_handle` | 125 | 27 | 1333 | 258 |
+| `window_handle` | 150 | 29 | 1333 | 258 |
 | `message_pump` | 25 | 7 | 332 | 54 |
 | `wndproc` | 342 | 9 | 2163 | 311 |
 | `polled_input` | 29 | 10 | 101 | 33 |
 | `cursor` | 36 | 9 | 281 | 95 |
-| `placement` | 20 | 5 | 576 | 120 |
+| `placement` | 21 | 5 | 576 | 120 |
 | `mode_change` | 53 | 8 | 26 | 8 |
-| **Total** | **630** | **39** | **4812** | **425** |
+| **Total** | **656** | **41** | **4812** | **425** |
+
+The in-scope figure rose from 630 to 656 when the engine was wired to the seam ([section
+6](#6-the-engine-wiring)), which looks like the wrong direction and is not: the seam keeps the
+Win32 *spellings*, so `ApplicationHWnd` (52 -> 74) and `HWND` (50 -> 54) are now also counted in
+the portable files that define and use them. What the scan cannot distinguish, and the wiring
+changed, is a `WM_*` case dispatched by `DispatchMessage` from the same name appearing in a
+comment-free `#ifdef _WIN32` branch that no longer runs off Windows.
 
 **24 in-scope files mention `HWND`, against 176 out of scope.** That is consistent with
 `next-slice-scope.md`'s "roughly 20 `HWND` files in scope": the extra four are the `Core/Libraries/Source/debug`
@@ -52,8 +59,8 @@ The individual API calls, in scope only — this is the actual work list:
 | Symbol | Refs | Files |
 |---|---:|---:|
 | `WM_*` | 272 | 7 |
-| `ApplicationHWnd` | 52 | 13 |
-| `HWND` | 50 | 24 |
+| `ApplicationHWnd` | 74 | 15 |
+| `HWND` | 54 | 24 |
 | `LPARAM` / `WPARAM` / `LRESULT` | 43 / 15 / 5 | 7 / 7 / 2 |
 | `Set_Render_Device` | 19 | 5 |
 | `MSG` | 16 | 6 |
@@ -62,11 +69,11 @@ The individual API calls, in scope only — this is the actual work list:
 | `Set_Device_Resolution` / `Reset_Device` / `Toggle_Windowed` | 9 / 8 / 5 | 5 / 3 / 4 |
 | `SetCursor` / `ShowCursor` / `LoadCursor` | 9 / 5 / 4 | 3 / 4 / 2 |
 | `GetAsyncKeyState` | 6 | 1 |
-| `ShowWindow` / `SetWindowPos` / `UpdateWindow` | 6 / 4 / 2 | 3 / 2 / 2 |
+| `ShowWindow` / `SetWindowPos` / `UpdateWindow` | 7 / 4 / 2 | 3 / 2 / 2 |
 | `WndProc` / `DefWindowProc` | 5 / 3 | 2 / 2 |
 | `ScreenToClient` / `ClientToScreen` / `GetClientRect` / `GetWindowRect` | 4 / 4 / 4 / 3 | 4 / 2 / 4 / 3 |
 | `ClipCursor` / `GetCursorPos` / `SetCursorPos` / `SetCapture` / `ReleaseCapture` | 3 / 3 / 2 / 1 / 1 | 2 / 3 / 1 / 1 / 1 |
-| `IsIconic` | 3 | 2 |
+| `IsIconic` | 2 | 2 |
 | `GetKeyState` / `GetKeyboardLayout` / `HKL` / `GetDoubleClickTime` | 2 / 2 / 2 / 2 | 1 / 2 / 2 / 2 |
 | `DirectInput8Create` | 2 | 2 |
 | `CreateWindow` / `RegisterClass` / `RegisterClassEx` / `DestroyWindow` / `AdjustWindowRect` | 2 / 1 / 1 / 1 / 2 | 2 / 1 / 1 / 1 / 2 |
@@ -87,7 +94,7 @@ on the list turns out not to exist.
 
 ### The files that have to change
 
-39 in-scope files, but the mass is in four of them:
+41 in-scope files, but the mass is in four of them:
 
 | File | Refs | What it is |
 |---|---:|---|
@@ -300,13 +307,13 @@ a control so a failure can be attributed to the Cocoa backend rather than to the
 `SUMMARY: PASS`/`SUMMARY: FAIL` line at the end, exit status to match. Only `--interactive` on a
 login session with a display covers items 1-3 and 6 above.
 
-## 5. What this does not do
+## 5. What the seam PR did not do
 
-The engine still calls `PeekMessage`. Nothing in `GeneralsMD/` or `Core/` was changed to use the
-seam, and Windows behaviour is untouched: the header is `#ifndef _WIN32`, the backends are not in
-any Windows build, and the one non-spike build file touched (`WWLib/CMakeLists.txt`) adds the
-header to the non-Windows source list and an opt-in `CORE_WWLIB_WINDOW_BACKEND` option that
-defaults to `OFF`.
+The state this section described — "the engine still calls `PeekMessage`, nothing in `GeneralsMD/`
+or `Core/` uses the seam" — is what [section 6](#6-the-engine-wiring) changed for everything
+except the renderer. The plan it laid out is kept here because the two rows that are still open
+(the renderer's `HWND` and IME) are still true, and because the cost estimates are worth checking
+against what the wiring actually took.
 
 The remaining work to actually replace the Win32 loop, in the order it has to happen:
 
@@ -326,6 +333,110 @@ reflects state as of the last pump rather than doing a hardware read the way `Ge
 does. The only in-scope caller of `GetAsyncKeyState` is `W3DWaterTracks.cpp` (6 references, debug
 code), so that difference is cheap here — but it is a difference.
 
+## 6. The engine wiring
+
+This is the second half: `#ifndef _WIN32` only, Windows untouched. The pump, the window, the
+keyboard, the mouse and the assert dialog now go through the seam, and `WndProc` has no
+non-Windows counterpart at all — the events are pulled at one point in the frame instead.
+
+| Win32 | Off Windows | File |
+|---|---|---|
+| `WinMain()` | `main()` | `GeneralsMD/Code/Main/PlatformMain.cpp` (new; `WinMain.cpp` is Windows-only in CMake now) |
+| `initializeAppWindows()`: `RegisterClass` + `CreateWindow` + `SetWindowPos` + `SetFocus`/`SetForegroundWindow`/`ShowWindow` | `Window_Create()` | `PlatformWindowHost::createAppWindow()` |
+| `WndProc()` | `handleEvent()`, called from the pump | `Core/GameEngine/Source/GameClient/PlatformWindowHost.cpp` |
+| `PeekMessage`/`GetMessage`/`TranslateMessage`/`DispatchMessage` | `Window_Poll_Event()` in a `while` | `Win32GameEngine::serviceWindowsOS()` |
+| `IsIconic()` idle loop | `Window_Is_Minimised()` | `Win32GameEngine::update()` |
+| `TheMessageTime` (`MSG::time`) | `WindowEvent::Time_Ms`, latched per event | `PlatformWindowHost::getMessageTime()` |
+| DirectInput 8 keyboard device | `WINDOW_EVENT_KEY_DOWN`/`_UP`, scan code passed through | `Win32DIKeyboard.cpp` |
+| `addWin32Event(msg, wParam, lParam, time)` | `addWin32Event(const WindowEvent &)` | `Win32Mouse.{h,cpp}` |
+| `ClipCursor()`/`ReleaseCapture()` | `Window_Set_Cursor_Clip()` | `Win32Mouse::capture()`/`releaseCapture()` |
+| `GetKeyState(VK_CAPITAL)` | `Window_Modifier_State()` | `Win32DIKeyboard::getCapsState()` |
+| `GetKeyboardLayout()` LCID | `LC_ALL`/`LC_CTYPE`/`LANG` prefix `fr` | `Keyboard.cpp` |
+| `MessageBox()` | `WWPlatform::Dialog_Message_Box()` | `Debug.cpp`, `platform_dialog.{h,cpp}` (new) |
+
+### The `WM_*` triage
+
+All 20 live cases in `WinMain.cpp`'s `WndProc`, plus the two message-time consumers. "Skirmish or
+campaign needs it" means single-player play or start-up breaks without it, not that it is nice to
+have.
+
+| `WM_*` case | Single-player? | Off Windows |
+|---|---|---|
+| `WM_CLOSE` | yes (Alt+F4 opens the quit menu) | `WINDOW_EVENT_CLOSE` -> same body: `MSG_META_DEMO_INSTANT_QUIT`, or `setQuitting()` before the message stream is up |
+| `WM_QUERYENDSESSION` | no (logout/shutdown) | folded into `WINDOW_EVENT_CLOSE`; the seam does not distinguish a session ending from a close, and the Win32 body was identical |
+| `WM_ACTIVATEAPP` | yes | `WINDOW_EVENT_FOCUS_GAINED`/`_LOST` -> `setActive()`: `setIsActive()` and the custom cursor |
+| `WM_ACTIVATE` (`WA_INACTIVE`) | yes | same `setActive()`: audio mute/unmute and `refreshCursorCapture()` |
+| `WM_SETFOCUS` | yes | same `setActive()`: `resetKeys()`, `regainFocus()` |
+| `WM_KILLFOCUS` | yes | same `setActive()`: `resetKeys()`, `loseFocus()`, `onCursorMovedOutside()`, and the queues are dropped |
+| `WM_MOVE` | yes (cursor clip follows the window) | `WINDOW_EVENT_MOVE` -> `refreshCursorCapture()` |
+| `WM_SIZE` | yes | `WINDOW_EVENT_RESIZE` -> `refreshCursorCapture()`; `SIZE_MINIMIZED` is `WINDOW_EVENT_MINIMISED`, which the idle loop reads. The `gDoPaint` half is splash-screen only (below) |
+| `WM_MOUSEMOVE` | yes | `WINDOW_EVENT_MOUSE_MOVE`, dropped while inactive as before. The client-rect hit test becomes the backend's enter/leave, which is *more* reliable: `WINDOW_EVENT_MOUSE_LEAVE` fires when the pointer leaves, where Win32 only noticed on the next move inside |
+| `WM_LBUTTON*`, `WM_MBUTTON*`, `WM_RBUTTON*` (9 cases) | yes | `WINDOW_EVENT_MOUSE_DOWN`/`_UP` with `Mouse_Button` and `Click_Count`; the `DBLCLK` cases become `Click_Count == 2` |
+| `WM_MOUSEWHEEL` (`0x020A`) | yes (zoom) | `WINDOW_EVENT_MOUSE_WHEEL`, still dropped when the pointer is outside |
+| `WM_KEYDOWN` | **no** | not reproduced. Its only body is `VK_ESCAPE` -> `PostQuitMessage(0)`, and `serviceWindowsOS()` dispatches `WM_QUIT` to `DefWindowProc` (the `GetMessage` return check is commented out), so pressing Escape does nothing on Windows today. Reproducing it would *add* a quit-on-Escape bug. In-game Escape reaches the engine through DirectInput, not this case |
+| `WM_SETCURSOR` | yes on Windows only | not reproduced, and not needed: the cursor is set from `setActive()`, and the window is created with `Hide_System_Cursor`, which is what the null-cursor window class did |
+| `WM_SYSCOMMAND` (`SC_KEYMENU`, `SC_MOVE`, `SC_SIZE`, `SC_MAXIMIZE`, `SC_MONITORPOWER`) | yes on Windows only | nothing to reproduce: these suppress Windows' own system menu, Alt-halts-the-game and screensaver behaviour. SDL2 does not synthesise them; `SDL_DISABLE_SCREENSAVER` is the equivalent of `SC_MONITORPOWER` and is the backend's business, not the engine's |
+| `WM_NCHITTEST` | no | Win32-only non-client geometry; a borderless window has none |
+| `WM_POWERBROADCAST` | no | suspend/resume acknowledgement. Not reproduced; a deferred item, not a stub |
+| `WM_PAINT`, `WM_ERASEBKGND` | no | the pre-W3D loading splash (`gLoadScreenBitmap`, `BitBlt`). Deliberately dropped: it needs GDI, it stops as soon as W3D initialises (`gDoPaint = false`), and the native window simply starts black |
+| `WM_DEVICECHANGE` | no | already `#if 0` in `WinMain.cpp` |
+| `WM_IME_*` (44 refs) | no | `TheIMEManager->serviceIMEMessage()` runs before the switch and is untouched. `WINDOW_EVENT_TEXT` is deliberately a no-op case: macOS IME is `NSTextInputClient`, which is its own slice |
+| `DEBUG_WINDOWS_MESSAGES` tracing (`messageToString`, ~130 `WM_*` names) | no | Windows-only debug aid, left where it is. It is most of `WinMain.cpp`'s 217 `WM_*` references |
+
+What this costs, stated once: **`DispatchMessage`'s re-entrancy is gone.** On Windows `WndProc`
+runs at whatever stack depth the OS chooses, including inside `Reset_Device()` and inside a modal
+`MessageBox`. Off Windows the events are applied at one point in `serviceWindowsOS()`. Nothing in
+the cases above depends on that — the bodies are idempotent state pokes, and the one case that did
+care (`WM_ACTIVATEAPP` calling `Reset_Device`) was already removed as a bugfix upstream. Two
+places would notice if they were reached natively, and neither is on the single-player path yet: a
+modal assert dialog does not pump, so the window stops repainting while it is up (the portable
+dialog is not modal and does not have this problem, because it is not a dialog — see below), and a
+long device reset queues events instead of interleaving them.
+
+### Deliberately not reproduced, in one list
+
+| Thing | Why, and what happens instead |
+|---|---|
+| The loading splash bitmap | GDI `BitBlt` of an 800x600 resource. The native window starts black |
+| `MessageBox()` | `platform_dialog.cpp` writes the text to `stderr` and returns a fixed answer (OK, No, Ignore). **It is not a dialog**: no window, no modality, no user choice. An assert that would have offered Abort/Retry/Ignore now continues as if Ignore was clicked. A real `NSAlert`/SDL message box belongs to whoever needs asserts to be interactive |
+| `.ANI` animated cursors | `Win32Mouse::loadCursorResources()` returns early; `HCURSOR` and the `.ANI` format are Win32. The game's own software cursor is unaffected |
+| Layout-dependent French detection | `GetKeyboardLayout()` reads the *keyboard layout*; the fallback reads the *locale*. A French layout under an English locale is not detected, which mis-picks the key *names* in the control-mapping UI. Behaviourally cheap, and it goes away with `WINDOW_EVENT_TEXT` |
+| `SetErrorMode(SEM_FAILCRITICALERRORS)` | no equivalent; nothing suppresses the OS's own error UI |
+| `SetUnhandledExceptionFilter()`, `_CrtSetDbgFlag()`, the duplicate-instance `FindWindow()` | Win32-only start-up niceties in `WinMain.cpp`, left out of `PlatformMain.cpp` |
+
+### What was measured
+
+All figures from this session's own runs on Linux, clang 14, `-std=c++20 -m64`:
+
+| Measurement | Before | After |
+|---|---:|---:|
+| Probe-clean translation units, native | 639 / 742 | 643 / 744 |
+| Probe-clean translation units, shimmed | 683 / 742 | 687 / 744 |
+| `native-build.json` objects (shimmed, levels 1-2) | 704 / 716 | 708 / 718 |
+| Unresolved symbols at link | 273 | 280 |
+
+The four newly clean translation units are `Debug.cpp` (`HWND`), `Keyboard.cpp` (`HKL`), and the
+two new files. `Win32Mouse.cpp` and `Win32DIKeyboard.cpp` also compile clean now, checked with the
+probe's own flags, but they live in `GameEngineDevice`, which no probe or build level covers yet,
+so they do not show up in either total.
+
+Unresolved symbols rose by 7, on purpose: `PlatformWindowHost.cpp` now references eleven
+`WWPlatform::Window_*` functions, and `CORE_WWLIB_WINDOW_BACKEND` still defaults to `OFF`, so the
+SDL2 backend is not in the build. Turning it on would make the native build depend on SDL2 being
+installed, which is a decision for the slice that first links an executable. `Debug.cpp` adds
+`FillStackAddresses` and `StackDumpFromAddresses` now that it compiles, since `StackDump.cpp` does
+not compile natively yet; the rest of the movement is other files in the same link becoming
+compilable, and §3 of `docs/porting/native-build-report.md` is the authoritative list.
+
+### What is not verified
+
+**Nothing in this section has been run.** It compiles on Linux and it is not linked into anything:
+the renderer (`dx8wrapper`), the audio device (Miles) and Bink do not compile natively, so there is
+no native executable to run. Specifically unverified: whether `createAppWindow()` opens a usable
+window in the engine's start-up order, whether the event queue depth is right under load, whether
+the mouse coordinates land where the game expects them, and the whole macOS/arm64 path, which has
+no compiler in this environment at all.
+
 ## Files
 
 | Path | Lines | Executed? |
@@ -338,3 +449,8 @@ code), so that difference is cheap here — but it is a difference.
 | `spikes/renderer/tools/macos-window-check.sh` | — | yes, in `--allow-no-display --no-sdl2` mode; the SDL2 control and `--interactive` are untried |
 | `scripts/window-input-scan.py` | 389 | yes |
 | `scripts/ci/check-window-scancodes.py` | 106 | yes |
+| `Core/GameEngine/Include/GameClient/PlatformWindowHost.h` | 104 | compiled on Linux, never run |
+| `Core/GameEngine/Source/GameClient/PlatformWindowHost.cpp` | 397 | compiled on Linux, never run |
+| `GeneralsMD/Code/Main/PlatformMain.cpp` | 176 | **compiles only against a stub `Win32GameEngine.h`** — the real header pulls in Miles and d3d8, which do not compile natively yet |
+| `Core/Libraries/Source/WWVegas/WWLib/platform/platform_dialog.{h,cpp}` | 75 + 59 | compiled on Linux, never run |
+| `scripts/ci/check-window-seam-wiring.py` | 192 | yes |

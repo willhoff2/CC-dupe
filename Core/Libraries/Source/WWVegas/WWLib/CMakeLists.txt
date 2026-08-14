@@ -172,6 +172,8 @@ if(WIN32)
 else()
     # Stand-ins for the Win32 threading, synchronisation, timing, registry and process calls.
     list(APPEND WWLIB_SRC
+        platform/platform_dialog.cpp
+        platform/platform_dialog.h
         platform/platform_mutex.cpp
         platform/platform_mutex.h
         platform/platform_process.cpp

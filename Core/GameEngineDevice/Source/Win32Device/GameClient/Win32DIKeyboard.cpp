@@ -28,7 +28,6 @@
 //						using Microsoft Direct Input
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include <windows.h>
 #include <assert.h>
 
 #include "Common/Debug.h"
@@ -36,6 +35,10 @@
 #include "GameClient/KeyDefs.h"
 #include "GameClient/Keyboard.h"
 #include "Win32Device/GameClient/Win32DIKeyboard.h"
+
+#ifdef _WIN32
+
+#include <windows.h>
 #include "WinMain.h"
 
 // DEFINES ////////////////////////////////////////////////////////////////////////////////////////
@@ -427,3 +430,108 @@ Bool DirectInputKeyboard::getCapsState()
 	return BitIsSet( GetKeyState( VK_CAPITAL ), 0X01);
 
 }
+
+#else // !_WIN32
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// TheSuperHackers @port There is no DirectInput off Windows. The class keeps its name and its
+// contract - one buffered key event per getKey() call, scan codes in KeyDefType's PC/AT set 1 -
+// and takes the events from the window seam instead, which reports the same scan codes
+// (scripts/ci/check-window-scancodes.py holds the two tables together). The device can never be
+// lost, so KEY_LOST is never reported and the re-acquire dance is gone.
+// See docs/porting/window-event-loop.md.
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+#include "GameClient/PlatformWindowHost.h"
+
+//-------------------------------------------------------------------------------------------------
+void DirectInputKeyboard::openKeyboard()
+{
+	// The window is the keyboard; it is opened with the window.
+}
+
+//-------------------------------------------------------------------------------------------------
+void DirectInputKeyboard::closeKeyboard()
+{
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Get a single keyboard event from the window seam */
+//-------------------------------------------------------------------------------------------------
+void DirectInputKeyboard::getKey( KeyboardIO *key )
+{
+	assert( key );
+	key->key = KEY_NONE;
+
+	WWPlatform::WindowEvent event;
+	if( !PlatformWindowHost::getNextKeyEvent( event ) )
+		return;
+
+	// The seam's scan code is the same PC/AT set 1 code DirectInput put in DIDEVICEOBJECTDATA.
+	key->key = (UnsignedByte)(event.Scan_Code & 0xFF);
+
+	//
+	// state of key, note we are setting the key state here with an assignment
+	// and not a bit set of the up/down state, this is the "start"
+	// of building this "key"
+	//
+	if( event.Type == WWPlatform::WINDOW_EVENT_KEY_DOWN )
+	{
+		key->state = KEY_STATE_DOWN;
+		key->keyDownTimeMsec = event.Time_Ms;
+	}
+	else
+	{
+		key->state = KEY_STATE_UP;
+	}
+
+	// set status as unused (unprocessed)
+	key->status = KeyboardIO::STATUS_UNUSED;
+}
+
+//-------------------------------------------------------------------------------------------------
+DirectInputKeyboard::DirectInputKeyboard()
+{
+	if( PlatformWindowHost::isCapsLockOn() )
+	{
+		m_modifiers |= KEY_STATE_CAPSLOCK;
+	}
+	else
+	{
+		m_modifiers &= ~KEY_STATE_CAPSLOCK;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+DirectInputKeyboard::~DirectInputKeyboard()
+{
+}
+
+//-------------------------------------------------------------------------------------------------
+void DirectInputKeyboard::init()
+{
+	// extending functionality
+	Keyboard::init();
+}
+
+//-------------------------------------------------------------------------------------------------
+void DirectInputKeyboard::reset()
+{
+	// extend functionality
+	Keyboard::reset();
+}
+
+//-------------------------------------------------------------------------------------------------
+void DirectInputKeyboard::update()
+{
+	// extending functionality
+	Keyboard::update();
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool DirectInputKeyboard::getCapsState()
+{
+	return PlatformWindowHost::isCapsLockOn();
+}
+
+#endif // !_WIN32

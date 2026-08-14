@@ -44,6 +44,46 @@ Keyboard *TheKeyboard = nullptr;
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 //-------------------------------------------------------------------------------------------------
+/** The language of the active keyboard layout, which is asked for only to tell an AZERTY layout
+	* from the rest, so that the key names below match the keys.
+	*
+	* TheSuperHackers @port There is no HKL off Windows, and neither SDL2 nor Cocoa report a layout
+	* identifier that maps to the Win32 LCIDs. The locale is the portable signal available, and it
+	* is the same signal the platform uses to pick a default layout, so an fr_* locale is read as a
+	* French layout. A user with a French layout under an English locale is not detected; that needs
+	* a real layout query, which is noted as open in docs/porting/window-event-loop.md. */
+//-------------------------------------------------------------------------------------------------
+static LanguageID getKeyboardLayoutLanguage()
+{
+#ifdef _WIN32
+
+	HKL kLayout = GetKeyboardLayout(0);
+
+	Int low = (UnsignedInt)kLayout & 0xFFFF;
+	if(low == 0x040c
+		 || low == 0x080c
+		 || low == 0x0c0c
+		 || low == 0x100c
+		 || low == 0x140c)
+		return LANGUAGE_ID_FRENCH;
+
+#else
+
+	const char *locale = getenv("LC_ALL");
+	if( locale == nullptr || locale[0] == '\0' )
+		locale = getenv("LC_CTYPE");
+	if( locale == nullptr || locale[0] == '\0' )
+		locale = getenv("LANG");
+
+	if( locale != nullptr && strncmp(locale, "fr", 2) == 0 )
+		return LANGUAGE_ID_FRENCH;
+
+#endif
+
+	return OurLanguage;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Given the state of the device, create messages from the input and
 	* place them on the message stream */
 //-------------------------------------------------------------------------------------------------
@@ -339,16 +379,7 @@ void Keyboard::initKeyNames()
 
 	_set_keyname_(L' ',		L' ',		L'\0',	KEY_SPACE  );
 
-	HKL kLayout = GetKeyboardLayout(0);
-
-	Int low = (UnsignedInt)kLayout & 0xFFFF;
-	LanguageID currentLanguage = OurLanguage;
-	if(low == 0x040c
-		 || low == 0x080c
-		 || low == 0x0c0c
-		 || low == 0x100c
-		 || low == 0x140c)
-		currentLanguage = LANGUAGE_ID_FRENCH;
+	LanguageID currentLanguage = getKeyboardLayoutLanguage();
 
 	switch( currentLanguage )
 	{

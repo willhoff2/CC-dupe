@@ -49,6 +49,10 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "GameClient/Mouse.h"
+#ifndef _WIN32
+// TheSuperHackers @port Off Windows the events come from the window seam instead of a WndProc.
+#include "WWLib/platform/platform_window.h"
+#endif
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////
 
@@ -78,7 +82,11 @@ public:
 	virtual void regainFocus() override;
 
 	/// add an event from a win32 window procedure
+#ifdef _WIN32
 	void addWin32Event( UINT msg, WPARAM wParam, LPARAM lParam, DWORD time );
+#else
+	void addWin32Event( const WWPlatform::WindowEvent & event );
+#endif
 
 protected:
 
@@ -93,10 +101,15 @@ protected:
 
 	struct Win32MouseEvent
 	{
+#ifdef _WIN32
 		UINT msg;				///< WM_* message
 		WPARAM wParam;  ///< WPARAM from the WM_* message
 		LPARAM lParam;  ///< LPARAM from the WM_* message
 		DWORD time;			///< TIME from the WM_* message
+#else
+		/// The window seam's event. WINDOW_EVENT_NONE marks the slot empty, the way msg zero does.
+		WWPlatform::WindowEvent event;
+#endif
 	};
 	/// this is our buffer of events that we receive via a WndProc message
 	Win32MouseEvent m_eventBuffer[ Mouse::NUM_MOUSE_EVENTS ];
