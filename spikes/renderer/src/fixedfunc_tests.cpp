@@ -201,6 +201,7 @@ void Harness::Reset_State() {
 	g.Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_ONE);
 	g.Set_DX8_Render_State(D3DRS_DESTBLEND, D3DBLEND_ZERO);
 	g.Set_DX8_Render_State(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	g.Set_DX8_Render_State(D3DRS_CLIPPLANEENABLE, 0);
 	g.Set_DX8_Render_State(D3DRS_POINTSPRITEENABLE, 0);
 	g.Set_DX8_Render_State(D3DRS_POINTSCALEENABLE, 0);
 	g.Set_Transform(D3DTS_WORLD, Matrix4x4::Identity());
@@ -1805,6 +1806,504 @@ Outcome Case_State_Readback(Harness& h) {
 	return Pass("GetRenderState and GetTransform return the shadowed state");
 }
 
+// ---------------------------------------------------------------------------
+// render targets, surfaces, blits and programmable shaders
+//
+// The methods this group covers are the ones D3D8 and Vulkan disagree about most,
+// so every case asserts on the *default* target's pixels after the work has been
+// routed through a render-target texture, a copy or a shader -- a case cannot pass
+// by leaving the render target untouched.
+// ---------------------------------------------------------------------------
+
+// Sets stage 0 to "the texture, unmodified", the cascade every readback of a
+// render-target or copied texture wants.
+void Texture_Only(RenderBackend& g) {
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+	g.Set_DX8_Texture_Stage_State(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+}
+
+// SetRenderTarget/GetRenderTarget/GetDepthStencilSurface/GetSurfaceLevel, which the
+// engine uses as a save-render-restore triple (W3DShaderManager::startRenderToTexture
+// and endRenderToTexture, and DX8Wrapper::Set_Render_Target). Rendering into the
+// texture is asserted by sampling the texture afterwards, back on the device target.
+Outcome Case_Render_Target(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Diffuse_Only(g);
+
+	TextureHandle* target_texture = g.Create_Render_Target_Texture(kWidth, kHeight);
+	if (target_texture == nullptr) return Fail("Create_Render_Target_Texture failed");
+	SurfaceHandle* target = g.Get_Surface_Level(target_texture, 0);
+	if (target == nullptr) return Fail("Get_Surface_Level(0) failed");
+
+	h.Begin();
+	SurfaceHandle* saved_color = g.Get_Render_Target();
+	SurfaceHandle* saved_depth = g.Get_Depth_Stencil_Target();
+	if (saved_color == nullptr) return Fail("GetRenderTarget returned nothing");
+	if (saved_depth == nullptr) return Fail("GetDepthStencilSurface returned nothing");
+
+	// Into the texture: a green quad on a red clear, so that both the clear and the
+	// draw have to have landed in the texture for the assertion to hold.
+	if (!g.Set_Render_Target(target, saved_depth)) return Fail("SetRenderTarget failed");
+	if (g.Get_Render_Target() != target)
+		return Fail("GetRenderTarget did not return the target that was set");
+	g.Clear(true, true, 1.0f, 0.0f, 0.0f, 1.0f);
+	g.Set_Viewport(ViewportRect{0, 0, kWidth / 2, kHeight, 0.0f, 1.0f});
+	h.Draw_Screen_Quad(Argb(0xff, 0x00, 0xff, 0x00));
+
+	// Back to the device's own, which D3D8 does by handing back the saved surfaces.
+	if (!g.Set_Render_Target(saved_color, saved_depth))
+		return Fail("SetRenderTarget(saved) failed");
+	if (g.Get_Render_Target() != saved_color)
+		return Fail("the device target did not come back");
+	g.Set_Viewport(ViewportRect{0, 0, kWidth, kHeight, 0.0f, 1.0f});
+	Texture_Only(g);
+	g.Set_Texture(0, target_texture);
+	// The left half of the target texture, then the right half, read by sampling it
+	// with the two coordinates rather than by reading the texture back.
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 0.25f, 0.5f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba drawn = h.Pixel(kWidth / 2, kHeight / 2);
+
+	h.Begin();
+	g.Set_Texture(0, target_texture);
+	Texture_Only(g);
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 0.75f, 0.5f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba cleared = h.Pixel(kWidth / 2, kHeight / 2);
+
+	if (!Near(drawn, Rgba{0, 255, 0, 255}))
+		return Fail("the render-target texture's drawn half got " + To_String(drawn));
+	if (!Near(cleared, Rgba{255, 0, 0, 255}))
+		return Fail("its cleared half got " + To_String(cleared));
+	return Pass("SetRenderTarget renders into a texture, GetRenderTarget/"
+	            "GetDepthStencilSurface round-trip the device's own");
+}
+
+// SetRenderTarget(colour, NULL): a target with no depth buffer, which in Vulkan is a
+// different render pass and therefore a differently-compatible pipeline, not a state.
+Outcome Case_Render_Target_No_Depth(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Diffuse_Only(g);
+
+	TextureHandle* target_texture = g.Create_Render_Target_Texture(kWidth / 2, kHeight / 2);
+	if (target_texture == nullptr) return Fail("Create_Render_Target_Texture failed");
+	SurfaceHandle* target = g.Get_Surface_Level(target_texture, 0);
+	if (target == nullptr) return Fail("Get_Surface_Level(0) failed");
+
+	h.Begin();
+	SurfaceHandle* saved_color = g.Get_Render_Target();
+	SurfaceHandle* saved_depth = g.Get_Depth_Stencil_Target();
+	if (!g.Set_Render_Target(target, nullptr))
+		return Fail("SetRenderTarget with no depth buffer failed");
+	if (g.Get_Depth_Stencil_Target() != nullptr)
+		return Fail("GetDepthStencilSurface should be null with no depth buffer");
+	// Depth testing on with no depth buffer is legal in D3D8 and has no effect.
+	g.Set_DX8_Render_State(D3DRS_ZENABLE, 1);
+	g.Clear(true, false, 0.0f, 0.0f, 0.0f, 0.0f);
+	h.Draw_Screen_Quad(Argb(0xff, 0x00, 0x00, 0xff));
+
+	if (!g.Set_Render_Target(saved_color, saved_depth))
+		return Fail("SetRenderTarget(saved) failed");
+	g.Set_DX8_Render_State(D3DRS_ZENABLE, 0);
+	Texture_Only(g);
+	g.Set_Texture(0, target_texture);
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 0.5f, 0.5f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	return Check(h.Pixel(kWidth / 2, kHeight / 2), Rgba{0, 0, 255, 255},
+	             "a depth-less render target draws");
+}
+
+// CreateImageSurface + LockRect + CopyRects, which is exactly what
+// missingtexture.cpp does: build the pattern in system memory, then blit it into a
+// texture's surface. Asserted by sampling the texture.
+Outcome Case_Copy_Rects_Host_To_Image(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Texture_Only(g);
+
+	constexpr uint32_t kSize = 8;
+	SurfaceHandle* source = g.Create_Image_Surface(kSize, kSize, TextureFormat::A8R8G8B8);
+	if (source == nullptr) return Fail("Create_Image_Surface failed");
+	LockedRect locked{};
+	if (!g.Surface_Bits(source, locked)) return Fail("LockRect on the image surface failed");
+	// The top-left quarter magenta, the rest yellow, so that a copy of the wrong
+	// rectangle or to the wrong corner shows up as the other colour.
+	for (uint32_t y = 0; y < kSize; ++y) {
+		auto* row = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(locked.bits) +
+		                                        static_cast<size_t>(y) * locked.pitch);
+		for (uint32_t x = 0; x < kSize; ++x) {
+			row[x] = (x < kSize / 2 && y < kSize / 2) ? Argb(0xff, 0xff, 0x00, 0xff)
+			                                         : Argb(0xff, 0xff, 0xff, 0x00);
+		}
+	}
+
+	TextureHandle* destination =
+	    g.Create_Lockable_Texture(kSize, kSize, TextureFormat::A8R8G8B8, 1);
+	if (destination == nullptr) return Fail("Create_Lockable_Texture failed");
+	SurfaceHandle* destination_surface = g.Get_Surface_Level(destination, 0);
+	if (destination_surface == nullptr) return Fail("Get_Surface_Level(0) failed");
+
+	// The magenta quarter only, into the destination's *bottom-right* corner.
+	const LockRect rect{0, 0, kSize / 2, kSize / 2};
+	const SurfacePoint point{kSize / 2, kSize / 2};
+	if (!g.Copy_Rects(source, &rect, 1, destination_surface, &point))
+		return Fail("CopyRects host-to-image failed");
+
+	g.Set_Texture(0, destination);
+	h.Begin();
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 0.8f, 0.8f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba copied = h.Pixel(kWidth / 2, kHeight / 2);
+
+	h.Begin();
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 0.2f, 0.2f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba untouched = h.Pixel(kWidth / 2, kHeight / 2);
+
+	if (!Near(copied, Rgba{255, 0, 255, 255}))
+		return Fail("the copied corner got " + To_String(copied));
+	if (!Near(untouched, Rgba{0, 0, 0, 0}))
+		return Fail("the rest of the texture should be untouched, got " +
+		            To_String(untouched));
+	return Pass("CopyRects blits a rectangle of a system-memory surface into a"
+	            " texture");
+}
+
+// CopyRects between two video-memory surfaces, the case that becomes vkCmdCopyImage
+// with a layout transition on both sides. Both surfaces are render-target textures
+// because D3D8 requires the two formats to match and the spike's render targets are
+// the one format the device target uses.
+Outcome Case_Copy_Rects_Image_To_Image(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Diffuse_Only(g);
+
+	TextureHandle* source_texture = g.Create_Render_Target_Texture(kWidth, kHeight);
+	TextureHandle* destination_texture = g.Create_Render_Target_Texture(kWidth, kHeight);
+	if (source_texture == nullptr || destination_texture == nullptr)
+		return Fail("Create_Render_Target_Texture failed");
+	SurfaceHandle* source = g.Get_Surface_Level(source_texture, 0);
+	SurfaceHandle* destination = g.Get_Surface_Level(destination_texture, 0);
+	if (source == nullptr || destination == nullptr) return Fail("Get_Surface_Level failed");
+
+	h.Begin();
+	SurfaceHandle* saved_color = g.Get_Render_Target();
+	SurfaceHandle* saved_depth = g.Get_Depth_Stencil_Target();
+	if (!g.Set_Render_Target(source, saved_depth)) return Fail("SetRenderTarget failed");
+	g.Clear(true, true, 0.0f, 0.0f, 0.0f, 0.0f);
+	h.Draw_Screen_Quad(Argb(0xff, 0x00, 0x80, 0xc0));
+	if (!g.Set_Render_Target(saved_color, saved_depth))
+		return Fail("SetRenderTarget(saved) failed");
+
+	// Mid-frame, which is the interesting half: the copy has to see the draw that
+	// preceded it in the same command buffer.
+	if (!g.Copy_Rects(source, nullptr, 0, destination, nullptr))
+		return Fail("CopyRects image-to-image failed");
+
+	Texture_Only(g);
+	g.Set_Texture(0, destination_texture);
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 0.5f, 0.5f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	return Check(h.Pixel(kWidth / 2, kHeight / 2), Rgba{0x00, 0x80, 0xc0, 255},
+	             "CopyRects copies a whole video-memory surface");
+}
+
+// The other direction: a video-memory surface into system memory, then back into a
+// second texture, so the assertion is on pixels rather than on the host bytes.
+Outcome Case_Copy_Rects_Image_To_Host(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Texture_Only(g);
+
+	constexpr uint32_t kSize = 4;
+	const uint32_t texels[kSize * kSize] = {
+	    Argb(0xff, 0x10, 0x20, 0x30), Argb(0xff, 0x40, 0x50, 0x60),
+	    Argb(0xff, 0x70, 0x80, 0x90), Argb(0xff, 0xa0, 0xb0, 0xc0),
+	    Argb(0xff, 0x10, 0x20, 0x30), Argb(0xff, 0x40, 0x50, 0x60),
+	    Argb(0xff, 0x70, 0x80, 0x90), Argb(0xff, 0xa0, 0xb0, 0xc0),
+	    Argb(0xff, 0x10, 0x20, 0x30), Argb(0xff, 0x40, 0x50, 0x60),
+	    Argb(0xff, 0x70, 0x80, 0x90), Argb(0xff, 0xa0, 0xb0, 0xc0),
+	    Argb(0xff, 0x10, 0x20, 0x30), Argb(0xff, 0x40, 0x50, 0x60),
+	    Argb(0xff, 0x70, 0x80, 0x90), Argb(0xff, 0xa0, 0xb0, 0xc0)};
+	const TextureMip mip{texels, sizeof(texels), kSize, kSize};
+	TextureDesc desc;
+	desc.format = TextureFormat::A8R8G8B8;
+	desc.mip_count = 1;
+	desc.mips = &mip;
+	TextureHandle* source_texture = g.Create_Texture(desc);
+	TextureHandle* destination_texture =
+	    g.Create_Lockable_Texture(kSize, kSize, TextureFormat::A8R8G8B8, 1);
+	if (source_texture == nullptr || destination_texture == nullptr)
+		return Fail("texture creation failed");
+	SurfaceHandle* source = g.Get_Surface_Level(source_texture, 0);
+	SurfaceHandle* destination = g.Get_Surface_Level(destination_texture, 0);
+	SurfaceHandle* host = g.Create_Image_Surface(kSize, kSize, TextureFormat::A8R8G8B8);
+	if (source == nullptr || destination == nullptr || host == nullptr)
+		return Fail("surface creation failed");
+
+	if (!g.Copy_Rects(source, nullptr, 0, host, nullptr))
+		return Fail("CopyRects image-to-host failed");
+	// The host copy is what the second blit reads, so a wrong pitch or offset in
+	// either direction changes the sampled colour.
+	if (!g.Copy_Rects(host, nullptr, 0, destination, nullptr))
+		return Fail("CopyRects host-to-image failed");
+
+	g.Set_Texture(0, destination_texture);
+	h.Begin();
+	// The third texel column of the 4x4 pattern, at its centre.
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 0.625f, 0.5f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	return Check(h.Pixel(kWidth / 2, kHeight / 2), Rgba{0x70, 0x80, 0x90, 255},
+	             "CopyRects round-trips a surface through system memory");
+}
+
+// UpdateTexture: D3D8's managed-pool upload, a system-memory texture's levels into a
+// video-memory texture's. The engine reaches it through
+// DX8Wrapper::Update_DX8_Texture.
+Outcome Case_Update_Texture(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Texture_Only(g);
+
+	constexpr uint32_t kSize = 4;
+	TextureHandle* source =
+	    g.Create_Lockable_Texture(kSize, kSize, TextureFormat::A8R8G8B8, 1);
+	if (source == nullptr) return Fail("Create_Lockable_Texture failed");
+	LockedRect locked{};
+	if (!g.Lock_Texture(source, 0, nullptr, 0, locked)) return Fail("LockRect failed");
+	for (uint32_t y = 0; y < kSize; ++y) {
+		auto* row = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(locked.bits) +
+		                                        static_cast<size_t>(y) * locked.pitch);
+		for (uint32_t x = 0; x < kSize; ++x) row[x] = Argb(0xff, 0x20, 0xc0, 0x40);
+	}
+	if (!g.Unlock_Texture(source, 0)) return Fail("UnlockRect failed");
+
+	const uint32_t black[kSize * kSize] = {};
+	const TextureMip mip{black, sizeof(black), kSize, kSize};
+	TextureDesc desc;
+	desc.format = TextureFormat::A8R8G8B8;
+	desc.mip_count = 1;
+	desc.mips = &mip;
+	TextureHandle* destination = g.Create_Texture(desc);
+	if (destination == nullptr) return Fail("Create_Texture failed");
+
+	if (!g.Update_Texture(source, destination)) return Fail("UpdateTexture failed");
+
+	g.Set_Texture(0, destination);
+	h.Begin();
+	h.Draw_Screen_Quad(Argb(0xff, 0xff, 0xff, 0xff), 0.5f, 0.5f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	return Check(h.Pixel(kWidth / 2, kHeight / 2), Rgba{0x20, 0xc0, 0x40, 255},
+	             "UpdateTexture copies a system-memory texture into a device one");
+}
+
+// --- D3D8 shader token assembly ---------------------------------------------
+// The engine loads *compiled* .pso/.vso streams, so the cases have to build the same
+// tokens an assembler would. Encoded here from d3d8types.h's bit fields,
+// independently of the backend's decoder.
+
+constexpr uint32_t kPsVersion11 = 0xffff0101u;
+constexpr uint32_t kVsVersion11 = 0xfffe0101u;
+constexpr uint32_t kEndToken = 0x0000ffffu;
+// D3DSP_NOSWIZZLE: .xyzw, two bits per component.
+constexpr uint32_t kNoSwizzle = 0xe4u << 16;
+
+enum : uint32_t { kTypeTemp = 0, kTypeInput = 1, kTypeConst = 2, kTypeTexture = 3,
+                  kTypeRastOut = 4, kTypeAttrOut = 5 };
+
+// A destination parameter token: register, all four channels written.
+constexpr uint32_t Dst(uint32_t type, uint32_t reg) {
+	return 0x80000000u | (type << 28) | (0xfu << 16) | reg;
+}
+// A source parameter token with an optional replicate swizzle.
+constexpr uint32_t Src(uint32_t type, uint32_t reg, uint32_t swizzle = kNoSwizzle) {
+	return 0x80000000u | (type << 28) | swizzle | reg;
+}
+// .a / .wwww, the swizzle terrain.nvp's `lrp r0, v0.a, t1, t0` uses.
+constexpr uint32_t kReplicateAlpha = 0xffu << 16;
+
+// CreatePixelShader/SetPixelShader/SetPixelShaderConstant/DeletePixelShader. The
+// program is the shape of the engine's own terrain and water shaders: sample a
+// stage, modulate it with the interpolated diffuse, then scale by a constant.
+Outcome Case_Pixel_Shader(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	// Deliberately *not* the cascade the shader computes: with the shader bound the
+	// cascade must be ignored, and with it deleted the cascade must come back.
+	Diffuse_Only(g);
+
+	TextureHandle* texture = h.Solid_Texture(Argb(0xff, 0x80, 0x40, 0xc0));
+	if (texture == nullptr) return Fail("Create_Texture failed");
+	g.Set_Texture(0, texture);
+
+	const uint32_t program[] = {
+	    kPsVersion11,
+	    0x00000042u, Dst(kTypeTexture, 0),                          // tex t0
+	    0x00000005u, Dst(kTypeTemp, 0), Src(kTypeTexture, 0),
+	    Src(kTypeInput, 0),                                         // mul r0, t0, v0
+	    0x00000005u, Dst(kTypeTemp, 0), Src(kTypeTemp, 0),
+	    Src(kTypeConst, 0),                                         // mul r0, r0, c0
+	    kEndToken};
+	const ShaderHandle shader = g.Create_Pixel_Shader(program);
+	if (shader == kNullShader) return Fail("CreatePixelShader failed");
+
+	const float constant[4] = {0.5f, 0.5f, 0.5f, 1.0f};
+	g.Set_Pixel_Shader(shader);
+	g.Set_Pixel_Shader_Constant(0, constant, 1);
+
+	const uint32_t diffuse = Argb(0xff, 0xff, 0x80, 0x40);
+	h.Begin();
+	h.Draw_Screen_Quad(diffuse, 0.5f, 0.5f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba shaded = h.Pixel(kWidth / 2, kHeight / 2);
+
+	// Back to the cascade, which is what DeletePixelShader after SetPixelShader(0)
+	// leaves behind: the same draw must now produce the vertex colour.
+	g.Set_Pixel_Shader(kNullShader);
+	g.Delete_Pixel_Shader(shader);
+	h.Begin();
+	h.Draw_Screen_Quad(diffuse, 0.5f, 0.5f);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba cascade = h.Pixel(kWidth / 2, kHeight / 2);
+
+	const Color t = From_Argb(Argb(0xff, 0x80, 0x40, 0xc0));
+	const Color d = From_Argb(diffuse);
+	const Rgba expected = Quantise(t.r * d.r * 0.5f, t.g * d.g * 0.5f, t.b * d.b * 0.5f,
+	                               t.a * d.a * 1.0f);
+	if (!Near(shaded, expected))
+		return Fail("ps.1.1 got " + To_String(shaded) + " expected " + To_String(expected));
+	if (!Near(cascade, Rgba{255, 128, 64, 255}))
+		return Fail("SetPixelShader(0) should restore the cascade, got " +
+		            To_String(cascade));
+	return Pass("ps.1.1 tex/mul with a constant, and SetPixelShader(0) restores the"
+	            " cascade");
+}
+
+// CreateVertexShader/SetVertexShader/SetVertexShaderConstant/DeleteVertexShader. The
+// declaration maps v0 and v1 onto the FVF's elements in order -- which is what D3D8
+// does, and what W3DTreeBuffer's declaration relies on -- and the program scales the
+// position by a constant, so the geometry and the colour are both evidence that the
+// interpreter ran.
+Outcome Case_Vertex_Shader(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Diffuse_Only(g);
+
+	// D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1: position then diffuse, so v0 is the
+	// position and v1 the colour.
+	struct ShaderVertex {
+		float x, y, z;
+		uint32_t diffuse;
+		float u, v;
+	};
+	const uint32_t yellow = Argb(0xff, 0xff, 0xff, 0x00);
+	const ShaderVertex quad[4] = {{-1.0f, -1.0f, 0.5f, yellow, 0, 0},
+	                              {1.0f, -1.0f, 0.5f, yellow, 1, 0},
+	                              {1.0f, 1.0f, 0.5f, yellow, 1, 1},
+	                              {-1.0f, 1.0f, 0.5f, yellow, 0, 1}};
+	const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+	VertexBufferHandle* vb = g.Create_Vertex_Buffer(
+	    quad, sizeof(quad), D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	IndexBufferHandle* ib = g.Create_Index_Buffer(indices, 6);
+	if (vb == nullptr || ib == nullptr) return Fail("buffer creation failed");
+
+	// D3DVSD_STREAM(0), D3DVSD_REG(0, FLOAT3), D3DVSD_REG(1, D3DCOLOR), D3DVSD_END():
+	// the token stream shape W3DShaderManager's Declaration[] arrays have.
+	const uint32_t declaration[] = {0x20000000u, 0x40020000u, 0x40040001u, 0xffffffffu};
+	const uint32_t program[] = {
+	    kVsVersion11,
+	    0x00000005u, Dst(kTypeRastOut, 0), Src(kTypeInput, 0),
+	    Src(kTypeConst, 0),                                     // mul oPos, v0, c0
+	    0x00000001u, Dst(kTypeAttrOut, 0), Src(kTypeInput, 1),  // mov oD0, v1
+	    kEndToken};
+	const ShaderHandle shader = g.Create_Vertex_Shader(declaration, program, 0);
+	if (shader == kNullShader) return Fail("CreateVertexShader failed");
+
+	// Half size, so the quad covers the middle of the target and not the edges.
+	const float constant[4] = {0.5f, 0.5f, 1.0f, 1.0f};
+	g.Set_Vertex_Shader(shader);
+	g.Set_Vertex_Shader_Constant(0, constant, 1);
+
+	h.Begin();
+	h.Draw(vb, ib, 2);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba centre = h.Pixel(kWidth / 2, kHeight / 2);
+	const Rgba edge = h.Pixel(2, kHeight / 2);
+
+	g.Set_Vertex_Shader(kNullShader);
+	g.Delete_Vertex_Shader(shader);
+	h.Begin();
+	h.Draw(vb, ib, 2);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba fixed_function = h.Pixel(2, kHeight / 2);
+
+	if (!Near(centre, Rgba{255, 255, 0, 255}))
+		return Fail("vs.1.1 should colour the centre from v1, got " + To_String(centre));
+	if (!Near(edge, Rgba{0, 0, 0, 0}))
+		return Fail("mul oPos, v0, c0 should halve the quad, got " + To_String(edge) +
+		            " at the edge");
+	if (!Near(fixed_function, Rgba{255, 255, 0, 255}))
+		return Fail("SetVertexShader(0) should restore the fixed-function transform,"
+		            " got " + To_String(fixed_function));
+	return Pass("vs.1.1 transforms from a constant and passes the declaration's v1"
+	            " through");
+}
+
+// SetClipPlane with D3DRS_CLIPPLANEENABLE. World space, identity transforms, so the
+// plane's half-space is the top half of the target after the backend's y flip.
+Outcome Case_Clip_Plane(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Diffuse_Only(g);
+
+	const WorldVertex quad[4] = {
+	    {-1.0f, -1.0f, 0.5f, 0, 0, 1, Argb(0xff, 0xff, 0x00, 0x00), 0, 0},
+	    {1.0f, -1.0f, 0.5f, 0, 0, 1, Argb(0xff, 0xff, 0x00, 0x00), 1, 0},
+	    {1.0f, 1.0f, 0.5f, 0, 0, 1, Argb(0xff, 0xff, 0x00, 0x00), 1, 1},
+	    {-1.0f, 1.0f, 0.5f, 0, 0, 1, Argb(0xff, 0xff, 0x00, 0x00), 0, 1},
+	};
+	const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+	VertexBufferHandle* vb = g.Create_Vertex_Buffer(
+	    quad, sizeof(quad), D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	IndexBufferHandle* ib = g.Create_Index_Buffer(indices, 6);
+	if (vb == nullptr || ib == nullptr) return Fail("buffer creation failed");
+
+	// Ax+By+Cz+D >= 0 is kept, so (0,1,0,0) keeps y >= 0, which is up in D3D.
+	const float plane[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+	g.Set_Clip_Plane(0, plane);
+	g.Set_DX8_Render_State(D3DRS_CLIPPLANEENABLE, 1);
+
+	h.Begin();
+	h.Draw(vb, ib, 2);
+	h.End();
+	if (!h.Read_Back()) return Fail("readback failed");
+	const Rgba kept = h.Pixel(kWidth / 2, kHeight / 4);
+	const Rgba clipped = h.Pixel(kWidth / 2, kHeight * 3 / 4);
+	g.Set_DX8_Render_State(D3DRS_CLIPPLANEENABLE, 0);
+
+	if (!Near(kept, Rgba{255, 0, 0, 255}))
+		return Fail("the kept half-space got " + To_String(kept));
+	if (!Near(clipped, Rgba{0, 0, 0, 0}))
+		return Fail("the clipped half-space got " + To_String(clipped));
+	return Pass("SetClipPlane(0) with CLIPPLANEENABLE clips the far half-space");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1901,6 +2400,17 @@ int main(int argc, char** argv) {
 	std::printf("\n== sampler state ==\n");
 	report("border colour", Case_Border_Color(harness));
 	report("max anisotropy", Case_Max_Anisotropy(harness));
+
+	std::printf("\n== render targets, blits and shaders ==\n");
+	report("render target", Case_Render_Target(harness));
+	report("render target no depth", Case_Render_Target_No_Depth(harness));
+	report("CopyRects host->image", Case_Copy_Rects_Host_To_Image(harness));
+	report("CopyRects image->image", Case_Copy_Rects_Image_To_Image(harness));
+	report("CopyRects image->host", Case_Copy_Rects_Image_To_Host(harness));
+	report("UpdateTexture", Case_Update_Texture(harness));
+	report("pixel shader", Case_Pixel_Shader(harness));
+	report("vertex shader", Case_Vertex_Shader(harness));
+	report("clip plane", Case_Clip_Plane(harness));
 
 	std::printf("\n== texture formats ==\n");
 	for (const FormatCase& c : kFormatCases) report("format", Case_Texture_Format(harness, c));

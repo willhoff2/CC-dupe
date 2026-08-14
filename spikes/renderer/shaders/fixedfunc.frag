@@ -21,6 +21,14 @@
 
 #define MAX_STAGES 8
 #define MAX_LIGHTS 4
+// Must match src/d3d8_subset.h and the copy in fixedfunc.vert.
+#define MAX_SHADER_INSTRUCTIONS 32
+#define MAX_PS_CONSTANTS 8
+#define MAX_VS_CONSTANTS 96
+#define MAX_VS_INPUTS 16
+#define MAX_CLIP_PLANES 6
+#define PS_TEMPS 2
+#define PS_TEXTURES 4
 
 layout(location = 0) in vec4 v_diffuse;
 layout(location = 1) in vec4 v_specular;
@@ -31,6 +39,7 @@ layout(location = 0) out vec4 out_color;
 
 layout(set = 0, binding = 0, std140) uniform Draw {
 	mat4 wvp;
+	mat4 world;
 	mat4 world_view;
 	mat4 view;
 	mat4 tex_matrix[4];
@@ -66,6 +75,16 @@ layout(set = 0, binding = 0, std140) uniform Draw {
 	ivec4 flags3;
 	vec4 point_size;  // size, min, max, point-sprite active for this draw
 	vec4 point_scale;
+
+	ivec4 ps_program[MAX_SHADER_INSTRUCTIONS * 2];
+	ivec4 vs_program[MAX_SHADER_INSTRUCTIONS * 2];
+	vec4 ps_constants[MAX_PS_CONSTANTS];
+	vec4 vs_constants[MAX_VS_CONSTANTS];
+	ivec4 vs_inputs[MAX_VS_INPUTS / 4];
+	ivec4 shader_counts; // ps instructions, vs instructions, -, -
+
+	vec4 clip_planes[MAX_CLIP_PLANES];
+	ivec4 clip_enable;
 } u;
 
 layout(set = 0, binding = 1) uniform sampler2D u_texture[MAX_STAGES];
@@ -242,6 +261,144 @@ bool alpha_test_passes(float alpha) {
 	}
 }
 
+// --- ps.1.1 -----------------------------------------------------------------
+// The token decoding is the same as fixedfunc.vert's; see the comment there.
+int sh_opcode(int t) { return t & 0xffff; }
+int sh_regnum(int t) { return t & 0x1fff; }
+int sh_regtype(int t) { return (t >> 28) & 7; }
+int sh_writemask(int t) { return (t >> 16) & 0xf; }
+bool sh_saturates(int t) { return ((t >> 20) & 0xf) == 1; }
+int sh_dstshift(int t) { int s = (t >> 24) & 0xf; return s > 7 ? s - 16 : s; }
+
+const int REG_TEMP = 0;
+const int REG_INPUT = 1;
+const int REG_CONST = 2;
+const int REG_TEXTURE = 3;
+
+const int SIO_MOV = 1;
+const int SIO_ADD = 2;
+const int SIO_SUB = 3;
+const int SIO_MAD = 4;
+const int SIO_MUL = 5;
+const int SIO_DP3 = 8;
+const int SIO_DP4 = 9;
+const int SIO_MIN = 10;
+const int SIO_MAX = 11;
+const int SIO_LRP = 18;
+const int SIO_TEXCOORD = 64;
+const int SIO_TEXKILL = 65;
+const int SIO_TEX = 66;
+const int SIO_CND = 80;
+
+vec4 sh_swizzled(vec4 v, int token) {
+	int s = (token >> 16) & 0xff;
+	float c[4] = float[4](v.x, v.y, v.z, v.w);
+	return vec4(c[s & 3], c[(s >> 2) & 3], c[(s >> 4) & 3], c[(s >> 6) & 3]);
+}
+
+// D3DSPSM_*, the source-register modifiers.
+vec4 sh_modified(vec4 v, int token) {
+	int m = (token >> 24) & 0xf;
+	if (m == 1) return -v;
+	if (m == 2) return v - 0.5;
+	if (m == 3) return -(v - 0.5);
+	if (m == 4) return 2.0 * v - 1.0;
+	if (m == 5) return -(2.0 * v - 1.0);
+	if (m == 6) return 1.0 - v;
+	if (m == 7) return 2.0 * v;
+	if (m == 8) return -2.0 * v;
+	return v;
+}
+
+vec4 sh_shifted(vec4 v, int token) {
+	int s = sh_dstshift(token);
+	if (s > 0) return v * float(1 << s);
+	if (s < 0) return v / float(1 << (-s));
+	return v;
+}
+
+vec4 ps_source(int token, vec4 r[PS_TEMPS], vec4 t[PS_TEXTURES]) {
+	int reg = sh_regnum(token);
+	int type = sh_regtype(token);
+	vec4 value = vec4(0.0);
+	// v0/v1 are the interpolated diffuse and specular, i.e. what the cascade calls
+	// D3DTA_DIFFUSE and D3DTA_SPECULAR.
+	if (type == REG_TEMP) value = r[clamp(reg, 0, PS_TEMPS - 1)];
+	else if (type == REG_INPUT) value = reg == 1 ? v_specular : v_diffuse;
+	else if (type == REG_CONST) value = u.ps_constants[clamp(reg, 0, MAX_PS_CONSTANTS - 1)];
+	else if (type == REG_TEXTURE) value = t[clamp(reg, 0, PS_TEXTURES - 1)];
+	return sh_modified(sh_swizzled(value, token), token);
+}
+
+// Returns r0, which is ps.1.1's output register.
+vec4 run_pixel_shader() {
+	vec4 r[PS_TEMPS];
+	for (int i = 0; i < PS_TEMPS; ++i) r[i] = vec4(0.0);
+	vec4 t[PS_TEXTURES];
+	for (int i = 0; i < PS_TEXTURES; ++i) t[i] = vec4(0.0);
+
+	int count = min(u.shader_counts.x, MAX_SHADER_INSTRUCTIONS);
+	for (int i = 0; i < count; ++i) {
+		ivec4 low = u.ps_program[i * 2];
+		ivec4 high = u.ps_program[i * 2 + 1];
+		int op = sh_opcode(low.x);
+		int dst = low.y;
+		int reg = sh_regnum(dst);
+		int type = sh_regtype(dst);
+
+		if (op == SIO_TEX || op == SIO_TEXCOORD) {
+			// `tex tN` samples stage N with the interpolated coordinate set N;
+			// `texcoord tN` takes the coordinate itself without sampling.
+			int stage = clamp(reg, 0, PS_TEXTURES - 1);
+			t[stage] = op == SIO_TEX ? sample_stage(stage, vec2(0.0))
+			                         : vec4(v_texcoord[stage].xyz, 1.0);
+			continue;
+		}
+		if (op == SIO_TEXKILL) {
+			// D3D8 kills the pixel when any of the first three coordinate
+			// components is negative.
+			if (any(lessThan(v_texcoord[clamp(reg, 0, PS_TEXTURES - 1)].xyz, vec3(0.0))))
+				discard;
+			continue;
+		}
+
+		vec4 s0 = ps_source(low.z, r, t);
+		vec4 s1 = ps_source(low.w, r, t);
+		vec4 s2 = ps_source(high.x, r, t);
+		vec4 value = vec4(0.0);
+		switch (op) {
+		case SIO_MOV: value = s0; break;
+		case SIO_ADD: value = s0 + s1; break;
+		case SIO_SUB: value = s0 - s1; break;
+		case SIO_MUL: value = s0 * s1; break;
+		case SIO_MAD: value = s0 * s1 + s2; break;
+		case SIO_DP3: value = vec4(dot(s0.xyz, s1.xyz)); break;
+		case SIO_DP4: value = vec4(dot(s0, s1)); break;
+		case SIO_MIN: value = min(s0, s1); break;
+		case SIO_MAX: value = max(s0, s1); break;
+		case SIO_LRP: value = mix(s2, s1, s0); break;
+		// ps.1.1's cnd compares src0.a against 0.5 and takes src1 when above.
+		case SIO_CND: value = s0.a > 0.5 ? s1 : s2; break;
+		default: break;
+		}
+
+		value = sh_shifted(value, dst);
+		// ps.1.1 registers are fixed-point: the result clamps to [-1,1], and to
+		// [0,1] when the instruction carries _sat.
+		value = sh_saturates(dst) ? clamp(value, 0.0, 1.0) : clamp(value, -1.0, 1.0);
+		int mask = sh_writemask(dst);
+		vec4 target = type == REG_TEXTURE ? t[clamp(reg, 0, PS_TEXTURES - 1)]
+		                                  : r[clamp(reg, 0, PS_TEMPS - 1)];
+		if ((mask & 1) != 0) target.x = value.x;
+		if ((mask & 2) != 0) target.y = value.y;
+		if ((mask & 4) != 0) target.z = value.z;
+		if ((mask & 8) != 0) target.w = value.w;
+		if (type == REG_TEXTURE) t[clamp(reg, 0, PS_TEXTURES - 1)] = target;
+		else r[clamp(reg, 0, PS_TEMPS - 1)] = target;
+	}
+	return r[0];
+}
+
 float pixel_fog_factor(float d) {
 	float start = u.fog_params.x;
 	float end = u.fog_params.y;
@@ -259,6 +416,21 @@ float pixel_fog_factor(float d) {
 }
 
 void main() {
+	// A pixel shader replaces the whole texture-stage cascade, exactly as it does in
+	// D3D8: SetTextureStageState is ignored while one is bound, but the alpha test
+	// and fog are still fixed-function state and still apply. D3DRS_SPECULARENABLE
+	// does not, because the shader reads v1 itself.
+	if (u.shader_counts.x != 0) {
+		vec4 shaded = run_pixel_shader();
+		if (u.flags.x != 0 && !alpha_test_passes(shaded.a)) discard;
+		if (u.flags.w != 0) {
+			float factor = u.flags2.z != FOG_NONE ? pixel_fog_factor(v_misc.y) : v_misc.x;
+			shaded.rgb = mix(u.fog_color.rgb, shaded.rgb, factor);
+		}
+		out_color = shaded;
+		return;
+	}
+
 	// D3D8 seeds CURRENT with the (lit) vertex diffuse colour before stage 0.
 	vec4 current = v_diffuse;
 	vec4 temp = vec4(0.0);

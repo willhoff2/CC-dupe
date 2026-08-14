@@ -30,6 +30,15 @@ struct Matrix4x4 {
 struct TextureHandle;
 struct VertexBufferHandle;
 struct IndexBufferHandle;
+// IDirect3DSurface8: a render target, a depth/stencil buffer, a texture's level or a
+// system-memory image surface. D3D8 hands the engine one interface for all four and
+// CopyRects/SetRenderTarget take them interchangeably, so this handle does too.
+struct SurfaceHandle;
+
+// D3D8 hands out DWORD shader handles, and the engine stores them as DWORD
+// (W3DShaderManager::m_dwBasePixelShader and friends), so the seam does the same.
+using ShaderHandle = uint32_t;
+constexpr ShaderHandle kNullShader = 0;
 
 struct SurfaceFormat {
 	uint32_t width = 0;
@@ -94,6 +103,11 @@ struct LockedRect {
 // RECT, in texels, right/bottom exclusive, as D3D8's LockRect takes it.
 struct LockRect {
 	uint32_t left = 0, top = 0, right = 0, bottom = 0;
+};
+
+// POINT, as CopyRects takes the destination corner.
+struct SurfacePoint {
+	uint32_t x = 0, y = 0;
 };
 
 // What emulating the D3D8 lock contract actually costs, counted rather than
@@ -256,6 +270,64 @@ public:
 	virtual bool Unlock_Vertex_Buffer(VertexBufferHandle* vb) = 0;
 
 	virtual ResourceStats Get_Resource_Stats() const = 0;
+
+	// --- render targets and surfaces: the SetRenderTarget/CopyRects group ------
+	// D3D8's own shape, which the engine relies on: DX8Wrapper::Set_Render_Target
+	// saves the device's current target with GetRenderTarget/GetDepthStencilSurface,
+	// binds a texture's surface, and later restores the saved pair
+	// (dx8wrapper.cpp:3336). What that costs over Vulkan render passes is in
+	// docs/porting/renderer-surface.md.
+	// A texture that can be both rendered into and sampled, i.e. D3D8's
+	// CreateTexture(D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT).
+	virtual TextureHandle* Create_Render_Target_Texture(uint32_t width,
+	                                                    uint32_t height) = 0;
+	// IDirect3DTexture8::GetSurfaceLevel. The surface stays owned by the texture.
+	virtual SurfaceHandle* Get_Surface_Level(TextureHandle* texture, uint32_t level) = 0;
+	virtual SurfaceHandle* Get_Render_Target() = 0;
+	virtual SurfaceHandle* Get_Depth_Stencil_Target() = 0;
+	// `color` null restores the default target, which is what the engine's restore
+	// path passes. `depth_stencil` null renders with no depth buffer, as D3D8 allows.
+	virtual bool Set_Render_Target(SurfaceHandle* color, SurfaceHandle* depth_stencil) = 0;
+	// CreateImageSurface: a system-memory surface, the staging half of CopyRects.
+	virtual SurfaceHandle* Create_Image_Surface(uint32_t width, uint32_t height,
+	                                            TextureFormat format) = 0;
+	// CopyRects. `rects`/`points` null copies the whole surface, as D3D8 defines it;
+	// no stretching and no format conversion, also as D3D8 defines it.
+	virtual bool Copy_Rects(SurfaceHandle* source, const LockRect* rects,
+	                        uint32_t rect_count, SurfaceHandle* destination,
+	                        const SurfacePoint* points) = 0;
+	// UpdateTexture: the managed-pool system-memory-to-video copy, level by level.
+	virtual bool Update_Texture(TextureHandle* source, TextureHandle* destination) = 0;
+	// Spike-only: the bits of a system-memory surface, so a test can assert on what
+	// CopyRects produced. Shaped like IDirect3DSurface8::LockRect minus the flags.
+	virtual bool Surface_Bits(SurfaceHandle* surface, LockedRect& out) = 0;
+
+	// --- user clip planes: SetClipPlane ---------------------------------------
+	// `plane` is A,B,C,D of Ax+By+Cz+Dw >= 0, in world space, as D3D8 defines it for
+	// the fixed-function pipeline. D3DRS_CLIPPLANEENABLE selects which are applied.
+	virtual void Set_Clip_Plane(uint32_t index, const float plane[4]) = 0;
+
+	// --- programmable shaders: the ps.1.1/vs.1.1 group ------------------------
+	// `function` is the D3D8 token stream the engine loads from a .pso/.vso file
+	// (W3DShaderManager::LoadAndCreateD3DShader), not source text: a port has to
+	// consume D3D8 shader tokens at runtime. Returns kNullShader when the program
+	// uses something the backend cannot serve, rather than rendering it wrongly.
+	virtual ShaderHandle Create_Pixel_Shader(const uint32_t* function) = 0;
+	virtual void Delete_Pixel_Shader(ShaderHandle shader) = 0;
+	// kNullShader returns to the fixed-function texture-stage cascade.
+	virtual void Set_Pixel_Shader(ShaderHandle shader) = 0;
+	virtual void Set_Pixel_Shader_Constant(uint32_t start_register, const void* data,
+	                                       uint32_t vector4_count) = 0;
+	// `declaration` is the D3DVSD_* token stream that maps v-registers onto the
+	// vertex's elements; `function` may be null, which is D3D8's declaration-only
+	// vertex shader (the fixed-function path, already served by the FVF).
+	virtual ShaderHandle Create_Vertex_Shader(const uint32_t* declaration,
+	                                          const uint32_t* function,
+	                                          uint32_t usage) = 0;
+	virtual void Delete_Vertex_Shader(ShaderHandle shader) = 0;
+	virtual void Set_Vertex_Shader(ShaderHandle shader) = 0;
+	virtual void Set_Vertex_Shader_Constant(uint32_t start_register, const void* data,
+	                                        uint32_t vector4_count) = 0;
 
 	virtual void Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream = 0) = 0;
 	virtual void Set_Index_Buffer(IndexBufferHandle* ib, uint32_t index_base_offset) = 0;

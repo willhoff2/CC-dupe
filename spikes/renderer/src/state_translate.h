@@ -69,6 +69,11 @@ struct PipelineKey {
 	// Whether D3DRS_ZBIAS is non-zero, not its value: the backend uses
 	// VK_DYNAMIC_STATE_DEPTH_BIAS, so the amount does not need its own pipeline.
 	uint32_t depth_bias_enable = 0;
+	// Whether the current render target has a depth/stencil surface. Not a D3D8 state
+	// at all: a Vulkan pipeline is only usable with a render pass it is compatible
+	// with, and D3D8's SetRenderTarget(colour, nullptr) is a pass with no depth
+	// attachment.
+	uint32_t has_depth_attachment = 1;
 
 	bool operator==(const PipelineKey& o) const;
 };
@@ -162,6 +167,7 @@ struct alignas(16) DrawUniforms {
 	// world_view puts the vertex in camera space and `view` puts the world-space
 	// light positions and directions there too.
 	float wvp[16]{};        // world*view*projection, y-flipped for Vulkan clip space
+	float world[16]{};      // object -> world; user clip planes are in world space
 	float world_view[16]{}; // object -> camera; the vertex shader derives the
 	                        // normal matrix from it
 	float view[16]{};       // world -> camera
@@ -204,6 +210,29 @@ struct alignas(16) DrawUniforms {
 	float point_size[4]{1.f, 0.f, 64.f, 0.f}; // size, min, max, sprite enable
 	// D3DRS_POINTSCALE_A/B/C and D3DRS_POINTSCALEENABLE.
 	float point_scale[4]{1.f, 0.f, 0.f, 0.f}; // a, b, c, scale enable
+
+	// --- ps.1.1 / vs.1.1, interpreted at draw time ---------------------------
+	// The engine loads its 16 shaders as compiled D3D8 token streams from .pso/.vso
+	// files (W3DShaderManager::LoadAndCreateD3DShader), so a port has to consume D3D8
+	// tokens at runtime, not shader source. Rather than translate a token stream into
+	// SPIR-V per shader, the tokens travel here and the uber-shader decodes the same
+	// bit fields d3d8types.h defines -- the same choice the texture-stage cascade
+	// already makes, for the same reason.
+	//
+	// Two ivec4 per instruction: {opcode token, destination token, source 0, source 1}
+	// and {source 2, relative-address token, -, -}.
+	int32_t ps_program[kMaxShaderInstructions][8]{};
+	int32_t vs_program[kMaxShaderInstructions][8]{};
+	float ps_constants[kMaxPixelShaderConstants][4]{};
+	float vs_constants[kMaxVertexShaderConstants][4]{};
+	// v-register -> vertex element, from the D3DVSD_* declaration. VA_* value, or -1.
+	int32_t vs_inputs[kMaxVertexShaderInputs / 4][4]{};
+	// ps instruction count, vs instruction count, -, -. Zero means fixed function.
+	int32_t shader_counts[4]{};
+
+	// D3D8 user clip planes (SetClipPlane) and the D3DRS_CLIPPLANEENABLE bitmask.
+	float clip_planes[kMaxClipPlanes][4]{};
+	int32_t clip_enable[4]{};
 };
 
 } // namespace spike

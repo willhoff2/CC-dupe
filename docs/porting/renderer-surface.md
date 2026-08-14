@@ -204,14 +204,18 @@ methods.
 
 | Measured coverage | Before this slice | After |
 |---|---:|---:|
-| Backend methods implemented | 23 / 45 | **30 / 45** |
-| Render states (`D3DRS_*`) the engine sets, served | 39 / 52 | **48 / 52** (+4 ignored by design) |
-| Texture-stage states (`D3DTSS_*`) served | 20 / 23 | **23 / 23** |
+| Backend methods implemented | 30 / 45 | **44 / 45** |
+| Render states (`D3DRS_*`) the engine sets, served | 48 / 52 | 48 / 52 (+4 ignored by design) |
+| Texture-stage states (`D3DTSS_*`) served | 23 / 23 | 23 / 23 |
 | Cascade ops (`D3DTOP_*`) served | 17 / 17 | 17 / 17 |
-| Primitive types (`D3DPT_*`) served | 1 / 3 | **3 / 3** |
-| States/ops the engine sets that nothing serves | 16 | **0** |
+| Primitive types (`D3DPT_*`) served | 3 / 3 | 3 / 3 |
+| States/ops the engine sets that nothing serves | 0 | 0 |
 
-What closed: `D3DRS_BLENDOP`; the eight point states (`POINTSIZE`, `_MIN`, `_MAX`,
+Both columns are `python3 scripts/ci/check-backend-coverage.py` output, the first measured on
+`main` before the slice and the second on its tip. The earlier wave's figures (23 / 45, 39 / 52,
+20 / 23, 1 / 3) are kept in git history rather than in this table.
+
+What the previous wave closed: `D3DRS_BLENDOP`; the eight point states (`POINTSIZE`, `_MIN`, `_MAX`,
 `POINTSPRITEENABLE`, `POINTSCALEENABLE`, `POINTSCALE_A/B/C`) that are the whole of `W3DSnow`,
 which draws every particle as one `D3DPT_POINTLIST` vertex; `SetViewport`/`GetViewport`;
 `DrawPrimitive`, `DrawIndexedPrimitive` and `DrawPrimitiveUP` for every primitive type the engine
@@ -224,19 +228,89 @@ The four render states counted as *ignored by design* carry a `COVERAGE-IGNORE:`
 switch) and `D3DRS_PATCHSEGMENTS` (N-patches, which the shipped drivers did not implement either).
 They are shadowed so `GetRenderState` still answers.
 
-The 15 backend methods still absent are the two features the spike has not started plus the
-render-target model: `Create{Pixel,Vertex}Shader` / `Delete*` / `Set{Pixel,Vertex}Shader*`
-(the 16 ps.1.1/vs.1.1 shaders), `SetRenderTarget`/`GetRenderTarget`/`GetDepthStencilSurface`/
-`CreateImageSurface`/`CopyRects`/`UpdateTexture` (offscreen targets and surface blits),
-`ProcessVertices` and `SetClipPlane`.
+What closed in this slice: the render-target model
+(`SetRenderTarget`/`GetRenderTarget`/`GetDepthStencilSurface`, plus `GetSurfaceLevel` on a
+render-target texture), the surface blits (`CreateImageSurface`, `CopyRects`, `UpdateTexture`),
+the programmable path (`Create{Pixel,Vertex}Shader`, `Delete*`, `Set{Pixel,Vertex}Shader`,
+`Set{Pixel,Vertex}ShaderConstant`) and `SetClipPlane`.
 
-Every newly claimed state and method above has a pixel assertion in `zh-fixedfunc-tests` — blend
-op per op against D3D8's own definition, a 16×16 point from one vertex, `gl_PointCoord` sprite
-coordinates split across a two-texel texture, a viewport that confines a pretransformed quad to
-half the target, a border colour sampled outside `[0,1]`, and a four-vertex strip that must cover
-two triangles and nothing more. All measured on Linux/lavapipe with the Khronos validation layer
-loaded and silent. The macOS CI job runs the same binaries on a paravirtualised GPU; it is a smoke
-test, not rasterisation parity, and no claim here was measured on Apple Silicon.
+The **one method left absent is `ProcessVertices`**, and it is deliberate. Its two call sites are
+inside `#ifdef PRE_TRANSFORM_VERTEX` in `HeightMap.cpp`, and the only place that names the macro is
+`BaseHeightMap.h`'s `#define no_PRE_TRANSFORM_VERTEX // Don't do this, not a performance win. jba.`
+— the terrain pre-transform path is compiled out, so a Vulkan implementation (a compute-shader
+vertex transform writing back into a vertex buffer, or a CPU path) would be dead code with no
+oracle to compare against. If the
+pre-transform path is ever turned back on, the cost is a compute pipeline plus a
+transform-feedback-shaped buffer contract, which is why it is scoped rather than stubbed.
+
+### What the render-target model cost
+
+This was the risk called out before the slice, and the honest answer is that D3D8's render target
+is a *state* and Vulkan's is *render-pass and framebuffer identity*, so the backend now carries
+three caches it did not have:
+
+- a render-pass cache keyed on (has depth, load vs. discard colour) — a depth-less target is a
+  differently-compatible pipeline, not a state change, so `PipelineKey` gained
+  `has_depth_attachment` and pipelines are created against the cached pass;
+- a framebuffer cache keyed on (pass, colour surface, depth surface);
+- a per-surface `VkImageLayout` that the backend transitions explicitly:
+  `COLOR_ATTACHMENT_OPTIMAL` while it is the target, `SHADER_READ_ONLY_OPTIMAL` when it is
+  sampled, `TRANSFER_SRC/DST_OPTIMAL` across a blit.
+
+Two consequences are visible in behaviour rather than in the API. D3D8 `SetRenderTarget`
+mid-frame is free; here it ends the current render pass and starts another, so a target that has
+already been drawn into has to be re-entered with `LOAD_OP_LOAD` instead of `DONT_CARE` — the
+backend tracks `written_this_frame` per surface to decide. And a `CopyRects` issued inside
+`BeginScene`/`EndScene` is recorded into the frame's own command buffer between passes, because a
+copy must see the draws that preceded it; outside a frame it is a one-shot submit.
+
+`Surface_Bits` (D3D8 `LockRect` on a surface) is implemented for system-memory surfaces only.
+Locking a *video-memory* surface is the readback the resource seam already prices, and this slice
+deliberately did not touch that code: the engine's own uses are
+`CreateImageSurface` → fill → `CopyRects`, which is served.
+
+#### The C8 read hazard, and where it can be fixed
+
+The staging-pooling slice flagged that a read-back of a paletted (C8) surface after the GPU has
+written it depends on `CopyRects`, which lives here. Measured against this implementation, both of
+the shapes it asked about are feasible in this layer, and neither is implemented here:
+
+- **unconditional readback**: `Copy_Rects` already implements the image→host direction
+  (`vkCmdCopyImageToBuffer` with an explicit transition to `TRANSFER_SRC_OPTIMAL` and back), so a
+  lock of a system-memory surface could always pull the device copy first. The cost is a full
+  pipeline stall plus a copy on *every* lock, including the overwhelmingly common case where
+  nothing on the GPU has touched the surface.
+- **GPU-dirty bit**: cheaper and the better fit, because the backend already keeps per-surface
+  state that the bit belongs next to — `written_this_frame` (set when a surface is a render-target
+  attachment) and the tracked `VkImageLayout` (set when it is a blit destination). Every path that
+  can dirty a surface goes through `Set_Render_Target` or `Copy_Rects`, so the set-points are
+  already funnelled; a lock would then read back only when the bit is set and clear it afterwards.
+
+The decision of *when* a lock triggers that readback is the resource/staging seam's contract, not
+this one, so this slice deliberately stops at exposing the copy direction and the per-surface state
+the fix needs.
+
+### The programmable path
+
+`Create{Pixel,Vertex}Shader` take D3D8 *token streams* — the engine ships compiled `.pso`/`.vso`
+blobs — so the backend parses the stream and the uber-shader interprets it per draw, rather than
+cross-compiling to SPIR-V at creation time. That keeps the immutable-pipeline design intact (a
+shader is uniform data, not a new pipeline) at the cost of a bounded interpreter:
+`kMaxShaderInstructions` = 32 instructions, `kMaxPixelShaderConstants` = 8,
+`kMaxVertexShaderConstants` = 96, matching ps.1.1/vs.1.1's own register files. The 16 shaders in
+`GeneralsMD/.../Shaders/` are 158 lines of assembly in total and fit inside that; a stream that
+does not parse is rejected at creation, which is what D3D8 does too.
+
+Every newly claimed method above has a pixel assertion in `zh-fixedfunc-tests`: rendering into a
+render-target texture and sampling both its cleared and its drawn half, a depth-less target, all
+three `CopyRects` directions (host→image, image→image mid-frame, image→host→image), an
+`UpdateTexture` upload, a ps.1.1 `tex`/`mul` program with a `SetPixelShaderConstant` scale that
+must *override* a contradicting texture-stage cascade and must give the cascade back on
+`SetPixelShader(0)`, a vs.1.1 program whose declaration maps `v0`/`v1` onto the FVF and whose
+`mul oPos, v0, c0` halves the quad, and a clip plane that removes half the target. All measured on
+Linux/lavapipe with the Khronos validation layer loaded and silent. The macOS CI job runs the same
+binaries on a paravirtualised GPU; it is a smoke test, not rasterisation parity, and no claim here
+was measured on Apple Silicon.
 
 ## 1. The surface, method by method
 
@@ -506,6 +580,15 @@ its own `Matrix4x4`/`Vector4`. The ones that need real work:
 | `D3DXLoadSurfaceFromSurface` | 3 | format-converting blit; needs a CPU converter or a compute shader |
 | `D3DXCreateTextureFromFileExA` | 1 | image file loading (DDS) |
 | `D3DXGetFVFVertexSize` | 3 | trivial, but only once FVF decoding exists |
+
+The five that the native link actually still wanted are now defined, in
+`Core/Libraries/Source/WWVegas/WWMath/d3dx8math.cpp` under the existing D3DX spellings and behind
+`#if !defined(_WIN32)` so Windows keeps the SDK's: `D3DXMATRIX`'s 16-float constructor,
+`D3DXVECTOR4`'s default and 4-float constructors, `D3DXVec4Dot` and `D3DXVec4Transform`. They wrap
+`Vector4::Dot_Product` and `Matrix4x4` rather than reimplementing the maths. Measured with
+`scripts/native-build.py --level 1 --level 2 --with-shims` (clang 14, Linux x86-64): the
+"Direct3D 8 / DirectX" category of unresolved symbols went from 5 to **0** and disappeared from the
+report, total unresolved 280 → **275**, objects 708 → **709**.
 
 ## 2. What the proof-of-concept actually does
 

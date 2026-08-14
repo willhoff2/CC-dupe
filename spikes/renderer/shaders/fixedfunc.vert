@@ -17,6 +17,14 @@
 
 #define MAX_STAGES 8
 #define MAX_LIGHTS 4
+// Must match kMaxShaderInstructions/kMaxVertexShaderConstants/kMaxClipPlanes and
+// friends in src/d3d8_subset.h.
+#define MAX_SHADER_INSTRUCTIONS 32
+#define MAX_PS_CONSTANTS 8
+#define MAX_VS_CONSTANTS 96
+#define MAX_VS_INPUTS 16
+#define MAX_CLIP_PLANES 6
+#define VS_TEMPS 12
 
 layout(location = 0) in vec4 a_position;
 layout(location = 1) in vec3 a_blendweight;
@@ -34,8 +42,13 @@ layout(location = 1) out vec4 v_specular;
 layout(location = 2) out vec4 v_misc; // x: fog factor, y: camera-space fog distance
 layout(location = 3) out vec4 v_texcoord[MAX_STAGES];
 
+// D3D8's user clip planes, which are a device feature in Vulkan rather than a
+// state: the array is always declared and a disabled plane is written as "inside".
+out float gl_ClipDistance[MAX_CLIP_PLANES];
+
 layout(set = 0, binding = 0, std140) uniform Draw {
 	mat4 wvp;
+	mat4 world;
 	mat4 world_view;
 	mat4 view;
 	mat4 tex_matrix[4];
@@ -71,7 +84,240 @@ layout(set = 0, binding = 0, std140) uniform Draw {
 	ivec4 flags3;
 	vec4 point_size;  // size, min, max, D3DRS_POINTSPRITEENABLE
 	vec4 point_scale; // D3DRS_POINTSCALE_A/B/C, D3DRS_POINTSCALEENABLE
+
+	// ps.1.1/vs.1.1 token streams, two ivec4 per instruction.
+	ivec4 ps_program[MAX_SHADER_INSTRUCTIONS * 2];
+	ivec4 vs_program[MAX_SHADER_INSTRUCTIONS * 2];
+	vec4 ps_constants[MAX_PS_CONSTANTS];
+	vec4 vs_constants[MAX_VS_CONSTANTS];
+	ivec4 vs_inputs[MAX_VS_INPUTS / 4];
+	ivec4 shader_counts; // ps instructions, vs instructions, -, -
+
+	vec4 clip_planes[MAX_CLIP_PLANES];
+	ivec4 clip_enable; // x: D3DRS_CLIPPLANEENABLE
 } u;
+
+// --- D3D8 shader token decoding ---------------------------------------------
+// The same bit fields d3d8types.h defines and src/d3d8_subset.h repeats. Shared
+// verbatim with fixedfunc.frag, which decodes the pixel half.
+int sh_opcode(int t) { return t & 0xffff; }
+int sh_regnum(int t) { return t & 0x1fff; }
+int sh_regtype(int t) { return (t >> 28) & 7; }
+int sh_writemask(int t) { return (t >> 16) & 0xf; }
+bool sh_saturates(int t) { return ((t >> 20) & 0xf) == 1; }
+int sh_dstshift(int t) { int s = (t >> 24) & 0xf; return s > 7 ? s - 16 : s; }
+bool sh_relative(int t) { return (t & 0x2000) != 0; }
+
+// D3DSHADER_PARAM_REGISTER_TYPE
+const int REG_TEMP = 0;
+const int REG_INPUT = 1;
+const int REG_CONST = 2;
+const int REG_ADDR = 3;
+const int REG_RASTOUT = 4;
+const int REG_ATTROUT = 5;
+const int REG_TEXCRDOUT = 6;
+
+// D3DSHADER_INSTRUCTION_OPCODE_TYPE
+const int SIO_MOV = 1;
+const int SIO_ADD = 2;
+const int SIO_SUB = 3;
+const int SIO_MAD = 4;
+const int SIO_MUL = 5;
+const int SIO_RCP = 6;
+const int SIO_RSQ = 7;
+const int SIO_DP3 = 8;
+const int SIO_DP4 = 9;
+const int SIO_MIN = 10;
+const int SIO_MAX = 11;
+const int SIO_SLT = 12;
+const int SIO_SGE = 13;
+const int SIO_EXP = 14;
+const int SIO_LOG = 15;
+const int SIO_LIT = 16;
+const int SIO_DST = 17;
+const int SIO_LRP = 18;
+const int SIO_FRC = 19;
+const int SIO_M4x4 = 20;
+const int SIO_M4x3 = 21;
+const int SIO_M3x4 = 22;
+const int SIO_M3x3 = 23;
+const int SIO_M3x2 = 24;
+const int SIO_EXPP = 78;
+const int SIO_LOGP = 79;
+
+vec4 sh_swizzled(vec4 v, int token) {
+	int s = (token >> 16) & 0xff;
+	float c[4] = float[4](v.x, v.y, v.z, v.w);
+	return vec4(c[s & 3], c[(s >> 2) & 3], c[(s >> 4) & 3], c[(s >> 6) & 3]);
+}
+
+// D3DSPSM_*, the source-register modifiers. DZ and DW are projective divides that
+// only appear in ps.1.1 texture addressing; they pass through unmodified.
+vec4 sh_modified(vec4 v, int token) {
+	int m = (token >> 24) & 0xf;
+	if (m == 1) return -v;
+	if (m == 2) return v - 0.5;
+	if (m == 3) return -(v - 0.5);
+	if (m == 4) return 2.0 * v - 1.0;
+	if (m == 5) return -(2.0 * v - 1.0);
+	if (m == 6) return 1.0 - v;
+	if (m == 7) return 2.0 * v;
+	if (m == 8) return -2.0 * v;
+	return v;
+}
+
+vec4 sh_shifted(vec4 v, int token) {
+	int s = sh_dstshift(token);
+	if (s > 0) return v * float(1 << s);
+	if (s < 0) return v / float(1 << (-s));
+	return v;
+}
+
+// --- vs.1.1 -----------------------------------------------------------------
+// The v-register the declaration mapped onto a vertex element, resolved to the
+// element by the backend (DrawUniforms::vs_inputs).
+vec4 vs_input(int reg) {
+	int element = u.vs_inputs[reg >> 2][reg & 3];
+	switch (element) {
+	case 0: return vec4(a_position.xyz, 1.0);
+	case 1: return vec4(a_blendweight, 0.0);
+	case 2: return vec4(a_blendindices);
+	case 3: return vec4(a_normal, 0.0);
+	case 4: return a_diffuse;
+	case 5: return a_specular;
+	case 6: return a_texcoord0;
+	case 7: return a_texcoord1;
+	case 8: return a_texcoord2;
+	case 9: return a_texcoord3;
+	default: return vec4(0.0);
+	}
+}
+
+vec4 vs_source(int token, vec4 r[VS_TEMPS], int a0) {
+	int reg = sh_regnum(token);
+	int type = sh_regtype(token);
+	vec4 value = vec4(0.0);
+	if (type == REG_TEMP) {
+		value = r[clamp(reg, 0, VS_TEMPS - 1)];
+	} else if (type == REG_INPUT) {
+		value = vs_input(clamp(reg, 0, MAX_VS_INPUTS - 1));
+	} else if (type == REG_CONST) {
+		// vs.1.1's c[a0.x + n]: the address register is implicit, so the relative bit
+		// is all there is to read.
+		int index = sh_relative(token) ? reg + a0 : reg;
+		value = u.vs_constants[clamp(index, 0, MAX_VS_CONSTANTS - 1)];
+	}
+	return sh_modified(sh_swizzled(value, token), token);
+}
+
+void run_vertex_shader() {
+	vec4 r[VS_TEMPS];
+	for (int i = 0; i < VS_TEMPS; ++i) r[i] = vec4(0.0);
+	vec4 out_position = vec4(0.0, 0.0, 0.0, 1.0);
+	vec4 out_diffuse = vec4(1.0);
+	vec4 out_specular = vec4(0.0);
+	vec4 out_texcoord[4] = vec4[4](vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0));
+	int a0 = 0;
+
+	int count = min(u.shader_counts.y, MAX_SHADER_INSTRUCTIONS);
+	for (int i = 0; i < count; ++i) {
+		ivec4 low = u.vs_program[i * 2];
+		ivec4 high = u.vs_program[i * 2 + 1];
+		int op = sh_opcode(low.x);
+		int dst = low.y;
+		vec4 s0 = vs_source(low.z, r, a0);
+		vec4 s1 = vs_source(low.w, r, a0);
+		vec4 s2 = vs_source(high.x, r, a0);
+		vec4 value = vec4(0.0);
+		switch (op) {
+		case SIO_MOV: value = s0; break;
+		case SIO_ADD: value = s0 + s1; break;
+		case SIO_SUB: value = s0 - s1; break;
+		case SIO_MUL: value = s0 * s1; break;
+		case SIO_MAD: value = s0 * s1 + s2; break;
+		case SIO_RCP: value = vec4(s0.x != 0.0 ? 1.0 / s0.x : 0.0); break;
+		case SIO_RSQ: value = vec4(s0.x != 0.0 ? inversesqrt(abs(s0.x)) : 0.0); break;
+		case SIO_DP3: value = vec4(dot(s0.xyz, s1.xyz)); break;
+		case SIO_DP4: value = vec4(dot(s0, s1)); break;
+		case SIO_MIN: value = min(s0, s1); break;
+		case SIO_MAX: value = max(s0, s1); break;
+		case SIO_SLT: value = vec4(lessThan(s0, s1)); break;
+		case SIO_SGE: value = vec4(greaterThanEqual(s0, s1)); break;
+		case SIO_EXP: case SIO_EXPP: value = vec4(exp2(s0.x)); break;
+		case SIO_LOG: case SIO_LOGP:
+			value = vec4(abs(s0.x) > 0.0 ? log2(abs(s0.x)) : -3.4e38);
+			break;
+		case SIO_FRC: value = fract(s0); break;
+		case SIO_LRP: value = mix(s2, s1, s0); break;
+		// D3D8's lighting helpers, defined exactly as the spec writes them.
+		case SIO_LIT: {
+			float power = clamp(s0.w, -128.0 + 1e-6, 128.0 - 1e-6);
+			value = vec4(1.0, max(s0.x, 0.0),
+			             (s0.x > 0.0 && s0.y > 0.0) ? pow(s0.y, power) : 0.0, 1.0);
+			break;
+		}
+		case SIO_DST:
+			value = vec4(1.0, s0.y * s1.y, s0.z, s1.w);
+			break;
+		case SIO_M4x4: case SIO_M4x3: case SIO_M3x4: case SIO_M3x3: case SIO_M3x2: {
+			// The matrix is consecutive registers starting at source 1, and the
+			// operand count says how many rows and how wide each dot product is.
+			int rows = (op == SIO_M4x4 || op == SIO_M3x4) ? 4
+			          : (op == SIO_M3x2 ? 2 : 3);
+			bool three = (op == SIO_M3x4 || op == SIO_M3x3 || op == SIO_M3x2);
+			value = vec4(0.0, 0.0, 0.0, 1.0);
+			for (int row = 0; row < rows; ++row) {
+				vec4 m = vs_source(low.w + row, r, a0);
+				float d = three ? dot(s0.xyz, m.xyz) : dot(s0, m);
+				if (row == 0) value.x = d;
+				else if (row == 1) value.y = d;
+				else if (row == 2) value.z = d;
+				else value.w = d;
+			}
+			break;
+		}
+		default: break;
+		}
+
+		value = sh_shifted(value, dst);
+		if (sh_saturates(dst)) value = clamp(value, 0.0, 1.0);
+		int mask = sh_writemask(dst);
+		int reg = sh_regnum(dst);
+		int type = sh_regtype(dst);
+		if (type == REG_ADDR) {
+			// `mov a0.x, v1`: D3D8 rounds the value to the nearest integer.
+			a0 = int(round(value.x));
+			continue;
+		}
+		vec4 target;
+		if (type == REG_TEMP) target = r[clamp(reg, 0, VS_TEMPS - 1)];
+		else if (type == REG_RASTOUT) target = out_position;
+		else if (type == REG_ATTROUT) target = reg == 1 ? out_specular : out_diffuse;
+		else if (type == REG_TEXCRDOUT) target = out_texcoord[clamp(reg, 0, 3)];
+		else target = vec4(0.0);
+		if ((mask & 1) != 0) target.x = value.x;
+		if ((mask & 2) != 0) target.y = value.y;
+		if ((mask & 4) != 0) target.z = value.z;
+		if ((mask & 8) != 0) target.w = value.w;
+		if (type == REG_TEMP) r[clamp(reg, 0, VS_TEMPS - 1)] = target;
+		else if (type == REG_RASTOUT) out_position = target;
+		else if (type == REG_ATTROUT) { if (reg == 1) out_specular = target; else out_diffuse = target; }
+		else if (type == REG_TEXCRDOUT) out_texcoord[clamp(reg, 0, 3)] = target;
+	}
+
+	// oPos is in D3D clip space, where +y is up; Vulkan's is +y down. The
+	// fixed-function path folds this flip into wvp, but a vertex shader builds its own
+	// projection out of constants, so the flip has to happen here instead.
+	gl_Position = vec4(out_position.x, -out_position.y, out_position.z, out_position.w);
+	v_diffuse = out_diffuse;
+	v_specular = out_specular;
+	for (int i = 0; i < 4; ++i) v_texcoord[i] = out_texcoord[i];
+	for (int i = 4; i < MAX_STAGES; ++i) v_texcoord[i] = vec4(0.0);
+	// oFog is not written by any shader the engine ships, so fog stays off for the
+	// shader path rather than reusing the fixed-function factor.
+	v_misc = vec4(1.0, 0.0, 0.0, 0.0);
+	gl_PointSize = 1.0;
+}
 
 // D3DTSS_TEXTURETRANSFORMFLAGS
 const int TTFF_DISABLE = 0;
@@ -277,5 +523,18 @@ void main() {
 		// divides after interpolation, and doing it here would make a projected
 		// texture affine across the triangle.
 		v_texcoord[stage] = coord;
+	}
+
+	// A vertex shader replaces all of the above, which is what D3D8 does too: with
+	// one set, none of SetTransform/SetLight/SetMaterial affects the vertex.
+	if (u.shader_counts.y != 0) run_vertex_shader();
+
+	// --- user clip planes ---------------------------------------------------
+	// D3D8's planes are in world space for fixed-function vertices, and the plane
+	// equation is the same one Vulkan's clip distance uses: keep where dot >= 0.
+	vec4 world_position = u.world * position;
+	for (int i = 0; i < MAX_CLIP_PLANES; ++i) {
+		bool enabled = (u.clip_enable.x & (1 << i)) != 0;
+		gl_ClipDistance[i] = enabled ? dot(u.clip_planes[i], world_position) : 1.0;
 	}
 }
