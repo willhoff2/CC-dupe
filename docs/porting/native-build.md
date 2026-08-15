@@ -488,17 +488,17 @@ What this does *not* claim: nothing here plays a sound. It is the same compile-a
 every other figure in this document. `audio-device-seam.md` §7 lists what is still open behind the
 API (MP2/MP3 streams, EFX, the Bink handoff), and none of it is visible to a linker.
 
-## Strict linking and the pile split, measured 2026-08-15 on 8bb8aff56 with clang 14 (current baseline)
+## Strict linking and the pile split, measured 2026-08-15 on 219d9130b with clang 14 (current baseline)
 
 Every figure above was produced by a link that *tolerates* unresolved symbols: `--whole-archive`
-plus `-Wl,--warn-unresolved-symbols`, which makes 339 unresolved symbols warnings, exits 0 and
+plus `-Wl,--warn-unresolved-symbols`, which makes 250 unresolved symbols warnings, exits 0 and
 writes a file. That file is not an executable — the loader would reject it — so "the link succeeds"
 has never meant what it sounds like. `--strict-link` removes the tolerance and reports the linker's
 own verdict:
 
 | | tolerant link | `--strict-link` |
 |---|---|---|
-| unresolved symbols | 339, warnings | 339, errors |
+| unresolved symbols | 250, warnings | 250, errors |
 | exit status | 0 | non-zero (and `native-build.py` exits 1) |
 | file produced | yes | **no** |
 
@@ -510,14 +510,14 @@ references it, which the `nm` scan cannot say.
 Nothing is stubbed to shorten the list, and nothing may be: a strict link made green with stubs
 would delete exactly the measurement this harness exists for.
 
-| Levels 1-4, `--with-shims`, `8bb8aff56` | |
+| Levels 1-4, `--with-shims`, `219d9130b` | |
 |---|---:|
 | Translation units | 972 |
 | Object files produced | 968 |
 | Probe-clean but uncompilable | 0 |
 | Compile failures | 4 (3 cut-scope GameSpy units + `dx8wrapper.cpp`) |
-| Archives linked | 14 |
-| Unresolved symbols (tolerant link, and strict) | 339 |
+| Archives linked | 14 (+2 support: the OpenAL backend and lzhl) |
+| Unresolved symbols (tolerant link, and strict) | 250 |
 | Strict link produced an executable | **no** |
 
 ### The second axis: what would resolve each symbol
@@ -529,11 +529,18 @@ carries a second attribution, its **pile**, and only one pile is port work:
 
 | Pile | Levels 1-3 | Levels 1-4 | What resolves it |
 |---|---:|---:|---|
-| `library-not-linked` | 102 | 131 | a library on the link line |
+| `library-not-linked` | 42 | 42 | a library on the link line |
 | `cut-scope-not-linked` | 82 | 82 | excising a cut feature's call sites |
 | `compile-blocked` | 18 | 108 | making a named translation unit compile (~90 of the 108 are `dx8wrapper.cpp`'s) |
 | `harness-artefact` | 400 | 9 | a build step or `#if` this configuration does not take |
 | `no-definition-anywhere` | 6 | **9** | **writing code** |
+
+`library-not-linked` fell 131 → 42 between this slice's first measurement and this one, because the
+audio backend landed in between and took Miles' 90 symbols to 1. That is the second axis earning its
+keep: the headline fell by 89 with no port work done, which is exactly the reading it exists to
+prevent. `--strict-link` therefore links the same support archives and system libraries as the
+tolerant link, `libopenal` included — omitting it would fail the strict link on 90 symbols the
+tolerant link resolves, and those would read as port work.
 
 The piles are assigned from evidence, not keywords: for each provider the script scans the sources
 or headers `fetch-probe-deps.sh` pins and matches the symbols they define, so the split is
@@ -543,7 +550,7 @@ changed with the box would not be a measurement.
 
 | Provider | Pile | Symbols at level 4 | Owner |
 |---|---|---:|---|
-| Miles `AIL_*` (OpenAL implementation not linked here) | `library-not-linked` | 90 | `platform/audio-device` |
+| Miles `AIL_*` — only what the OpenAL backend does not implement (`MSS_auto_cleanup`) | `library-not-linked` | 1 | `platform/audio-device` |
 | FFmpeg | `library-not-linked` | 29 | `video/bink-excision-and-harness-headers` |
 | SDL2 / Cocoa window backend | `library-not-linked` | 12 | `platform/macos-window-compile`, `platform/window-seam-wiring` |
 | GameSpy SDK | `cut-scope-not-linked` | 82 | `online/absent-menu-seam` |
@@ -558,7 +565,7 @@ checkable definition of "startable".
 ### Is strict linking stable enough for CI
 
 Yes, and it is wired into the `Native build + renderer` job. It is a link, not a compile, so it costs
-seconds; two consecutive runs produced byte-identical JSON including the 339 `referenced_by` entries
+seconds; two consecutive runs produced byte-identical JSON including the 250 `referenced_by` entries
 and the per-pile symbol lists. Because it exits non-zero today by design, the step records its exit
 status in the job summary and asserts the JSON exists; the ratchet is the baseline check, which fails
 if the count the linker refuses grows.
@@ -572,7 +579,7 @@ if the count the linker refuses grows.
 - **The link is not clean, and is not meant to be.** A binary is produced because unresolved symbols
   are warnings, not errors; the report records `link_binary_produced` and `link_clean` separately so
   the difference cannot be glossed over. `--strict-link` is the measurement that cannot be glossed:
-  no file, non-zero status, 339 named symbols.
+  no file, non-zero status, 250 named symbols.
 - **A strict link that fails is not a launch attempt.** Nothing here has executed a single
   instruction of the game, and no amount of symbol resolution would: the engine loads ~25
   `Data\INI\...` directories out of a retail install during `GameEngine::init()`, which CI has no

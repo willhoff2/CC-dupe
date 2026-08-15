@@ -1,6 +1,8 @@
-# What "startable" means, and what stands between 339 symbols and a running process
+# What "startable" means, and what stands between 250 symbols and a running process
 
-Measured at `8bb8aff56` with `clang++-14` on Ubuntu 22.04, levels 1-4 shimmed:
+Measured at `219d9130b` with `clang++-14` on Ubuntu 22.04, levels 1-4 shimmed — i.e. after #64 put
+the OpenAL backend on the link line, which is why every total here is 89 lower than this slice's
+first measurement without a line of port work being done.
 
 ```sh
 ./scripts/ci/fetch-probe-deps.sh
@@ -18,7 +20,7 @@ None of it is quoted from prose.
 Levels 1-4 produce **968/972 object files**, and the link is anchored by
 `GeneralsMD/Code/Main`'s own `main()` (`PlatformMain.cpp`) rather than by a stub the harness writes.
 That link also **produces a file**, and the file means nothing: it is linked with
-`-Wl,--warn-unresolved-symbols`, so 339 unresolved symbols are warnings and the linker exits 0. The
+`-Wl,--warn-unresolved-symbols`, so 250 unresolved symbols are warnings and the linker exits 0. The
 loader would reject the result immediately.
 
 `--strict-link` drops the tolerance and asks the linker for a verdict:
@@ -26,16 +28,16 @@ loader would reject the result immediately.
 | | tolerant link (`link_probe`) | strict link (`--strict-link`) |
 |---|---|---|
 | flags | `-Wl,--warn-unresolved-symbols` | none |
-| unresolved symbols | 339, reported as warnings | 339, reported as errors |
+| unresolved symbols | 250, reported as warnings | 250, reported as errors |
 | exit status | 0 | non-zero |
 | file produced | yes | **no** |
 
-The two lists are identical, which is the useful part: the strict link's 339 and the `nm` scan's 339
+The two lists are identical, which is the useful part: the strict link's 250 and the `nm` scan's 250
 agree symbol for symbol (`strict_link.agrees_with_nm`), so the categorised list is exactly the list
 standing between this build and an executable. Nothing is stubbed to obtain that, and nothing may
 be — a green strict link bought with stubs would hide precisely the work these numbers count.
 
-## 2. The 339, by what would resolve each one
+## 2. The 250, by what would resolve each one
 
 The existing categories say what a symbol *is* (`Win32 API`, `FFmpeg`, `Miles Sound System`). They do
 not say what makes it go away, and conflating the two is what made the pre-level-4 figure
@@ -45,7 +47,7 @@ therefore also assigned to exactly one **pile**:
 
 | Pile | Symbols | What resolves it | Owner |
 |---|---:|---|---|
-| `library-not-linked` | 131 | Adding a library to the link line. | see §3 |
+| `library-not-linked` | 42 | Adding a library to the link line. | see §3 |
 | `cut-scope-not-linked` | 82 | Excising the call sites of a cut feature. | `online/absent-menu-seam` |
 | `compile-blocked` | 108 | Making an in-tree translation unit compile; the definition already exists. | the slice that owns the file |
 | `harness-artefact` | 9 | A build step this harness does not run, or an `#if` this configuration does not take. | this slice |
@@ -68,16 +70,19 @@ box would not be a measurement. Where a real library is present it is used as a 
 reported in `providers.*.system_libraries`: all 29 FFmpeg symbols are exported by this box's
 `libavcodec.so.58` and friends.
 
-## 3. `library-not-linked`: 131 symbols, and why each library is absent
+## 3. `library-not-linked`: 42 symbols, and why each library is absent
 
 | Library | Symbols | Why it is not linked here | Slice that will remove them |
 |---|---:|---|---|
-| Miles `AIL_*` API | 90 | `cmake/openal.cmake` builds an OpenAL implementation of the same API and the 32-bit Windows build links the fetched `miles-sdk-stub`. This harness builds neither: `Core/Libraries/Source/OpenALAudioDevice` is not one of its levels. | `platform/audio-device` |
+| Miles `AIL_*` API | 1 | Was 90. #64 builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links `libopenal`, so 89 of the 90 resolved with no `AIL_*` written or stubbed. What remains is `MSS_auto_cleanup`, which that backend does not implement. | `platform/audio-device` |
 | FFmpeg | 29 | The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route (`cmake/config-build.cmake`, default `OFF`). This harness compiles source lists rather than honouring that option, so `VideoDevice/FFmpeg/*.cpp` is built with the pinned headers `fetch-probe-deps.sh` provisions, while nothing installs an FFmpeg runtime to link against. | `video/bink-excision-and-harness-headers` |
 | SDL2 / Cocoa window backend | 12 | `probe.OPTIONAL_BACKENDS` keeps `platform_window_sdl2.cpp` opt-in, and `platform_window_cocoa.mm` is Objective-C++ so no target lists it. Both definitions are in the tree. | `platform/macos-window-compile`, `platform/window-seam-wiring` |
 | zlib, LZHL | 0 | Already linked: `libz` from the system and the provisioned LZHL sources as a support archive. Listed because their absence used to be counted. | — |
 
-These 131 are the same class of artefact level 4 removed for the renderer. They are not a smaller
+These 42 are the same class of artefact level 4 removed for the renderer, and the drop from 131
+demonstrates it: the strict link must be given the same libraries as the tolerant one (`libopenal`
+included) or it would report 90 symbols as unresolved that the engine can already resolve, which
+would read as port work. They are not a smaller
 number of "real" problems; they are a link line and a decision. The decision matters, which is §4.
 
 `cut-scope-not-linked` is 82 GameSpy SDK symbols. The SDK's own sources define all of them, so this
@@ -138,12 +143,12 @@ That decomposes into checkable conditions, none of which is met today:
 
 | Condition | Status |
 |---|---|
-| Strict link produces a binary | **no** — 339 unresolved symbols |
+| Strict link produces a binary | **no** — 250 unresolved symbols |
 | `no-definition-anywhere` is empty | **no** — 9 symbols |
 | Every measured translation unit compiles | **no** — 4 failures, 3 of them cut-scope GameSpy units |
 | A window backend is selected | **no** — the configuration picks none |
 | A renderer device exists | **no** — `dx8wrapper.cpp` does not compile (`DriverVersion`) |
-| An audio device exists | **no** — no `AIL_*` implementation is linked |
+| An audio device exists | **partly** — the OpenAL `AIL_*` implementation is linked (#64), but nothing has opened a device or played a sound |
 | `gitinfo` is generated | **no** — the harness does not run the CMake step |
 | Retail `Data/` available to the process | out of scope for CI; required for any launch |
 
@@ -158,16 +163,17 @@ The 9 `no-definition-anywhere` symbols, with the object file that needs each:
 
 So the honest headline is: **9 symbols of real port work — 4 D3DX texture/shader helpers, 4
 cursor/window calls the window seam owns, and one WWAudio member function** — on top of
-`dx8wrapper.cpp`, a backend that must be chosen, and a data dependency CI will never satisfy. The 330
+`dx8wrapper.cpp`, a backend that must be chosen, and a data dependency CI will never satisfy. The 241
 others are a link line, a cut feature, or this harness.
 
 ## 6. What the first launch attempt would actually require
 
-1. `platform/audio-device` links the OpenAL `AIL_*` implementation (#64, next in the merge order,
-   takes the Miles category to 0 and the total to a measured-elsewhere ~250); `online/absent-menu-seam`
-   removes the GameSpy call sites, which is 82 symbols plus ~18 of the 108 `compile-blocked` ones;
-   finishing `dx8wrapper.cpp` removes the other ~90. Those plus the 9 harness symbols account for 289
-   of the 339, leaving FFmpeg's 29, the backend's 12 and the 9 that are port work.
+1. `platform/audio-device` has landed (#64): the Miles category is 0, the total 339 → 250, and the
+   prediction it made — that this was a link line and not unported code — held exactly.
+   `online/absent-menu-seam` removes the GameSpy call sites, which is 82 symbols plus ~18 of the 108
+   `compile-blocked` ones; finishing `dx8wrapper.cpp` removes the other ~90. Those plus the 9 harness
+   symbols account for 200 of the 250, leaving FFmpeg's 29, the backend's 12 and the 9 that are port
+   work.
 2. The harness gains a real link configuration rather than a measurement one: an SDL2 backend
    selected, `gitinfo.cpp` generated, `libavcodec` either linked or the video path compiled out.
 3. `--strict-link` goes green, at which point the ratchet flips from "the count must not grow" to

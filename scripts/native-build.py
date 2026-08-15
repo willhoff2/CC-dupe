@@ -460,8 +460,10 @@ PROVIDERS = (
         label="Miles AIL_* API — the `milesstub`/OpenAL backend",
         pile=PILE_LIBRARY,
         reason="`cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, "
-               "and the 32-bit Windows build links the fetched miles-sdk-stub. This harness builds "
-               "neither: `Core/Libraries/Source/OpenALAudioDevice` is not one of its levels.",
+               "and the 32-bit Windows build links the fetched miles-sdk-stub. This harness now "
+               "builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links "
+               "libopenal, so what is left here is the part of the Miles surface that backend does "
+               "not implement rather than the whole API.",
         owner="platform/audio-device (the Miles/OpenAL link)",
         sources=("Core/Libraries/Source/OpenALAudioDevice/**/*.cpp",
                  "@deps/miles-src/*.c"),
