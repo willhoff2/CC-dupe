@@ -282,6 +282,12 @@ typedef struct _PAINTSTRUCT {
 	HDC hdc; BOOL fErase; RECT rcPaint; BOOL fRestore, fIncUpdate; BYTE rgbReserved[32];
 } PAINTSTRUCT, *LPPAINTSTRUCT;
 
+// The monitor geometry WW3D2/dx8wrapper.cpp centres a windowed render device inside. cbSize is
+// first because the call sites brace-initialise it as `{sizeof(MONITORINFO)}`.
+typedef struct _MONITORINFO {
+	DWORD cbSize; RECT rcMonitor; RECT rcWork; DWORD dwFlags;
+} MONITORINFO, *LPMONITORINFO;
+
 typedef struct _RGBQUAD { BYTE rgbBlue, rgbGreen, rgbRed, rgbReserved; } RGBQUAD;
 typedef struct _PALETTEENTRY { BYTE peRed, peGreen, peBlue, peFlags; } PALETTEENTRY, *LPPALETTEENTRY;
 
@@ -477,6 +483,16 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define SW_SHOWNORMAL            1
 #define SW_MINIMIZE              6
 #define SW_RESTORE               9
+// GetWindowLong indices and the SetWindowPos flags the renderer's window sizing uses.
+#define GWL_STYLE                (-16)
+#define GWL_EXSTYLE              (-20)
+#define SWP_NOSIZE               0x0001
+#define SWP_NOMOVE               0x0002
+#define SWP_NOZORDER             0x0004
+// MonitorFromWindow fallbacks when the window intersects no monitor.
+#define MONITOR_DEFAULTTONULL    0x00000000
+#define MONITOR_DEFAULTTOPRIMARY 0x00000001
+#define MONITOR_DEFAULTTONEAREST 0x00000002
 #define HWND_TOP                 ((HWND)0)
 #define HWND_TOPMOST             ((HWND)-1)
 #define HWND_NOTOPMOST           ((HWND)-2)
@@ -724,6 +740,11 @@ BOOL    UpdateWindow(HWND);
 BOOL    SetWindowPos(HWND, HWND, int, int, int, int, UINT);
 BOOL    GetClientRect(HWND, LPRECT);
 BOOL    GetWindowRect(HWND, LPRECT);
+LONG    GetWindowLongA(HWND, int);
+BOOL    AdjustWindowRect(LPRECT, DWORD, BOOL);
+HMONITOR MonitorFromWindow(HWND, DWORD);
+BOOL    GetMonitorInfoA(HMONITOR, LPMONITORINFO);
+HWND    GetDesktopWindow();
 BOOL    IsIconic(HWND);
 LRESULT SendMessageA(HWND, UINT, WPARAM, LPARAM);
 BOOL    PostMessageA(HWND, UINT, WPARAM, LPARAM);
@@ -786,6 +807,10 @@ COLORREF SetTextColor(HDC, COLORREF);
 BOOL     GetTextMetricsA(HDC, LPTEXTMETRICA);
 int      MulDiv(int, int, int);
 BOOL    InvalidateRect(HWND, LPCRECT, BOOL);
+// The gamma path WW3D2/dx8wrapper.cpp falls back to when the D3D8 device cannot set a gamma ramp.
+// LPVOID rather than LPRAMP because the ramp the call site passes is D3D8's D3DGAMMARAMP, which is
+// layout-identical to GDI's and would drag wingdi's spelling into this header for nothing.
+BOOL    SetDeviceGammaRamp(HDC, LPVOID);
 }
 
 // The engine builds ANSI-only; the real headers alias the A variants behind these names.
@@ -836,6 +861,8 @@ BOOL    InvalidateRect(HWND, LPCRECT, BOOL);
 #define lstrcat          lstrcatA
 #define lstrcmp          lstrcmpA
 #define lstrcmpi         lstrcmpiA
+#define GetWindowLong    GetWindowLongA
+#define GetMonitorInfo   GetMonitorInfoA
 #define LoadCursor       LoadCursorA
 #define CreateFont       CreateFontA
 #define GetTextMetrics   GetTextMetricsA
