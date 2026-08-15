@@ -11,7 +11,7 @@ python3 scripts/porting-status.py
 
 ## Native 64-bit compile readiness
 
-Measured with clang 14. Vendor headers present: dx8-src, gamespy-src/include, lzhl-src, miles-src, miles-src/mss, stb-src.
+Measured with clang 14. Vendor headers present: dx8-src, ffmpeg-src, gamespy-src/include, lzhl-src, miles-src, miles-src/mss, stb-src.
 
 | Target | Native clean | Shimmed clean |
 |---|---:|---:|

@@ -223,6 +223,39 @@ the same treatment as `rts::ClientInstance::s_instanceLock`, and no Win32 type s
 So criterion "Main produces objects" is **not met**, and cannot be met from inside this slice: it
 unblocks when the Bink slice lands.
 
+## The wave-3 stack, measured together on this branch with clang 14 (current baseline)
+
+The three wave-3 slices — video/Bink excision, the renderer layer off Windows, and the GDI font
+seam — were measured separately, each against `main`, so their numbers do not add up. Measured as
+one branch:
+
+| | `main` | Stacked |
+|---|---:|---:|
+| Translation units | 835 | 836 |
+| Object files produced | 756 | 816 |
+| Compile failures | 79 | 20 |
+| Probe-clean but uncompilable | 0 | 0 |
+| Unresolved symbols after linking | 341 | 457 |
+
+Two facts the per-slice reports could not show:
+
+- **`GeneralsMD/Code/Main` still produces no archive**, and the reason has changed. `bink.h` is gone
+  and the `sizeof(long)` assertion is gone, so the remaining diagnostic is
+  `allocating an object of abstract class type 'CComObject<W3DWebBrowser>'` — the COM browser
+  embedding, which is cut scope and now the sole thing between this build and a game target.
+- **Five units failed with `redefinition of '_D3DMATRIX'`, which was a shim collision rather than a
+  port defect** — fixed here. Once the renderer slice makes the vendored `d3d8types.h` reachable off
+  Windows, a unit can reach both it and `scripts/native-port-shims/d3d8types.h` (through the shim's
+  `d3dx8math.h`), and `#pragma once` does not deduplicate two different files defining the same type.
+  The shim now carries the vendored header's own `_D3D8TYPES_H_` guard, so whichever is found first
+  is the only definition. The renderer slice's report recorded these units with an empty diagnostic,
+  so the cause only became visible with this branch's diagnostic attribution and the vendored headers
+  in one tree: +4 objects (`W3DView`, `W3DWater` and the three shadow units).
+
+Unresolved symbols rise for the reason the slices each predicted: 272 of the 457 are defined in
+`WW3D2`, which levels 1+2+3 do not build. The total will not fall until the renderer library is
+built.
+
 ## What this does not show
 
 - **This is Linux x86-64, not macOS arm64.** Nothing here has been run on Apple Silicon. The
