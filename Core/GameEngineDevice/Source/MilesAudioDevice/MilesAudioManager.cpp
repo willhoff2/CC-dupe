@@ -38,6 +38,11 @@
 /*		7/18/2002 : Initial creation                                           */
 /*---------------------------------------------------------------------------*/
 
+// TheSuperHackers @port The Win32 mutex and Interlocked spellings this file uses reached it through
+// <dsound.h> on Windows, which is Windows-only. <windows.h> is where they are declared on both
+// platforms - off Windows over the portable implementations in WWLib's platform_win32_kernel.cpp
+// (docs/porting/win32-runtime-and-crt-gaps.md) - so include it in its own right.
+#include <windows.h>
 #ifdef _WIN32
 #include <dsound.h>
 #endif

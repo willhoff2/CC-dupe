@@ -194,9 +194,11 @@ else()
         platform/platform_win32_compat.h
         platform/platform_win32_file.cpp
         platform/platform_win32_gdi_font.cpp
+        platform/platform_win32_kernel.cpp
         platform/platform_win32_locale.cpp
         platform/platform_win32_module.cpp
         platform/platform_win32_stub.cpp
+        platform/platform_win32_user.cpp
     )
     # The window/event-loop/input backends (docs/porting/window-event-loop.md). The header
     # above is always listed because it is pure declarations; a backend is opt-in and off by

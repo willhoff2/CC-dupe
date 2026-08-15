@@ -276,6 +276,10 @@ that only appear once the game target links: `native-build.py` had to reproduce 
 CMake-generated `BuildVersion.h`/`GeneratedVersion.h`, and it removes the two standalone test tools'
 `main()` objects from the archives, since a duplicate entry point is otherwise all the linker reports.
 
+The kernel32/CRT gap slice has since moved this on to 826/839 objects with 13 compile failures, and
+the unresolved total to 546 for the same reason — see `docs/porting/win32-runtime-and-crt-gaps.md`.
+`docs/porting/native-build-report.md` is the generated, authoritative version of these counts.
+
 ## What this does not show
 
 - **This is Linux x86-64, not macOS arm64.** Nothing here has been run on Apple Silicon. The

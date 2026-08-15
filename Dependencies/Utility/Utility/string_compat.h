@@ -65,3 +65,8 @@ inline char *_strupr(char *str) {
 #define _strnicmp strncasecmp
 #define _strcmpi strcasecmp
 
+// TheSuperHackers @port `_strdup` is MSVC's conforming spelling of POSIX `strdup`, which is what
+// <string.h> above already declares. A macro rather than an inline wrapper because the engine
+// writes `::_strdup` (WW3D2/agg_def.h, part_ldr.cpp), which only resolves for a global name.
+#define _strdup strdup
+
