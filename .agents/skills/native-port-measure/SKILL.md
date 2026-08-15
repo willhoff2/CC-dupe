@@ -71,10 +71,16 @@ comparable:
 
 ```sh
 CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims \
+  --strict-link \
   --report docs/porting/native-build-report.md \
   --json docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json
 python3 scripts/ci/check-native-build-baseline.py --results docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json
 ```
+
+`--strict-link` is not optional even though it exits non-zero: the strict link is expected to fail
+today, and the checker refuses to compare a result measured without it — the executable figure it
+ratchets simply went unmeasured, so it reports `regressed` on an otherwise identical tree. Read the
+non-zero exit of `native-build.py` as the strict link's own status and the checker's exit as the gate.
 
 The audio gates need the backend *built*, so they need the top-level CMake build (CMake >= 3.25,
 `libopenal-dev`), and `check-openal-symbols.py` needs both of its paths. Use a build directory other
@@ -95,8 +101,8 @@ python3 scripts/audio-surface-scan.py --check
 
 Ubuntu 22.04 ships CMake 3.22, which the top-level `cmake_minimum_required(3.25)` rejects; the
 `audio-surface-scan.py --check` half of the pair still runs without a build, but the symbol gate does
-not. `pip install --user cmake` provides a new enough `~/.local/bin/cmake` without touching the
-system one.
+not. `pip install --user 'cmake==4.1.2'` provides a new enough `~/.local/bin/cmake` without touching
+the system one; that is the version the audio CI job pins, so it configures the same way.
 
 ## 6. Regenerate the status document
 
@@ -104,6 +110,12 @@ system one.
 python3 scripts/porting-status.py          # rewrite docs/porting/STATUS.md
 python3 scripts/porting-status.py --check  # what CI runs
 ```
+
+The native build's `First diagnostic` column is attributed by following clang's `In file included
+from` chain back to the translation unit at its head, not by looking for the file's own name in the
+log: most failures report their first error inside an included header, so a name scan silently leaves
+the column empty. If a re-measurement changes only that column, suspect the attribution and not the
+tree.
 
 `STATUS.md` is generated from the baselines and must never be hand-edited. Then grep the rest of
 `docs/porting/*.md` for any figure your change moved and update or mark it superseded.

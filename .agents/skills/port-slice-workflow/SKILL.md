@@ -56,6 +56,7 @@ concurrent slice. **Never hand-merge them.** A hand resolution once concatenated
 
   ```sh
   CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims \
+    --strict-link \
     --report docs/porting/native-build-report.md \
     --json docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json
   python3 scripts/porting-status.py
