@@ -19,63 +19,43 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
 | `Core/GameEngine` | 207 | 210 | 207 |
 | `GeneralsMD/Code/GameEngine` | 380 | 380 | 380 |
-| `Core/Libraries/Source/WWVegas/WW3D2` | 72 | 73 | 72 |
+| `Core/Libraries/Source/WWVegas/WW3D2` | 73 | 73 | 73 |
 | `Core/Libraries/Source/WWVegas/WWAudio` | 19 | 19 | 19 |
 | `Core/Libraries/Source/WWVegas/WWDownload` | 4 | 4 | 4 |
 | `GeneralsMD/Code/Libraries/Source/WWVegas` | 35 | 35 | 35 |
 | `Core/GameEngineDevice` | 70 | 70 | 70 |
 | `GeneralsMD/Code/GameEngineDevice` | 39 | 39 | 39 |
 | `GeneralsMD/Code/Main` | 1 | 1 | 1 |
-| **Total** | **968** | **972** | **968** |
+| **Total** | **969** | **972** | **969** |
 
-4 translation units produced no object file:
+3 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
 | `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` | `unknown type name 'HANDLE'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp` | `unknown type name 'AsnObjectIdentifier'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp` | `unknown type name 'HOSTENT'` |
-| `Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp` | `no member named 'GetWindowLong' in the global namespace` |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 968 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 969 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 14 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_openalaudiodevice`, `libthirdparty_lzhl`, `openal (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 4 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **250 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 14 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_openalaudiodevice`, `libthirdparty_lzhl`, `openal (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 4 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **173 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| Defined in a translation unit that failed to compile | 108 |
 | GameSpy SDK (cut scope, not linked) | 81 |
 | FFmpeg (not linked here) | 29 |
+| Defined in a translation unit that failed to compile | 18 |
+| Win32 API | 12 |
 | Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 |
+| Direct3D 8 / DirectX | 9 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
-| Direct3D 8 / DirectX | 4 |
-| Win32 API | 4 |
 | Defined in a built translation unit behind a disabled #if (build option / platform) | 4 |
 | Other / unclassified | 1 |
 | Engine C++ not built at this level | 1 |
-
-### Defined in a translation unit that failed to compile
-
-- `DX8Wrapper_IsWindowed`
-- `DX8Wrapper_PreserveFPU`
-- `ThePinger`
-- `DX8_Assert()`
-- `StartPatchCheck()`
-- `HTTPThinkWrapper()`
-- `Log_DX8_ErrorCode(unsigned int)`
-- `StopAsyncDNSCheck()`
-- `StartDownloadingPatches()`
-- `CancelPatchCheckCallback()`
-- `GetLocalChatConnectionAddress(AsciiString, unsigned short, unsigned int&)`
-- `DX8Wrapper::Draw_Strip(unsigned short, unsigned short, unsigned short, unsigned short)`
-- `DX8Wrapper::IsWindowed`
-- `DX8Wrapper::Begin_Scene()`
-- `DX8Wrapper::CurrentCaps`
-- …and 93 more
 
 ### GameSpy SDK (cut scope, not linked)
 
@@ -115,6 +95,40 @@ The 14 archives were linked into one binary with `--whole-archive`, plus the thi
 - `avcodec_find_decoder`
 - …and 14 more
 
+### Defined in a translation unit that failed to compile
+
+- `ThePinger`
+- `StartPatchCheck()`
+- `HTTPThinkWrapper()`
+- `StopAsyncDNSCheck()`
+- `StartDownloadingPatches()`
+- `CancelPatchCheckCallback()`
+- `GetLocalChatConnectionAddress(AsciiString, unsigned short, unsigned int&)`
+- `GameSpyGameSlot::setPingString(AsciiString)`
+- `PingerInterface::createNewPingerInterface()`
+- `GameSpyStagingRoom::launchGame()`
+- `GameSpyStagingRoom::setPingString(AsciiString)`
+- `GameSpyStagingRoom::getGameSpySlot(int)`
+- `GameSpyStagingRoom::cleanUpSlotPointers()`
+- `GameSpyStagingRoom::generateLadderGameResultsPacket()`
+- `GameSpyStagingRoom::generateGameSpyGameResultsPacket()`
+- …and 3 more
+
+### Win32 API
+
+- `AdjustWindowRect`
+- `GetClientRect`
+- `GetCursorPos`
+- `GetDesktopWindow`
+- `GetMonitorInfoA`
+- `GetWindowLongA`
+- `IsIconic`
+- `MonitorFromWindow`
+- `ScreenToClient`
+- `SetCursor`
+- `SetDeviceGammaRamp`
+- `SetWindowPos`
+
 ### Defined only in a backend this configuration excludes (SDL2 / Cocoa)
 
 - `WWPlatform::Window_Show(void*, bool)`
@@ -130,6 +144,18 @@ The 14 archives were linked into one binary with `--whole-archive`, plus the thi
 - `WWPlatform::Window_Modifier_State(void*)`
 - `WWPlatform::Window_Set_Cursor_Clip(void*, bool)`
 
+### Direct3D 8 / DirectX
+
+- `D3DXAssembleShader`
+- `D3DXCreateCubeTexture`
+- `D3DXCreateTexture`
+- `D3DXCreateTextureFromFileExA`
+- `D3DXCreateVolumeTexture`
+- `D3DXFilterTexture`
+- `D3DXGetErrorStringA`
+- `D3DXGetFVFVertexSize`
+- `D3DXLoadSurfaceFromSurface`
+
 ### Generated gitinfo (build-time, not a blocker)
 
 - `GitCommitAuthorName`
@@ -138,20 +164,6 @@ The 14 archives were linked into one binary with `--whole-archive`, plus the thi
 - `GitShortSHA1`
 - `GitTag`
 - `GitUncommittedChanges`
-
-### Direct3D 8 / DirectX
-
-- `D3DXAssembleShader`
-- `D3DXFilterTexture`
-- `D3DXGetFVFVertexSize`
-- `D3DXLoadSurfaceFromSurface`
-
-### Win32 API
-
-- `GetCursorPos`
-- `IsIconic`
-- `ScreenToClient`
-- `SetCursor`
 
 ### Defined in a built translation unit behind a disabled #if (build option / platform)
 
@@ -164,6 +176,10 @@ The 14 archives were linked into one binary with `--whole-archive`, plus the thi
 
 - `MSS_auto_cleanup`
 
+### Engine C++ not built at this level
+
+- `ListenerHandleClass::Initialize(SoundBufferClass*)`
+
 ## 4. What would resolve them
 
 The causes above say what each symbol *is*. They do not say what makes it go away, and the two get confused: before level 4 the renderer's 272 symbols read as port work when they were only "the build does not include that layer". Each unresolved symbol is therefore also assigned to exactly one pile, and only one of the five is remaining port work.
@@ -173,8 +189,8 @@ The causes above say what each symbol *is*. They do not say what makes it go awa
 | `library-not-linked` | 42 | A library defines it and this configuration links no such library. A link line, not port work. |
 | `cut-scope-not-linked` | 82 | A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it. |
 | `compile-blocked` | 18 | An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker. |
-| `harness-artefact` | 400 | An artefact of how this harness is configured: a build-time generated definition it does not generate, one a disabled `#if` removed, or one in a layer this level selection does not build. |
-| `no-definition-anywhere` | 6 | Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work. |
+| `harness-artefact` | 9 | An artefact of how this harness is configured: a build-time generated definition it does not generate, one a disabled `#if` removed, or one in a layer this level selection does not build. |
+| `no-definition-anywhere` | 22 | Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work. |
 
 The libraries in the `library-not-linked` and `cut-scope-not-linked` piles, the evidence each attribution rests on, and the slice that owns it:
 
@@ -189,7 +205,7 @@ Evidence is the provisioned sources or headers that define the symbols, not a li
 
 ## 5. Strict link: is there an executable?
 
-`--strict-link` linked the same archives with no tolerance for unresolved symbols: **failed**, 544 unresolved symbol(s), executable produced: no. Nothing is stubbed to make this pass, and nothing may be — a green strict link bought with stubs would hide exactly the work this number exists to count.
+`--strict-link` linked the same archives with no tolerance for unresolved symbols: **failed**, 173 unresolved symbol(s), executable produced: no. Nothing is stubbed to make this pass, and nothing may be — a green strict link bought with stubs would hide exactly the work this number exists to count.
 
 The linker's list and §3's `nm` scan agree, so the categorised list above is the list standing between this build and an executable.
 
@@ -199,5 +215,5 @@ Symbol resolution is necessary and not sufficient; `docs/porting/startability.md
 
 ```sh
 bash scripts/ci/fetch-probe-deps.sh
-python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims --strict-link --report docs/porting/native-build-report.md --json native-build.json
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims --strict-link --report docs/porting/native-build-report.md --json native-build.json
 ```

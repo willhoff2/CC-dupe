@@ -1,5 +1,11 @@
 # What "startable" means, and what stands between 250 symbols and a running process
 
+> **Superseded in part.** Every total below predates the slice that made `dx8wrapper.cpp` compile.
+> The current figures are 969/972 objects, 3 compile failures, 173 strict-link unresolved symbols,
+> `compile-blocked` 18 and `no-definition-anywhere` 22; see
+> `docs/porting/dx8wrapper-native-compile.md` and the level 1-4 baseline JSON. The definitions of
+> "startable" and of the five piles below are unaffected.
+
 Measured at `219d9130b` with `clang++-14` on Ubuntu 22.04, levels 1-4 shimmed — i.e. after #64 put
 the OpenAL backend on the link line, which is why every total here is 89 lower than this slice's
 first measurement without a line of port work being done.

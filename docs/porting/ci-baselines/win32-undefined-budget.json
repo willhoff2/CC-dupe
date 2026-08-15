@@ -1,14 +1,23 @@
 {
   "allowed": [
+    "AdjustWindowRect",
+    "GetClientRect",
     "GetCursorPos",
+    "GetDesktopWindow",
+    "GetMonitorInfoA",
+    "GetWindowLongA",
     "IsIconic",
+    "MonitorFromWindow",
     "ScreenToClient",
-    "SetCursor"
+    "SetCursor",
+    "SetDeviceGammaRamp",
+    "SetWindowPos"
   ],
   "category": "Win32 API",
   "levels": [
     1,
     2,
-    3
+    3,
+    4
   ]
 }
