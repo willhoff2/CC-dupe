@@ -1,0 +1,11 @@
+# actionlint knows the labels GitHub hosts and rejects anything else, because a typo in a
+# `runs-on:` label is otherwise invisible until a job sits queued forever. This repository does use
+# one label actionlint cannot know about, so declare it rather than dropping the check:
+#
+#   ubuntu-slim  — validate-pull-request.yml, from upstream #2377.
+#
+# Add a label here only when the runner really exists. An entry that is wrong turns a queued-forever
+# job back into a silent failure, which is the thing this check is for.
+self-hosted-runner:
+  labels:
+    - ubuntu-slim
