@@ -868,6 +868,146 @@ bool Window_Set_Mode(void * window, int width, int height, bool fullscreen)
 	return true;
 }
 
+bool Window_Frame_Insets(void * window, int & left, int & top, int & right, int & bottom)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+
+	left = 0;
+	top = 0;
+	right = 0;
+	bottom = 0;
+
+	// A borderless window has no frame; -frameRectForContentRect: agrees, but asking is pointless
+	// and the answer for a borderless style mask is not worth trusting mid-transition.
+	if (([state->Window styleMask] & NSWindowStyleMaskTitled) == 0) return true;
+
+	// AppKit's own arithmetic for "how much bigger is the frame than the content", which is where
+	// the title bar's height comes from without hard-coding 22 points. Points, because both rects
+	// are in the window's coordinate space; -convertRectToBacking: would be the pixel version.
+	const NSRect content = NSMakeRect(0.0, 0.0, 200.0, 100.0);
+	const NSRect frame = [state->Window frameRectForContentRect:content];
+	left = static_cast<int>(content.origin.x - frame.origin.x);
+	bottom = static_cast<int>(content.origin.y - frame.origin.y);
+	right = static_cast<int>(frame.size.width - content.size.width - (content.origin.x -
+		frame.origin.x));
+	top = static_cast<int>(frame.size.height - content.size.height - (content.origin.y -
+		frame.origin.y));
+	return true;
+}
+
+bool Window_Is_Fullscreen(void * window)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+	// Window_Set_Mode() goes borderless-and-covering rather than using AppKit's own fullscreen
+	// transition, so borderless is what "fullscreen" looks like here; the native flag is checked
+	// too, because the user can take the window fullscreen from the title bar.
+	if (([state->Window styleMask] & NSWindowStyleMaskFullScreen) != 0) return true;
+	return ([state->Window styleMask] & NSWindowStyleMaskTitled) == 0;
+}
+
+bool Window_Set_Position(void * window, int x, int y)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+
+	// The caller means the client area's top-left in top-left-origin screen points, and
+	// -setFrameTopLeftPoint: takes the *frame's* top-left in bottom-left-origin ones.
+	int left = 0;
+	int top = 0;
+	int right = 0;
+	int bottom = 0;
+	if (!Window_Frame_Insets(window, left, top, right, bottom)) return false;
+
+	const NSRect screen = [[NSScreen mainScreen] frame];
+	const CGFloat frame_left = static_cast<CGFloat>(x - left);
+	const CGFloat frame_top_flipped = static_cast<CGFloat>(y - top);
+	[state->Window setFrameTopLeftPoint:
+		NSMakePoint(frame_left, screen.size.height - frame_top_flipped)];
+	return true;
+}
+
+bool Window_Set_Client_Size(void * window, int width, int height)
+{
+	WindowState * state = State(window);
+	if (state == nullptr || width <= 0 || height <= 0) return false;
+	[state->Window setContentSize:NSMakeSize(width, height)];
+	// The drawable is in pixels and the content size is in points, so the backing scale is
+	// applied here, at the renderer boundary, exactly as Window_Set_Mode() does it.
+	const NSRect bounds = [state->View bounds];
+	const CGFloat scale = [state->Window backingScaleFactor];
+	state->Layer.drawableSize =
+		CGSizeMake(bounds.size.width * scale, bounds.size.height * scale);
+	return true;
+}
+
+void Window_Set_Always_On_Top(void * window, bool on_top)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return;
+	[state->Window setLevel:(on_top ? NSFloatingWindowLevel : NSNormalWindowLevel)];
+}
+
+int Window_Display_Count()
+{
+	return static_cast<int>([[NSScreen screens] count]);
+}
+
+int Window_Display_For_Window(void * window)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return 0;
+
+	NSScreen * screen = [state->Window screen];
+	if (screen == nil) return 0;		// off-screen or minimised: the primary display, as
+										// MONITOR_DEFAULTTOPRIMARY asks for.
+	NSArray<NSScreen *> * screens = [NSScreen screens];
+	const NSUInteger index = [screens indexOfObject:screen];
+	return (index == NSNotFound) ? 0 : static_cast<int>(index);
+}
+
+namespace
+{
+
+bool Screen_Rect(int display, NSRect rect, int & x, int & y, int & width, int & height)
+{
+	(void)display;
+	// Cocoa's screen coordinates have a bottom-left origin on the *primary* screen; the seam's
+	// are top-left, like Win32's, so the flip is against the primary screen's height.
+	const NSRect primary = [[[NSScreen screens] firstObject] frame];
+	x = static_cast<int>(rect.origin.x);
+	y = static_cast<int>(primary.size.height - (rect.origin.y + rect.size.height));
+	width = static_cast<int>(rect.size.width);
+	height = static_cast<int>(rect.size.height);
+	return true;
+}
+
+NSScreen * Screen_At(int display)
+{
+	NSArray<NSScreen *> * screens = [NSScreen screens];
+	if (display < 0 || display >= static_cast<int>([screens count])) return nil;
+	return [screens objectAtIndex:static_cast<NSUInteger>(display)];
+}
+
+}	// anonymous namespace
+
+bool Window_Display_Bounds(int display, int & x, int & y, int & width, int & height)
+{
+	NSScreen * screen = Screen_At(display);
+	if (screen == nil) return false;
+	return Screen_Rect(display, [screen frame], x, y, width, height);
+}
+
+bool Window_Display_Work_Area(int display, int & x, int & y, int & width, int & height)
+{
+	NSScreen * screen = Screen_At(display);
+	if (screen == nil) return false;
+	// -visibleFrame is the frame minus the menu bar and the Dock, which is what GetMonitorInfo()
+	// calls rcWork and what a window is centred in.
+	return Screen_Rect(display, [screen visibleFrame], x, y, width, height);
+}
+
 void Window_Show(void * window, bool show)
 {
 	WindowState * state = State(window);

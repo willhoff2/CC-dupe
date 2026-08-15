@@ -235,6 +235,43 @@ void Window_Show(void * window, bool show);
 void Window_Set_Title(void * window, const char * title);
 
 /*
+**	The rest of what DX8Wrapper::Resize_And_Position_Window() needs, which is a Win32
+**	GetClientRect()/GetWindowLong()/AdjustWindowRect()/SetWindowPos() sequence: it sizes the
+**	*frame* to fit a given client area and then centres the frame on the monitor's work area.
+**
+**	Window_Frame_Insets() is the thickness the platform adds around the client area - title bar
+**	and borders - so a client size can be turned into a frame size and back. It is all zeros for
+**	a borderless or fullscreen window, and false when the platform cannot say.
+**	Window_Is_Fullscreen() is which of the two the window currently is.
+**	Window_Set_Position() moves the window by its client area's top-left corner, in the same
+**	screen coordinates Window_Client_Origin() reports.
+**	Window_Set_Always_On_Top() is SetWindowPos()'s HWND_TOPMOST, which the fullscreen path asks
+**	for so the game is not covered by the shell.
+**
+**	POINTS, again and for the same reason: the frame metrics and the monitor geometry the game
+**	compares against a resolution are both in points here, and the renderer converts to pixels
+**	at its own boundary. Do not "fix" a half-size window by scaling these
+**	(docs/porting/decisions-resolved.md).
+*/
+bool Window_Frame_Insets(void * window, int & left, int & top, int & right, int & bottom);
+bool Window_Is_Fullscreen(void * window);
+bool Window_Set_Position(void * window, int x, int y);
+bool Window_Set_Client_Size(void * window, int width, int height);
+void Window_Set_Always_On_Top(void * window, bool on_top);
+
+/*
+**	The display the window is on, and its geometry - MonitorFromWindow() and GetMonitorInfo().
+**	Displays are numbered from zero and the numbering is the platform's; index 0 is the primary
+**	display. Window_Display_Bounds() is the whole display and Window_Display_Work_Area() is what
+**	is left after the menu bar, the Dock or the taskbar, which is the rectangle a window is
+**	centred in. Both are in screen points with a top-left origin, like Window_Client_Origin().
+*/
+int Window_Display_Count();
+int Window_Display_For_Window(void * window);
+bool Window_Display_Bounds(int display, int & x, int & y, int & width, int & height);
+bool Window_Display_Work_Area(int display, int & x, int & y, int & width, int & height);
+
+/*
 **	Mouse. Window_Set_Cursor_Clip() is ClipCursor() (Win32Mouse::refreshCursorCapture);
 **	Window_Warp_Cursor() is SetCursorPos() in client coordinates; Window_Show_System_Cursor()
 **	is ShowCursor().
