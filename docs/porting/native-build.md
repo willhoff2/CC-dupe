@@ -432,11 +432,11 @@ recompiles all 968 units and doubling that job's compile time would put it near 
 has its own baseline file so the larger build cannot be read as progress against the smaller one.
 Levels 1-3 keep their own ratchet.
 
-## The audio backend, measured 2026-08-15 on a6ef778ed with clang 14 (current baseline)
+## The audio backend, measured 2026-08-15 on b81226000 with clang 14 (current baseline)
 
 Level 4's `Miles Sound System 0 → 74` entry above ended by predicting its own fix: *"this is not an
 unported surface … this harness simply does not link it … it should take the category to 0."* It
-does, and the prediction was right in full. By `a6ef778ed` the category had grown to 89 as more of
+does, and the prediction was right in full. By `b81226000` the category had grown to 89 as more of
 `GameEngineDevice` and `WWAudio` compiled; building
 `Core/Libraries/Source/OpenALAudioDevice` — the `milesstub` implementation `cmake/openal.cmake`
 supplies to every audio consumer off 32-bit Windows — takes it to 0.
@@ -445,8 +445,8 @@ supplies to every audio consumer off 32-bit Windows — takes it to 0.
 |---|---:|---:|
 | Undefined `AIL_*` before | 60 | 89 |
 | Undefined `AIL_*` after | **0** | **0** |
-| Unresolved symbols, all causes, before | 577 | 412 |
-| Unresolved symbols, all causes, after | **517** | **323** |
+| Unresolved symbols, all causes, before | 608 | 339 |
+| Unresolved symbols, all causes, after | **548** | **250** |
 
 The totals fall by exactly 60 and 89: no other category moves, no object count changes, and **no
 `AIL_*` function was written or stubbed**. All 89 were already defined — the backend defines 101
@@ -458,7 +458,7 @@ How it is built, and why that keeps the numbers comparable:
 
 - A **support** archive (`libsupport_openalaudiodevice`), like lzhl: a dependency of the measured
   libraries rather than one of them, so it stays out of the objects and translation-unit
-  denominators, which have to keep matching the probe's. 971 units and 952 objects at level 4, both
+  denominators, which have to keep matching the probe's. 972 units and 968 objects at level 4, both
   unchanged.
 - Its file list is read out of `Core/Libraries/Source/OpenALAudioDevice/CMakeLists.txt`, so the
   harness cannot drift from the real build. (That file's list is a flat `set()` of bare names, not

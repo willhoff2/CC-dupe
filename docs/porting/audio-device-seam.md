@@ -192,13 +192,13 @@ Windows, builds `core_openalaudiodevice`, checks declared-vs-defined `AIL_*` sym
 
 `scripts/native-build.py` — the harness that compiles the engine's libraries with clang and runs a
 real linker over the archives — did not build this backend, so it reported the whole Miles surface as
-unresolved. Measured on `a6ef778ed`, shimmed:
+unresolved. Measured on `b81226000`, shimmed:
 
 | Undefined `AIL_*` symbols | Before | After |
 |---|---:|---:|
 | levels 1-3 (`GameEngineDevice`, so `MilesAudioManager.cpp`) | 60 | **0** |
 | levels 1-4 (adds `WWAudio`'s 19 units) | 89 | **0** |
-| unresolved symbols, all causes, levels 1-4 | 412 | **323** |
+| unresolved symbols, all causes, levels 1-4 | 339 | **250** |
 
 All 89 were defined by the backend already; nothing was implemented or stubbed for this, and the
 difference in the total is exactly 89. The category was the same artefact level 4 removed for the
