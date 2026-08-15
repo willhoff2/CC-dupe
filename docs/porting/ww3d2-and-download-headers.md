@@ -59,9 +59,10 @@ uncompiled units are theirs, plus the Miles and FFmpeg layers that are not linke
 
 ### Re-measured after the browser and D3DX slices landed
 
-Both columns above were measured before `main` gained the browser excision (#65) and the D3DX math
-family (#66), so they no longer describe the tree. Re-measured on `8bb8aff56`, levels 1-4 stand at
-**968 / 972 objects, 4 failures, 339 undefined symbols**; the only failure left outside GameSpy is
+Both columns above were measured before `main` gained the browser excision (#65), the D3DX math
+family (#66) and the OpenAL audio link (#64), so they no longer describe the tree. Re-measured on
+`40fdfd066`, levels 1-4 stand at
+**968 / 972 objects, 4 failures, 250 undefined symbols**; the only failure left outside GameSpy is
 `dx8wrapper.cpp`, which needs the user32 window-management surface (`GetWindowLong`, `GWL_STYLE`,
 `AdjustWindowRect`, `GetMonitorInfo`) that the window/input slice owns. `dx8wrapper.cpp` had a second
 copy of the `DriverVersion` arithmetic below, which now calls `D3D8AdapterDriverVersion()` too, so
