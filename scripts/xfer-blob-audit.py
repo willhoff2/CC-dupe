@@ -114,7 +114,10 @@ def split_top_level(args: str):
     return parts
 
 
-SIZEOF_RE = re.compile(r"sizeof\s*(?:\(\s*(?P<paren>[^()]*(?:\([^()]*\))?[^()]*)\s*\)|\s+(?P<bare>[A-Za-z_][\w:]*))")
+SIZEOF_RE = re.compile(
+    r"sizeof\s*(?:\(\s*(?P<paren>[^()]*(?:\([^()]*\))?[^()]*)\s*\)"
+    r"|\s+(?P<bare>[A-Za-z_][\w:]*))"
+)
 
 
 def sizeof_operands(expr: str):
@@ -135,8 +138,10 @@ class Index:
             r"([A-Za-z_][\w:]*(?:\s*\*)?)\s+(m_[A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*[;=]",
             re.M)
         enum_re = re.compile(
-            r"\benum\s+(?:class\s+)?([A-Za-z_]\w*)\s*(?:CPP_11\s*\(\s*:\s*([\w ]+?)\s*\)|:\s*([\w ]+?))?\s*[{;]")
-        rec_re = re.compile(r"\b(?:struct|class|union)\s+([A-Za-z_]\w*)\s*(?:final\s*)?(?::[^{;]*)?\{")
+            r"\benum\s+(?:class\s+)?([A-Za-z_]\w*)\s*"
+            r"(?:CPP_11\s*\(\s*:\s*([\w ]+?)\s*\)|:\s*([\w ]+?))?\s*[{;]")
+        rec_re = re.compile(
+            r"\b(?:struct|class|union)\s+([A-Za-z_]\w*)\s*(?:final\s*)?(?::[^{;]*)?\{")
         td_re = re.compile(r"\btypedef\s+([^;{}()]+?)\s+([A-Za-z_]\w*)\s*;")
         comment_re = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
         for rel in files:

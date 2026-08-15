@@ -40,8 +40,13 @@ jobs:
               - 'Generals/**'
             generalsmd:
               - 'GeneralsMD/**'
+            # Only the workflows that define these Windows builds. '.github/workflows/**' meant
+            # that editing any workflow -- including native-port-ci.yml, which cannot affect a
+            # Windows preset -- rebuilt all thirteen of them.
             shared:
-              - '.github/workflows/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/build-toolchain.yml'
+              - '.github/workflows/check-replays.yml'
               - 'CMakeLists.txt'
               - 'CMakePresets.json'
               - 'cmake/**'
@@ -164,7 +169,9 @@ jobs:
 
   replaycheck-generalsmd:
     name: Replay Check GeneralsMD${{ matrix.preset && '' }}
-    needs: build-generalsmd-vc6
+    # detect-changes is in `needs` because the condition below reads its outputs: without it those
+    # are the empty string, so this gate only ever ran on workflow_dispatch. actionlint says so.
+    needs: [detect-changes, build-generalsmd-vc6]
     if: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.generalsmd == 'true' || needs.detect-changes.outputs.shared == 'true' }}
     strategy:
       matrix:

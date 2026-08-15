@@ -1367,7 +1367,7 @@ def render_report(data, examples):
         "",
         "```sh",
         "bash scripts/ci/fetch-probe-deps.sh",
-        f"python3 scripts/native-build.py {' '.join(f'--level {l}' for l in data['levels'])}"
+        f"python3 scripts/native-build.py {' '.join(f'--level {n}' for n in data['levels'])}"
         + (" --with-shims" if data["with_shims"] else "")
         + (" --strict-link" if strict.get("attempted") else "")
         + " --report docs/porting/native-build-report.md --json native-build.json",

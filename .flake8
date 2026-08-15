@@ -1,0 +1,11 @@
+[flake8]
+max-line-length = 100
+
+# Upstream tooling, imported wholesale and formatted to its own conventions. Linting it would be
+# several hundred pre-existing findings that say nothing about the port, and reformatting it would
+# make every future upstream merge conflict. The port's own scripts (scripts/*.py, scripts/ci/) are
+# linted, and that is what the lint job in native-port-ci.yml gates.
+extend-exclude =
+    scripts/cpp,
+    scripts/run-clang-tidy.py,
+    scripts/fix_compile_commands.py

@@ -80,12 +80,15 @@ Cheapest first; run the rungs your change can affect. Details in the `native-por
 `renderer-spike-verify` and `windows-build-and-replays` skills.
 
 ```sh
-# Lint the Python you touched, not the tree: `flake8 scripts/` does not pass on main (~700
-# pre-existing violations in the upstream scripts/cpp/ tools, plus a handful of long regex
-# literals in the port scripts), and neither lint is wired into any workflow.
-git diff --name-only origin/main...HEAD -- '*.py' | xargs -r python3 -m flake8 --max-line-length=100
-actionlint .github/workflows/native-port-ci.yml   # `.github/workflows/` is rejected as a directory,
-                                                  # and upstream ci.yml has pre-existing errors
+# Both of these are clean on main and both are gated by the `lint` job in native-port-ci.yml, so
+# a failure here is yours. The 909 violations in the upstream scripts/cpp/ tools are excluded in
+# .flake8 -- reformatting them would conflict with every future upstream merge.
+python3 -m flake8 scripts/                        # settings come from .flake8; do not pass overrides
+python3 scripts/ci/classify-changes.py --self-check   # which CI jobs a diff is allowed to skip
+# Match CI exactly: it pins Python 3.10 (3.12's pycodestyle looks inside f-strings) and caps
+# shellcheck at errors (actionlint invokes shellcheck when it is on PATH, and the upstream
+# workflows carry 45 info/style/warning findings this port does not own).
+SHELLCHECK_OPTS=--severity=error actionlint .github/workflows/*.yml   # the glob; the dir is rejected
 ./scripts/ci/fetch-probe-deps.sh && CLANGXX=clang++-14 python3 scripts/native-port-probe.py --json probe-native.json
 python3 scripts/ci/check-probe-baseline.py --results probe-native.json
 python3 scripts/porting-status.py --check
