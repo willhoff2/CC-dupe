@@ -920,6 +920,41 @@ void Window_Show_System_Cursor(void * window, bool show)
 	}
 }
 
+bool Window_Cursor_Position(void * window, int & x, int & y)
+{
+	if (State(window) == nullptr) return false;
+
+	// [NSEvent mouseLocation] is the pointer in screen coordinates with a bottom-left origin,
+	// and keeps reading while the pointer is over another application's window, which is what
+	// GetCursorPos() does. The flip to a top-left origin is against the main screen's frame, the
+	// same reference Window_Warp_Cursor() uses for the opposite conversion.
+	const NSPoint location = [NSEvent mouseLocation];
+	const NSRect screen = [[NSScreen mainScreen] frame];
+	x = static_cast<int>(location.x);
+	y = static_cast<int>(screen.size.height - location.y);
+	return true;
+}
+
+bool Window_Client_Origin(void * window, int & x, int & y)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+
+	// The view's frame converted to screen coordinates is the client area, so its top-left is
+	// the corner ScreenToClient() measures from. These are points: -convertRectToScreen: works
+	// in the window's coordinate space, and only -convertRectToBacking: would be in pixels.
+	const NSRect content = [state->Window convertRectToScreen:[state->View frame]];
+	const NSRect screen = [[NSScreen mainScreen] frame];
+	x = static_cast<int>(content.origin.x);
+	y = static_cast<int>(screen.size.height - (content.origin.y + content.size.height));
+	return true;
+}
+
+void * Window_Current()
+{
+	return TheWindow;
+}
+
 bool Window_Key_Is_Down(void * window, int scan_code)
 {
 	WindowState * state = State(window);

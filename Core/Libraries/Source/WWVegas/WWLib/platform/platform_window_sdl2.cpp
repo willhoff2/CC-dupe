@@ -572,6 +572,53 @@ void Window_Show_System_Cursor(void * window, bool show)
 	SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE);
 }
 
+bool Window_Cursor_Position(void * window, int & x, int & y)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+
+	/*
+	**	SDL_GetGlobalMouseState() is the desktop position, which is what GetCursorPos() reports:
+	**	it keeps reading while the pointer is outside our window, which SDL_GetMouseState() does
+	**	not. Where it is unavailable, the window-relative position plus the window's origin is
+	**	the same value for the case that matters (the pointer inside our window) and clamps to
+	**	the window's edges outside it.
+	*/
+#if SDL_VERSION_ATLEAST(2, 0, 4)
+	SDL_GetGlobalMouseState(&x, &y);
+#else
+	int client_x = 0;
+	int client_y = 0;
+	SDL_GetMouseState(&client_x, &client_y);
+	int origin_x = 0;
+	int origin_y = 0;
+	if (!Window_Client_Origin(window, origin_x, origin_y)) return false;
+	x = origin_x + client_x;
+	y = origin_y + client_y;
+#endif
+	return true;
+}
+
+bool Window_Client_Origin(void * window, int & x, int & y)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+
+	/*
+	**	SDL_GetWindowPosition() reports the top-left of the client area, not of the frame, which
+	**	is the corner ScreenToClient() measures from. Both values are in points: SDL keeps
+	**	window coordinates in points and only SDL_GL_GetDrawableSize()/SDL_Vulkan_GetDrawableSize()
+	**	are in pixels.
+	*/
+	SDL_GetWindowPosition(state->Sdl_Window, &x, &y);
+	return true;
+}
+
+void * Window_Current()
+{
+	return TheWindow;
+}
+
 bool Window_Key_Is_Down(void * window, int scan_code)
 {
 	if (State(window) == nullptr) return false;

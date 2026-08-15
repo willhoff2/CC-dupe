@@ -37,6 +37,19 @@
  *  editing hotkeys -- so answering "no key" leaves that tooling inert rather than wrong, and    *
  *  each entry point says so on stderr the first time it is reached.                             *
  *                                                                                              *
+ *  IsIconic(), GetCursorPos(), ScreenToClient() and SetCursor() are real, and go through          *
+ *  platform_window.h: the HWND these take *is* the seam's window handle off Windows, so           *
+ *  IsIconic() and ScreenToClient() need no lookup, and GetCursorPos(), which has no window        *
+ *  parameter, asks the seam for its one window. ScreenToClient() is the client origin subtracted   *
+ *  -- the whole of it for a parentless, unmirrored window, which is the only kind the game        *
+ *  creates -- and both it and GetCursorPos() work in POINTS, because this is the mouse path and    *
+ *  the renderer converts at its own boundary (docs/porting/decisions-resolved.md).                 *
+ *                                                                                              *
+ *  SetCursor() is hide-or-show: every call site reachable here passes null, meaning "no           *
+ *  cursor", because W3DMouse draws the game's own. A non-null HCURSOR would be a handle from      *
+ *  LoadCursor()/LoadCursorFromFile() reading a .CUR/.ANI, which do not exist here, so it says so   *
+ *  once and shows the system pointer rather than guessing a shape.                                *
+ *                                                                                              *
  *  SetThreadExecutionState() is a stub for the same reason: keeping the display awake during a  *
  *  long load is a Windows power-management API, its macOS equivalent (IOPMAssertion) is a       *
  *  separate decision, and nothing about the game's correctness depends on it.                   *
@@ -48,6 +61,7 @@
 #ifdef WWPLATFORM_WIN32_COMPAT
 
 #include "WWLib/platform/platform_dialog.h"
+#include "WWLib/platform/platform_window.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -144,6 +158,110 @@ short GetKeyState(int)
 	WWPlatform::Win32::Report_Stub("GetKeyState",
 		"there is no hardware key poll here; use platform_window.h's Window_Modifier_State()");
 	return 0;
+}
+
+
+BOOL IsIconic(HWND window)
+{
+	/*
+	**	Win32GameEngine::update() spins on this while the game is alt-tabbed out, and
+	**	W3DDisplay::draw() uses it to skip a frame. Both pass ApplicationHWnd, which off Windows
+	**	*is* the seam's window handle, so there is nothing to look up. A null window is not
+	**	minimised, which is what Win32 answers for a handle it cannot find.
+	*/
+	if (window == nullptr) {
+		return FALSE;
+	}
+	return WWPlatform::Window_Is_Minimised(window) ? TRUE : FALSE;
+}
+
+
+BOOL GetCursorPos(LPPOINT point)
+{
+	/*
+	**	GetCursorPos() has no window parameter, so the seam's single window is found through
+	**	Window_Current() rather than through an engine global WWLib cannot see. The result is the
+	**	pointer in screen points; every caller immediately passes it to ScreenToClient(), below.
+	*/
+	if (point == nullptr) {
+		return FALSE;
+	}
+
+	int x = 0;
+	int y = 0;
+	if (!WWPlatform::Window_Cursor_Position(WWPlatform::Window_Current(), x, y)) {
+		/*
+		**	Before the window exists there is no screen coordinate space to answer in. Win32
+		**	fails the same way for a session with no desktop, and every caller tests the result:
+		**	W3DWaterTracks.cpp's `if (GetCursorPos(&p))` and W3DMouse.cpp's, which only reaches
+		**	it inside its own window-active branch.
+		*/
+		return FALSE;
+	}
+
+	point->x = x;
+	point->y = y;
+	return TRUE;
+}
+
+
+BOOL ScreenToClient(HWND window, LPPOINT point)
+{
+	/*
+	**	Subtracting the client area's origin is the whole of ScreenToClient() for a window with
+	**	no parent chain and no mirrored layout, which is the only kind the game creates. Points
+	**	in, points out: this is the mouse path, and the renderer converts to pixels at its own
+	**	boundary (docs/porting/decisions-resolved.md).
+	*/
+	if (point == nullptr) {
+		return FALSE;
+	}
+
+	int origin_x = 0;
+	int origin_y = 0;
+	if (!WWPlatform::Window_Client_Origin(window, origin_x, origin_y)) {
+		return FALSE;
+	}
+
+	point->x -= origin_x;
+	point->y -= origin_y;
+	return TRUE;
+}
+
+
+HCURSOR SetCursor(HCURSOR cursor)
+{
+	/*
+	**	The game's own cursor is drawn by W3DMouse, and what it wants from Win32 is for the
+	**	system pointer to be out of the way: every reachable call site off Windows passes null,
+	**	which in Win32 means "no cursor", i.e. hide it. That maps exactly onto the seam's
+	**	Window_Show_System_Cursor().
+	**
+	**	A non-null HCURSOR cannot be honoured: the handle would have come from LoadCursor() or
+	**	LoadCursorFromFile() reading a Win32 .CUR/.ANI, neither of which exists here, so there is
+	**	nothing to identify the requested shape by. Those call sites are in Win32DIMouse.cpp,
+	**	which is not on the native path. Rather than pick an arbitrary shape, this says so once
+	**	and shows the system pointer, so the symptom is "the wrong cursor is visible" rather than
+	**	"the pointer vanished".
+	*/
+	static HCURSOR previous = nullptr;
+
+	if (cursor != nullptr) {
+		WWPlatform::Win32::Report_Stub("SetCursor",
+			"a non-null HCURSOR is a Win32 .CUR/.ANI handle and cannot be resolved to a shape "
+			"here; showing the system pointer instead");
+	}
+
+	WWPlatform::Window_Show_System_Cursor(WWPlatform::Window_Current(), cursor != nullptr);
+
+	/*
+	**	Win32 returns the cursor that was set before, and null if there was none. Nothing in the
+	**	engine uses the result, but returning the previous value is free and is what the
+	**	documented contract says.
+	*/
+	HCURSOR was = previous;
+	previous = cursor;
+	return was;
 }
 
 

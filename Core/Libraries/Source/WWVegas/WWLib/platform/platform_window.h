@@ -244,6 +244,30 @@ void Window_Warp_Cursor(void * window, int x, int y);
 void Window_Show_System_Cursor(void * window, bool show);
 
 /*
+**	The read side of the same seam, which is what GetCursorPos() and ScreenToClient() need.
+**	Window_Cursor_Position() is GetCursorPos(): where the pointer is now, in the platform's own
+**	screen coordinates with a top-left origin, whether or not it is over our window.
+**	Window_Client_Origin() is where the client area's top-left corner sits in those same
+**	coordinates, which is exactly the offset ScreenToClient() subtracts. Both return false when
+**	the window is gone, and neither touches its outputs in that case.
+**
+**	Both are in POINTS, like every other coordinate in this seam and like the engine's mouse
+**	(see docs/porting/decisions-resolved.md): the renderer converts to pixels at its own
+**	boundary. On a Retina display the difference is a factor of two, and on the CI runner it is
+**	a factor of one, so getting this wrong is invisible in CI.
+*/
+bool Window_Cursor_Position(void * window, int & x, int & y);
+bool Window_Client_Origin(void * window, int & x, int & y);
+
+/*
+**	The one window, or null before Window_Create() and after Window_Destroy(). The engine holds
+**	the handle itself (ApplicationHWnd) and should keep passing it; this exists for the Win32
+**	compatibility layer, where GetCursorPos() has no HWND parameter to take one from and cannot
+**	see an engine global.
+*/
+void * Window_Current();
+
+/*
 **	Polled keyboard state, replacing GetAsyncKeyState()/GetKeyState() and the DirectInput
 **	GetDeviceState() that Win32DIKeyboard uses. Takes a KEYSCAN_* set-1 code. Unlike
 **	GetAsyncKeyState() this reflects the state as of the last Window_Pump(), not a hardware
