@@ -19,18 +19,26 @@ Measured, `./scripts/ci/fetch-probe-deps.sh` then
 `CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4
 --with-shims --strict-link`:
 
-| | Before | After |
+| | Before (main at `ee059ee3d`) | After |
 | --- | ---: | ---: |
-| objects | 968 / 972 | **971 / 972** |
-| compile failures | 4 | **1** (`dx8wrapper.cpp`, slice 1's — untouched) |
-| unresolved symbols (strict link) | 250 | **150** |
+| objects | 969 / 972 | **972 / 972** |
+| compile failures | 3 (all three these) | **0** |
+| unresolved symbols (strict link) | 173 | **73** |
 | — `cut-scope-not-linked` (GameSpy SDK) | 82 | **0** |
-| — `compile-blocked` | 108 | **90** |
-| — `no-definition-anywhere` | 9 | **9** (unchanged; slice 3's) |
+| — `compile-blocked` | 18 | **0** |
+| — `no-definition-anywhere` | 22 | **22** (unchanged; slice 3's) |
 | — `library-not-linked` / `harness-artefact` | 42 / 9 | 42 / 9 |
 
-`Core/GameEngine` goes from 207/210 to **210/210** objects. The strict link still fails and still
-produces no executable, for the 150 symbols that are other slices'.
+`Core/GameEngine` goes from 207/210 to **210/210** objects, and with slice 1's `dx8wrapper.cpp` fix
+already on main these were the last three compile failures in the level 1-4 build: **every
+translation unit the harness builds now compiles**, and both piles that a compile failure feeds —
+`compile-blocked` and `cut-scope-not-linked` — are empty. The strict link still fails and still
+produces no executable, for the 73 symbols that are other slices': 42 `library-not-linked`, 9
+`harness-artefact` and the 22 `no-definition-anywhere` slice 3 owns.
+
+(An earlier revision of this branch measured 971/972 and 150 unresolved against main at `6df9b180a`,
+before `dx8wrapper.cpp` compiled. Those figures do not transfer; the table above is a re-measurement
+after rebasing.)
 
 ## The mechanism: one build definition, `RTS_HAS_GAMESPY`
 
@@ -108,9 +116,11 @@ reaches on Windows when the network is unavailable:
 
 ## Findings for other slices
 
-- **`no-definition-anywhere` is still 9.** Compiling these units exposed no call to anything nothing
-  defines. Those 9 remain slice 3's; nothing here implements or hides them.
-- **`dx8wrapper.cpp`** is the one remaining compile failure and is slice 1's. Not touched.
+- **`no-definition-anywhere` is still 22.** Unlike slice 1, which took that pile from 9 to 22 by
+  making a file compile, compiling these three exposed no call to anything nothing defines: the code
+  they newly contribute to the link is either portable engine code or absent. Those 22 remain slice
+  3's; nothing here implements or hides them.
+- **`dx8wrapper.cpp`** is slice 1's and landed in #79 before this rebase. Not touched.
 - **The link configuration and harness** stay slice 4's. The only build change here is the Windows/
   non-Windows split of the GameSpy library in `Core/GameEngine/CMakeLists.txt`, which is this seam.
 
