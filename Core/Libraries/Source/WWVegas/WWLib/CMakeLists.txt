@@ -193,6 +193,7 @@ else()
     list(APPEND WWLIB_SRC
         platform/platform_win32_compat.h
         platform/platform_win32_file.cpp
+        platform/platform_win32_gdi_font.cpp
         platform/platform_win32_locale.cpp
         platform/platform_win32_module.cpp
         platform/platform_win32_stub.cpp
@@ -239,6 +240,12 @@ target_link_libraries(core_wwlib PRIVATE
     core_wwcommon
     corei_always
 )
+
+if(NOT WIN32)
+    # stb_truetype rasterises the glyphs the GDI text entry points draw off Windows
+    # (docs/porting/gdi-font-seam.md). The same stb the screenshot writer already uses.
+    target_link_libraries(core_wwlib PRIVATE stb)
+endif()
 
 if(NOT WIN32 AND CORE_WWLIB_WINDOW_BACKEND)
     if(APPLE)

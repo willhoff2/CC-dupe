@@ -40,6 +40,9 @@ clone_at "$(pin miles.cmake GIT_REPOSITORY)"   "$(pin miles.cmake GIT_TAG)"   "$
 # lzhl is laid out as _deps/lzhl-src/CompLibHeader by cmake/lzhl.cmake, and the engine includes
 # it as <CompLibHeader/....h>.
 clone_at "$(pin lzhl.cmake GIT_REPOSITORY)"    "$(pin lzhl.cmake GIT_TAG)"    "$deps_dir/lzhl-src/CompLibHeader"
+# stb: <stb_image_write.h> for stb_image_write_impl.cpp and <stb_truetype.h> for the GDI
+# font seam's rasteriser (docs/porting/gdi-font-seam.md), so WWLib does not compile
+# natively without it.
 # stb is laid out as _deps/stb-src by cmake/stb.cmake; stb_image_write_impl.cpp includes
 # <stb_image_write.h> from the root of it.
 clone_at "$(pin stb.cmake GIT_REPOSITORY)"     "$(pin stb.cmake GIT_TAG)"     "$deps_dir/stb-src"

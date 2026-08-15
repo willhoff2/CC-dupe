@@ -376,7 +376,10 @@ def well_known_keys_category(owner, failed, built_sources):
 # because it adds the directory anyway. Adding it here rather than in the probe keeps the probe's
 # published baselines stable; the divergence measurement is unaffected because the probe pass in
 # this script uses the same include set as the build it is compared against.
-EXTRA_DEP_INCLUDES = ["gamespy-src/include/gamespy"]
+# stb-src for the same reason: <stb_truetype.h> is what WWLib's GDI text entry points rasterise
+# glyphs with off Windows (docs/porting/gdi-font-seam.md), and the real CMake build gets it from
+# the `stb` interface target that cmake/stb.cmake fetches.
+EXTRA_DEP_INCLUDES = ["gamespy-src/include/gamespy", "stb-src"]
 
 
 def includes_for(target, deps_dir, with_shims):

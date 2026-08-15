@@ -244,6 +244,7 @@ unblocks when the Bink slice lands.
 - **The remaining compile failures are reported, not fixed.** The Win32 surface (`HWND`/`HFONT`/
   `HRESULT`/`SetWindowText`), the GameSpy socket units and the Bink/FFmpeg/stb video devices belong
   to other slices or to cut scope. This build's job is to count them and name them.
+  (The 18 `HFONT` ones are since gone: `docs/porting/gdi-font-seam.md`.)
 - **The level-3 numbers are Linux only.** zlib is found by probing a list of platform library paths
   that includes `/usr/lib/libz.dylib`; that macOS entry has never been executed and is written blind.
 

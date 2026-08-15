@@ -144,7 +144,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            clang-14 cmake ninja-build python3 git ca-certificates binutils zlib1g-dev
+            clang-14 cmake ninja-build python3 git ca-certificates binutils zlib1g-dev \
+            fonts-dejavu-core
           clang++-14 --version
 
       - name: Checkout
@@ -210,6 +211,23 @@ jobs:
             echo '## Video path and provisioned headers'
             echo '```'
             python3 scripts/ci/check-video-headers.py --results native-build.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The GDI font seam draws the text the WND GUI measures its layout against, so "text appears"
+      # is not the acceptance criterion: the advance widths and the line height are. This compares
+      # the port's CreateFont/GetTextMetrics/GetTextExtentPoint32W against recorded GDI metrics --
+      # fonts-dejavu-core above is the font both sides are pointed at. See
+      # docs/porting/gdi-font-seam.md.
+      - name: Compare the font seam's glyph metrics against GDI's
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## GDI font seam glyph metrics'
+            echo '```'
+            python3 scripts/ci/check-font-metrics.py
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
