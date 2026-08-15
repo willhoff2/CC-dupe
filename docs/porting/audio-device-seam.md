@@ -188,13 +188,41 @@ Windows, builds `core_openalaudiodevice`, checks declared-vs-defined `AIL_*` sym
 `scripts/ci/openal-standalone/` is deleted. jammy's CMake 3.22 is too old for the root
 `CMakeLists.txt` (needs 3.25), so the job pip-installs CMake 4.1.2.
 
+## 6a. The native build links it, and every `AIL_*` the engine references resolves
+
+`scripts/native-build.py` — the harness that compiles the engine's libraries with clang and runs a
+real linker over the archives — did not build this backend, so it reported the whole Miles surface as
+unresolved. Measured on `b81226000`, shimmed:
+
+| Undefined `AIL_*` symbols | Before | After |
+|---|---:|---:|
+| levels 1-3 (`GameEngineDevice`, so `MilesAudioManager.cpp`) | 60 | **0** |
+| levels 1-4 (adds `WWAudio`'s 19 units) | 89 | **0** |
+| unresolved symbols, all causes, levels 1-4 | 339 | **250** |
+
+All 89 were defined by the backend already; nothing was implemented or stubbed for this, and the
+difference in the total is exactly 89. The category was the same artefact level 4 removed for the
+renderer: *the build excluded the layer that defines them*. The backend is built as a **support**
+archive, like lzhl — it is a dependency of the measured libraries rather than one of them, so the
+objects/translation-unit denominators still match the probe's — and OpenAL itself is linked from the
+system library, with `scripts/ci/fetch-probe-deps.sh` provisioning `<AL/al.h>` from openal-soft at
+the tag `cmake/openal.cmake` pins so the backend also compiles on a box without `libopenal-dev`.
+
+`scripts/ci/check-audio-backend-linked.py` gates both halves in the two `native-build` jobs: that the
+backend archive is in the link (its absence would put the count back up while looking like a ratchet
+holding), and that no `AIL_*` is unresolved. That second assertion is the one the existing gates
+cannot make — `check-openal-symbols.py` compares declared against defined *inside* the backend, and
+`audio-surface-scan.py --check` compares demanded against declared *by source scan*; neither can see
+a symbol the engine references that `mss.h` never declares. Only a link can, and now one does.
+
 ## 7. What the next slice in this area has to solve
 
 1. **`WWSaveLoad` pointer-width** (`persistfactory.h:123`, `pointerremap.h`): the remaining 9
    WWAudio TUs, and far more elsewhere. Save-file compatibility is the real question, not the cast.
-2. **`GameEngineDevice` off Windows**, so `MilesAudioManager.cpp` — the largest consumer, 100
-   references — is compiled against the backend at all. Blocked on `windows.h`/`dinput.h`, i.e. the
-   PreRTS/Win32 slice, not on audio.
+2. ~~**`GameEngineDevice` off Windows**, so `MilesAudioManager.cpp` — the largest consumer, 100
+   references — is compiled against the backend at all.~~ Done: it is one of `Core/GameEngineDevice`'s
+   69 objects in the shimmed native build, and its `AIL_*` references resolve against the backend
+   there (section 6a). Whether it *runs* is untouched by that.
 3. **MP2/MP3 decoding.** `AIL_open_stream` handles WAV; Zero Hour's music is compressed. Streams of
    unsupported formats currently open, report zero length and play silence. FFmpeg is already an
    optional dependency for video and is the obvious route.

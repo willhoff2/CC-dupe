@@ -47,6 +47,26 @@ clone_at "$(pin lzhl.cmake GIT_REPOSITORY)"    "$(pin lzhl.cmake GIT_TAG)"    "$
 # <stb_image_write.h> from the root of it.
 clone_at "$(pin stb.cmake GIT_REPOSITORY)"     "$(pin stb.cmake GIT_TAG)"     "$deps_dir/stb-src"
 
+# OpenAL: <AL/al.h> and <AL/alc.h> for Core/Libraries/Source/OpenALAudioDevice, the engine's own
+# Miles replacement (`milesstub` off 32-bit Windows). cmake/openal.cmake prefers a system OpenAL and
+# only falls back to fetching openal-soft, so these headers are what makes the native build's audio
+# backend compile on a box without libopenal-dev. A blobless partial clone of the public headers is
+# enough: nothing here builds openal-soft itself, and linking uses the system library when present.
+openal_dir="$deps_dir/openal-src"
+if [ -d "$openal_dir/.git" ]; then
+    echo "== $openal_dir already present"
+else
+    openal_tag=$(pin openal.cmake GIT_TAG)
+    echo "== $(pin openal.cmake GIT_REPOSITORY) @ $openal_tag -> $openal_dir"
+    mkdir -p "$openal_dir"
+    git -C "$openal_dir" init -q
+    git -C "$openal_dir" remote add origin "$(pin openal.cmake GIT_REPOSITORY)"
+    git -C "$openal_dir" config extensions.partialClone origin
+    git -C "$openal_dir" sparse-checkout set --no-cone '/include/AL/*.h'
+    git -C "$openal_dir" fetch -q --depth 1 --filter=blob:none origin "$openal_tag"
+    git -C "$openal_dir" checkout -q FETCH_HEAD
+fi
+
 # FFmpeg headers for the RTS_BUILD_OPTION_FFMPEG video path. The real build gets the libraries
 # from vcpkg, so the pin is the version in vcpkg-lock.json rather than a cmake/*.cmake GIT_TAG;
 # upstream tags that release as n<version>. The probe and the native build only ever compile
