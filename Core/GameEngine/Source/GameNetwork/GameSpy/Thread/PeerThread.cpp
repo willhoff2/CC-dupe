@@ -31,6 +31,9 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port BSD sockets behind the Winsock spellings; this is <winsock.h> on Windows
+#include <Utility/socket_compat.h>
+
 #include "Common/Registry.h"
 #include "Common/OptionPreferences.h"
 #include "Common/version.h"
@@ -1125,7 +1128,8 @@ void checkQR2Queries( PEER peer, SOCKET sock )
 {
 	static char indata[INBUF_LEN];
 	struct sockaddr_in saddr;
-	int saddrlen = sizeof(struct sockaddr_in);
+	// TheSuperHackers @port socklen_t is int on Winsock and the address-length type on BSD sockets
+	socklen_t saddrlen = sizeof(struct sockaddr_in);
 	fd_set set;
 	struct timeval timeout = {0,0};
 	int error;

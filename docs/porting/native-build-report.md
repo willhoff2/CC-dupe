@@ -17,22 +17,19 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/Libraries/Source/WWVegas/WWLib` | 74 | 74 | 74 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 | 3 | 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
-| `Core/GameEngine` | 204 | 210 | 204 |
-| `GeneralsMD/Code/GameEngine` | 378 | 380 | 378 |
+| `Core/GameEngine` | 207 | 210 | 207 |
+| `GeneralsMD/Code/GameEngine` | 380 | 380 | 380 |
 | `Core/GameEngineDevice` | 64 | 70 | 64 |
 | `GeneralsMD/Code/GameEngineDevice` | 34 | 39 | 34 |
 | `GeneralsMD/Code/Main` | 0 | 1 | 0 |
-| **Total** | **816** | **836** | **816** |
+| **Total** | **821** | **836** | **821** |
 
-20 translation units produced no object file:
+15 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
-| `Core/GameEngine/Source/GameNetwork/DownloadManager.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
-| `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
+| `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` | `unknown type name 'HANDLE'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp` | `unknown type name 'AsnObjectIdentifier'` |
-| `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/GameResultsThread.cpp` | `unknown type name 'HOSTENT'` |
-| `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PeerThread.cpp` | `no matching function for call to 'recvfrom'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp` | `unknown type name 'HOSTENT'` |
 | `Core/GameEngineDevice/Source/MilesAudioDevice/MilesAudioManager.cpp` | `unknown type name 'HANDLE'` |
 | `Core/GameEngineDevice/Source/StdDevice/Common/StdLocalFileSystem.cpp` | `use of undeclared identifier 'unNormalized'; did you mean 'nonNormalized'?` |
@@ -40,8 +37,6 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DShaderManager.cpp` | `no member named 'DriverVersion' in '_D3DADAPTER_IDENTIFIER8'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp` | `use of undeclared identifier 'D3DXMatrixInverse'` |
 | `Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp` | `use of undeclared identifier 'VK_F5'` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/DownloadMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/MainMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DAssetManager.cpp` | `use of undeclared identifier 'lstrcpyn'` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp` | `no member named '_strdup' in the global namespace; did you mean 'strdup'?` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DWebBrowser.cpp` | `'IDispatch' does not refer to a value` |
@@ -51,17 +46,17 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 816 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 821 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: no; clean link: no). **457 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: no; clean link: no). **496 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| Defined in a layer not built here (renderer / audio) | 272 |
-| Defined in a translation unit that failed to compile | 86 |
-| GameSpy SDK (cut scope, not linked) | 33 |
+| Defined in a layer not built here (renderer / audio) | 274 |
+| GameSpy SDK (cut scope, not linked) | 81 |
+| Defined in a translation unit that failed to compile | 75 |
 | Other / unclassified | 29 |
 | Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 |
 | Defined in a built translation unit behind a disabled #if (build option / platform) | 10 |
@@ -87,26 +82,7 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `DX8Wrapper::Draw_Triangles(unsigned short, unsigned short, unsigned short, unsigned short)`
 - `DX8Wrapper::m_pCleanupHook`
 - `DX8Wrapper::FrameStatistics`
-- …and 257 more
-
-### Defined in a translation unit that failed to compile
-
-- `TheGameResultsQueue`
-- `TheGameSpyPeerMessageQueue`
-- `ThePinger`
-- `TheWaterRenderObj`
-- `TheWin32Mouse`
-- `doSkyBoxSet(bool)`
-- `MainMenuInit(WindowLayout*, void*)`
-- `MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `MainMenuUpdate(WindowLayout*, void*)`
-- `setupGameStart(AsciiString, GameDifficulty)`
-- `CreateGameEngine()`
-- `DownloadMenuInit(WindowLayout*, void*)`
-- `MainMenuShutdown(WindowLayout*, void*)`
-- `DownloadMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- …and 71 more
+- …and 259 more
 
 ### GameSpy SDK (cut scope, not linked)
 
@@ -121,11 +97,30 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `PersistThink`
 - `PreAuthenticatePlayerCDA`
 - `PreAuthenticatePlayerPM`
-- `SendGameSnapShotA`
-- `SetPersistDataValuesA`
-- `gcd_gamename`
-- `gcd_secret_key`
-- …and 18 more
+- `SBServerGetIntValueA`
+- `SBServerGetPlayerIntValueA`
+- `SBServerGetPlayerStringValueA`
+- `SBServerGetPrivateInetAddress`
+- …and 66 more
+
+### Defined in a translation unit that failed to compile
+
+- `ThePinger`
+- `TheWaterRenderObj`
+- `TheWin32Mouse`
+- `doSkyBoxSet(bool)`
+- `StartPatchCheck()`
+- `CreateGameEngine()`
+- `HTTPThinkWrapper()`
+- `StopAsyncDNSCheck()`
+- `OSDisplaySetBusyState(bool, bool)`
+- `StartDownloadingPatches()`
+- `testMinimumRequirements(ChipsetType*, CpuType*, int*, unsigned long long*, float*, float*, float*)`
+- `CancelPatchCheckCallback()`
+- `GetLocalChatConnectionAddress(AsciiString, unsigned short, unsigned int&)`
+- `W3DDisplay::m_assetManager`
+- `W3DDisplay::m_3DInterfaceScene`
+- …and 60 more
 
 ### Other / unclassified
 

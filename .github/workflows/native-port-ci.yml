@@ -185,6 +185,19 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The single-player main menu reaches online code, so it has to compile with the online path
+      # absent. Pins those translation units by name and the cut GameSpy SDK category by symbol.
+      # See docs/porting/online-absent-menu-seam.md.
+      - name: Gate the menu path against the online path's absence
+        run: |
+          set -o pipefail
+          {
+            echo '## Single-player menu with online absent'
+            echo '```'
+            python3 scripts/ci/check-online-absent-seam.py --results native-build.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Linking the seam says nothing about what it does. This runs FindFirstFile()'s patterns,
       # the directory attribute, GetFullPathName()'s buffer protocol and the case-insensitive
       # lookup against a real directory tree. See docs/porting/win32-file-api-seam.md.

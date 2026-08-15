@@ -10,7 +10,7 @@
     "miles-src/mss",
     "stb-src"
   ],
-  "clean": 664,
+  "clean": 667,
   "total": 754,
   "targets": {
     "Core/Libraries/Source/Compression": {
@@ -42,11 +42,11 @@
       "total": 6
     },
     "Core/GameEngine": {
-      "clean": 180,
+      "clean": 182,
       "total": 210
     },
     "GeneralsMD/Code/GameEngine": {
-      "clean": 343,
+      "clean": 344,
       "total": 380
     }
   }

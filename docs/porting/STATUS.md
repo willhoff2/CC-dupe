@@ -22,9 +22,9 @@ Measured with clang 14. Vendor headers present: dx8-src, ffmpeg-src, gamespy-src
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 11 / 12 | 12 / 12 |
 | `Core/Libraries/Source/debug` | 12 / 22 | 13 / 22 |
 | `Core/Libraries/Source/profile` | 5 / 6 | 5 / 6 |
-| `Core/GameEngine` | 180 / 210 | 193 / 210 |
-| `GeneralsMD/Code/GameEngine` | 343 / 380 | 359 / 380 |
-| **total** | **664 / 754** | **706 / 754** |
+| `Core/GameEngine` | 182 / 210 | 195 / 210 |
+| `GeneralsMD/Code/GameEngine` | 344 / 380 | 360 / 380 |
+| **total** | **667 / 754** | **709 / 754** |
 
 ## D3D8 call surface
 
