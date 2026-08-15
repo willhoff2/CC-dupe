@@ -22,7 +22,7 @@ This script measures both, and the divergence between them and the probe:
 A playable binary is not a goal. An honest, reproducible blocker list is.
 
 Usage:
-    python3 scripts/native-build.py [--level 1|2|3] [--with-shims]
+    python3 scripts/native-build.py [--level 1|2|3|4] [--with-shims]
                                     [--report docs/porting/native-build-report.md]
                                     [--json out.json] [--jobs N] [--build-dir DIR]
 """
@@ -57,8 +57,21 @@ CXX = os.environ.get("CLANGXX", "clang++")
 # `TheKey_*` (104 symbols, instantiated only in GameEngineDevice's WorldHeightMap.cpp) and "defined
 # in a layer not built here" (21) were artefacts of the level-1-2 scope, not port work. Including
 # the layer converts each of them into either a resolved symbol or a compile failure attributable
-# to a named file. The renderer libraries (WW3D2, WWAudio, WWDownload) are still out: they are the
-# renderer seam's own measurement, and pulling them in here would mix two slices' figures.
+# to a named file.
+#
+# Level 4 adds the renderer and audio libraries for exactly the same reason, one level up. Keeping
+# them out was defended as "the renderer seam's own measurement", but the level-1-2-3 link put 272
+# of its 457 unresolved symbols in "defined in a layer not built here (renderer / audio)" -- 60% of
+# the total was a statement about this script's scope rather than about the code. A number that
+# large cannot be read as portability, and no honest link attempt is possible while the layer that
+# defines those symbols is absent. Building it converts each of them into a resolved symbol or a
+# compile failure attributable to a named file, which is what the level-3 comment above claims as
+# the whole point of the exercise.
+#
+# It is emphatically not expected to compile: these translation units are the D3D8, DirectSound and
+# WinInet consumers, the code least likely to build off Windows. New compile failures here are the
+# deliverable, not a regression. Level 4 has its own baseline file
+# (`native-build-shimmed-level1-2-3-4.json`), so the smaller build's ratchet is untouched.
 LEVELS = {
     1: [
         "Core/Libraries/Source/Compression",
@@ -75,6 +88,12 @@ LEVELS = {
         "Core/GameEngineDevice",
         "GeneralsMD/Code/GameEngineDevice",
         "GeneralsMD/Code/Main",
+    ],
+    4: [
+        "Core/Libraries/Source/WWVegas/WW3D2",
+        "Core/Libraries/Source/WWVegas/WWAudio",
+        "Core/Libraries/Source/WWVegas/WWDownload",
+        "GeneralsMD/Code/Libraries/Source/WWVegas",
     ],
 }
 

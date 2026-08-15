@@ -40,7 +40,10 @@ Three things in that table are not what a reader would assume, so they are spell
   (and `W3DGameWinDefaultDraw` stopped being one), all of them in `native-build.py`'s "defined in a
   layer not built here" category. `render2dsentence.cpp` itself compiles clean now; what it cannot do
   yet is link, because `dx8wrapper.h` still fails on `TheD3D8RenderBackend`, which the concurrent
-  renderer slice owns. No renderer file was touched here.
+  renderer slice owns. No renderer file was touched here. (Superseded for the *linking* half:
+  `native-build.py`'s level 4 now builds `WW3D2`, `render2dsentence.cpp` among it, and none of those
+  12 symbols is unresolved any more — see `docs/porting/native-build.md`. The paragraph stands as the
+  levels 1-3 measurement it was.)
 - **The probe totals rose by 3.** Two are this slice's new files; the third is
   `WWMath/d3dx8math.cpp`, added by `feat: Close Vulkan backend methods and D3DX math gaps` without a
   baseline refresh, and refreshing the probe baselines here picks it up.
