@@ -409,12 +409,12 @@ Measured effect at level 4: 927 → 935 objects, 41 → 33 failures, 432 → 386
 ### Since: the D3DX math entry points
 
 The three D3DX units above are gone, and with them the five matrix symbols they left unresolved:
-952/971 → 956/972 objects, 19 → 16 failures, 412 → 364 unresolved at level 4 (834/839 → 836/840, 5 →
-4, 577 → 561 at levels 1-3). `Direct3D 8 / DirectX` 8 → 4, and `D3DXAssembleShader` appears in it for
-the first time because `W3DWater.cpp` now compiles and its pixel-shader path calls it. The denominator
-grows by one for `WWMath/tests/d3dx8math_test.cpp`, whose `main()` is removed from the archives like
-the other standalone tests'. Full account, including why an object count is the *weaker* half of that
-slice's evidence: `docs/porting/d3dx8-math-seam.md`.
+954/971 → 958/972 objects, 17 → 14 failures, 427 → 377 unresolved at level 4 (835/839 → 837/840, 4 →
+3, 628 → 608 at levels 1-3), measured against `main` `4afd6c894`. `Direct3D 8 / DirectX` 8 → 4, and
+`D3DXAssembleShader` appears in it for the first time because `W3DWater.cpp` now compiles and its
+pixel-shader path calls it. The denominator grows by one for `WWMath/tests/d3dx8math_test.cpp`, whose
+`main()` is removed from the archives like the other standalone tests'. Full account, including why an
+object count is the *weaker* half of that slice's evidence: `docs/porting/d3dx8-math-seam.md`.
 
 ### Is level 4 stable enough for CI
 
