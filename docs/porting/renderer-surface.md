@@ -264,10 +264,11 @@ backend tracks `written_this_frame` per surface to decide. And a `CopyRects` iss
 `BeginScene`/`EndScene` is recorded into the frame's own command buffer between passes, because a
 copy must see the draws that preceded it; outside a frame it is a one-shot submit.
 
-`Surface_Bits` (D3D8 `LockRect` on a surface) is implemented for system-memory surfaces only.
-Locking a *video-memory* surface is the readback the resource seam already prices, and this slice
-deliberately did not touch that code: the engine's own uses are
-`CreateImageSurface` → fill → `CopyRects`, which is served.
+`Surface_Bits` (D3D8 `LockRect` on a surface) was implemented for system-memory surfaces only when
+this section was written. It now serves video-memory surfaces as well, allocating the host-visible
+buffer on the first read and reading back only when the GPU-dirty bit says the device is the newer
+writer (`renderer-resource-seam.md` §4.4). The engine's own uses remain
+`CreateImageSurface` → fill → `CopyRects`.
 
 #### The C8 read hazard, and where it can be fixed
 
@@ -289,6 +290,14 @@ the shapes it asked about are feasible in this layer, and neither is implemented
 The decision of *when* a lock triggers that readback is the resource/staging seam's contract, not
 this one, so this slice deliberately stops at exposing the copy direction and the per-surface state
 the fix needs.
+
+**Since resolved and built** (`decisions-resolved.md` §1, implemented in
+`renderer-resource-seam.md` §4.4): the GPU-dirty bit, living on the `Image` so a texture and a
+surface view of it agree, set at five enumerated funnels rather than the two guessed at above —
+`Set_Render_Target`, `Clear`, `Prepare_Draw`, `Copy_Rects` and `Update_Texture`. The two this
+section named were not sufficient: binding a target without counting the draws into it would have
+left a surface clean after the draw that wrote it. `Surface_Bits` now serves video-memory surfaces
+too, reading back only when the bit is set.
 
 ### The programmable path
 

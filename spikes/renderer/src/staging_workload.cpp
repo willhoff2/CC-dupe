@@ -432,6 +432,17 @@ void Print_Json(const Report& r) {
 	std::printf("  \"texture_upload_regions\": %u,\n", r.stats.texture_upload_regions);
 	std::printf("  \"upload_submits\": %u,\n", r.stats.upload_submits);
 	std::printf("  \"readback_stalls\": %u,\n", r.stats.readback_stalls);
+	// What the D3D8 preserve-on-lock contract costs the pool: the levels a lock had
+	// to bring back because the block no longer held them, against the locks that
+	// proved they did not need to.
+	std::printf("  \"staging_preserve_readbacks\": %u,\n",
+	            r.stats.staging_preserve_readbacks);
+	std::printf("  \"staging_preserve_bytes\": %llu,\n",
+	            static_cast<unsigned long long>(r.stats.staging_preserve_bytes));
+	std::printf("  \"staging_preserve_skips\": %u,\n", r.stats.staging_preserve_skips);
+	std::printf("  \"gpu_write_marks\": %u,\n", r.stats.gpu_write_marks);
+	std::printf("  \"dirty_reads\": %u,\n", r.stats.dirty_reads);
+	std::printf("  \"clean_reads\": %u,\n", r.stats.clean_reads);
 	std::printf("  \"cpu_expansions\": %u,\n", r.stats.cpu_expansions);
 	std::printf("  \"ring_discards\": %u,\n", r.stats.ring_discards);
 	std::printf("  \"ring_appends\": %u,\n", r.stats.ring_appends);
