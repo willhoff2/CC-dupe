@@ -395,6 +395,211 @@ def well_known_keys_category(owner, failed, built_sources):
 
 
 # ---------------------------------------------------------------------------------------------
+# Piles: how far each unresolved symbol is from an executable
+# ---------------------------------------------------------------------------------------------
+
+# The categories above say *what* a symbol is. They do not say what would make it go away, and the
+# two are routinely confused: FFmpeg's 29 symbols and the renderer layer's 272 (before level 4)
+# read as port work while both were only "the build does not include that". Level 4 settled the
+# renderer case by building the layer; these piles settle the rest by naming, for every remaining
+# symbol, the thing that resolves it.
+#
+# Only `no-definition-anywhere` is remaining port work. Everything else is a link line, a cut, or a
+# build-configuration fact.
+PILE_LIBRARY = "library-not-linked"
+PILE_CUT = "cut-scope-not-linked"
+PILE_COMPILE = "compile-blocked"
+PILE_HARNESS = "harness-artefact"
+PILE_PORT = "no-definition-anywhere"
+
+PILE_MEANING = {
+    PILE_LIBRARY: "A library defines it and this configuration links no such library. A link line, "
+                  "not port work.",
+    PILE_CUT: "A library defines it and this project will never link that library, because the "
+              "feature is cut scope. Goes away by excising the call sites, not by defining it.",
+    PILE_COMPILE: "An in-tree translation unit defines it in its source text but that unit does "
+                  "not compile natively yet. The definition exists; the file is the blocker.",
+    PILE_HARNESS: "An artefact of how this harness is configured: a build-time generated "
+                  "definition it does not generate, one a disabled `#if` removed, or one in a "
+                  "layer this level selection does not build.",
+    PILE_PORT: "Nothing in the repository, the provisioned dependencies or a linkable library "
+               "defines it. This is the remaining port work.",
+}
+
+
+@dataclasses.dataclass(frozen=True)
+class Provider:
+    """A library that defines some of the unresolved symbols, and why nothing links it here.
+
+    `sources` and `headers` are the *evidence*: globs, repo-relative or relative to the provisioned
+    dependency tree, whose definitions (or, for a declaration-only SDK, declarations) account for
+    the symbols. They are provisioned by `scripts/ci/fetch-probe-deps.sh`, so the attribution is
+    reproducible on any box. `libraries` is an extra check against a real shared library when the
+    measuring machine happens to have one; it is deliberately *not* what decides the pile, because
+    then the answer would depend on the box.
+    """
+
+    key: str
+    label: str
+    pile: str
+    reason: str
+    owner: str
+    sources: tuple = ()
+    headers: tuple = ()
+    libraries: tuple = ()
+    # Whether `Foo::bar` may be matched by the evidence defining a bare `bar`. Only safe where the
+    # qualifier is a namespace the source scan cannot see; for a class member it produced a real
+    # misattribution -- a 4700-name C SDK defines something called `Initialize`, and WWAudio's
+    # `ListenerHandleClass::Initialize` is not it.
+    match_unqualified: bool = False
+
+
+PROVIDERS = (
+    Provider(
+        key="miles",
+        label="Miles AIL_* API — the `milesstub`/OpenAL backend",
+        pile=PILE_LIBRARY,
+        reason="`cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, "
+               "and the 32-bit Windows build links the fetched miles-sdk-stub. This harness builds "
+               "neither: `Core/Libraries/Source/OpenALAudioDevice` is not one of its levels.",
+        owner="platform/audio-device (the Miles/OpenAL link)",
+        sources=("Core/Libraries/Source/OpenALAudioDevice/**/*.cpp",
+                 "@deps/miles-src/*.c"),
+        libraries=(r"libopenal\.so.*",),
+    ),
+    Provider(
+        key="ffmpeg",
+        label="FFmpeg (libavcodec / libavformat / libavutil / libswscale)",
+        pile=PILE_LIBRARY,
+        reason="The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route. "
+               "`fetch-probe-deps.sh` provisions the pinned headers so the code compiles, and "
+               "nothing installs an FFmpeg runtime for the link.",
+        owner="video/bink-excision-and-harness-headers",
+        headers=("@deps/ffmpeg-src/libav*/**/*.h", "@deps/ffmpeg-src/libsw*/**/*.h"),
+        libraries=(r"libav(codec|format|util)\.so\.\d+", r"libsw(scale|resample)\.so\.\d+"),
+    ),
+    Provider(
+        key="window-backend",
+        label="The window/input backend this configuration does not choose (SDL2, Cocoa)",
+        pile=PILE_LIBRARY,
+        reason="`probe.OPTIONAL_BACKENDS` keeps the SDL2 backend opt-in and the Cocoa backend is "
+               "Objective-C++, so no target lists either. The definitions are in the tree; a "
+               "configuration that picks one resolves all of them.",
+        owner="platform/macos-window-compile and platform/window-seam-wiring",
+        sources=("Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_sdl2.cpp",
+                 "Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_cocoa.mm"),
+        libraries=(r"libSDL2-2\.0\.so\.\d+",),
+        # These two files define `WWPlatform::Window_Create` inside `namespace WWPlatform`, which
+        # the column-zero source scan only ever sees unqualified.
+        match_unqualified=True,
+    ),
+    Provider(
+        key="gamespy",
+        label="GameSpy SDK",
+        pile=PILE_CUT,
+        reason="Online matchmaking is permanently cut scope (docs/porting/native-port-plan.md). "
+               "The SDK's own sources are provisioned and define these symbols, so this is a link "
+               "refused rather than one that is missing: they disappear when the call sites go, "
+               "which is `online/absent-menu-seam`'s work, and must not be stubbed to make a link "
+               "pass.",
+        owner="online/absent-menu-seam",
+        sources=("@deps/gamespy-src/**/*.c", "@deps/gamespy-src/**/*.cpp"),
+    ),
+)
+
+# Categories whose pile is a property of the category itself: no library is involved either way.
+CATEGORY_PILES = {
+    "Generated gitinfo (build-time, not a blocker)": PILE_HARNESS,
+    DISABLED_IF_CATEGORY: PILE_HARNESS,
+    "Defined in a translation unit that failed to compile": PILE_COMPILE,
+    UNBUILT_LAYER_CATEGORY: PILE_HARNESS,
+    EXCLUDED_BACKEND_CATEGORY: PILE_LIBRARY,
+    "COM / OLE (browser embedding, cut scope)": PILE_CUT,
+    "Bink video": PILE_CUT,
+    "Third-party library not linked (lzhl, zlib)": PILE_LIBRARY,
+}
+
+
+def _expand(globs, deps_dir):
+    """Resolve a provider's evidence globs. `@deps/` prefixes are relative to the deps tree."""
+    paths = []
+    for pattern in globs:
+        if pattern.startswith("@deps/"):
+            root, rest = deps_dir, pattern[len("@deps/"):]
+        else:
+            root, rest = REPO_ROOT, pattern
+        paths.extend(p for p in root.glob(rest) if p.is_file())
+    return paths
+
+
+def provider_definitions(deps_dir):
+    """Provider key -> the names its evidence files define or declare, with what was scanned."""
+    definitions = {}
+    for provider in PROVIDERS:
+        sources = _expand(provider.sources, deps_dir)
+        headers = _expand(provider.headers, deps_dir)
+        names = defined_names_in(sources) | declared_names_in(headers)
+        definitions[provider.key] = (names, len(sources) + len(headers))
+    return definitions
+
+
+def provider_library_symbols(provider, search_dirs):
+    """Symbols a real shared library on this box exports, for cross-checking the evidence scan.
+
+    Informational only: the CI container has no FFmpeg or SDL2 runtime, so making the pile depend
+    on this would make the pile split depend on the machine.
+    """
+    names = set()
+    found = []
+    for directory in search_dirs:
+        root = pathlib.Path(directory)
+        if not root.is_dir():
+            continue
+        for pattern in provider.libraries:
+            matcher = re.compile(pattern + r"$")
+            for path in root.iterdir():
+                if matcher.match(path.name):
+                    found.append(str(path))
+                    names |= nm_symbols(path, "-D", "--defined-only", "--extern-only")
+    return names, sorted(set(found))
+
+
+LIBRARY_SEARCH_DIRS = (
+    "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu",
+    "/usr/lib", "/usr/local/lib", "/opt/homebrew/lib",
+)
+
+
+def symbol_keys(demangled, unqualified=True):
+    """The names a symbol could be matched by: fully qualified, bare, and optionally unqualified."""
+    base = demangled.split("(", 1)[0].strip().removesuffix("[abi:cxx11]")
+    stripped = SYMBOL_OWNER_PREFIX_RE.sub("", base).strip()
+    keys = {base, stripped}
+    if unqualified:
+        keys.add(stripped.rsplit("::", 1)[-1])
+    return keys
+
+
+def provider_for(demangled, provider_definitions_by_key):
+    """The first provider whose evidence accounts for this symbol, or None."""
+    for provider in PROVIDERS:
+        names, _ = provider_definitions_by_key.get(provider.key, (frozenset(), 0))
+        if symbol_keys(demangled, provider.match_unqualified) & names:
+            return provider
+    return None
+
+
+def pile_for(category, provider):
+    if provider is not None:
+        return provider.pile
+    # `well_known_keys_category` names the one translation unit that decides those 104 symbols, so
+    # the category text is built per run and cannot be a dictionary key.
+    if category.startswith("Well-known Dict keys"):
+        return PILE_COMPILE if "failed to compile" in category else PILE_HARNESS
+    return CATEGORY_PILES.get(category, PILE_PORT)
+
+
+# ---------------------------------------------------------------------------------------------
 # Steps
 # ---------------------------------------------------------------------------------------------
 
@@ -885,6 +1090,91 @@ def link_probe(build_dir, archives, support_archives=(), link_zlib=False, openal
             [a.stem for a in entry_point])
 
 
+UNDEFINED_REFERENCE_RE = re.compile(r"undefined reference to `([^']+)'")
+# `libcore_gameengine.a(PlatformWindowHost.cpp.o): in function `X::y()':` -- the archive member that
+# references the symbols named on the lines that follow.
+REFERENCING_MEMBER_RE = re.compile(r"^(?:\S*ld:\s*)?(\S+\.a)\(([^)]+\.o)\)")
+# ld64 says `  "_AIL_startup", referenced from:` and then `      _f in libfoo.a(bar.o)`. It reports
+# mangled names with the Mach-O leading underscore where GNU ld reports demangled ones, so which
+# form the list is in depends on the platform and is recorded alongside it.
+MACH_UNDEFINED_RE = re.compile(r'^\s*"([^"]+)", referenced from:')
+MACH_REFERENCED_FROM_RE = re.compile(r"\bin ([^\s(]+\.a)\(([^)]+\.o)\)")
+STRICT_LINK_NAME_FORM = "mangled" if sys.platform == "darwin" else "demangled"
+
+
+def parse_strict_link_log(log):
+    """symbol -> first archive member that references it, from a failed link's diagnostics."""
+    referenced_by = {}
+    member = None
+    pending = None
+    for line in log.splitlines():
+        found = REFERENCING_MEMBER_RE.match(line.strip())
+        if found:
+            member = f"{pathlib.Path(found.group(1)).name}({found.group(2)})"
+        for match in UNDEFINED_REFERENCE_RE.finditer(line):
+            referenced_by.setdefault(match.group(1), member)
+        mach = MACH_UNDEFINED_RE.match(line)
+        if mach:
+            pending = mach.group(1).lstrip("_")
+            referenced_by.setdefault(pending, None)
+            continue
+        site = MACH_REFERENCED_FROM_RE.search(line)
+        if site and pending is not None and referenced_by.get(pending) is None:
+            referenced_by[pending] = f"{pathlib.Path(site.group(1)).name}({site.group(2)})"
+    return referenced_by
+
+
+def strict_link(build_dir, archives, support_archives=(), link_zlib=False,
+                openal_path=None):
+    """Link with no tolerance for unresolved symbols, i.e. attempt an actual executable.
+
+    `link_probe` above passes `--warn-unresolved-symbols`, which is why it produces a file: the
+    unresolved symbols are warnings and the "binary" it writes is not one the loader would accept.
+    This runs the same link without that flag, so the linker's own verdict is the result. It is
+    expected to fail; the deliverable is the list it fails with, fully attributed.
+
+    Returns (linked, binary_produced, symbol -> first referencing archive member, log). The names
+    are demangled under GNU ld and mangled under ld64; `STRICT_LINK_NAME_FORM` says which.
+
+    Nothing is stubbed to make this pass, and nothing may be: a strict link made green with stubs is
+    a worse measurement than the honest failure, because the stubs are invisible in every figure
+    afterwards.
+    """
+    entry_point = archives_defining_main(archives)
+    stub = build_dir / "native_strict_link.cpp"
+    stub.write_text(
+        "// Generated by scripts/native-build.py for the strict link.\n"
+        + ("// The game target's own main() anchors this link.\n" if entry_point
+           else "int main() { return 0; }\n"))
+    out = build_dir / "native_strict_link"
+    if out.exists():
+        out.unlink()
+    if sys.platform == "darwin":
+        cmd = [
+            CXX, "-std=c++20", "-o", str(out), str(stub), "-Wl,-all_load",
+            *[str(a) for a in archives], *[str(a) for a in support_archives], "-lc++", "-lm",
+        ]
+    else:
+        cmd = [
+            CXX, "-std=c++20", "-o", str(out), str(stub),
+            "-Wl,--whole-archive", *[str(a) for a in archives], "-Wl,--no-whole-archive",
+            *[str(a) for a in support_archives],
+            "-lstdc++", "-lm", "-lpthread", "-ldl",
+        ]
+    if link_zlib:
+        cmd.append("-lz")
+    # By path, for the same reason link_probe does it: the OpenAL runtime library alone resolves the
+    # backend's al*/alc* calls. Omitting it here would fail the strict link on ~90 symbols the
+    # tolerant link resolves, which would read as port work rather than as a missing -l.
+    if openal_path is not None:
+        cmd.append(str(openal_path))
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    log = proc.stdout + proc.stderr
+    # ld reports every reference site, so the same symbol appears many times; the first one is kept,
+    # because a named object file is a better answer to "who needs this" than a count.
+    return proc.returncode == 0, out.exists(), parse_strict_link_log(log), log
+
+
 def demangle(names):
     if not names:
         return {}
@@ -1006,12 +1296,78 @@ def render_report(data, examples):
         lines.append("")
 
     lines += [
+        "## 4. What would resolve them",
+        "",
+        "The causes above say what each symbol *is*. They do not say what makes it go away, and "
+        "the two get confused: before level 4 the renderer's 272 symbols read as port work when "
+        "they were only \"the build does not include that layer\". Each unresolved symbol is "
+        "therefore also assigned to exactly one pile, and only one of the five is remaining port "
+        "work.",
+        "",
+        "| Pile | Symbols | Meaning |",
+        "|---|---:|---|",
+    ]
+    for pile, meaning in data["pile_meaning"].items():
+        lines.append(f"| `{pile}` | {data['undefined_by_pile'].get(pile, 0)} | {meaning} |")
+    lines += [
+        "",
+        "The libraries in the `library-not-linked` and `cut-scope-not-linked` piles, the evidence "
+        "each attribution rests on, and the slice that owns it:",
+        "",
+        "| Library | Pile | Symbols | Evidence files | Why it is not linked | Owner |",
+        "|---|---|---:|---:|---|---|",
+    ]
+    for provider in data["providers"].values():
+        lines.append(
+            f"| {provider['label']} | `{provider['pile']}` | {provider['symbols']} | "
+            f"{provider['evidence_files']} | {provider['reason']} | {provider['owner']} |")
+    lines += [
+        "",
+        "Evidence is the provisioned sources or headers that define the symbols, not a library "
+        "found on the measuring machine: the CI container has no FFmpeg or SDL2 runtime, and a "
+        "pile split that changed with the box would not be a measurement.",
+        "",
+    ]
+
+    strict = data.get("strict_link") or {}
+    lines += ["## 5. Strict link: is there an executable?", ""]
+    if not strict.get("attempted"):
+        lines += [
+            "Not attempted in this run. `--strict-link` drops "
+            "`--warn-unresolved-symbols` and reports the linker's own verdict; §3's file was "
+            "produced *with* that tolerance and is not something the loader would accept.",
+            "",
+        ]
+    else:
+        lines += [
+            f"`--strict-link` linked the same archives with no tolerance for unresolved symbols: "
+            f"**{'succeeded' if strict['clean'] else 'failed'}**, "
+            f"{strict['unresolved_total']} unresolved symbol(s), executable produced: "
+            f"{'yes' if strict['binary_produced'] else 'no'}. Nothing is stubbed to make this "
+            "pass, and nothing may be — a green strict link bought with stubs would hide exactly "
+            "the work this number exists to count.",
+            "",
+            "The linker's list and §3's `nm` scan "
+            + ("agree, so the categorised list above is the list standing between this build and "
+               "an executable."
+               if strict["agrees_with_nm"] else
+               f"**disagree**: {len(strict['only_in_linker_report'])} symbol(s) only the linker "
+               f"reports, {len(strict['only_in_nm_scan'])} only the scan does. Treat that as a bug "
+               "in the scan, not as a smaller problem."),
+            "",
+            "Symbol resolution is necessary and not sufficient; "
+            "`docs/porting/startability.md` defines what else a first launch needs.",
+            "",
+        ]
+
+    lines += [
         "## Reproducing",
         "",
         "```sh",
         "bash scripts/ci/fetch-probe-deps.sh",
         f"python3 scripts/native-build.py {' '.join(f'--level {l}' for l in data['levels'])}"
         + (" --with-shims" if data["with_shims"] else "")
+        + (" --strict-link" if strict.get("attempted") else "")
         + " --report docs/porting/native-build-report.md --json native-build.json",
         "```",
         "",
@@ -1030,6 +1386,9 @@ def main():
     parser.add_argument("--with-shims", action="store_true",
                         help="put scripts/native-port-shims/ on the include path, as the probe's "
                              "shimmed mode does")
+    parser.add_argument("--strict-link", action="store_true",
+                        help="also attempt a link with no tolerance for unresolved symbols, i.e. "
+                             "an actual executable, and exit non-zero when it fails")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--examples", type=int, default=15,
                         help="how many example symbols to list per category")
@@ -1146,6 +1505,16 @@ def main():
         openal_path=openal_path)
     if entry_archives:
         print(f"   entry point from {', '.join(entry_archives)} (no stub main)")
+    strict_referenced_by = None
+    strict_ok = strict_binary = False
+    if args.strict_link:
+        print("== linking strictly (no --warn-unresolved-symbols): expected to fail")
+        strict_ok, strict_binary, strict_referenced_by, _ = strict_link(
+            build_dir, archives, support_archives, link_zlib=zlib_path is not None,
+            openal_path=openal_path)
+        print(f"   strict link {'succeeded' if strict_ok else 'failed'}: "
+              f"{len(strict_referenced_by)} unresolved symbol(s), binary produced: "
+              f"{'yes' if strict_binary else 'no'}")
     extra_libraries = [p for p in (zlib_path, openal_path) if p]
     symbols = unresolved_symbols(archives, support_archives, extra_libraries)
     demangled = demangle(list(symbols))
@@ -1172,11 +1541,48 @@ def main():
 
     by_category = collections.Counter()
     per_category_names = collections.defaultdict(list)
+    provider_defs = provider_definitions(deps_dir)
+    by_pile = collections.Counter()
+    per_pile_names = collections.defaultdict(list)
+    provider_hits = collections.defaultdict(list)
     for symbol in sorted(symbols):
         name = demangled.get(symbol, symbol)
         category = categorise_symbol(symbol, name, attribution)
         by_category[category] += 1
         per_category_names[category].append(name)
+        # Provider evidence outranks the category, which says what a symbol *is* rather than what
+        # would resolve it: `MSS_auto_cleanup` categorises as "other / unclassified" and is
+        # nonetheless defined by the Miles-API implementation this build does not include.
+        provider = provider_for(name, provider_defs)
+        pile = pile_for(category, provider)
+        by_pile[pile] += 1
+        per_pile_names[pile].append(name)
+        if provider is not None:
+            provider_hits[provider.key].append(name)
+
+    providers = {}
+    for provider in PROVIDERS:
+        library_names, library_files = provider_library_symbols(provider, LIBRARY_SEARCH_DIRS)
+        names, evidence_files = provider_defs[provider.key]
+        providers[provider.key] = {
+            "label": provider.label,
+            "pile": provider.pile,
+            "reason": provider.reason,
+            "owner": provider.owner,
+            # What the attribution rests on. Zero evidence files means the dependency was not
+            # provisioned, so its symbols land in another pile: the run under-reports this
+            # provider rather than guessing at it.
+            "evidence_files": evidence_files,
+            "evidence_names": len(names),
+            "symbols": len(provider_hits[provider.key]),
+            "symbol_names": sorted(provider_hits[provider.key]),
+            # Informational: a runtime on this box that exports the same symbols. Never what
+            # decides the pile, or the split would differ between CI and a developer's machine.
+            "system_libraries": library_files,
+            "system_library_symbols_matched": sorted(
+                n for n in provider_hits[provider.key]
+                if symbol_keys(n, provider.match_unqualified) & library_names),
+        }
 
     compiled = {}
     for target in targets:
@@ -1228,6 +1634,16 @@ def main():
         "undefined_symbols": {
             category: sorted(per_category_names[category]) for category in by_category
         },
+        # What would resolve each symbol, which the categories above do not say. Only
+        # `no-definition-anywhere` is remaining port work; see PILE_MEANING.
+        "undefined_by_pile": {pile: by_pile.get(pile, 0) for pile in PILE_MEANING},
+        "undefined_by_pile_symbols": {
+            pile: sorted(per_pile_names[pile]) for pile in PILE_MEANING if by_pile.get(pile)
+        },
+        "pile_meaning": PILE_MEANING,
+        # Per omitted library: how many symbols it accounts for, why it is not linked, and which
+        # slice owns linking it or excising the calls.
+        "providers": providers,
         "compile_failures": {
             str(source.relative_to(REPO_ROOT)): compile_diagnostics.get(source, "")
             for source in sorted(failed)
@@ -1237,6 +1653,30 @@ def main():
             "probe_failed_compile_ok": probe_failed_compile_ok,
         },
     }
+
+    if strict_referenced_by is not None:
+        # The tolerant link's list comes from `nm` over the archives; the strict link's comes from
+        # the linker itself. They should agree, and disagreement is the interesting result: it
+        # would mean the categorised 412 is not the set standing between here and an executable.
+        reported = set(strict_referenced_by)
+        expected = {demangled.get(s, s) for s in symbols}
+        data["strict_link"] = {
+            "attempted": True,
+            "clean": strict_ok,
+            "binary_produced": strict_binary,
+            "unresolved_total": len(reported),
+            # Demangled under GNU ld, mangled under ld64, so the lists are not comparable across
+            # platforms and the form is recorded rather than assumed.
+            "symbol_name_form": STRICT_LINK_NAME_FORM,
+            "agrees_with_nm": reported == expected,
+            "only_in_linker_report": sorted(reported - expected),
+            "only_in_nm_scan": sorted(expected - reported),
+            # Which archive member needs each symbol: the answer to "who calls this", which a bare
+            # count does not give, and the thing a slice owner needs to excise or implement it.
+            "referenced_by": {name: strict_referenced_by[name] for name in sorted(reported)},
+        }
+    else:
+        data["strict_link"] = {"attempted": False}
 
     examples = collections.OrderedDict(
         (category, per_category_names[category][:args.examples])
@@ -1253,7 +1693,19 @@ def main():
           f"probe-clean {data['probe_clean']}, "
           f"probe-clean-but-uncompilable {len(probe_clean_compile_failed)}, "
           f"undefined symbols {data['undefined_total']}")
+    print("  " + ", ".join(f"{pile} {count}"
+                           for pile, count in data["undefined_by_pile"].items()))
+
+    if strict_referenced_by is not None and not strict_ok:
+        # The honest failure is the deliverable, so it is reported as one: the tolerant link above
+        # produces a file and exits 0, which is what made "there is no executable" easy to lose.
+        print(f"FAIL: strict link: {len(strict_referenced_by)} unresolved symbol(s); no loadable "
+              f"executable. {data['undefined_by_pile'][PILE_PORT]} of them are port work, the rest "
+              "are a library this configuration does not link, a cut feature, a translation unit "
+              "that does not compile yet, or a harness artefact.", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

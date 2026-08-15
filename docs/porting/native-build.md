@@ -13,7 +13,9 @@ compile.
 - Driver: `scripts/native-build.py` (`scripts/native_probe_targets.py` reuses the probe's own target,
   source and include definitions, so the two measurements cannot silently diverge)
 - CMake project: `cmake/native/CMakeLists.txt`
-- Generated report: `docs/porting/native-build-report.md` (levels 1-4, the largest build measured)
+- Generated report: `docs/porting/native-build-report.md` (levels 1-4 with `--strict-link`, the
+  largest build measured)
+- What a binary would still need: [`startability.md`](startability.md)
 - CI ratchets: the `Native build (Linux, clang 14, 64-bit)` and
   `Native build + renderer (Linux, clang 14, 64-bit)` jobs in
   `.github/workflows/native-port-ci.yml`, gated by `scripts/ci/check-native-build-baseline.py`
@@ -25,8 +27,9 @@ compile.
 > its record; they were already superseded once by
 > [`crt-and-widechar-compat.md`](crt-and-widechar-compat.md) (679/717 objects and 376 unresolved to
 > 704/716 and 273, plus a corrected denominator: the SDL2 backend and `GameMemoryNull.cpp` were
-> counted although the configured build compiles neither). The **levels 1+2+3+4** section at the
-> end is the current measurement; levels 1+2+3 and 1+2+3+4 are both ratcheted, each against its own
+> counted although the configured build compiles neither). Every section below is dated and names the
+> commit it was measured on; the **strict linking** section at the end is the current measurement and
+> supersedes the earlier totals. Levels 1+2+3 and 1+2+3+4 are both ratcheted, each against its own
 > baseline file.
 
 ## Measured, on Linux x86-64 with clang 14
@@ -70,7 +73,7 @@ Only **10 distinct Win32 entry points** are actually referenced by the engine co
 That is the size of the platform layer at this level, and it is much smaller than the `windows.h`
 include count suggested.
 
-## Levels 1+2+3, measured 2026-08-14 on b9199724 with clang 14 (current)
+## Levels 1+2+3, measured 2026-08-14 on b9199724 with clang 14
 
 Level 3 adds `Core/GameEngineDevice`, `GeneralsMD/Code/GameEngineDevice` and `GeneralsMD/Code/Main`
 — the device layer and the entry point. It was added to stop two of the largest undefined-symbol
@@ -282,7 +285,7 @@ The kernel32/CRT gap slice has since moved this on to 826/839 objects with 13 co
 the unresolved total to 546 for the same reason — see `docs/porting/win32-runtime-and-crt-gaps.md`.
 `docs/porting/native-build-report.md` is the generated, authoritative version of these counts.
 
-## Level 4: the renderer and audio libraries, measured 2026-08-15 on ac520adf8 with clang 14 (current baseline)
+## Level 4: the renderer and audio libraries, measured 2026-08-15 on ac520adf8 with clang 14
 
 Level 4 adds the four libraries `native-port-probe.py` already knew as `RENDERER_TARGETS`:
 `Core/Libraries/Source/WWVegas/{WW3D2,WWAudio,WWDownload}` and `GeneralsMD`'s `WWVegas` fork. They
@@ -485,6 +488,81 @@ What this does *not* claim: nothing here plays a sound. It is the same compile-a
 every other figure in this document. `audio-device-seam.md` §7 lists what is still open behind the
 API (MP2/MP3 streams, EFX, the Bink handoff), and none of it is visible to a linker.
 
+## Strict linking and the pile split, measured 2026-08-15 on 8bb8aff56 with clang 14 (current baseline)
+
+Every figure above was produced by a link that *tolerates* unresolved symbols: `--whole-archive`
+plus `-Wl,--warn-unresolved-symbols`, which makes 339 unresolved symbols warnings, exits 0 and
+writes a file. That file is not an executable — the loader would reject it — so "the link succeeds"
+has never meant what it sounds like. `--strict-link` removes the tolerance and reports the linker's
+own verdict:
+
+| | tolerant link | `--strict-link` |
+|---|---|---|
+| unresolved symbols | 339, warnings | 339, errors |
+| exit status | 0 | non-zero (and `native-build.py` exits 1) |
+| file produced | yes | **no** |
+
+The two lists agree symbol for symbol — `strict_link.agrees_with_nm`, and the gate fails if they
+ever diverge, since that would mean the `nm` scan the categories are built from is not the set the
+linker refuses. `strict_link.referenced_by` additionally names, per symbol, the archive member that
+references it, which the `nm` scan cannot say.
+
+Nothing is stubbed to shorten the list, and nothing may be: a strict link made green with stubs
+would delete exactly the measurement this harness exists for.
+
+| Levels 1-4, `--with-shims`, `8bb8aff56` | |
+|---|---:|
+| Translation units | 972 |
+| Object files produced | 968 |
+| Probe-clean but uncompilable | 0 |
+| Compile failures | 4 (3 cut-scope GameSpy units + `dx8wrapper.cpp`) |
+| Archives linked | 14 |
+| Unresolved symbols (tolerant link, and strict) | 339 |
+| Strict link produced an executable | **no** |
+
+### The second axis: what would resolve each symbol
+
+The existing categories say what a symbol *is*. They do not say what makes it go away, and level 4
+showed how badly those differ: 272 of the symbols levels 1-3 could not resolve were only "this build
+excludes the renderer", and building the layer removed them without any port work. Each symbol now
+carries a second attribution, its **pile**, and only one pile is port work:
+
+| Pile | Levels 1-3 | Levels 1-4 | What resolves it |
+|---|---:|---:|---|
+| `library-not-linked` | 102 | 131 | a library on the link line |
+| `cut-scope-not-linked` | 82 | 82 | excising a cut feature's call sites |
+| `compile-blocked` | 18 | 108 | making a named translation unit compile (~90 of the 108 are `dx8wrapper.cpp`'s) |
+| `harness-artefact` | 400 | 9 | a build step or `#if` this configuration does not take |
+| `no-definition-anywhere` | 6 | **9** | **writing code** |
+
+The piles are assigned from evidence, not keywords: for each provider the script scans the sources
+or headers `fetch-probe-deps.sh` pins and matches the symbols they define, so the split is
+reproducible in the CI container. Libraries installed on the measuring box are reported as a
+cross-check (`providers.*.system_libraries`) and deliberately do not affect the pile — a number that
+changed with the box would not be a measurement.
+
+| Provider | Pile | Symbols at level 4 | Owner |
+|---|---|---:|---|
+| Miles `AIL_*` (OpenAL implementation not linked here) | `library-not-linked` | 90 | `platform/audio-device` |
+| FFmpeg | `library-not-linked` | 29 | `video/bink-excision-and-harness-headers` |
+| SDL2 / Cocoa window backend | `library-not-linked` | 12 | `platform/macos-window-compile`, `platform/window-seam-wiring` |
+| GameSpy SDK | `cut-scope-not-linked` | 82 | `online/absent-menu-seam` |
+
+`check-native-build-baseline.py` ratchets `no-definition-anywhere` and the strict-link total
+separately from the headline, so linking FFmpeg could not mask real port work growing behind a
+falling total. `docs/porting/startability.md` has the rest: the 9 symbols nothing defines with the
+object file that needs each, what an executable needs beyond symbol resolution (entry point, a
+*chosen* backend, generated `gitinfo`, the `#if`-disabled definitions, retail `Data/`), and the
+checkable definition of "startable".
+
+### Is strict linking stable enough for CI
+
+Yes, and it is wired into the `Native build + renderer` job. It is a link, not a compile, so it costs
+seconds; two consecutive runs produced byte-identical JSON including the 339 `referenced_by` entries
+and the per-pile symbol lists. Because it exits non-zero today by design, the step records its exit
+status in the job summary and asserts the JSON exists; the ratchet is the baseline check, which fails
+if the count the linker refuses grows.
+
 ## What this does not show
 
 - **This is Linux x86-64, not macOS arm64.** Nothing here has been run on Apple Silicon. The
@@ -493,7 +571,12 @@ API (MP2/MP3 streams, EFX, the Bink handoff), and none of it is visible to a lin
   are GNU ld spellings. Treat every count as a Linux measurement until a Mac session reproduces it.
 - **The link is not clean, and is not meant to be.** A binary is produced because unresolved symbols
   are warnings, not errors; the report records `link_binary_produced` and `link_clean` separately so
-  the difference cannot be glossed over.
+  the difference cannot be glossed over. `--strict-link` is the measurement that cannot be glossed:
+  no file, non-zero status, 339 named symbols.
+- **A strict link that fails is not a launch attempt.** Nothing here has executed a single
+  instruction of the game, and no amount of symbol resolution would: the engine loads ~25
+  `Data\INI\...` directories out of a retail install during `GameEngine::init()`, which CI has no
+  copy of. See [`startability.md`](startability.md) §5.
 - **Symbol attribution to failed files is a source-text scan.** Recovering it properly would need
   the object files that by definition do not exist, so `native-build.py` reads definitions out of
   the sources. It never attributes a cause to a symbol none of those files mentions, but overloads
@@ -524,13 +607,15 @@ API (MP2/MP3 streams, EFX, the Bink handoff), and none of it is visible to a lin
 
 ```sh
 bash scripts/ci/fetch-probe-deps.sh
-python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims \
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims --strict-link \
     --report docs/porting/native-build-report.md --json native-build.json
 python3 scripts/ci/check-native-build-baseline.py --results native-build.json
 ```
 
 Drop `--level 4` for the smaller build; the baseline the gate compares against is chosen from the
-levels in the results, so the two cannot be confused with each other.
+levels in the results, so the two cannot be confused with each other. `--strict-link` exits non-zero
+while any symbol is unresolved, which is the honest state and not a harness failure — the JSON and
+report are still written, and the gate on the next line is what fails on a regression.
 
 Add `--update` to the last command, in the PR that earns it, when the counts improve.
 
