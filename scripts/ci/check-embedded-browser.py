@@ -98,9 +98,14 @@ REQUIRED_UNITS = [
                  "W3DDisplay.cpp"),
 ]
 
-# Where the feature may be defined: the Windows-only branch of the BrowserDispatch library.
-FEATURE_DEFINITION_FILE = os.path.join("Core", "Libraries", "Source", "EABrowserDispatch",
-                                       "CMakeLists.txt")
+# Where the feature may be defined, and where it must be: the Windows-only branches of the two
+# libraries that actually carry the control. BrowserDispatch is the COM server the game-side
+# WebBrowser talks to; BrowserEngine is what WW3D2 hosts, and WW3D2 links only that one, so
+# dx8webbrowser.cpp loses its real implementation if the engine target stops saying so.
+FEATURE_DEFINITION_FILES = [
+    os.path.join("Core", "Libraries", "Source", "EABrowserDispatch", "CMakeLists.txt"),
+    os.path.join("Core", "Libraries", "Source", "EABrowserEngine", "CMakeLists.txt"),
+]
 
 ATL_SPELLINGS = re.compile(
     r"\b(?:CComObject|CComModule|CComCoClass|IDispatch|IUnknown|IBrowserDispatch|"
@@ -197,7 +202,7 @@ def check_sources(failures):
 
 
 def check_feature_definition(failures):
-    """The feature may only be turned on by the Windows BrowserDispatch target."""
+    """The feature may only be turned on by the Windows browser targets -- and must be by both."""
     definers = []
     for directory, _, names in os.walk(ROOT):
         if any(part in directory.split(os.sep) for part in (".git", "build", "docs", "scripts")):
@@ -211,15 +216,15 @@ def check_feature_definition(failures):
                     re.search(r"(?:add_compile_definitions|target_compile_definitions)"
                               r"[^)]*%s" % FEATURE, text):
                 definers.append(relative)
-    if definers != [FEATURE_DEFINITION_FILE]:
+    if sorted(definers) != sorted(FEATURE_DEFINITION_FILES):
         failures.append("%s must be defined by %s and nothing else; found: %s"
-                        % (FEATURE, FEATURE_DEFINITION_FILE, ", ".join(definers) or "nothing"))
+                        % (FEATURE, " and ".join(FEATURE_DEFINITION_FILES),
+                           ", ".join(definers) or "nothing"))
     else:
-        # ...and only inside that file's Windows branch.
-        text = read(os.path.join(ROOT, FEATURE_DEFINITION_FILE))
-        if "if(WIN32" not in text:
-            failures.append("%s defines %s outside a Windows branch"
-                            % (FEATURE_DEFINITION_FILE, FEATURE))
+        # ...and only inside those files' Windows branches.
+        for relative in FEATURE_DEFINITION_FILES:
+            if "if(WIN32" not in read(os.path.join(ROOT, relative)):
+                failures.append("%s defines %s outside a Windows branch" % (relative, FEATURE))
     print("feature definition: %s defined by %s" % (FEATURE, ", ".join(definers) or "nothing"))
 
 

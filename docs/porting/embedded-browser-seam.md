@@ -240,6 +240,17 @@ user32 block alongside `ShowWindow`/`GetWindowRect` and added to
 `platform_window.h`'s `Window_Is_Minimised()`, and rewiring this call site belongs to
 `platform/window-seam-wiring`, not here.
 
+### Which target knows the browser exists
+
+Wave 4 defined `RTS_HAS_EMBEDDED_BROWSER` on the Windows branch of `core_browserdispatch` alone,
+which is right for the game-side `WebBrowser` but not for this layer: WW3D2 links
+`core_browserengine`, not the dispatch server, so `dx8webbrowser.cpp` compiled its *absent* half on
+Windows and `generalszh.exe` failed to link with `DX8WebBrowser::CreateBrowser(..., IDispatch *)`
+unresolved from `W3DWebBrowser.cpp`. `core_browserengine` now defines the feature in its own
+Windows branch too, and the gate requires both targets to carry it — the definition has to follow
+whichever library actually contains the control, or one half of the seam silently disappears from a
+build that has ATL.
+
 ### Deliberately stubbed, wave two
 
 `DX8WebBrowser`'s per-frame entry points — `Update()`, `Render()` — do nothing, silently: they are
