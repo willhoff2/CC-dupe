@@ -486,6 +486,39 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The D3DX texture/FVF/shader entry points: the FVF vertex size is a pure function of the
+      # bitmask, the mip filter and the surface blit have exact expected pixels, and the shader
+      # assembler must FAIL rather than hand back a buffer a caller would treat as bytecode.
+      # See docs/porting/d3dx8-texture-seam.md.
+      - name: Run the D3DX texture, FVF and shader entry points' behaviour test
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## D3DX 8 texture, FVF and shader entry points'
+            echo '```'
+            python3 scripts/native-d3dx8-entrypoints-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The window/GDI seam is where the points-versus-pixels decision bites: GetClientRect and
+      # GetMonitorInfo answer in points, the renderer works in pixels, and the CI runner's backing
+      # scale is 1, so a doubled number cannot fail anywhere else in this workflow. This drives the
+      # entry points over a faked window seam with a known geometry, and asserts the composed
+      # sizing path DX8Wrapper uses, not just the return codes. See docs/porting/window-gdi-seam.md.
+      - name: Run the user32 window/GDI seam's behaviour test
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## user32 window/GDI seam'
+            echo '```'
+            python3 scripts/native-win32-user32-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The GDI font seam draws the text the WND GUI measures its layout against, so "text appears"
       # is not the acceptance criterion: the advance widths and the line height are. This compares
       # the port's CreateFont/GetTextMetrics/GetTextExtentPoint32W against recorded GDI metrics --

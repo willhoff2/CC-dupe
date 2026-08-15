@@ -50,6 +50,21 @@
  *  LoadCursor()/LoadCursorFromFile() reading a .CUR/.ANI, which do not exist here, so it says so   *
  *  once and shows the system pointer rather than guessing a shape.                                *
  *                                                                                              *
+ *  GetClientRect(), GetWindowLongA(), AdjustWindowRect(), MonitorFromWindow(),                  *
+ *  GetMonitorInfoA() and SetWindowPos() are the window-sizing path                              *
+ *  DX8Wrapper::Resize_And_Position_Window() drives, and they all work in POINTS for the same     *
+ *  reason the mouse ones do. Win32 places a FRAME rectangle; the seam places a CLIENT area,      *
+ *  because the client area is what the renderer's back buffer must match, so SetWindowPos()      *
+ *  converts by the frame insets and AdjustWindowRect() is its exact inverse. HMONITOR off        *
+ *  Windows is the seam's display index biased by one, decoded only by GetMonitorInfoA().         *
+ *  GetDesktopWindow() returns a handle that is deliberately not the seam's window, since the      *
+ *  only caller hands it straight to GetDC(). See docs/porting/window-gdi-seam.md.                *
+ *                                                                                              *
+ *  SetDeviceGammaRamp() is the one refusal here: it returns FALSE and says why on stderr.         *
+ *  There is no portable display gamma ramp, its macOS equivalent changes the whole display        *
+ *  without Windows' automatic revert on process exit, and a renderer-side post-process is a       *
+ *  renderer decision. The cost is that the brightness slider does nothing off Windows.           *
+ *                                                                                              *
  *  SetThreadExecutionState() is a stub for the same reason: keeping the display awake during a  *
  *  long load is a Windows power-management API, its macOS equivalent (IOPMAssertion) is a       *
  *  separate decision, and nothing about the game's correctness depends on it.                   *
@@ -63,6 +78,7 @@
 #include "WWLib/platform/platform_dialog.h"
 #include "WWLib/platform/platform_window.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -262,6 +278,311 @@ HCURSOR SetCursor(HCURSOR cursor)
 	HCURSOR was = previous;
 	previous = cursor;
 	return was;
+}
+
+
+BOOL GetClientRect(HWND window, LPRECT rect)
+{
+	/*
+	**	The client area, origin at zero, in POINTS -- Win32's own units for this call and the
+	**	units the seam keeps window geometry in. The renderer's backing size in pixels is a
+	**	different number on a Retina display and is obtained at the renderer boundary, not here
+	**	(docs/porting/decisions-resolved.md).
+	*/
+	if (rect == nullptr) {
+		return FALSE;
+	}
+
+	int width = 0;
+	int height = 0;
+	WWPlatform::Window_Client_Size(window, width, height);
+	if (width <= 0 || height <= 0) {
+		return FALSE;
+	}
+
+	rect->left = 0;
+	rect->top = 0;
+	rect->right = width;
+	rect->bottom = height;
+	return TRUE;
+}
+
+
+LONG GetWindowLongA(HWND window, int index)
+{
+	/*
+	**	Off Windows there is no per-window LONG store, so the only honest answer is one
+	**	assembled from the seam's actual state. GWL_STYLE is the index that matters:
+	**	DX8Wrapper::Resize_And_Position_Window() reads it purely to hand to AdjustWindowRect(),
+	**	and Debug.cpp tests it against WS_CAPTION, so both callers need the frame bits to say
+	**	whether this window has a frame -- which the seam knows.
+	*/
+	if (window == nullptr) {
+		return 0;
+	}
+
+	switch (index) {
+		case GWL_STYLE:
+		{
+			LONG style = WS_VISIBLE;
+			if (WWPlatform::Window_Is_Fullscreen(window)) {
+				/*
+				**	A borderless, undecorated window: Win32's fullscreen device window is
+				**	created WS_POPUP, and it has no frame for AdjustWindowRect() to add.
+				*/
+				style |= WS_POPUP;
+			} else {
+				style |= WS_OVERLAPPEDWINDOW;
+			}
+			if (WWPlatform::Window_Is_Minimised(window)) {
+				style |= WS_MINIMIZE;
+			}
+			return style;
+		}
+
+		case GWL_EXSTYLE:
+			/*
+			**	The seam creates no extended styles -- no topmost-at-creation, no layered, no
+			**	tool window -- so zero is the truth rather than a placeholder.
+			*/
+			return 0;
+
+		default:
+			WWPlatform::Win32::Report_Stub("GetWindowLongA",
+				"only GWL_STYLE and GWL_EXSTYLE exist off Windows; there is no per-window "
+				"LONG store, no WndProc and no HINSTANCE to report");
+			return 0;
+	}
+}
+
+
+BOOL AdjustWindowRect(LPRECT rect, DWORD style, BOOL menu)
+{
+	/*
+	**	Grow a client rectangle into the frame rectangle that contains it, in points. Win32
+	**	computes this from the style alone because it knows every theme's border metrics; here
+	**	the border metrics belong to the one window the seam owns, so they come from
+	**	Window_Frame_Insets(). That is the same window whose style the caller just read with
+	**	GetWindowLong(GWL_STYLE), which is why the two compose correctly: a frameless
+	**	(fullscreen, WS_POPUP) window reports no frame bits AND has zero insets.
+	**
+	**	Win32 subtracts from left/top and adds to right/bottom, i.e. the returned rectangle is
+	**	in a space where the client origin stays at (0,0) and left/top go negative.
+	**	DX8Wrapper::Resize_And_Position_Window() depends on exactly that: it uses rect.left and
+	**	rect.top as the offset from the frame corner to the client corner.
+	*/
+	if (rect == nullptr) {
+		return FALSE;
+	}
+
+	if (menu != FALSE) {
+		WWPlatform::Win32::Report_Stub("AdjustWindowRect",
+			"there is no menu bar off Windows, so no menu height is added; the frame will be "
+			"one menu bar short of the Windows answer");
+	}
+
+	const DWORD FRAME_BITS = (DWORD)(WS_BORDER | WS_DLGFRAME | WS_THICKFRAME);
+	if ((style & FRAME_BITS) == 0) {
+		/*
+		**	No border of any kind: frame rectangle == client rectangle. Win32 returns the
+		**	rectangle unchanged here too.
+		*/
+		return TRUE;
+	}
+
+	int left = 0;
+	int top = 0;
+	int right = 0;
+	int bottom = 0;
+	if (!WWPlatform::Window_Frame_Insets(WWPlatform::Window_Current(), left, top, right, bottom)) {
+		/*
+		**	The platform would not say how thick its own decorations are (an SDL2 older than
+		**	2.0.5, or a window that has not been shown yet). Zero insets keep the client SIZE
+		**	right -- which is what the renderer's back buffer is matched to -- and leave only
+		**	the window POSITION off by the title bar, so this says so rather than refusing to
+		**	size the render window at all.
+		*/
+		WWPlatform::Win32::Report_Stub("AdjustWindowRect",
+			"the platform did not report its frame insets; sizing as if the window had no "
+			"decorations, so the window may sit one title bar out of place");
+		return TRUE;
+	}
+
+	rect->left -= left;
+	rect->top -= top;
+	rect->right += right;
+	rect->bottom += bottom;
+	return TRUE;
+}
+
+
+HMONITOR MonitorFromWindow(HWND window, DWORD flags)
+{
+	/*
+	**	HMONITOR off Windows is the seam's display index, biased by one so that a valid handle
+	**	is never null -- null is Win32's "no monitor", which is what MONITOR_DEFAULTTONULL asks
+	**	for when the window is on no display. GetMonitorInfoA() below is the only thing that
+	**	decodes it.
+	*/
+	if (window == nullptr) {
+		if ((flags & (MONITOR_DEFAULTTOPRIMARY | MONITOR_DEFAULTTONEAREST)) == 0) {
+			return nullptr;
+		}
+		return (HMONITOR)(uintptr_t)1;
+	}
+
+	const int display = WWPlatform::Window_Display_For_Window(window);
+	return (HMONITOR)(uintptr_t)(display + 1);
+}
+
+
+BOOL GetMonitorInfoA(HMONITOR monitor, LPMONITORINFO info)
+{
+	/*
+	**	The display's bounds and its work area, in points. rcWork excludes the menu bar and the
+	**	Dock on macOS, exactly as it excludes the taskbar on Windows, which is what
+	**	DX8Wrapper::Resize_And_Position_Window() centres a windowed render device inside.
+	**
+	**	Win32 fails if cbSize was not filled in, and callers rely on that to detect a struct
+	**	from a different SDK, so the check is kept.
+	*/
+	if (info == nullptr || info->cbSize < sizeof(MONITORINFO)) {
+		return FALSE;
+	}
+
+	const uintptr_t encoded = (uintptr_t)monitor;
+	if (encoded == 0) {
+		return FALSE;
+	}
+	const int display = (int)(encoded - 1);
+
+	int x = 0;
+	int y = 0;
+	int width = 0;
+	int height = 0;
+	if (!WWPlatform::Window_Display_Bounds(display, x, y, width, height)) {
+		return FALSE;
+	}
+	info->rcMonitor.left = x;
+	info->rcMonitor.top = y;
+	info->rcMonitor.right = x + width;
+	info->rcMonitor.bottom = y + height;
+
+	if (!WWPlatform::Window_Display_Work_Area(display, x, y, width, height)) {
+		return FALSE;
+	}
+	info->rcWork.left = x;
+	info->rcWork.top = y;
+	info->rcWork.right = x + width;
+	info->rcWork.bottom = y + height;
+
+	info->dwFlags = (display == 0) ? MONITORINFOF_PRIMARY : 0;
+	return TRUE;
+}
+
+
+BOOL SetWindowPos(HWND window, HWND insert_after, int x, int y, int cx, int cy, UINT flags)
+{
+	/*
+	**	Win32 places and sizes the FRAME rectangle in screen points; the seam places and sizes
+	**	the CLIENT area, because that is the rectangle the renderer's back buffer has to match.
+	**	The conversion is the frame insets, i.e. the inverse of AdjustWindowRect() above, and it
+	**	has to be the inverse: DX8Wrapper hands this the frame size AdjustWindowRect() produced
+	**	and expects the client area to come out at ResolutionWidth x ResolutionHeight.
+	*/
+	if (window == nullptr) {
+		return FALSE;
+	}
+
+	int left = 0;
+	int top = 0;
+	int right = 0;
+	int bottom = 0;
+	if (!WWPlatform::Window_Frame_Insets(window, left, top, right, bottom)) {
+		WWPlatform::Win32::Report_Stub("SetWindowPos",
+			"the platform did not report its frame insets; placing and sizing the client area "
+			"as if the window had no decorations");
+		left = 0;
+		top = 0;
+		right = 0;
+		bottom = 0;
+	}
+
+	BOOL result = TRUE;
+
+	if ((flags & SWP_NOZORDER) == 0) {
+		if (insert_after == HWND_TOPMOST) {
+			WWPlatform::Window_Set_Always_On_Top(window, true);
+		} else if (insert_after == HWND_NOTOPMOST) {
+			WWPlatform::Window_Set_Always_On_Top(window, false);
+		} else if (insert_after != HWND_TOP && insert_after != nullptr) {
+			/*
+			**	"Put me directly behind that other window" needs a second window to be relative
+			**	to, and the seam owns exactly one.
+			*/
+			WWPlatform::Win32::Report_Stub("SetWindowPos",
+				"there is only one window off Windows, so it cannot be ordered relative to "
+				"another; the Z order is left alone");
+		}
+	}
+
+	if ((flags & SWP_NOMOVE) == 0) {
+		if (!WWPlatform::Window_Set_Position(window, x + left, y + top)) {
+			result = FALSE;
+		}
+	}
+
+	if ((flags & SWP_NOSIZE) == 0) {
+		const int client_width = cx - left - right;
+		const int client_height = cy - top - bottom;
+		if (!WWPlatform::Window_Set_Client_Size(window, client_width, client_height)) {
+			result = FALSE;
+		}
+	}
+
+	if ((flags & SWP_SHOWWINDOW) != 0) {
+		WWPlatform::Window_Show(window, true);
+	}
+
+	return result;
+}
+
+
+HWND GetDesktopWindow()
+{
+	/*
+	**	There is no desktop window off Windows, and the one call site -- DX8Wrapper's gamma
+	**	fallback -- only wants something to pass to GetDC()/ReleaseDC(), which ignore it. This
+	**	returns a handle that is deliberately NOT the seam's window, so that code which mistakes
+	**	it for a real window operates on nothing rather than on the game's window: the seam's
+	**	lookups do not recognise it, so Window_* calls on it fail.
+	*/
+	static HWND__ desktop = { 0 };
+	return &desktop;
+}
+
+
+BOOL SetDeviceGammaRamp(HDC, LPVOID)
+{
+	/*
+	**	Refused, loudly, and to a caller that checks the result -- and the caller does:
+	**	DX8Wrapper::Set_Gamma() only reaches this when the D3D8 device itself reports no gamma
+	**	support, so this is already the fallback of a fallback, and FALSE means "the ramp was
+	**	not applied".
+	**
+	**	Why not emulate it: a gamma ramp on Windows is a property of the display, set through
+	**	the DC and reverted when the process exits. The macOS equivalent
+	**	(CGSetDisplayTransferByTable) has the same whole-display reach but no such automatic
+	**	revert, so a crash leaves the user's screen miscoloured until they log out; and doing it
+	**	in the renderer instead means a post-process pass over every frame, which is a renderer
+	**	decision and not a Win32 compatibility one. Until that decision is made, the honest
+	**	behaviour is that the game's brightness slider does nothing off Windows, which is a
+	**	cosmetic loss, and it is recorded in docs/porting/window-gdi-seam.md.
+	*/
+	WWPlatform::Win32::Report_Stub("SetDeviceGammaRamp",
+		"there is no portable display gamma ramp; the brightness setting has no effect off "
+		"Windows (see docs/porting/window-gdi-seam.md)");
+	return FALSE;
 }
 
 

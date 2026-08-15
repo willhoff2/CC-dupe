@@ -490,6 +490,21 @@ void Mouse_Position_In_Client(WindowState * state, NSEvent * event, int & x, int
 }
 
 /*
+**	Cocoa's screen coordinates have their origin at the bottom-left of the PRIMARY screen -- the
+**	one with the menu bar, [[NSScreen screens] firstObject] -- and every conversion to the seam's
+**	top-left origin flips against its height. +mainScreen is a different screen: it is whichever
+**	one has keyboard focus, so on a two-monitor Mac with the focus on the secondary display it
+**	gives a different height and every converted y is wrong by the difference. Single-monitor
+**	hardware, which is what CI and most testing has, cannot tell the two apart.
+*/
+CGFloat Primary_Screen_Height()
+{
+	NSScreen * primary = [[NSScreen screens] firstObject];
+	if (primary == nil) return 0.0;
+	return [primary frame].size.height;
+}
+
+/*
 **	The engine's fullscreen is a screen-sized WS_POPUP, which on macOS is a borderless window -
 **	but a borderless window is still an ordinary layer-0 window, and the menu bar (level 24), the
 **	Control Center items (25) and the Dock (20) all composite above it. Raising the level alone
@@ -920,11 +935,10 @@ bool Window_Set_Position(void * window, int x, int y)
 	int bottom = 0;
 	if (!Window_Frame_Insets(window, left, top, right, bottom)) return false;
 
-	const NSRect screen = [[NSScreen mainScreen] frame];
 	const CGFloat frame_left = static_cast<CGFloat>(x - left);
 	const CGFloat frame_top_flipped = static_cast<CGFloat>(y - top);
 	[state->Window setFrameTopLeftPoint:
-		NSMakePoint(frame_left, screen.size.height - frame_top_flipped)];
+		NSMakePoint(frame_left, Primary_Screen_Height() - frame_top_flipped)];
 	return true;
 }
 
@@ -973,11 +987,9 @@ namespace
 bool Screen_Rect(int display, NSRect rect, int & x, int & y, int & width, int & height)
 {
 	(void)display;
-	// Cocoa's screen coordinates have a bottom-left origin on the *primary* screen; the seam's
-	// are top-left, like Win32's, so the flip is against the primary screen's height.
-	const NSRect primary = [[[NSScreen screens] firstObject] frame];
+	// Bottom-left origin to top-left, so the bottom edge is what the top becomes.
 	x = static_cast<int>(rect.origin.x);
-	y = static_cast<int>(primary.size.height - (rect.origin.y + rect.size.height));
+	y = static_cast<int>(Primary_Screen_Height() - (rect.origin.y + rect.size.height));
 	width = static_cast<int>(rect.size.width);
 	height = static_cast<int>(rect.size.height);
 	return true;
@@ -1044,9 +1056,9 @@ void Window_Warp_Cursor(void * window, int x, int y)
 	// CGWarpMouseCursorPosition is in global, top-left-origin display coordinates, so the
 	// client point is converted through the window's frame rather than passed through.
 	NSRect content = [state->Window convertRectToScreen:[state->View frame]];
-	NSRect screen = [[NSScreen mainScreen] frame];
 	const CGFloat global_x = content.origin.x + x;
-	const CGFloat global_y = screen.size.height - (content.origin.y + content.size.height) + y;
+	const CGFloat global_y =
+		Primary_Screen_Height() - (content.origin.y + content.size.height) + y;
 	CGWarpMouseCursorPosition(CGPointMake(global_x, global_y));
 }
 
@@ -1066,12 +1078,11 @@ bool Window_Cursor_Position(void * window, int & x, int & y)
 
 	// [NSEvent mouseLocation] is the pointer in screen coordinates with a bottom-left origin,
 	// and keeps reading while the pointer is over another application's window, which is what
-	// GetCursorPos() does. The flip to a top-left origin is against the main screen's frame, the
-	// same reference Window_Warp_Cursor() uses for the opposite conversion.
+	// GetCursorPos() does. The flip to a top-left origin is against the primary screen, the same
+	// reference Window_Warp_Cursor() uses for the opposite conversion.
 	const NSPoint location = [NSEvent mouseLocation];
-	const NSRect screen = [[NSScreen mainScreen] frame];
 	x = static_cast<int>(location.x);
-	y = static_cast<int>(screen.size.height - location.y);
+	y = static_cast<int>(Primary_Screen_Height() - location.y);
 	return true;
 }
 
@@ -1084,9 +1095,8 @@ bool Window_Client_Origin(void * window, int & x, int & y)
 	// the corner ScreenToClient() measures from. These are points: -convertRectToScreen: works
 	// in the window's coordinate space, and only -convertRectToBacking: would be in pixels.
 	const NSRect content = [state->Window convertRectToScreen:[state->View frame]];
-	const NSRect screen = [[NSScreen mainScreen] frame];
 	x = static_cast<int>(content.origin.x);
-	y = static_cast<int>(screen.size.height - (content.origin.y + content.size.height));
+	y = static_cast<int>(Primary_Screen_Height() - (content.origin.y + content.size.height));
 	return true;
 }
 
