@@ -7,7 +7,7 @@
       "mode_change": 8,
       "placement": 5,
       "polled_input": 11,
-      "window_handle": 29,
+      "window_handle": 30,
       "wndproc": 9
     },
     "out_of_scope": {
@@ -34,6 +34,7 @@
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
       "Core/Libraries/Source/WWVegas/WW3D2/render2dsentence.cpp",
       "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_gdi_font.cpp",
       "Core/Libraries/Source/WWVegas/WWLib/win.h",
       "Core/Libraries/Source/debug/debug_debug.cpp",
       "Core/Libraries/Source/debug/debug_dlg/debug_dlg.cpp",
@@ -348,6 +349,7 @@
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
       "Core/Libraries/Source/WWVegas/WW3D2/render2dsentence.cpp",
       "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_gdi_font.cpp",
       "Core/Libraries/Source/WWVegas/WWLib/win.h",
       "Core/Libraries/Source/debug/debug_debug.cpp",
       "Core/Libraries/Source/debug/debug_dlg/debug_dlg.cpp",
@@ -544,7 +546,7 @@
       "mode_change": 50,
       "placement": 8,
       "polled_input": 1,
-      "window_handle": 42,
+      "window_handle": 44,
       "wndproc": 74
     },
     "main": {
@@ -623,7 +625,7 @@
       "GetWindowLong": 2,
       "GetWindowRect": 3,
       "HKL": 2,
-      "HWND": 54,
+      "HWND": 56,
       "IsIconic": 2,
       "LPARAM": 43,
       "LRESULT": 5,
@@ -723,7 +725,7 @@
       "mode_change": 53,
       "placement": 21,
       "polled_input": 30,
-      "window_handle": 152,
+      "window_handle": 154,
       "wndproc": 342
     },
     "out_of_scope": {

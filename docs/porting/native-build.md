@@ -99,7 +99,7 @@ progress would be the same mistake as measuring the denominator.
 
 | Levels 1+2 category | Symbols | Where they are now |
 |---|---:|---|
-| Well-known Dict keys | 104 | all 104 still unresolved, and all 104 blocked by **one named file**: `Core/GameEngineDevice/.../WorldHeightMap.cpp`, the only unit that sets `INSTANTIATE_WELL_KNOWN_KEYS`, fails on `TheD3D8RenderBackend` (renderer slice) |
+| Well-known Dict keys | 104 | all 104 still unresolved, and all 104 blocked by **one named file**: `Core/GameEngineDevice/.../WorldHeightMap.cpp`, the only unit that sets `INSTANTIATE_WELL_KNOWN_KEYS`, fails on `TheD3D8RenderBackend` (renderer slice) — since resolved, see the current baseline below |
 | Defined in a layer not built here | 21 | 2 resolved (`MOTDSystem`, `ReloadAllTextures`), 14 now attributed to a named failed unit, 3 still in the unbuilt `WW3D2` renderer, 2 behind a disabled `#if` |
 
 So of the 125, **2 were resolved by building the layer and 123 were real** — but none of them is
@@ -160,6 +160,102 @@ A third, harness-level: the GameSpy SDK's headers include their siblings unquali
 build adds it (`EXTRA_DEP_INCLUDES` in `scripts/native-build.py`); the probe's baselines are left
 alone so they stay comparable with the numbers already published.
 
+## The renderer-seam slice, measured 2026-08-14 on eb9e98110 with clang 14 (current baseline)
+
+Same command, same box (Linux x86-64, `clang++-14`), before and after making the renderer layer
+compile off Windows:
+
+| | Before (`eb9e98110`) | After |
+|---|---:|---:|
+| Translation units | 835 | 834 |
+| Object files produced | 756 | 783 |
+| Compile failures | 79 | 51 |
+| `use of undeclared identifier 'TheD3D8RenderBackend'` failures | **37** | **0** |
+| Archives linked | 9 | 9 |
+| Unresolved symbols after linking | 341 | 435 |
+
+The translation-unit count drops by one because `GeneralsMD/Code/Main/WinMain.cpp` is no longer
+measured: `GeneralsMD/Code/Main/CMakeLists.txt` compiles it only under `if(WIN32)` and compiles
+`PlatformMain.cpp` otherwise, so it is a mutually exclusive alternative in the sense
+`native-port-probe.py` already had a list for, alongside `GameMemoryNull.cpp`. Counting the MSVC
+SEH entry point as a native port blocker measured the harness; its `eh.h` failure was never going
+to be fixed, because the native build does not compile the file.
+
+**Unresolved symbols went up, and that is not a regression — it is what "more code links" looks
+like at this level.** The 27 new objects are `W3DDevice` units that reference the `WW3D2`
+renderer library, which levels 1+2+3 do not build. By cause:
+
+| Cause | Before | After |
+|---|---:|---:|
+| Well-known Dict keys (`WorldHeightMap.cpp` failed to compile) | 104 | **0** |
+| Defined in a layer not built here (renderer / audio) | 72 | 221 |
+| Defined in a translation unit that failed to compile | 104 | 146 |
+| Win32 API | 0 | 3 |
+| Direct3D 8 / DirectX | 0 | 3 |
+| Defined in a built translation unit behind a disabled `#if` | 7 | 8 |
+| unchanged (GameSpy 33, SDL2/Cocoa 12, gitinfo 6, COM/OLE 3) | 54 | 54 |
+| **Total** | **341** | **435** |
+
+The 104 `TheKey_*` well-known Dict keys are the headline: they were all blocked by one file,
+`Core/GameEngineDevice/.../WorldHeightMap.cpp`, which is one of the 37, and they are now defined.
+The +149 in "layer not built here" is entirely `WW3D2`, and it is the next slice's number, not
+this one's; the total will not fall until the renderer library itself is built.
+
+The three new "Win32 API" symbols are `GetCursorPos`, `ScreenToClient` and `SetCursor`, all from
+`W3DMouse.cpp`, which is one of the 37 and now compiles. `check-win32-undefined.py`'s budget is
+**deliberately widened** from 0 to those three names, rather than defined or guarded: a portable
+definition needs the pointer position from the window seam (`platform/window-seam-wiring`), and
+`WWLib/platform/platform_win32_*` belongs to `platform/win32-file-api`, so both fixes are edits to
+another in-flight slice's files. Whoever lands the cursor path should take the budget back to 0.
+
+`GeneralsMD/Code/Main` still produces **no archive**, now out of one unit rather than two.
+`PlatformMain.cpp` has exactly one remaining diagnostic, and it is not this slice's:
+
+```
+Core/GameEngineDevice/Include/VideoDevice/Bink/BinkVideoPlayer.h:49: fatal error: 'bink.h' file not found
+```
+
+It is fatal, it is reached through `Win32GameEngine.h`, and `VideoDevice/**` belongs to the
+concurrent Bink/FFmpeg slice. The other two blockers are fixed: the `sizeof(long)` static assertion,
+and `MilesAudioManager.h`'s `HANDLE m_mutex`, which is now held as the `void*` that `HANDLE` is —
+the same treatment as `rts::ClientInstance::s_instanceLock`, and no Win32 type shim was touched.
+
+So criterion "Main produces objects" is **not met**, and cannot be met from inside this slice: it
+unblocks when the Bink slice lands.
+
+## The wave-3 stack, measured together on this branch with clang 14 (current baseline)
+
+The three wave-3 slices — video/Bink excision, the renderer layer off Windows, and the GDI font
+seam — were measured separately, each against `main`, so their numbers do not add up. Measured as
+one branch:
+
+| | `main` | Stacked |
+|---|---:|---:|
+| Translation units | 835 | 836 |
+| Object files produced | 756 | 816 |
+| Compile failures | 79 | 20 |
+| Probe-clean but uncompilable | 0 | 0 |
+| Unresolved symbols after linking | 341 | 457 |
+
+Two facts the per-slice reports could not show:
+
+- **`GeneralsMD/Code/Main` still produces no archive**, and the reason has changed. `bink.h` is gone
+  and the `sizeof(long)` assertion is gone, so the remaining diagnostic is
+  `allocating an object of abstract class type 'CComObject<W3DWebBrowser>'` — the COM browser
+  embedding, which is cut scope and now the sole thing between this build and a game target.
+- **Five units failed with `redefinition of '_D3DMATRIX'`, which was a shim collision rather than a
+  port defect** — fixed here. Once the renderer slice makes the vendored `d3d8types.h` reachable off
+  Windows, a unit can reach both it and `scripts/native-port-shims/d3d8types.h` (through the shim's
+  `d3dx8math.h`), and `#pragma once` does not deduplicate two different files defining the same type.
+  The shim now carries the vendored header's own `_D3D8TYPES_H_` guard, so whichever is found first
+  is the only definition. The renderer slice's report recorded these units with an empty diagnostic,
+  so the cause only became visible with this branch's diagnostic attribution and the vendored headers
+  in one tree: +4 objects (`W3DView`, `W3DWater` and the three shadow units).
+
+Unresolved symbols rise for the reason the slices each predicted: 272 of the 457 are defined in
+`WW3D2`, which levels 1+2+3 do not build. The total will not fall until the renderer library is
+built.
+
 ## What this does not show
 
 - **This is Linux x86-64, not macOS arm64.** Nothing here has been run on Apple Silicon. The
@@ -176,10 +272,12 @@ alone so they stay comparable with the numbers already published.
   handled explicitly.
 - **`WW3D2` is still not built.** Level 3 covers `GameEngineDevice` and `Main`; the renderer library
   itself needs the renderer resource seam first, which is where the 72 "layer not built here"
-  symbols and `WorldHeightMap.cpp`'s `TheD3D8RenderBackend` failure lead.
-- **81 compile failures are reported, not fixed.** The Win32 surface (`HWND`/`HFONT`/`HRESULT`/
-  `SetWindowText`), the GameSpy socket units, the Bink/FFmpeg/stb video devices and `eh.h` belong to
-  other slices or to cut scope. This build's job is to count them and name them.
+  symbols and `WorldHeightMap.cpp`'s `TheD3D8RenderBackend` failure lead. The 72 has since become
+  221 for exactly that reason.
+- **The remaining compile failures are reported, not fixed.** The Win32 surface (`HWND`/`HFONT`/
+  `HRESULT`/`SetWindowText`), the GameSpy socket units and the Bink/FFmpeg/stb video devices belong
+  to other slices or to cut scope. This build's job is to count them and name them.
+  (The 18 `HFONT` ones are since gone: `docs/porting/gdi-font-seam.md`.)
 - **The level-3 numbers are Linux only.** zlib is found by probing a list of platform library paths
   that includes `/usr/lib/libz.dylib`; that macOS entry has never been executed and is written blind.
 

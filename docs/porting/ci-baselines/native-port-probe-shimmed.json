@@ -3,25 +3,27 @@
   "clang_major": "14",
   "deps_present": [
     "dx8-src",
+    "ffmpeg-src",
     "gamespy-src/include",
     "lzhl-src",
     "miles-src",
-    "miles-src/mss"
+    "miles-src/mss",
+    "stb-src"
   ],
-  "clean": 703,
-  "total": 751,
+  "clean": 706,
+  "total": 754,
   "targets": {
     "Core/Libraries/Source/Compression": {
       "clean": 11,
       "total": 11
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
-      "clean": 35,
-      "total": 35
+      "clean": 36,
+      "total": 36
     },
     "Core/Libraries/Source/WWVegas/WWLib": {
-      "clean": 72,
-      "total": 72
+      "clean": 74,
+      "total": 74
     },
     "Core/Libraries/Source/WWVegas/WWDebug": {
       "clean": 3,

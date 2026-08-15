@@ -41,6 +41,10 @@
 //
 //----------------------------------------------------------------------------
 
+// Compiles to an empty translation unit unless the Bink SDK is present, i.e. everywhere except
+// the 32-bit Windows build. See docs/porting/video-and-harness-headers.md.
+#ifdef RTS_HAS_BINK
+
 //----------------------------------------------------------------------------
 //         Includes
 //----------------------------------------------------------------------------
@@ -446,3 +450,5 @@ Int		BinkVideoStream::width()
 
 
 
+
+#endif // RTS_HAS_BINK

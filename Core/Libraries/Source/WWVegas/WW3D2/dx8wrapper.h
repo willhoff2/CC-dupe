@@ -52,7 +52,7 @@
 #include "WWMath/vector4.h"
 #include "WWLib/cpudetect.h"
 #include "dx8caps.h"
-#include "d3d8renderbackend.h"
+#include "renderbackend.h"
 
 #include "texture.h"
 #include "dx8vertexbuffer.h"
@@ -637,9 +637,14 @@ public:
 	** helper calls in dx8wrapper.cpp take a device, and because the tools and the embedded
 	** browser reach for the device directly.  They are the documented hole in the seam -
 	** see docs/porting/renderer-seam.md.
+	**
+	** They ask the *installed* backend, not the D3D8 one by name: D3D8RenderBackendClass
+	** exists only on Windows, so naming it here made every consumer of this header
+	** Windows-only.  A backend without D3D8 objects answers nullptr, which is the same answer
+	** these accessors already gave before a device existed.
 	*/
-	static IDirect3DDevice8* _Get_D3D_Device8() { return TheD3D8RenderBackend.Peek_D3D_Device8(); }
-	static IDirect3D8* _Get_D3D8() { return TheD3D8RenderBackend.Peek_D3D8(); }
+	static IDirect3DDevice8* _Get_D3D_Device8() { return RenderBackend ? RenderBackend->Peek_D3D_Device8() : nullptr; }
+	static IDirect3D8* _Get_D3D8() { return RenderBackend ? RenderBackend->Peek_D3D8() : nullptr; }
 	/// Returns the display format - added by TR for video playback - not part of W3D
 	static WW3DFormat	getBackBufferFormat();
 	static bool Reset_Device(bool reload_assets=true);

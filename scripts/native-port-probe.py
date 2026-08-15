@@ -55,6 +55,12 @@ FETCHED_DEP_INCLUDES = [
     "miles-src",
     # The Miles headers live one level down; WWAudio includes them as <mss.h>.
     "miles-src/mss",
+    # stb_image_write_impl.cpp includes <stb_image_write.h>, and the font seam's rasteriser
+    # includes <stb_truetype.h>.
+    "stb-src",
+    # The FFmpeg video path includes <libavcodec/avcodec.h> and friends. Headers only: nothing
+    # here links the libraries. See docs/porting/video-and-harness-headers.md.
+    "ffmpeg-src",
 ]
 
 # Include dirs shared by every target.
@@ -341,7 +347,14 @@ OPTIONAL_BACKENDS = {"platform_window_sdl2.cpp"}
 # MemoryPoolObject -- classes PreRTS.h has already supplied through GameMemory.h. Counting it as a
 # port blocker measured the harness rather than the code; it appeared as one from the first probe
 # run until this exclusion.
-EXCLUSIVE_ALTERNATIVES = {"GameMemoryNull.cpp"}
+#
+# WinMain.cpp is the second entry: GeneralsMD/Code/Main/CMakeLists.txt compiles it only under
+# `if(WIN32)` and compiles PlatformMain.cpp otherwise, so off Windows it is not in the
+# configuration at all. It is the MSVC SEH entry point -- <eh.h>, _set_se_translator,
+# SetUnhandledExceptionFilter -- and porting it is not the goal; PlatformMain.cpp replacing it is.
+# Measuring it made the Main target look 0-of-2 when the native entry point was the only unit that
+# had to compile. See docs/porting/process-and-crash-seam.md.
+EXCLUSIVE_ALTERNATIVES = {"GameMemoryNull.cpp", "WinMain.cpp"}
 
 
 def is_measured_source(path):

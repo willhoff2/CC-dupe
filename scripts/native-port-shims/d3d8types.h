@@ -7,7 +7,13 @@
 // docs/porting/native-model-render.md.
 //
 // The layout matches the real header: an anonymous struct of _11.._44 unioned with m[4][4].
-#pragma once
+//
+// The guard is the vendored header's own, not `#pragma once`: a translation unit that reaches both
+// -- the renderer layer's units see the vendored `d3d8types.h`, while `d3dx8math.h` here includes
+// `<d3d8types.h>` -- would otherwise define `_D3DMATRIX` twice, since `#pragma once` is per file
+// and these are two files. Sharing the guard makes whichever is found first the only definition.
+#ifndef _D3D8TYPES_H_
+#define _D3D8TYPES_H_
 
 typedef struct _D3DMATRIX {
 	union {
@@ -20,3 +26,5 @@ typedef struct _D3DMATRIX {
 		float m[4][4];
 	};
 } D3DMATRIX;
+
+#endif /* _D3D8TYPES_H_ */
