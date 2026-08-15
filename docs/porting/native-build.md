@@ -433,6 +433,59 @@ recompiles all 968 units and doubling that job's compile time would put it near 
 has its own baseline file so the larger build cannot be read as progress against the smaller one.
 Levels 1-3 keep their own ratchet.
 
+## The audio backend, measured 2026-08-15 on b81226000 with clang 14 (current baseline)
+
+Level 4's `Miles Sound System 0 → 74` entry above ended by predicting its own fix: *"this is not an
+unported surface … this harness simply does not link it … it should take the category to 0."* It
+does, and the prediction was right in full. By `b81226000` the category had grown to 89 as more of
+`GameEngineDevice` and `WWAudio` compiled; building
+`Core/Libraries/Source/OpenALAudioDevice` — the `milesstub` implementation `cmake/openal.cmake`
+supplies to every audio consumer off 32-bit Windows — takes it to 0.
+
+| | Levels 1-3 | Levels 1-4 |
+|---|---:|---:|
+| Undefined `AIL_*` before | 60 | 89 |
+| Undefined `AIL_*` after | **0** | **0** |
+| Unresolved symbols, all causes, before | 608 | 339 |
+| Unresolved symbols, all causes, after | **548** | **250** |
+
+The totals fall by exactly 60 and 89: no other category moves, no object count changes, and **no
+`AIL_*` function was written or stubbed**. All 89 were already defined — the backend defines 101
+entry points and `mss.h` declares 101, which `check-openal-symbols.py` has gated all along. This was
+purely the harness excluding the layer that defines them, the same artefact level 4 removed for the
+renderer, and it means the audio category never belonged in any "remaining port work" figure.
+
+How it is built, and why that keeps the numbers comparable:
+
+- A **support** archive (`libsupport_openalaudiodevice`), like lzhl: a dependency of the measured
+  libraries rather than one of them, so it stays out of the objects and translation-unit
+  denominators, which have to keep matching the probe's. 972 units and 968 objects at level 4, both
+  unchanged.
+- Its file list is read out of `Core/Libraries/Source/OpenALAudioDevice/CMakeLists.txt`, so the
+  harness cannot drift from the real build. (That file's list is a flat `set()` of bare names, not
+  the `Source/...` layout `probe.cmake_sources` parses, hence a four-line reader of its own.)
+- OpenAL is linked from the system library, found by path — the runtime `libopenal.so.1` is enough,
+  so a box without the `-dev` symlink can still link. `libopenal-dev` is installed in both CI jobs.
+  If no OpenAL library is found the build says so and `al*`/`alc*` land in their own
+  `OpenAL (not linked here)` category, which is the backend's own dependency and never an engine
+  call site — the one thing that must not happen is those being counted as the engine's problem.
+- `scripts/ci/fetch-probe-deps.sh` provisions `<AL/al.h>` from openal-soft at the tag
+  `cmake/openal.cmake` pins (a blobless partial clone of `include/AL/*.h`), so the backend *compiles*
+  on a box with no OpenAL installed at all, and the headers are pinned rather than whatever the
+  distribution ships. System headers are the fallback, not the first choice, for the same
+  reproducibility reason `review-and-decisions.md` §1.2 records.
+
+Gated by `scripts/ci/check-audio-backend-linked.py` in both `native-build` jobs, asserting two things
+the baseline ratchet cannot: that the backend archive is *in* the link (its absence would take the
+total back up by 60/89 while every ratchet still held), and that no `AIL_*` is unresolved by name. The
+second is deliberately a link-time check — `check-openal-symbols.py` compares declared against
+defined inside the backend, `audio-surface-scan.py --check` compares demanded against declared by
+source scan, and neither can see an entry point the engine references that `mss.h` never declares.
+
+What this does *not* claim: nothing here plays a sound. It is the same compile-and-link statement as
+every other figure in this document. `audio-device-seam.md` §7 lists what is still open behind the
+API (MP2/MP3 streams, EFX, the Bink handoff), and none of it is visible to a linker.
+
 ## What this does not show
 
 - **This is Linux x86-64, not macOS arm64.** Nothing here has been run on Apple Silicon. The

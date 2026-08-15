@@ -4,7 +4,7 @@ Produced by `scripts/native-build.py`. Unlike every other number in `docs/portin
 these come from real object files and a real linker invocation, not from
 `clang++ -fsyntax-only`.
 
-Toolchain: `Ubuntu clang version 14.0.0-1ubuntu1.1`, target `x86_64-pc-linux-gnu`, levels built: 1, 2, 3, 4.
+Toolchain: `Ubuntu clang version 14.0.0-1ubuntu1.1`, target `x86_64-pc-linux-gnu`, levels built: 1, 2, 3.
 
 Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only stand-ins for the Win32 headers, so a missing platform layer shows up as an undefined symbol rather than as a failed compile. That is the point: it moves the blockers from §1 to §3, where they can be counted individually.
 
@@ -19,83 +19,58 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
 | `Core/GameEngine` | 207 | 210 | 207 |
 | `GeneralsMD/Code/GameEngine` | 380 | 380 | 380 |
-| `Core/Libraries/Source/WWVegas/WW3D2` | 72 | 73 | 72 |
-| `Core/Libraries/Source/WWVegas/WWAudio` | 19 | 19 | 19 |
-| `Core/Libraries/Source/WWVegas/WWDownload` | 4 | 4 | 4 |
-| `GeneralsMD/Code/Libraries/Source/WWVegas` | 35 | 35 | 35 |
 | `Core/GameEngineDevice` | 70 | 70 | 70 |
 | `GeneralsMD/Code/GameEngineDevice` | 39 | 39 | 39 |
 | `GeneralsMD/Code/Main` | 1 | 1 | 1 |
-| **Total** | **968** | **972** | **968** |
+| **Total** | **838** | **841** | **838** |
 
-4 translation units produced no object file:
+3 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
 | `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` | `unknown type name 'HANDLE'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp` | `unknown type name 'AsnObjectIdentifier'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp` | `unknown type name 'HOSTENT'` |
-| `Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp` | `no member named 'GetWindowLong' in the global namespace` |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 968 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 838 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 14 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 4 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **339 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 10 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_openalaudiodevice`, `libthirdparty_lzhl`, `openal (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 4 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **548 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| Defined in a translation unit that failed to compile | 108 |
-| Miles Sound System | 89 |
+| Defined in a layer not built here (renderer / audio) | 385 |
 | GameSpy SDK (cut scope, not linked) | 81 |
 | FFmpeg (not linked here) | 29 |
+| Defined in a translation unit that failed to compile | 18 |
 | Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 |
+| Defined in a built translation unit behind a disabled #if (build option / platform) | 10 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
-| Direct3D 8 / DirectX | 4 |
 | Win32 API | 4 |
-| Defined in a built translation unit behind a disabled #if (build option / platform) | 4 |
+| Direct3D 8 / DirectX | 2 |
 | Other / unclassified | 1 |
-| Engine C++ not built at this level | 1 |
 
-### Defined in a translation unit that failed to compile
+### Defined in a layer not built here (renderer / audio)
 
-- `DX8Wrapper_IsWindowed`
-- `DX8Wrapper_PreserveFPU`
-- `ThePinger`
-- `DX8_Assert()`
-- `StartPatchCheck()`
-- `HTTPThinkWrapper()`
+- `TheDX8MeshRenderer`
+- `_AggregateLoader`
+- `_ParticleEmitterLoader`
 - `Log_DX8_ErrorCode(unsigned int)`
-- `StopAsyncDNSCheck()`
-- `StartDownloadingPatches()`
-- `CancelPatchCheckCallback()`
-- `GetLocalChatConnectionAddress(AsciiString, unsigned short, unsigned int&)`
+- `Get_Bytes_Per_Pixel(WW3DFormat)`
+- `ARGB_Color_To_WW3D_Color(WW3DFormat, unsigned int)`
+- `SetUnsignedIntInRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int)`
 - `DX8Wrapper::Draw_Strip(unsigned short, unsigned short, unsigned short, unsigned short)`
-- `DX8Wrapper::IsWindowed`
-- `DX8Wrapper::Begin_Scene()`
 - `DX8Wrapper::CurrentCaps`
-- …and 93 more
-
-### Miles Sound System
-
-- `AIL_3D_sample_length`
-- `AIL_3D_sample_loop_count`
-- `AIL_3D_sample_offset`
-- `AIL_3D_sample_playback_rate`
-- `AIL_3D_sample_volume`
-- `AIL_3D_user_data`
-- `AIL_WAV_info`
-- `AIL_allocate_3D_sample_handle`
-- `AIL_allocate_sample_handle`
-- `AIL_close_3D_listener`
-- `AIL_close_3D_provider`
-- `AIL_close_stream`
-- `AIL_decompress_ADPCM`
-- `AIL_end_3D_sample`
-- `AIL_end_sample`
-- …and 74 more
+- `DX8Wrapper::Has_Stencil()`
+- `DX8Wrapper::Pixel_Shader`
+- `DX8Wrapper::RenderStates`
+- `DX8Wrapper::render_state`
+- `DX8Wrapper::DX8Transforms`
+- `DX8Wrapper::RenderBackend`
+- …and 370 more
 
 ### GameSpy SDK (cut scope, not linked)
 
@@ -135,6 +110,25 @@ The 14 archives were linked into one binary with `--whole-archive`, plus the thi
 - `avcodec_find_decoder`
 - …and 14 more
 
+### Defined in a translation unit that failed to compile
+
+- `ThePinger`
+- `StartPatchCheck()`
+- `HTTPThinkWrapper()`
+- `StopAsyncDNSCheck()`
+- `StartDownloadingPatches()`
+- `CancelPatchCheckCallback()`
+- `GetLocalChatConnectionAddress(AsciiString, unsigned short, unsigned int&)`
+- `GameSpyGameSlot::setPingString(AsciiString)`
+- `PingerInterface::createNewPingerInterface()`
+- `GameSpyStagingRoom::launchGame()`
+- `GameSpyStagingRoom::setPingString(AsciiString)`
+- `GameSpyStagingRoom::getGameSpySlot(int)`
+- `GameSpyStagingRoom::cleanUpSlotPointers()`
+- `GameSpyStagingRoom::generateLadderGameResultsPacket()`
+- `GameSpyStagingRoom::generateGameSpyGameResultsPacket()`
+- …and 3 more
+
 ### Defined only in a backend this configuration excludes (SDL2 / Cocoa)
 
 - `WWPlatform::Window_Show(void*, bool)`
@@ -150,6 +144,19 @@ The 14 archives were linked into one binary with `--whole-archive`, plus the thi
 - `WWPlatform::Window_Modifier_State(void*)`
 - `WWPlatform::Window_Set_Cursor_Clip(void*, bool)`
 
+### Defined in a built translation unit behind a disabled #if (build option / platform)
+
+- `DX8Wrapper_IsWindowed`
+- `DX8Wrapper_PreserveFPU`
+- `Convert_Pixel(unsigned char*, SurfaceClass::SurfaceDescription const&, Vector3 const&)`
+- `FillStackAddresses(void**, unsigned int, unsigned int)`
+- `StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))`
+- `GetUnsignedIntFromRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int&)`
+- `DX8Wrapper::Set_Vertex_Buffer(VertexBufferClass const*, unsigned int)`
+- `DX8Wrapper::Set_Vertex_Buffer(DynamicVBAccessClass const&)`
+- `g_LastErrorDump`
+- `getQR2HostingStatus`
+
 ### Generated gitinfo (build-time, not a blocker)
 
 - `GitCommitAuthorName`
@@ -159,13 +166,6 @@ The 14 archives were linked into one binary with `--whole-archive`, plus the thi
 - `GitTag`
 - `GitUncommittedChanges`
 
-### Direct3D 8 / DirectX
-
-- `D3DXAssembleShader`
-- `D3DXFilterTexture`
-- `D3DXGetFVFVertexSize`
-- `D3DXLoadSurfaceFromSurface`
-
 ### Win32 API
 
 - `GetCursorPos`
@@ -173,24 +173,18 @@ The 14 archives were linked into one binary with `--whole-archive`, plus the thi
 - `ScreenToClient`
 - `SetCursor`
 
-### Defined in a built translation unit behind a disabled #if (build option / platform)
+### Direct3D 8 / DirectX
 
-- `FillStackAddresses(void**, unsigned int, unsigned int)`
-- `StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))`
-- `g_LastErrorDump`
-- `getQR2HostingStatus`
+- `D3DXAssembleShader`
+- `D3DXFilterTexture`
 
 ### Other / unclassified
 
 - `MSS_auto_cleanup`
 
-### Engine C++ not built at this level
-
-- `ListenerHandleClass::Initialize(SoundBufferClass*)`
-
 ## Reproducing
 
 ```sh
 bash scripts/ci/fetch-probe-deps.sh
-python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims --report docs/porting/native-build-report.md --json native-build.json
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims --report docs/porting/native-build-report.md --json native-build.json
 ```
