@@ -10,23 +10,38 @@ gate cannot run there by default — which matters for this port: it is the only
 catch a save/serialisation or 64-bit change desyncing the simulation. Everything else in CI only
 proves the code still builds.
 
-There are two ways to run it, and this document covers both: **manually against a local data
-directory** (what this fork does), and **from your own bucket in CI** (how to get the automatic
-gate back).
+There are two ways to run it, and this document covers both: **from a bucket in CI** (what this fork
+now does) and **manually against a local data directory** (the fallback when no bucket is
+configured).
 
-## Status in this fork: manual
+## Status in this fork: running in CI
 
-No game data is configured, so `Replay Check GeneralsMD` **skips** with a reason in the job summary
-instead of failing red. The decision is deliberate: hosting the data was not wanted, and a job that
-fails for a missing input tells you nothing about the code.
+Game data is hosted and the credentials are configured, so `Replay Check GeneralsMD` **runs on every
+pull request that touches game code**. First green run: 10 replays simulated, `Errors occurred: 0`,
+under both the `vc6+t+e` and `vc6-releaselog+t+e` presets
+([run 31912666731](https://github.com/willhoff2/CC-dupe/actions/runs/31912666731)). That is the
+whole design working as intended: the `Game data available?` probe flipped from skip to run purely
+because the secrets appeared, with no change to any workflow file.
 
-> **The cost of that choice: with the gate manual, replay determinism — specifically PR #27's
-> save/serialisation change — is unverified against desync until somebody runs it.**
+What that buys, and it is the reason this gate is worth the setup: **PR #27's save/serialisation
+change is now verified against desync** rather than argued about. It is the only check in the
+repository that runs the simulation and compares it against a recorded retail run; everything else
+only proves the code still builds. A 64-bit or serialisation change that silently diverges the
+simulation now fails a job instead of reaching a player.
 
-The skip is driven by the `Game data available?` job in `check-replays.yml`, which checks whether
-`R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` are both set. Setting them (see
-[Hosting the data yourself](#hosting-the-data-yourself)) re-enables the gate with no change to any
-workflow file.
+What it still does not cover, so nobody over-reads a green tick:
+
+- The replays are Zero Hour skirmish/multiplayer recordings against AI. **No campaign mission is
+  replayed**, so mission scripting is untested by this gate.
+- It runs the **32-bit x86 Windows VC6 build**, which is the retail-compatible one by construction.
+  It says nothing about the 64-bit or native macOS build — those cannot even link yet.
+- Divergence is detected as an error from the headless run, so a change that alters behaviour
+  *identically* in both the recording and the simulation would not be caught.
+
+If the credentials are ever removed the gate returns to skipping with a reason in the job summary
+rather than failing red, because a job that fails for a missing input tells you nothing about the
+code. That branch is driven by the `Game data available?` job in `check-replays.yml`, which checks
+whether `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` are both set.
 
 ## What the data is
 
@@ -38,6 +53,9 @@ twin `pack-gamedata.ps1`) and in the comments of `check-replays.yml`.
 Retail game data is not redistributable. Keep the bucket private, and do not commit the archives.
 
 ## Running it manually
+
+Still useful without a bucket, or to reproduce a CI failure on the machine that holds the retail
+installs.
 
 `scripts/ci/run-replays-local.ps1` is the manual equivalent of the CI job, against local
 directories and with no bucket in the path. It stages a copy of the build, stages the data files,
