@@ -32,24 +32,44 @@
 
 #pragma once
 
-#include <windows.h>
-#include "d3d8.h"
-
 // ***********************************
 // Set this to 0 to remove all embedded browser code.
 //
+// The control is Internet Explorer hosted in a COM server (BrowserEngine) that exists only where
+// RTS_HAS_EMBEDDED_BROWSER is defined, i.e. where EABrowserDispatch builds it. Where it is absent
+// the class keeps its name and every entry point, so DX8Wrapper and W3DDisplay compile and link
+// unchanged; see docs/porting/embedded-browser-seam.md.
+//
+#ifdef RTS_HAS_EMBEDDED_BROWSER
 #define ENABLE_EMBEDDED_BROWSER		1
+#else
+#define ENABLE_EMBEDDED_BROWSER		0
+#endif
 //
 // ***********************************
 
 #if ENABLE_EMBEDDED_BROWSER
+#include <windows.h>
+#include "d3d8.h"
+#endif
 
 // These options must match the browser option bits defined in the BrowserEngine code.
 // Look in febrowserengine.h
 #define BROWSEROPTION_SCROLLBARS		0x0001
 #define BROWSEROPTION_3DBORDER		0x0002
 
+#if ENABLE_EMBEDDED_BROWSER
 struct IDirect3DDevice8;
+
+// The browser's option bits and the game-side scripting object it is handed. Spelled through the
+// class' own names so the declaration below is one declaration on both platforms: the OLE
+// IDispatch the control really wants, or the opaque pointer it is where there is no OLE.
+typedef LONG			DX8WebBrowserOptions;
+typedef LPDISPATCH	DX8WebBrowserDispatch;
+#else
+typedef long			DX8WebBrowserOptions;
+typedef void *			DX8WebBrowserDispatch;
+#endif
 
 /**
 ** DX8WebBrowser
@@ -71,7 +91,7 @@ public:
 	static void			Render(int backbufferindex);	//Draws all browsers to the backbuffer.
 
 	// Creates a browser with the specified name
-	static void			CreateBrowser(const char* browsername, const char* url, int x, int y, int w, int h, int updateticks = 0, LONG options = BROWSEROPTION_SCROLLBARS | BROWSEROPTION_3DBORDER, LPDISPATCH gamedispatch = 0);
+	static void			CreateBrowser(const char* browsername, const char* url, int x, int y, int w, int h, int updateticks = 0, DX8WebBrowserOptions options = BROWSEROPTION_SCROLLBARS | BROWSEROPTION_3DBORDER, DX8WebBrowserDispatch gamedispatch = 0);
 
 	// Destroys the browser with the specified name
 	static void			DestroyBrowser(const char* browsername);
@@ -82,9 +102,9 @@ public:
 	// Navigates the specified browser to the specified page.
 	static void			Navigate(const char* browsername, const char* url);
 
+#if ENABLE_EMBEDDED_BROWSER
 private:
 	// The window handle of the application.  This is initialized by Initialize().
 	static				HWND						hWnd;
-};
-
 #endif
+};
