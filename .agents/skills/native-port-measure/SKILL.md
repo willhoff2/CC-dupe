@@ -105,10 +105,11 @@ python3 scripts/porting-status.py          # rewrite docs/porting/STATUS.md
 python3 scripts/porting-status.py --check  # what CI runs
 ```
 
-The native build's `First diagnostic` column is attributed from the generator's failure block
-(`FAILED: <obj>` under Ninja), not by looking for the file's own name in the log: most failures
-report their first error inside an included header, so a basename scan silently leaves the column
-empty. If a re-measurement changes only that column, suspect the attribution and not the tree.
+The native build's `First diagnostic` column is attributed by following clang's `In file included
+from` chain back to the translation unit at its head, not by looking for the file's own name in the
+log: most failures report their first error inside an included header, so a name scan silently leaves
+the column empty. If a re-measurement changes only that column, suspect the attribution and not the
+tree.
 
 `STATUS.md` is generated from the baselines and must never be hand-edited. Then grep the rest of
 `docs/porting/*.md` for any figure your change moved and update or mark it superseded.

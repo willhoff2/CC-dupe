@@ -19,7 +19,7 @@ slice is much closer to portable than the raw `windows.h` counts suggest.
 
 > **Superseded.** That 106/147 covered only the `Core/Libraries` slice, and later slices grew the
 > denominator; `review-and-decisions.md` records it as stale. The probe now covers nine targets:
-> **663 / 752** clean native and **704 / 752** shimmed (clang 14, commit `4306101`). Read
+> **664 / 754** clean native and **706 / 754** shimmed (clang 14, commit `ac520ad`). Read
 > [`STATUS.md`](STATUS.md), which is generated from the committed baselines, rather than this
 > paragraph.
 
