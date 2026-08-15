@@ -558,6 +558,12 @@ private:
 	bool Begin_Current_Pass();
 	// Moves an image surface to `to`, recording into `cmd`, and remembers the layout.
 	void Transition_Surface(VkCommandBuffer cmd, SurfaceHandle* surface, VkImageLayout to);
+	// Records that a texture's image now *is* in `layout`, for the paths that
+	// transition the image directly rather than through Transition_Surface. A
+	// GetSurfaceLevel surface is a second name for the same image, so leaving its
+	// layout behind makes the next Transition_Surface transition from a layout the
+	// image left: correct bytes, wrong barrier, and the validation layer says so.
+	void Note_Texture_Layout(TextureHandle* texture, VkImageLayout layout);
 	// Records into the frame's command buffer when a scene is open, and into a
 	// one-shot submission otherwise, so a copy stays ordered against the draws.
 	VkCommandBuffer Begin_Transfer(bool& one_shot);
@@ -1324,6 +1330,14 @@ bool VulkanBackend::Flush_Frame_Commands(bool end_pass_first) {
 //
 // Present's blit writes a swapchain image, which no lock can reach.
 // ---------------------------------------------------------------------------
+
+void VulkanBackend::Note_Texture_Layout(TextureHandle* texture, VkImageLayout layout) {
+	if (texture == nullptr) return;
+	texture->layout = layout;
+	for (SurfaceHandle* surface : owned_surfaces_) {
+		if (surface->owner == texture) surface->layout = layout;
+	}
+}
 
 void VulkanBackend::Mark_Gpu_Write(Image* image) {
 	if (image == nullptr) return;
@@ -2633,7 +2647,7 @@ bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
 	}
 	release_staging();
 	if (!submitted) return false;
-	texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	Note_Texture_Layout(texture, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	++resource_stats_.texture_upload_regions;
 	++resource_stats_.upload_submits;
 	return true;
@@ -4008,11 +4022,11 @@ bool VulkanBackend::Update_Texture(TextureHandle* source, TextureHandle* destina
 	Transition(cmd, source->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
 	           source->image.mip_levels);
-	source->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	Note_Texture_Layout(source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	Transition(cmd, destination->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
 	           destination->image.mip_levels);
-	destination->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	Note_Texture_Layout(destination, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	// Write funnel 5.
 	Mark_Gpu_Write(&destination->image);
 	return End_Transfer(cmd, one_shot);
