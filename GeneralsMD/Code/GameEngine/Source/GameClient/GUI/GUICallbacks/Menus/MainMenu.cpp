@@ -30,8 +30,6 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-#include "gamespy/ghttp/ghttp.h"
-
 #include "Lib/BaseType.h"
 #include "Common/GameEngine.h"
 #include "Common/GameState.h"
@@ -1002,14 +1000,14 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 		//---------------------------------------------------------------------------------------------
 		case GWM_CREATE:
 		{
-			ghttpStartup();
+			HTTPStartupWrapper();
 			break;
 		}
 
 		//---------------------------------------------------------------------------------------------
 		case GWM_DESTROY:
 		{
-			ghttpCleanup();
+			HTTPCleanupWrapper();
 			DEBUG_LOG(("Tearing down GameSpy from MainMenuSystem(GWM_DESTROY)"));
 			TearDownGameSpy();
 			StopAsyncDNSCheck(); // kill off the async DNS check thread in case it is still running

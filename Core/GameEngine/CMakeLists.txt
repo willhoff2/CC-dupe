@@ -1215,9 +1215,23 @@ target_link_libraries(corei_gameengine_public INTERFACE
     core_browserdispatch
     #core_wwvegas
     d3d8lib
-    gamespy::gamespy
     stlport
 )
+
+# GameSpy online play is cut scope for the native port, so the SDK library is linked on Windows only.
+# RTS_HAS_GAMESPY is what the GameSpy sources and the menu code that calls into them key off: without
+# it the engine's own GameSpy classes still build - the menus, the queues and the message plumbing
+# reference them - but nothing calls the SDK, so no online session can be established off Windows.
+# The SDK's headers stay on the include path either way, because engine headers such as PeerDefs.h
+# declare their own types in terms of PEER and GPProfile. See docs/porting/online-path-excision.md.
+if(WIN32)
+    target_link_libraries(corei_gameengine_public INTERFACE gamespy::gamespy)
+    target_compile_definitions(corei_gameengine_public INTERFACE RTS_HAS_GAMESPY)
+else()
+    target_include_directories(corei_gameengine_public INTERFACE
+        $<TARGET_PROPERTY:gamespy::gamespy,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+endif()
 
 # ReactOS ATL for MinGW-w64 only (MSVC uses native ATL)
 if(MINGW)

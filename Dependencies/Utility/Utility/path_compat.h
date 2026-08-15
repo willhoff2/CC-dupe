@@ -36,10 +36,25 @@
 
 #else
 
+#include <fcntl.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #define _chmod chmod
+
+// MSVC spells the POSIX descriptor calls and their open flags with a leading underscore; off
+// Windows they are the POSIX ones. Only the spellings the engine's write-access probes use are
+// here, for the same reason the rest of this header is narrow.
+#define _open  open
+#define _close close
+
+#ifndef _O_CREAT
+#define _O_CREAT O_CREAT
+#endif
+#ifndef _O_RDWR
+#define _O_RDWR O_RDWR
+#endif
 
 // MSVC's _mkdir takes no mode: a new directory gets the default permissions. 0777 is that,
 // modulo the process umask, which is what every other POSIX directory creation in the engine

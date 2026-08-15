@@ -151,6 +151,10 @@ fails with all five units listed as no longer compiling.
 
 ## What the next slice here has to solve
 
+Answered by [online-path-excision.md](online-path-excision.md), which resolves the product decision
+in 1 as "not linked off Windows, not stubbed": the SDK budget below is now 0, and the three units
+named above compile.
+
 1. **The product decision.** A single-player build has 81 unresolved GameSpy SDK symbols. Someone has
    to choose between a loud-failing SDK stub layer (`ghttpStartup` and friends returning failure so
    the menu's online buttons degrade), and the `RTS_BUILD_OPTION_ONLINE` excision — which is now a

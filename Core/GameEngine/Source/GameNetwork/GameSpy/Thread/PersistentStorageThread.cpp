@@ -574,6 +574,12 @@ PSPlayerStats GameSpyPSMessageQueue::findPlayerStatsByID( Int id )
 
 //-------------------------------------------------------------------------
 
+// TheSuperHackers @port Persistent storage is the GameSpy stats/persistence backend: everything from
+// here to the end of the thread body is SDK calls, and the SDK is cut scope off Windows. The message
+// queue and the PSPlayerStats parsing above and below stay, because the single-player-facing code
+// that reads a player's stats block is built either way. See docs/porting/online-path-excision.md.
+#ifdef RTS_HAS_GAMESPY
+
 Bool PSThreadClass::tryConnect()
 {
 	Int result;
@@ -1076,6 +1082,14 @@ void PSThreadClass::Thread_Function()
 		DEBUG_CRASH(("Exception in storage thread!"));
 	}
 }
+
+#else // RTS_HAS_GAMESPY
+
+void PSThreadClass::Thread_Function()
+{
+}
+
+#endif // RTS_HAS_GAMESPY
 
 //-------------------------------------------------------------------------
 PSPlayerStats::PSPlayerStats()

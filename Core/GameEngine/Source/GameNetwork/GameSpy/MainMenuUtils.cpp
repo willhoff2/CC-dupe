@@ -33,6 +33,9 @@
 
 #include <fcntl.h>
 
+// TheSuperHackers @port for the _open()/_close()/_S_IREAD spellings hasWriteAccess() uses
+#include <Utility/path_compat.h>
+
 //#include "Common/Registry.h"
 #include "Common/UserPreferences.h"
 #include "Common/version.h"
@@ -43,7 +46,13 @@
 
 #include "GameClient/ShellHooks.h"
 
+// TheSuperHackers @port Everything in this file that talks to servserv - the patch check, the MOTD,
+// the config fetch and the online player counts - is GameSpy's HTTP SDK, which is cut scope off
+// Windows. The entry points the single-player main menu calls stay, and off Windows behave as they
+// already do on a Windows box that cannot reach servserv. See docs/porting/online-path-excision.md.
+#ifdef RTS_HAS_GAMESPY
 #include "gamespy/ghttp/ghttp.h"
+#endif
 
 #include "GameNetwork/DownloadManager.h"
 #include "GameNetwork/GameSpy/BuddyThread.h"
@@ -68,10 +77,12 @@ static char *MOTDBuffer = nullptr;
 static char *configBuffer = nullptr;
 GameWindow *onlineCancelWindow = nullptr;
 
+static Bool s_asyncDNSLookupInProgress = FALSE;
+#ifdef RTS_HAS_GAMESPY
 static Bool s_asyncDNSThreadDone = TRUE;
 static Bool s_asyncDNSThreadSucceeded = FALSE;
-static Bool s_asyncDNSLookupInProgress = FALSE;
 static HANDLE s_asyncDNSThreadHandle = nullptr;
+#endif
 enum {
 	LOOKUP_INPROGRESS,
 	LOOKUP_FAILED,
@@ -81,7 +92,9 @@ enum {
 ///////////////////////////////////////////////////////////////////////////////////////
 
 static void startOnline();
+#ifdef RTS_HAS_GAMESPY
 static void reallyStartPatchCheck();
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
@@ -241,6 +254,8 @@ static void startOnline()
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
+
+#ifdef RTS_HAS_GAMESPY
 
 static void queuePatch(Bool mandatory, AsciiString downloadURL)
 {
@@ -546,6 +561,10 @@ static GHTTPBool gamePatchCheckCallback( GHTTPRequest request, GHTTPResult resul
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
+#endif // RTS_HAS_GAMESPY
+
+///////////////////////////////////////////////////////////////////////////////////////
+
 void CancelPatchCheckCallbackAndReopenDropdown()
 {
 	HandleCanceledDownload();
@@ -573,6 +592,8 @@ void CancelPatchCheckCallback()
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
+
+#ifdef RTS_HAS_GAMESPY
 
 static GHTTPBool overallStatsCallback( GHTTPRequest request, GHTTPResult result, char * buffer, GHTTPByteCount bufferLen, void * param )
 {
@@ -707,6 +728,18 @@ void CheckNumPlayersOnline()
 	const char *const url = "http://launch.gamespyarcade.com/software/launch/arcadecount2.dll?svcname=ccgenzh";
 #endif
 	ghttpGet(url, GHTTPFalse, numPlayersOnlineCallback, nullptr);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////
+
+void HTTPStartupWrapper()
+{
+	ghttpStartup();
+}
+
+void HTTPCleanupWrapper()
+{
+	ghttpCleanup();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -870,5 +903,51 @@ static void reallyStartPatchCheck()
 	// check the users online
 	CheckNumPlayersOnline();
 }
+
+#else // RTS_HAS_GAMESPY
+
+///////////////////////////////////////////////////////////////////////////////////////
+
+// TheSuperHackers @port Without the HTTP SDK there is no servserv to ask, so the entry points the
+// single-player main menu calls take the path this code already takes when servserv cannot be
+// reached: nothing is queued for download, the download menu is not raised, and the online button
+// reports that it cannot connect. No GameSpy call is faked here, and nothing a single-player game
+// reaches behaves differently. See docs/porting/online-path-excision.md.
+
+void CheckOverallStats()
+{
+}
+
+void CheckNumPlayersOnline()
+{
+}
+
+void HTTPStartupWrapper()
+{
+}
+
+void HTTPCleanupWrapper()
+{
+}
+
+void HTTPThinkWrapper()
+{
+}
+
+void StopAsyncDNSCheck()
+{
+	s_asyncDNSLookupInProgress = FALSE;
+}
+
+void StartPatchCheck()
+{
+	checkingForPatchBeforeGameSpy = TRUE;
+	cantConnectBeforeOnline = TRUE;
+	checksLeftBeforeOnline = 0;
+	timeThroughOnline++;
+	startOnline();
+}
+
+#endif // RTS_HAS_GAMESPY
 
 ///////////////////////////////////////////////////////////////////////////////////////

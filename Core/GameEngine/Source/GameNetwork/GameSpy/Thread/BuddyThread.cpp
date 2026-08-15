@@ -123,6 +123,13 @@ enum CallbackType
 	CALLBACK_RECVSTATUS,
 };
 
+// TheSuperHackers @port The buddy list is a GameSpy Presence connection: this thread's body and its
+// callbacks are SDK calls from end to end, and the SDK is cut scope off Windows. The message queue
+// above stays - the menus that own it are single-player code that has to keep building - so what is
+// compiled out is the worker that would talk to the network, exactly as if the thread had never
+// been started. See docs/porting/online-path-excision.md.
+#ifdef RTS_HAS_GAMESPY
+
 void callbackWrapper( GPConnection *con, void *arg, void *param )
 {
 	CallbackType info = (CallbackType)(Int)param;
@@ -149,6 +156,8 @@ void callbackWrapper( GPConnection *con, void *arg, void *param )
 			break;
 	}
 }
+
+#endif // RTS_HAS_GAMESPY
 
 //-------------------------------------------------------------------------
 
@@ -254,6 +263,8 @@ GPProfile GameSpyBuddyMessageQueue::getLocalProfileID()
 }
 
 //-------------------------------------------------------------------------
+
+#ifdef RTS_HAS_GAMESPY
 
 void BuddyThreadClass::Thread_Function()
 {
@@ -681,3 +692,12 @@ void BuddyThreadClass::statusCallback( GPConnection *con, GPRecvBuddyStatusArg *
 
 //-------------------------------------------------------------------------
 
+#else // RTS_HAS_GAMESPY
+
+void BuddyThreadClass::Thread_Function()
+{
+}
+
+#endif // RTS_HAS_GAMESPY
+
+//-------------------------------------------------------------------------

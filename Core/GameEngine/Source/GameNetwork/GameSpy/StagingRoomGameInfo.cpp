@@ -29,8 +29,12 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+// TheSuperHackers @port The Windows SNMP SDK is only needed by GetLocalChatConnectionAddress()
+// below, which is compiled on Windows only. See docs/porting/online-path-excision.md.
+#ifdef _WIN32
 #include <windows.h>
 #include <snmp.h>
+#endif
 
 #include "Common/GameState.h"
 #include "Common/Player.h"
@@ -71,6 +75,16 @@ GameSpyGameSlot::GameSpyGameSlot()
 }
 
 // Helper Functions ----------------------------------------
+
+// TheSuperHackers @port GetLocalChatConnectionAddress() walks the local machine's MIB-II TCP
+// connection table through the Windows SNMP agent DLLs to find which of our addresses the GameSpy
+// chat connection is using, so a hosted game can advertise it. Both halves of that - SNMP and a
+// chat connection - exist only when the online path does, and there is no portable SNMP agent to
+// walk, so off Windows the function is not compiled at all. Its only caller is the peer thread's
+// connect callback, which is compiled out with the rest of the SDK path, so nothing references it.
+// The rest of this file is the staging-room GameInfo the menus use, and is built either way.
+#ifdef _WIN32
+
 /*
 ** Function definitions for the MIB-II entry points.
 */
@@ -436,6 +450,8 @@ Bool GetLocalChatConnectionAddress(AsciiString serverName, UnsignedShort serverP
 	FreeLibrary(mib_ii_dll);
 	return(found);
 }
+
+#endif // _WIN32
 
 // GameSpyGameSlot ----------------------------------------
 
