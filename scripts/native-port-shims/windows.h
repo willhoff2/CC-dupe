@@ -724,6 +724,7 @@ BOOL    UpdateWindow(HWND);
 BOOL    SetWindowPos(HWND, HWND, int, int, int, int, UINT);
 BOOL    GetClientRect(HWND, LPRECT);
 BOOL    GetWindowRect(HWND, LPRECT);
+BOOL    IsIconic(HWND);
 LRESULT SendMessageA(HWND, UINT, WPARAM, LPARAM);
 BOOL    PostMessageA(HWND, UINT, WPARAM, LPARAM);
 LRESULT DefWindowProcA(HWND, UINT, WPARAM, LPARAM);

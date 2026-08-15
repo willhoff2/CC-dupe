@@ -13,52 +13,52 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | Library | Objects produced | Translation units | Probe-clean |
 |---|---:|---:|---:|
 | `Core/Libraries/Source/Compression` | 11 | 11 | 11 |
-| `Core/Libraries/Source/WWVegas/WWMath` | 36 | 36 | 36 |
-| `Core/Libraries/Source/WWVegas/WWLib` | 78 | 78 | 78 |
+| `Core/Libraries/Source/WWVegas/WWMath` | 37 | 37 | 37 |
+| `Core/Libraries/Source/WWVegas/WWLib` | 77 | 77 | 77 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 | 3 | 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
 | `Core/GameEngine` | 207 | 210 | 207 |
 | `GeneralsMD/Code/GameEngine` | 380 | 380 | 380 |
-| `Core/GameEngineDevice` | 69 | 70 | 69 |
-| `GeneralsMD/Code/GameEngineDevice` | 38 | 39 | 38 |
+| `Core/GameEngineDevice` | 70 | 70 | 70 |
+| `GeneralsMD/Code/GameEngineDevice` | 39 | 39 | 39 |
 | `GeneralsMD/Code/Main` | 1 | 1 | 1 |
-| **Total** | **835** | **840** | **835** |
+| **Total** | **837** | **840** | **837** |
 
-5 translation units produced no object file:
+3 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
 | `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` | `unknown type name 'HANDLE'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp` | `unknown type name 'AsnObjectIdentifier'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp` | `unknown type name 'HOSTENT'` |
-| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp` | `use of undeclared identifier 'D3DXMatrixInverse'` |
-| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp` | `unknown type name 'LPDISPATCH'` |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 835 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 837 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 10 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 3 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`). **577 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 10 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 4 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **608 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| Defined in a layer not built here (renderer / audio) | 323 |
+| Defined in a layer not built here (renderer / audio) | 385 |
 | GameSpy SDK (cut scope, not linked) | 81 |
 | Miles Sound System | 60 |
-| Defined in a translation unit that failed to compile | 46 |
 | FFmpeg (not linked here) | 29 |
+| Defined in a translation unit that failed to compile | 18 |
 | Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 |
 | Defined in a built translation unit behind a disabled #if (build option / platform) | 10 |
-| Direct3D 8 / DirectX | 6 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
-| Win32 API | 3 |
+| Win32 API | 4 |
+| Direct3D 8 / DirectX | 2 |
 | Other / unclassified | 1 |
 
 ### Defined in a layer not built here (renderer / audio)
 
 - `TheDX8MeshRenderer`
+- `_AggregateLoader`
+- `_ParticleEmitterLoader`
 - `Log_DX8_ErrorCode(unsigned int)`
 - `Get_Bytes_Per_Pixel(WW3DFormat)`
 - `ARGB_Color_To_WW3D_Color(WW3DFormat, unsigned int)`
@@ -71,9 +71,7 @@ The 10 archives were linked into one binary with `--whole-archive`, plus the thi
 - `DX8Wrapper::render_state`
 - `DX8Wrapper::DX8Transforms`
 - `DX8Wrapper::RenderBackend`
-- `DX8Wrapper::Vertex_Shader`
-- `DX8Wrapper::Draw_Triangles(unsigned short, unsigned short, unsigned short, unsigned short)`
-- …and 308 more
+- …and 370 more
 
 ### GameSpy SDK (cut scope, not linked)
 
@@ -113,25 +111,6 @@ The 10 archives were linked into one binary with `--whole-archive`, plus the thi
 - `AIL_open_3D_provider`
 - …and 45 more
 
-### Defined in a translation unit that failed to compile
-
-- `ThePinger`
-- `TheWaterRenderObj`
-- `doSkyBoxSet(bool)`
-- `StartPatchCheck()`
-- `HTTPThinkWrapper()`
-- `StopAsyncDNSCheck()`
-- `StartDownloadingPatches()`
-- `CancelPatchCheckCallback()`
-- `GetLocalChatConnectionAddress(AsciiString, unsigned short, unsigned int&)`
-- `W3DDisplay::m_assetManager`
-- `W3DDisplay::m_3DInterfaceScene`
-- `W3DDisplay::m_2DScene`
-- `W3DDisplay::m_3DScene`
-- `W3DDisplay::W3DDisplay()`
-- `GameSpyGameSlot::setPingString(AsciiString)`
-- …and 31 more
-
 ### FFmpeg (not linked here)
 
 - `av_frame_alloc`
@@ -150,6 +129,25 @@ The 10 archives were linked into one binary with `--whole-archive`, plus the thi
 - `avcodec_alloc_context3`
 - `avcodec_find_decoder`
 - …and 14 more
+
+### Defined in a translation unit that failed to compile
+
+- `ThePinger`
+- `StartPatchCheck()`
+- `HTTPThinkWrapper()`
+- `StopAsyncDNSCheck()`
+- `StartDownloadingPatches()`
+- `CancelPatchCheckCallback()`
+- `GetLocalChatConnectionAddress(AsciiString, unsigned short, unsigned int&)`
+- `GameSpyGameSlot::setPingString(AsciiString)`
+- `PingerInterface::createNewPingerInterface()`
+- `GameSpyStagingRoom::launchGame()`
+- `GameSpyStagingRoom::setPingString(AsciiString)`
+- `GameSpyStagingRoom::getGameSpySlot(int)`
+- `GameSpyStagingRoom::cleanUpSlotPointers()`
+- `GameSpyStagingRoom::generateLadderGameResultsPacket()`
+- `GameSpyStagingRoom::generateGameSpyGameResultsPacket()`
+- …and 3 more
 
 ### Defined only in a backend this configuration excludes (SDL2 / Cocoa)
 
@@ -179,15 +177,6 @@ The 10 archives were linked into one binary with `--whole-archive`, plus the thi
 - `g_LastErrorDump`
 - `getQR2HostingStatus`
 
-### Direct3D 8 / DirectX
-
-- `D3DXFilterTexture`
-- `D3DXMatrixInverse`
-- `D3DXMatrixMultiply`
-- `D3DXMatrixScaling`
-- `D3DXMatrixTranslation`
-- `D3DXMatrixTranspose`
-
 ### Generated gitinfo (build-time, not a blocker)
 
 - `GitCommitAuthorName`
@@ -200,8 +189,14 @@ The 10 archives were linked into one binary with `--whole-archive`, plus the thi
 ### Win32 API
 
 - `GetCursorPos`
+- `IsIconic`
 - `ScreenToClient`
 - `SetCursor`
+
+### Direct3D 8 / DirectX
+
+- `D3DXAssembleShader`
+- `D3DXFilterTexture`
 
 ### Other / unclassified
 

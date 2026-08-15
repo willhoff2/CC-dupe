@@ -4,9 +4,7 @@
   "compile_failures": {
     "Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp": "unknown type name 'HANDLE'",
     "Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp": "unknown type name 'AsnObjectIdentifier'",
-    "Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp": "unknown type name 'HOSTENT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp": "use of undeclared identifier 'D3DXMatrixInverse'",
-    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp": "unknown type name 'LPDISPATCH'"
+    "Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp": "unknown type name 'HOSTENT'"
   },
   "compiled": {
     "Core/GameEngine": {
@@ -15,8 +13,8 @@
       "total": 210
     },
     "Core/GameEngineDevice": {
-      "objects": 69,
-      "probe_clean": 69,
+      "objects": 70,
+      "probe_clean": 70,
       "total": 70
     },
     "Core/Libraries/Source/Compression": {
@@ -35,9 +33,9 @@
       "total": 78
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
-      "objects": 36,
-      "probe_clean": 36,
-      "total": 36
+      "objects": 37,
+      "probe_clean": 37,
+      "total": 37
     },
     "Core/Libraries/Source/WWVegas/WWSaveLoad": {
       "objects": 12,
@@ -50,8 +48,8 @@
       "total": 380
     },
     "GeneralsMD/Code/GameEngineDevice": {
-      "objects": 38,
-      "probe_clean": 38,
+      "objects": 39,
+      "probe_clean": 39,
       "total": 39
     },
     "GeneralsMD/Code/Main": {
@@ -77,13 +75,14 @@
   "link_dropped_entry_points": [
     "libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)",
     "libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)",
-    "libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)"
+    "libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)",
+    "libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)"
   ],
   "link_entry_point_archives": [
     "libgeneralsmd_code_main"
   ],
-  "objects": 835,
-  "probe_clean": 835,
+  "objects": 837,
+  "probe_clean": 837,
   "third_party_linked": [
     "libthirdparty_lzhl",
     "z (system)"
@@ -91,16 +90,16 @@
   "translation_units": 840,
   "undefined_by_category": {
     "Defined in a built translation unit behind a disabled #if (build option / platform)": 10,
-    "Defined in a layer not built here (renderer / audio)": 323,
-    "Defined in a translation unit that failed to compile": 46,
+    "Defined in a layer not built here (renderer / audio)": 385,
+    "Defined in a translation unit that failed to compile": 18,
     "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": 12,
-    "Direct3D 8 / DirectX": 6,
+    "Direct3D 8 / DirectX": 2,
     "FFmpeg (not linked here)": 29,
     "GameSpy SDK (cut scope, not linked)": 81,
     "Generated gitinfo (build-time, not a blocker)": 6,
     "Miles Sound System": 60,
     "Other / unclassified": 1,
-    "Win32 API": 3
+    "Win32 API": 4
   },
   "undefined_symbols": {
     "Defined in a built translation unit behind a disabled #if (build option / platform)": [
@@ -137,6 +136,8 @@
       "DX8MeshRendererClass::Clear_Pending_Delete_Lists()",
       "DX8MeshRendererClass::Flush()",
       "DX8VertexBufferClass::DX8VertexBufferClass(unsigned int, unsigned short, DX8VertexBufferClass::UsageType)",
+      "DX8WebBrowser::Initialize(char const*, char const*, char const*, char const*)",
+      "DX8WebBrowser::Shutdown()",
       "DX8Wrapper::Apply_Render_State_Changes()",
       "DX8Wrapper::Clear(bool, bool, Vector3 const&, float, float, unsigned int)",
       "DX8Wrapper::Create_Render_Target(int, int, WW3DFormat)",
@@ -154,22 +155,36 @@
       "DX8Wrapper::Pixel_Shader",
       "DX8Wrapper::RenderBackend",
       "DX8Wrapper::RenderStates",
+      "DX8Wrapper::Set_Gamma(float, float, float, bool, bool)",
       "DX8Wrapper::Set_Index_Buffer(DynamicIBAccessClass const&, unsigned short)",
       "DX8Wrapper::Set_Index_Buffer(IndexBufferClass const*, unsigned short)",
       "DX8Wrapper::Set_Light_Environment(LightEnvironmentClass*)",
+      "DX8Wrapper::Set_Render_Target(IDirect3DSurface8*, bool)",
+      "DX8Wrapper::Set_Render_Target_With_Z(TextureClass*, ZTextureClass*)",
       "DX8Wrapper::TextureStageStates",
       "DX8Wrapper::Textures",
       "DX8Wrapper::Vertex_Shader",
       "DX8Wrapper::ZFar",
       "DX8Wrapper::ZNear",
       "DX8Wrapper::_Create_DX8_Surface(unsigned int, unsigned int, WW3DFormat)",
+      "DX8Wrapper::_Create_DX8_Texture(unsigned int, unsigned int, WW3DFormat, MipCountType, _D3DPOOL, bool)",
       "DX8Wrapper::_EnableTriangleDraw",
       "DX8Wrapper::_Get_DX8_Back_Buffer(unsigned int)",
       "DX8Wrapper::getBackBufferFormat()",
       "DX8Wrapper::m_pCleanupHook",
       "DX8Wrapper::render_state",
       "DX8Wrapper::render_state_changed",
+      "Debug_Statistics::Begin_Statistics()",
+      "Debug_Statistics::End_Statistics()",
+      "Debug_Statistics::Get_DX8_Polygons()",
+      "Debug_Statistics::Get_DX8_Skin_Renders()",
+      "Debug_Statistics::Get_DX8_Vertices()",
+      "Debug_Statistics::Get_Draw_Calls()",
+      "Debug_Statistics::Get_Record_Texture_Size()",
+      "Debug_Statistics::Get_Sorting_Polygons()",
       "Debug_Statistics::Record_DX8_Polys_And_Vertices(int, int, ShaderClass const&)",
+      "Debug_Statistics::Record_Texture_Mode(Debug_Statistics::RecordTextureMode)",
+      "Debug_Statistics::Shutdown_Statistics()",
       "DynamicIBAccessClass::DynamicIBAccessClass(unsigned short, unsigned short)",
       "DynamicIBAccessClass::WriteLockClass::WriteLockClass(DynamicIBAccessClass*)",
       "DynamicIBAccessClass::WriteLockClass::~WriteLockClass()",
@@ -228,6 +243,22 @@
       "PointGroupClass::Set_Point_Mode(PointGroupClass::PointModeEnum)",
       "PointGroupClass::Set_Shader(ShaderClass)",
       "PointGroupClass::Set_Texture(TextureClass*)",
+      "PredictiveLODOptimizerClass::Free()",
+      "Render2DClass::Add_Line(Vector2 const&, Vector2 const&, float, unsigned long)",
+      "Render2DClass::Add_Line(Vector2 const&, Vector2 const&, float, unsigned long, unsigned long)",
+      "Render2DClass::Add_Outline(RectClass const&, float, unsigned long)",
+      "Render2DClass::Add_Quad(RectClass const&, RectClass const&, unsigned long)",
+      "Render2DClass::Add_Rect(RectClass const&, float, unsigned int, unsigned int)",
+      "Render2DClass::Add_Tri(Vector2 const&, Vector2 const&, Vector2 const&, Vector2 const&, Vector2 const&, Vector2 const&, unsigned long)",
+      "Render2DClass::Enable_Additive(bool)",
+      "Render2DClass::Enable_Alpha(bool)",
+      "Render2DClass::Enable_Grayscale(bool)",
+      "Render2DClass::Enable_Texturing(bool)",
+      "Render2DClass::Render()",
+      "Render2DClass::Render2DClass(TextureClass*)",
+      "Render2DClass::Set_Coordinate_Range(RectClass const&)",
+      "Render2DClass::Set_Screen_Resolution(RectClass const&)",
+      "Render2DClass::Set_Texture(TextureClass*)",
       "Render2DSentenceClass::Build_Sentence(wchar_t const*, int*, int*)",
       "Render2DSentenceClass::Draw_Sentence(unsigned int)",
       "Render2DSentenceClass::Get_Formatted_Text_Extents(wchar_t const*)",
@@ -293,6 +324,7 @@
       "SegmentedLineClass::Set_UV_Offset_Rate(Vector2 const&)",
       "SegmentedLineClass::Set_Width(float)",
       "SetUnsignedIntInRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int)",
+      "ShaderClass::Invert_Backface_Culling(bool)",
       "ShaderClass::Is_Backface_Culling_Inverted()",
       "ShaderClass::ShaderDirty",
       "ShaderClass::_PresetATestSpriteShader",
@@ -320,6 +352,7 @@
       "SimpleSceneClass::Visibility_Check(CameraClass*)",
       "SimpleSceneClass::~SimpleSceneClass()",
       "SortingRendererClass::Flush()",
+      "SortingRendererClass::SetMinVertexBufferSize(unsigned int)",
       "SpecialRenderInfoClass::SpecialRenderInfoClass(CameraClass&, int)",
       "SpecialRenderInfoClass::~SpecialRenderInfoClass()",
       "StreakLineClass::Reset_Line()",
@@ -377,20 +410,46 @@
       "VertexMaterialClass::Set_Diffuse(Vector3 const&)",
       "VertexMaterialClass::Set_Diffuse(float, float, float)",
       "VertexMaterialClass::Set_Emissive(float, float, float)",
+      "VertexMaterialClass::Set_Opacity(float)",
+      "VertexMaterialClass::Set_Shininess(float)",
+      "VertexMaterialClass::Set_Specular(float, float, float)",
       "VertexMaterialClass::VertexMaterialClass()",
+      "WW3D::Add_To_Static_Sort_List(RenderObjClass*, unsigned int)",
+      "WW3D::AnisotropyLevel",
+      "WW3D::AreStaticSortListsEnabled",
+      "WW3D::Begin_Render(bool, bool, Vector3 const&, float, void (*)())",
       "WW3D::Enable_Coloring(unsigned int)",
       "WW3D::Enable_Texturing(bool)",
+      "WW3D::End_Render(bool)",
       "WW3D::Flush(RenderInfoClass&)",
+      "WW3D::Get_MSAA_Mode()",
+      "WW3D::Get_Render_Device_Desc(int)",
       "WW3D::Get_Texture_Reduction()",
+      "WW3D::Init(void*, char*, bool)",
+      "WW3D::IsScreenUVBiased",
       "WW3D::IsTexturingEnabled",
       "WW3D::LogicFrameTimeMs",
+      "WW3D::PrelitMode",
       "WW3D::PreviousSyncTime",
       "WW3D::Render(RenderObjClass&, RenderInfoClass&)",
       "WW3D::Render(SceneClass*, CameraClass*, bool, bool, Vector3 const&)",
       "WW3D::Render_And_Clear_Static_Sort_Lists(RenderInfoClass&)",
+      "WW3D::Set_Anisotropy_Level(int)",
+      "WW3D::Set_Collision_Box_Display_Mask(int)",
+      "WW3D::Set_Device_Resolution(int, int, int, int, bool)",
+      "WW3D::Set_MSAA_Mode(WW3D::MultiSampleModeEnum)",
+      "WW3D::Set_Render_Device(int, int, int, int, int, bool, bool, bool)",
+      "WW3D::Set_Texture_Bitdepth(int)",
+      "WW3D::Set_Texture_Filter(int)",
       "WW3D::Set_Texture_Reduction(int, int)",
+      "WW3D::Shutdown()",
       "WW3D::SnapshotActivated",
+      "WW3D::Sync(bool)",
       "WW3D::SyncTime",
+      "WW3D::TextureFilter",
+      "WW3D::ThumbnailEnabled",
+      "WW3D::Toggle_Movie_Capture(char const*, float)",
+      "WW3D::Update_Logic_Frame_Time(float)",
       "WW3DAssetManager::Add_Font3DData(Font3DDataClass*)",
       "WW3DAssetManager::Add_Prototype(PrototypeClass*)",
       "WW3DAssetManager::Create_Asset_List(DynamicVectorClass<StringClass>&)",
@@ -425,6 +484,8 @@
       "WW3DAssetManager::TheInstance",
       "WW3DAssetManager::WW3DAssetManager()",
       "WW3DAssetManager::~WW3DAssetManager()",
+      "_AggregateLoader",
+      "_ParticleEmitterLoader",
       "non-virtual thunk to LightClass::Get_Factory() const",
       "non-virtual thunk to LightClass::Load(ChunkLoadClass&)",
       "non-virtual thunk to LightClass::Save(ChunkSaveClass&)",
@@ -458,34 +519,6 @@
       "StartPatchCheck()",
       "StopAsyncDNSCheck()",
       "ThePinger",
-      "TheWaterRenderObj",
-      "W3DDisplay::W3DDisplay()",
-      "W3DDisplay::m_2DScene",
-      "W3DDisplay::m_3DInterfaceScene",
-      "W3DDisplay::m_3DScene",
-      "W3DDisplay::m_assetManager",
-      "WaterRenderObjClass::ReAcquireResources()",
-      "WaterRenderObjClass::ReleaseResources()",
-      "WaterRenderObjClass::WaterRenderObjClass()",
-      "WaterRenderObjClass::addVelocity(float, float, float, float)",
-      "WaterRenderObjClass::changeGridHeight(float, float, float)",
-      "WaterRenderObjClass::enableWaterGrid(bool)",
-      "WaterRenderObjClass::getGridResolution(float*, float*, float*)",
-      "WaterRenderObjClass::getGridTransform(Matrix3D*)",
-      "WaterRenderObjClass::getWaterHeight(float, float)",
-      "WaterRenderObjClass::init(float, float, float, SceneClass*, WaterRenderObjClass::WaterType)",
-      "WaterRenderObjClass::load()",
-      "WaterRenderObjClass::replaceSkyboxTexture(AsciiString const&, AsciiString const&)",
-      "WaterRenderObjClass::reset()",
-      "WaterRenderObjClass::setGridChangeAttenuationFactors(float, float, float, float)",
-      "WaterRenderObjClass::setGridHeightClamps(float, float)",
-      "WaterRenderObjClass::setGridResolution(float, float, float)",
-      "WaterRenderObjClass::setGridTransform(Matrix3D const*)",
-      "WaterRenderObjClass::setGridTransform(float, float, float, float)",
-      "WaterRenderObjClass::setTimeOfDay(TimeOfDay)",
-      "WaterRenderObjClass::update()",
-      "WaterRenderObjClass::updateMapOverrides()",
-      "doSkyBoxSet(bool)",
       "vtable for GameSpyStagingRoom"
     ],
     "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": [
@@ -503,12 +536,8 @@
       "WWPlatform::Window_Warp_Cursor(void*, int, int)"
     ],
     "Direct3D 8 / DirectX": [
-      "D3DXFilterTexture",
-      "D3DXMatrixInverse",
-      "D3DXMatrixMultiply",
-      "D3DXMatrixScaling",
-      "D3DXMatrixTranslation",
-      "D3DXMatrixTranspose"
+      "D3DXAssembleShader",
+      "D3DXFilterTexture"
     ],
     "FFmpeg (not linked here)": [
       "av_frame_alloc",
@@ -699,10 +728,11 @@
     ],
     "Win32 API": [
       "GetCursorPos",
+      "IsIconic",
       "ScreenToClient",
       "SetCursor"
     ]
   },
-  "undefined_total": 577,
+  "undefined_total": 608,
   "with_shims": true
 }
