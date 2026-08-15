@@ -222,7 +222,11 @@ RENDERER_TARGETS = [
     ),
     Target(
         name="GeneralsMD/Code/GameEngineDevice",
-        includes=tuple(DEVICE_INCLUDES),
+        # `GeneralsMD/Code/Main` is on this library's include path in the real build too:
+        # GameEngineDevice links `zi_main`, whose only content is that directory
+        # (`GeneralsMD/Code/CMakeLists.txt`). W3DDisplay.cpp's `#include "WinMain.h"` needs it, and
+        # without it the file reports a missing header rather than its real portability state.
+        includes=tuple(DEVICE_INCLUDES) + ("GeneralsMD/Code/Main",),
         cmake_lists="GeneralsMD/Code/GameEngineDevice/CMakeLists.txt",
         cmake_root="GeneralsMD/Code/GameEngineDevice",
         defines=("RTS_ZEROHOUR=1",),
