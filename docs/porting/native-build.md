@@ -13,19 +13,21 @@ compile.
 - Driver: `scripts/native-build.py` (`scripts/native_probe_targets.py` reuses the probe's own target,
   source and include definitions, so the two measurements cannot silently diverge)
 - CMake project: `cmake/native/CMakeLists.txt`
-- Generated report: `docs/porting/native-build-report.md`
-- CI ratchet: the `Native build (Linux, clang 14, 64-bit)` job in `.github/workflows/native-port-ci.yml`,
-  gated by `scripts/ci/check-native-build-baseline.py` against
-  `docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json` (one baseline per mode and level
-  set: the file is named after what it measures, so adding a level cannot be read as progress
-  against the smaller build's figures)
+- Generated report: `docs/porting/native-build-report.md` (levels 1-4, the largest build measured)
+- CI ratchets: the `Native build (Linux, clang 14, 64-bit)` and
+  `Native build + renderer (Linux, clang 14, 64-bit)` jobs in
+  `.github/workflows/native-port-ci.yml`, gated by `scripts/ci/check-native-build-baseline.py`
+  against `docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json` and
+  `...-level1-2-3-4.json` (one baseline per mode and level set: the file is named after what it
+  measures, so adding a level cannot be read as progress against the smaller build's figures)
 
 > The level 1 and levels 1+2 figures below are the original slice's own measurement and are kept as
 > its record; they were already superseded once by
 > [`crt-and-widechar-compat.md`](crt-and-widechar-compat.md) (679/717 objects and 376 unresolved to
 > 704/716 and 273, plus a corrected denominator: the SDL2 backend and `GameMemoryNull.cpp` were
-> counted although the configured build compiles neither). The **levels 1+2+3** section is the
-> current measurement and the one CI ratchets.
+> counted although the configured build compiles neither). The **levels 1+2+3+4** section at the
+> end is the current measurement; levels 1+2+3 and 1+2+3+4 are both ratcheted, each against its own
+> baseline file.
 
 ## Measured, on Linux x86-64 with clang 14
 
@@ -223,7 +225,7 @@ the same treatment as `rts::ClientInstance::s_instanceLock`, and no Win32 type s
 So criterion "Main produces objects" is **not met**, and cannot be met from inside this slice: it
 unblocks when the Bink slice lands.
 
-## The wave-3 stack, measured together on this branch with clang 14 (current baseline)
+## The wave-3 stack, measured together on that branch with clang 14
 
 The three wave-3 slices — video/Bink excision, the renderer layer off Windows, and the GDI font
 seam — were measured separately, each against `main`, so their numbers do not add up. Measured as
@@ -280,6 +282,140 @@ The kernel32/CRT gap slice has since moved this on to 826/839 objects with 13 co
 the unresolved total to 546 for the same reason — see `docs/porting/win32-runtime-and-crt-gaps.md`.
 `docs/porting/native-build-report.md` is the generated, authoritative version of these counts.
 
+## Level 4: the renderer and audio libraries, measured 2026-08-15 on ac520adf8 with clang 14 (current baseline)
+
+Level 4 adds the four libraries `native-port-probe.py` already knew as `RENDERER_TARGETS`:
+`Core/Libraries/Source/WWVegas/{WW3D2,WWAudio,WWDownload}` and `GeneralsMD`'s `WWVegas` fork. They
+were excluded from levels 1-3 because they did not compile off Windows at all; the wave-3 renderer
+slice changed that, and until they are built the unresolved total is not a portability measurement —
+272 of the 457 symbols levels 1-3 could not resolve were simply defined in a layer the build had
+excluded.
+
+Same command, same box (Linux x86-64, `clang++-14`, `--with-shims`), all three columns measured in
+this session:
+
+| | Levels 1-3 on `ac520adf8` | Levels 1-3 + the compat fix | Levels 1-4 + the compat fix |
+|---|---:|---:|---:|
+| Translation units | 836 | 836 | 968 |
+| Object files produced | 816 | 817 | 935 |
+| Probe-clean but uncompilable | 0 | 0 | 0 |
+| Compile failures | 20 | 19 | 33 |
+| Archives linked | 9 | 9 | 12 |
+| Unresolved symbols after linking | 457 | 503 | 386 |
+
+Read the middle column before the right one. The compat fix (below) makes one more level-1-3 unit
+compile, `W3DAssetManager.cpp`, and that *raises* the unresolved total by 46, because everything it
+calls lives in `WW3D2`. That is the artefact this level exists to remove, caught in isolation: at
+levels 1-3 the same change looks like a 46-symbol regression, and at level 4 it is 8 fewer failures
+and 71 fewer unresolved symbols than `main`.
+
+### Per library
+
+| Level-4 library | Objects | Translation units | Compile failures |
+|---|---:|---:|---:|
+| `Core/Libraries/Source/WWVegas/WW3D2` | 66 | 74 | 8 |
+| `Core/Libraries/Source/WWVegas/WWAudio` | 19 | 19 | **0** |
+| `Core/Libraries/Source/WWVegas/WWDownload` | **0** | 4 | 4 |
+| `GeneralsMD/Code/Libraries/Source/WWVegas` | 33 | 35 | 2 |
+| **Level 4 total** | **118** | **132** | **14** |
+
+`WWAudio` compiles clean, all 19 units, which no measurement had ever shown. `WWDownload` produces
+**no archive** — it joins `GeneralsMD/Code/Main` in `libraries_without_archive`, so the gate fails if
+a third library ever does.
+
+### Undefined symbols, by cause
+
+| Cause | Levels 1-3 on `ac520adf8` | Levels 1-4 |
+|---|---:|---:|
+| Defined in a layer not built here (renderer / audio) | 272 | **0** |
+| Defined in a translation unit that failed to compile | 86 | 214 |
+| Miles Sound System (`AIL_*`) | 0 | 74 |
+| GameSpy SDK (cut scope, not linked) | 33 | 33 |
+| Other / unclassified | 29 | 30 |
+| Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 | 12 |
+| Generated gitinfo (build-time, not a blocker) | 6 | 6 |
+| Defined in a built translation unit behind a disabled `#if` | 10 | 5 |
+| Direct3D 8 / DirectX (`D3DX*`) | 3 | 5 |
+| Win32 API | 3 | 3 |
+| COM / OLE (browser embedding, cut scope) | 3 | 3 |
+| Engine C++ not built at this level | 0 | 1 |
+| **Total** | **457** | **386** |
+
+The 272 is gone, which was the deliverable. The total falls by 71 rather than by 272, and the two
+categories that absorb the difference are both honest:
+
+- **`Defined in a translation unit that failed to compile` 86 → 214.** The renderer's own symbols are
+  now attributed to the 14 named level-4 files below instead of to "a layer we chose not to build".
+  Same symbols, an owner each.
+- **`Miles Sound System` 0 → 74.** `AIL_*`, referenced by the `WWAudio` units that now compile. This
+  is *not* an unported surface: `Core/Libraries/Source/OpenALAudioDevice`, wired in as the
+  `milesstub` target off 32-bit Windows, defines all 101 entry points `mss.h` declares
+  (`audio-surface-scan.py --check` gates that count), and this harness simply does not link it.
+  Linking it is a `cmake/native/CMakeLists.txt` change, i.e. an engine change, so it is deliberately
+  not in this measurement PR; it should take the category to 0.
+
+`Direct3D 8 / DirectX` 3 → 5 adds `D3DXGetFVFVertexSize` and `D3DXLoadSurfaceFromSurface`, both from
+`WW3D2`, for the D3DX math slice.
+
+`Engine C++ not built at this level` 0 → 1 is a real find that only a link could produce:
+`ListenerHandleClass::Initialize(SoundBufferClass*)` is declared `override` in
+`WWAudio/listenerhandle.h` and **defined nowhere in the tree** — `listenerhandle.cpp` compiles
+cleanly and does not contain it. That is a missing definition in retail `WWAudio` rather than a port
+defect; whether the Windows link tolerates it has not been checked here, and this harness's
+`--whole-archive` is stricter than a normal link, so it is reported rather than diagnosed.
+
+Nothing new appears in `Win32 API`, so `check-win32-undefined.py`'s budget is unchanged at the
+three cursor calls, and it now gates the renderer libraries too.
+
+### The 14 new compile failures, by cause
+
+No level-1-3 failure disappeared or appeared: the 33 are the 19 above plus these 14.
+
+| Cause | Units | Owner |
+|---|---:|---|
+| The Windows-only patch downloader (`HRESULT`, `KEY_READ` registry access, `Common/Debug.h`, an undeclared `sku`) | 4 — all of `WWDownload` | cut scope (online/patching), same cut as GameSpy |
+| D3DX math not yet in the vendored surface (`D3DX_PI`, `D3DXMATRIX * D3DXMATRIX`) | 2 — `pointgr.cpp`, `sortingrenderer.cpp` | the D3DX math slice, which already owns `D3DXMatrixInverse` in `W3DWater.cpp` |
+| COM browser embedding (`LPDISPATCH`) | 2 — `dx8webbrowser.cpp`, `dx8wrapper.cpp` | the COM browser excision slice, which owns the same failure in `W3DDisplay.cpp`/`W3DWebBrowser.cpp` |
+| Harness headers with no stand-in (`windowsx.h`, `ddraw.h`) | 3 — `FramGrab.cpp`, `ww3d.cpp`, `ddsfile.cpp` | this harness (`scripts/native-port-shims/`), reachable only through the shimmed build |
+| `_D3DADAPTER_IDENTIFIER8` has no `DriverVersion` in the vendored `d3d8.h` | 1 — `dx8caps.cpp` | the Win32-residue slice, which owns the identical failure in `W3DShaderManager.cpp` |
+| A missing `<stddef.h>` for `size_t` in a file-local STL allocator | 1 — `w3d_dep.cpp` | unowned, one line, left for whoever holds `WW3D2` next |
+| **A denominator defect, not a port failure** | 1 — `textdraw.cpp` | see below |
+
+`textdraw.cpp` is commented out of `Core/Libraries/Source/WWVegas/WW3D2/CMakeLists.txt` as
+`# textdraw.cpp # unused`, and its two diagnostics are a stale call to `Peek_Texture(ch)` against a
+zero-argument `Peek_Texture()` — a source bug in dead code, which is why it is not in the Windows
+build. It is measured only because `RENDERER_TARGETS` enumerate their sources by globbing
+`source_dirs` while the level-1-3 targets read the CMake lists (`Target.cmake_lists`, honoured by
+`native_probe_targets.target_sources`). Giving the renderer targets their `cmake_lists` would take
+132 units to 131 and 14 failures to 13, and it changes no probe baseline because the probe does not
+measure these targets — but `scripts/native-port-probe.py` is claimed by another in-flight slice, so
+it is reported here rather than fixed.
+
+### The one cause fixed here
+
+Eight of the level-4 failures were a single cause, and it is a CRT-alias header rather than any
+slice's implementation file: the W3D renderer calls the kernel32 string entry points fully qualified
+(`::lstrcpy`, `::lstrcpyn`, `::lstrcat`, `::lstrcmpi`, `::_strdup`), which a macro alias cannot
+satisfy — the name has to exist in the global namespace. `Dependencies/Utility/Utility/string_compat.h`
+now defines them, `lstrcpyn` written out because its count includes the terminator. They are
+spellings of the C library, not Win32 functionality, so nothing has to be implemented behind them
+later, and Windows is unaffected: the header is only reachable through the `#ifndef _WIN32` branch of
+`Utility/compat.h`.
+
+Measured effect at level 4: 927 → 935 objects, 41 → 33 failures, 432 → 386 unresolved symbols
+(`agg_def.cpp`, `rendobj.cpp`, `soundrobj.cpp`, `assetmgr.cpp`, `hlod.cpp`, `part_emt.cpp`,
+`part_ldr.cpp` and `W3DAssetManager.cpp`).
+
+### Is level 4 stable enough for CI
+
+Yes, and it is wired: the `Native build + renderer` job. Two consecutive runs of
+`--level 1 --level 2 --level 3 --level 4 --with-shims` produced byte-identical JSON, including the
+per-symbol category lists, and every remaining failure is a named diagnostic rather than a resource
+or ordering effect. It is a separate job rather than a second step in `native-build` because it
+recompiles all 968 units and doubling that job's compile time would put it near its timeout, and it
+has its own baseline file so the larger build cannot be read as progress against the smaller one.
+Levels 1-3 keep their own ratchet.
+
 ## What this does not show
 
 - **This is Linux x86-64, not macOS arm64.** Nothing here has been run on Apple Silicon. The
@@ -294,10 +430,20 @@ the unresolved total to 546 for the same reason — see `docs/porting/win32-runt
   the sources. It never attributes a cause to a symbol none of those files mentions, but overloads
   and macro-generated definitions can be misfiled — the `TheKey_*` keys are exactly that case,
   handled explicitly.
-- **`WW3D2` is still not built.** Level 3 covers `GameEngineDevice` and `Main`; the renderer library
+- **`WW3D2` was not built until level 4.** Level 3 covers `GameEngineDevice` and `Main`; the renderer library
   itself needs the renderer resource seam first, which is where the 72 "layer not built here"
-  symbols and `WorldHeightMap.cpp`'s `TheD3D8RenderBackend` failure lead. The 72 has since become
-  221 for exactly that reason.
+  symbols and `WorldHeightMap.cpp`'s `TheD3D8RenderBackend` failure lead. The 72 became 221, then
+  272, for exactly that reason, and level 4 takes the category to 0.
+- **Level 4 links no renderer, and runs nothing.** Every level-4 figure is "does this library
+  produce objects, and what do those objects reference". `WW3D2` producing 66 objects says nothing
+  about whether the D3D8-to-Vulkan backend draws a frame; that is `spikes/renderer` and
+  `renderer-spike-verify`.
+- **The compat-header change is guarded, and CI confirms it.** `string_compat.h` is reachable only
+  through the `#ifndef _WIN32` branch of `Utility/compat.h`, so the Windows configurations cannot see
+  the added names; all 13 `Build Generals`/`Build GeneralsMD` jobs are green on the branch that added
+  them. Behaviour under those builds is unchanged by construction, not by replay evidence — the
+  replay jobs need game-data credentials this fork does not have
+  (`docs/porting/replay-check-gamedata.md`).
 - **The remaining compile failures are reported, not fixed.** The Win32 surface (`HWND`/`HFONT`/
   `HRESULT`/`SetWindowText`), the GameSpy socket units and the Bink/FFmpeg/stb video devices belong
   to other slices or to cut scope. This build's job is to count them and name them.
@@ -309,9 +455,12 @@ the unresolved total to 546 for the same reason — see `docs/porting/win32-runt
 
 ```sh
 bash scripts/ci/fetch-probe-deps.sh
-python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims \
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims \
     --report docs/porting/native-build-report.md --json native-build.json
 python3 scripts/ci/check-native-build-baseline.py --results native-build.json
 ```
+
+Drop `--level 4` for the smaller build; the baseline the gate compares against is chosen from the
+levels in the results, so the two cannot be confused with each other.
 
 Add `--update` to the last command, in the PR that earns it, when the counts improve.

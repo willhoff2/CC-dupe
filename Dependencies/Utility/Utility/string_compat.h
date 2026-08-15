@@ -64,6 +64,29 @@ inline char *_strupr(char *str) {
 #define _stricmp strcasecmp
 #define _strnicmp strncasecmp
 #define _strcmpi strcasecmp
+#define _strdup strdup
+
+// TheSuperHackers @port The kernel32 string entry points. The W3D renderer calls them qualified,
+// as `::lstrcpy` / `::lstrcmpi` / ... (WW3D2/part_ldr.cpp includes WWLib/win.h for exactly this),
+// so a macro alias is not enough: they have to exist as names in the global namespace. They are
+// spellings of the C library rather than Win32 functionality; `lstrcpyn`'s count includes the
+// terminator, which is the one behavioural difference from `strncpy`.
+#ifdef __cplusplus
+inline char *lstrcpy(char *dest, const char *src) { return strcpy(dest, src); }
+inline char *lstrcat(char *dest, const char *src) { return strcat(dest, src); }
+inline int lstrcmp(const char *a, const char *b) { return strcmp(a, b); }
+inline int lstrcmpi(const char *a, const char *b) { return strcasecmp(a, b); }
+inline int lstrlen(const char *str) { return str != 0 ? (int)strlen(str) : 0; }
+
+inline char *lstrcpyn(char *dest, const char *src, int count) {
+  if (count <= 0) {
+    return dest;
+  }
+  strncpy(dest, src, (size_t)count - 1);
+  dest[count - 1] = '\0';
+  return dest;
+}
+#endif
 
 // TheSuperHackers @port `_strdup` is MSVC's conforming spelling of POSIX `strdup`, which is what
 // <string.h> above already declares. A macro rather than an inline wrapper because the engine
