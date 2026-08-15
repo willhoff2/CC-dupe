@@ -11,6 +11,7 @@ set(UTILITY_SRC
     Utility/iostream_adapter.h
     Utility/mbstring_compat.h
     Utility/mem_compat.h
+    Utility/path_compat.h
     Utility/socket_compat.h
     Utility/sstream_adapter.h
     Utility/stdint_adapter.h

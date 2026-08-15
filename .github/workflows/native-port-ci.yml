@@ -364,6 +364,20 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The patch downloader is the library that decides whether level 4's denominator is honest:
+      # it is adjacent to the cut online functionality but its symbols are still on the
+      # single-player link, so it is ported rather than excluded. This pins that, and pins the one
+      # source CMake comments out. See docs/porting/ww3d2-and-download-headers.md.
+      - name: Gate the patch-downloader seam
+        run: |
+          set -o pipefail
+          {
+            echo '## Patch downloader seam'
+            echo '```'
+            python3 scripts/ci/check-download-seam.py --results native-build-level4.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the build report
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0

@@ -323,6 +323,12 @@ and 71 fewer unresolved symbols than `main`.
 **no archive** — it joins `GeneralsMD/Code/Main` in `libraries_without_archive`, so the gate fails if
 a third library ever does.
 
+Both of those have since been resolved and `libraries_without_archive` is now empty: the browser
+excision earned `GeneralsMD/Code/Main` its archive, and the patch downloader's four units were ported
+rather than excluded — 962/971 objects at levels 1-4, with `check-download-seam.py` holding it. See
+[`ww3d2-and-download-headers.md`](ww3d2-and-download-headers.md). `docs/porting/native-build-report.md`
+and `STATUS.md` are the generated, authoritative counts.
+
 ### Undefined symbols, by cause
 
 | Cause | Levels 1-3 on `ac520adf8` | Levels 1-4 |

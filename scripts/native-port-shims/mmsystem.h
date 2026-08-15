@@ -6,6 +6,11 @@
 // MMRESULT, TIMERR_NOERROR, timeGetTime, timeBeginPeriod, timeEndPeriod all come from
 // Utility/time_compat.h via windows.h.
 
+// Four-character code of a RIFF chunk or, via <vfw.h>, of an AVI stream type.
+#define mmioFOURCC(ch0, ch1, ch2, ch3) \
+	((DWORD)(BYTE)(ch0) | ((DWORD)(BYTE)(ch1) << 8) | \
+	 ((DWORD)(BYTE)(ch2) << 16) | ((DWORD)(BYTE)(ch3) << 24))
+
 #define MMSYSERR_NOERROR   0
 #define MMSYSERR_ERROR     1
 #define WAVE_FORMAT_PCM    1

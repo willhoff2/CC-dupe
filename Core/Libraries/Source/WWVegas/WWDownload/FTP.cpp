@@ -36,6 +36,11 @@
 #include <direct.h>
 #include <errno.h>
 #include <WWLib/WWCommon.h>
+// TheSuperHackers @port The Win32 spellings this file declares its host-lookup thread with --
+// DWORD, WINAPI and CreateThread(), whose portable implementation is
+// WWLib/platform/platform_win32_kernel.cpp. On Windows this is the <windows.h> it already had.
+#include <WWLib/win.h>
+#include <Utility/path_compat.h>
 //#include "wlib/wstring.h"
 
 #include "DownloadDebug.h"
@@ -116,8 +121,16 @@ bool Prepare_Directories(const char *rootdir, const char *filename);
 // This is here as a hack...
 // Some firewalls break the TCP stack so non-blocking sockets don't work right...
 //
+// TheSuperHackers @port The flag lives in HKEY_LOCAL_MACHINE under another product's key -- a
+// Westwood MMO beta, whose installer is what wrote it. Off Windows there is no machine wide
+// settings store and nothing writes that key, so the read cannot succeed and this returns the
+// default it already returns on every machine without the key. See
+// docs/porting/ww3d2-and-download-headers.md.
 static bool Use_Non_Blocking_Mode()
 {
+#ifndef _WIN32
+	return(TRUE);
+#else
 	HKEY regKey;
 	LONG regRetval;
 	DWORD bufsiz=0;
@@ -141,6 +154,7 @@ static bool Use_Non_Blocking_Mode()
 		return(TRUE);
 
 	return bool(value);
+#endif
 }
 
 
@@ -261,7 +275,10 @@ DWORD WINAPI gethostbynameA( void * szName )
 int Cftp::AsyncGetHostByName(char * szName, struct sockaddr_in &address )
 {
 	static int            stat = 0;
-	static unsigned long  threadid;
+	// TheSuperHackers @port CreateThread() writes a DWORD, which is 32 bits on every platform,
+	// while unsigned long is 64 bits on LP64. Spelling the variable DWORD keeps it exactly the
+	// unsigned long it is on Windows.
+	static DWORD          threadid;
 
 	if( stat == 0 )
 	{
@@ -1002,6 +1019,10 @@ unsigned long MyIPAddress( int sockfd )
 
 	int		 test = 99;
 	int i;
+	// TheSuperHackers @port Winsock spells getsockname()'s length parameter int*, BSD sockets
+	// spell it socklen_t*, and on LP64 the two are different types. Utility/socket_compat.h
+	// typedefs socklen_t to exactly int on Windows.
+	socklen_t addrlen;
 	char pBuffer[ 256 ];
 	char * pAddr;
 	struct hostent * pHE;
@@ -1010,10 +1031,10 @@ unsigned long MyIPAddress( int sockfd )
 
 	if( sockfd != -1 )
 	{
-		i = sizeof( sin );
-		getsockname( sockfd, (struct sockaddr *)&sin, &i );
+		addrlen = sizeof( sin );
+		getsockname( sockfd, (struct sockaddr *)&sin, &addrlen );
 
-		ip = sin.sin_addr.S_un.S_addr;
+		ip = sin.sin_addr.s_addr;
 	}
 	else
 	{
@@ -1091,6 +1112,7 @@ int Cftp::SendNewPort()
 	unsigned long uTemp;
 	char command[ 256 ];
 	int i, iReply;
+	socklen_t addrlen;
 
 	/* Open a socket */
 
@@ -1127,9 +1149,9 @@ int Cftp::SendNewPort()
 		}
 
 
-		i = sizeof( m_DataSockAddr);
+		addrlen = sizeof( m_DataSockAddr);
 
-		getsockname( m_iDataSocket, (struct sockaddr *)&m_DataSockAddr, &i );
+		getsockname( m_iDataSocket, (struct sockaddr *)&m_DataSockAddr, &addrlen );
 
 		listen( m_iDataSocket, 5 );
 

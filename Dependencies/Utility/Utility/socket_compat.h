@@ -94,6 +94,15 @@ typedef struct sockaddr_in *LPSOCKADDR_IN;
 #define WSAEISCONN EISCONN
 #endif
 
+// The errors a peer-closed connection reports to recv()/send(), which the FTP transfer loop
+// treats as end-of-transfer rather than as failure. Winsock and BSD sockets agree on both.
+#ifndef WSAECONNRESET
+#define WSAECONNRESET ECONNRESET
+#endif
+#ifndef WSAENOTCONN
+#define WSAENOTCONN ENOTCONN
+#endif
+
 // Word building, normally from <windef.h>. Only used to spell the Winsock version number.
 #ifndef MAKEWORD
 #define MAKEWORD(low, high) \

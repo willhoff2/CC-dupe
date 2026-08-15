@@ -48,6 +48,11 @@
  *   Make_W3D_Filename -- Converts a W3D object name into a W3D filename.                      *
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
+// TheSuperHackers @port size_t, for the allocator below, which is declared before any project
+// header. MSVC's <windows.h> arrived through the precompiled header and brought it in; nothing
+// does off Windows.
+#include <stddef.h>
+
 //-----------------------------------------------------------------------------
 // srj sez: hack festival :-(
 class STLSpecialAlloc
