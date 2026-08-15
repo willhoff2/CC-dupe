@@ -349,12 +349,23 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           ./scripts/ci/fetch-probe-deps.sh
 
-      - name: Compile objects and link (shimmed, levels 1-4)
+      # --strict-link additionally attempts the link the loader would accept: no
+      # --warn-unresolved-symbols, so unresolved symbols are errors rather than warnings. It is
+      # expected to fail today and exits non-zero when it does, which is the honest state and not a
+      # reason to fail the job -- the ratchet is the baseline check below, which fails if the count
+      # the linker refuses grows. Its own exit status is recorded in the summary instead.
+      - name: Compile objects and link (shimmed, levels 1-4, strict link attempted)
         env:
           CLANGXX: clang++-14
         run: |
+          set +e
           python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims \
+            --strict-link \
             --report native-build-level4-report.md --json native-build-level4.json
+          echo "strict link exit status: $?" | tee -a "$GITHUB_STEP_SUMMARY"
+          # The measurement itself must still have run: a missing JSON is a broken harness, and
+          # without this the `set +e` above would swallow it.
+          test -f native-build-level4.json
 
       - name: Gate against the checked-in baseline
         run: |

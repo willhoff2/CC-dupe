@@ -182,9 +182,40 @@ The 10 archives were linked into one binary with `--whole-archive`, plus the thi
 
 - `MSS_auto_cleanup`
 
+## 4. What would resolve them
+
+The causes above say what each symbol *is*. They do not say what makes it go away, and the two get confused: before level 4 the renderer's 272 symbols read as port work when they were only "the build does not include that layer". Each unresolved symbol is therefore also assigned to exactly one pile, and only one of the five is remaining port work.
+
+| Pile | Symbols | Meaning |
+|---|---:|---|
+| `library-not-linked` | 42 | A library defines it and this configuration links no such library. A link line, not port work. |
+| `cut-scope-not-linked` | 82 | A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it. |
+| `compile-blocked` | 18 | An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker. |
+| `harness-artefact` | 400 | An artefact of how this harness is configured: a build-time generated definition it does not generate, one a disabled `#if` removed, or one in a layer this level selection does not build. |
+| `no-definition-anywhere` | 6 | Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work. |
+
+The libraries in the `library-not-linked` and `cut-scope-not-linked` piles, the evidence each attribution rests on, and the slice that owns it:
+
+| Library | Pile | Symbols | Evidence files | Why it is not linked | Owner |
+|---|---|---:|---:|---|---|
+| Miles AIL_* API — the `milesstub`/OpenAL backend | `library-not-linked` | 1 | 7 | `cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, and the 32-bit Windows build links the fetched miles-sdk-stub. This harness now builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links libopenal, so what is left here is the part of the Miles surface that backend does not implement rather than the whole API. | platform/audio-device (the Miles/OpenAL link) |
+| FFmpeg (libavcodec / libavformat / libavutil / libswscale) | `library-not-linked` | 29 | 823 | The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route. `fetch-probe-deps.sh` provisions the pinned headers so the code compiles, and nothing installs an FFmpeg runtime for the link. | video/bink-excision-and-harness-headers |
+| The window/input backend this configuration does not choose (SDL2, Cocoa) | `library-not-linked` | 12 | 2 | `probe.OPTIONAL_BACKENDS` keeps the SDL2 backend opt-in and the Cocoa backend is Objective-C++, so no target lists either. The definitions are in the tree; a configuration that picks one resolves all of them. | platform/macos-window-compile and platform/window-seam-wiring |
+| GameSpy SDK | `cut-scope-not-linked` | 82 | 279 | Online matchmaking is permanently cut scope (docs/porting/native-port-plan.md). The SDK's own sources are provisioned and define these symbols, so this is a link refused rather than one that is missing: they disappear when the call sites go, which is `online/absent-menu-seam`'s work, and must not be stubbed to make a link pass. | online/absent-menu-seam |
+
+Evidence is the provisioned sources or headers that define the symbols, not a library found on the measuring machine: the CI container has no FFmpeg or SDL2 runtime, and a pile split that changed with the box would not be a measurement.
+
+## 5. Strict link: is there an executable?
+
+`--strict-link` linked the same archives with no tolerance for unresolved symbols: **failed**, 544 unresolved symbol(s), executable produced: no. Nothing is stubbed to make this pass, and nothing may be — a green strict link bought with stubs would hide exactly the work this number exists to count.
+
+The linker's list and §3's `nm` scan agree, so the categorised list above is the list standing between this build and an executable.
+
+Symbol resolution is necessary and not sufficient; `docs/porting/startability.md` defines what else a first launch needs.
+
 ## Reproducing
 
 ```sh
 bash scripts/ci/fetch-probe-deps.sh
-python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims --report docs/porting/native-build-report.md --json native-build.json
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims --strict-link --report docs/porting/native-build-report.md --json native-build.json
 ```
