@@ -5,12 +5,9 @@
     "Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp": "unknown type name 'HANDLE'",
     "Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp": "unknown type name 'AsnObjectIdentifier'",
     "Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp": "unknown type name 'HOSTENT'",
-    "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp": "use of undeclared identifier 'D3DXMatrixInverse'",
     "Core/Libraries/Source/WWVegas/WW3D2/FramGrab.cpp": "'windowsx.h' file not found",
     "Core/Libraries/Source/WWVegas/WW3D2/dx8caps.cpp": "no member named 'DriverVersion' in '_D3DADAPTER_IDENTIFIER8'",
     "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp": "no member named 'DriverVersion' in '_D3DADAPTER_IDENTIFIER8'",
-    "Core/Libraries/Source/WWVegas/WW3D2/pointgr.cpp": "use of undeclared identifier 'D3DX_PI'",
-    "Core/Libraries/Source/WWVegas/WW3D2/sortingrenderer.cpp": "invalid operands to binary expression ('D3DXMATRIX' and 'D3DXMATRIX')",
     "Core/Libraries/Source/WWVegas/WW3D2/textdraw.cpp": "too many arguments to function call, expected 0, have 1",
     "Core/Libraries/Source/WWVegas/WW3D2/w3d_dep.cpp": "unknown type name 'size_t'; did you mean 'std::size_t'?",
     "Core/Libraries/Source/WWVegas/WWDownload/Download.cpp": "'Common/Debug.h' file not found",
@@ -27,8 +24,8 @@
       "total": 210
     },
     "Core/GameEngineDevice": {
-      "objects": 69,
-      "probe_clean": 69,
+      "objects": 70,
+      "probe_clean": 70,
       "total": 70
     },
     "Core/Libraries/Source/Compression": {
@@ -37,8 +34,8 @@
       "total": 11
     },
     "Core/Libraries/Source/WWVegas/WW3D2": {
-      "objects": 67,
-      "probe_clean": 67,
+      "objects": 69,
+      "probe_clean": 69,
       "total": 74
     },
     "Core/Libraries/Source/WWVegas/WWAudio": {
@@ -62,9 +59,9 @@
       "total": 77
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
-      "objects": 36,
-      "probe_clean": 36,
-      "total": 36
+      "objects": 37,
+      "probe_clean": 37,
+      "total": 37
     },
     "Core/Libraries/Source/WWVegas/WWSaveLoad": {
       "objects": 12,
@@ -112,23 +109,24 @@
   "link_dropped_entry_points": [
     "libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)",
     "libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)",
-    "libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)"
+    "libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)",
+    "libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)"
   ],
   "link_entry_point_archives": [
     "libgeneralsmd_code_main"
   ],
-  "objects": 954,
-  "probe_clean": 954,
+  "objects": 958,
+  "probe_clean": 958,
   "third_party_linked": [
     "libthirdparty_lzhl",
     "z (system)"
   ],
-  "translation_units": 971,
+  "translation_units": 972,
   "undefined_by_category": {
     "Defined in a built translation unit behind a disabled #if (build option / platform)": 4,
-    "Defined in a translation unit that failed to compile": 192,
+    "Defined in a translation unit that failed to compile": 146,
     "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": 12,
-    "Direct3D 8 / DirectX": 8,
+    "Direct3D 8 / DirectX": 4,
     "Engine C++ not built at this level": 1,
     "FFmpeg (not linked here)": 29,
     "GameSpy SDK (cut scope, not linked)": 81,
@@ -162,6 +160,7 @@
       "DX8Wrapper::Clear(bool, bool, Vector3 const&, float, float, unsigned int)",
       "DX8Wrapper::Create_Render_Target(int, int, WW3DFormat)",
       "DX8Wrapper::CurrentCaps",
+      "DX8Wrapper::CurrentDX8LightEnables",
       "DX8Wrapper::DX8Transforms",
       "DX8Wrapper::Draw_Strip(unsigned short, unsigned short, unsigned short, unsigned short)",
       "DX8Wrapper::Draw_Triangles(unsigned int, unsigned short, unsigned short, unsigned short, unsigned short)",
@@ -229,35 +228,11 @@
       "HTTPThinkWrapper()",
       "Log_DX8_ErrorCode(unsigned int)",
       "PingerInterface::createNewPingerInterface()",
-      "PointGroupClass::Get_Frame_Row_Column_Count_Log2()",
-      "PointGroupClass::Get_Shader()",
-      "PointGroupClass::Get_Texture()",
-      "PointGroupClass::Peek_Texture()",
-      "PointGroupClass::PointGroupClass()",
-      "PointGroupClass::Render(RenderInfoClass&)",
-      "PointGroupClass::RenderVolumeParticle(RenderInfoClass&, unsigned int)",
-      "PointGroupClass::Set_Arrays(ShareBufferClass<Vector3>*, ShareBufferClass<Vector4>*, ShareBufferClass<unsigned int>*, ShareBufferClass<float>*, ShareBufferClass<unsigned char>*, ShareBufferClass<unsigned char>*, int, float, float, float, float)",
-      "PointGroupClass::Set_Billboard(bool)",
-      "PointGroupClass::Set_Flag(PointGroupClass::FlagsType, bool)",
-      "PointGroupClass::Set_Frame_Row_Column_Count_Log2(unsigned char)",
-      "PointGroupClass::Set_Point_Alpha(float)",
-      "PointGroupClass::Set_Point_Color(Vector3)",
-      "PointGroupClass::Set_Point_Frame(unsigned char)",
-      "PointGroupClass::Set_Point_Mode(PointGroupClass::PointModeEnum)",
-      "PointGroupClass::Set_Point_Orientation(unsigned char)",
-      "PointGroupClass::Set_Point_Size(float)",
-      "PointGroupClass::Set_Shader(ShaderClass)",
-      "PointGroupClass::Set_Texture(TextureClass*)",
       "SetUnsignedIntInRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int)",
-      "SortingRendererClass::Flush()",
-      "SortingRendererClass::Insert_Triangles(SphereClass const&, unsigned short, unsigned short, unsigned short, unsigned short)",
-      "SortingRendererClass::Insert_Triangles(unsigned short, unsigned short, unsigned short, unsigned short)",
-      "SortingRendererClass::SetMinVertexBufferSize(unsigned int)",
       "StartDownloadingPatches()",
       "StartPatchCheck()",
       "StopAsyncDNSCheck()",
       "ThePinger",
-      "TheWaterRenderObj",
       "WW3D::Add_To_Static_Sort_List(RenderObjClass*, unsigned int)",
       "WW3D::AnisotropyLevel",
       "WW3D::AreDecalsEnabled",
@@ -312,29 +287,6 @@
       "WW3D::Toggle_Movie_Capture(char const*, float)",
       "WW3D::Update_Logic_Frame_Time(float)",
       "WW3D::_Invalidate_Mesh_Cache()",
-      "WaterRenderObjClass::ReAcquireResources()",
-      "WaterRenderObjClass::ReleaseResources()",
-      "WaterRenderObjClass::WaterRenderObjClass()",
-      "WaterRenderObjClass::addVelocity(float, float, float, float)",
-      "WaterRenderObjClass::changeGridHeight(float, float, float)",
-      "WaterRenderObjClass::enableWaterGrid(bool)",
-      "WaterRenderObjClass::getGridResolution(float*, float*, float*)",
-      "WaterRenderObjClass::getGridTransform(Matrix3D*)",
-      "WaterRenderObjClass::getWaterHeight(float, float)",
-      "WaterRenderObjClass::init(float, float, float, SceneClass*, WaterRenderObjClass::WaterType)",
-      "WaterRenderObjClass::load()",
-      "WaterRenderObjClass::replaceSkyboxTexture(AsciiString const&, AsciiString const&)",
-      "WaterRenderObjClass::reset()",
-      "WaterRenderObjClass::setGridChangeAttenuationFactors(float, float, float, float)",
-      "WaterRenderObjClass::setGridHeightClamps(float, float)",
-      "WaterRenderObjClass::setGridResolution(float, float, float)",
-      "WaterRenderObjClass::setGridTransform(Matrix3D const*)",
-      "WaterRenderObjClass::setGridTransform(float, float, float, float)",
-      "WaterRenderObjClass::setTimeOfDay(TimeOfDay)",
-      "WaterRenderObjClass::update()",
-      "WaterRenderObjClass::updateMapOverrides()",
-      "WaterRenderObjClass::updateRenderTargetTextures(CameraClass*)",
-      "doSkyBoxSet(bool)",
       "vtable for CDownload",
       "vtable for GameSpyStagingRoom"
     ],
@@ -353,14 +305,10 @@
       "WWPlatform::Window_Warp_Cursor(void*, int, int)"
     ],
     "Direct3D 8 / DirectX": [
+      "D3DXAssembleShader",
       "D3DXFilterTexture",
       "D3DXGetFVFVertexSize",
-      "D3DXLoadSurfaceFromSurface",
-      "D3DXMatrixInverse",
-      "D3DXMatrixMultiply",
-      "D3DXMatrixScaling",
-      "D3DXMatrixTranslation",
-      "D3DXMatrixTranspose"
+      "D3DXLoadSurfaceFromSurface"
     ],
     "Engine C++ not built at this level": [
       "ListenerHandleClass::Initialize(SoundBufferClass*)"
@@ -588,6 +536,6 @@
       "SetCursor"
     ]
   },
-  "undefined_total": 427,
+  "undefined_total": 377,
   "with_shims": true
 }
