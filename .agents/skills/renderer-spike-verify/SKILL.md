@@ -13,46 +13,45 @@ validation layer are.
 ```sh
 sudo apt-get install -y clang cmake ninja-build libvulkan-dev vulkan-validationlayers \
     glslang-tools mesa-vulkan-drivers
-ls /usr/share/vulkan/icd.d/lvp_icd.*.json                                     # lavapipe present
+test -f /usr/share/vulkan/icd.d/lvp_icd.json                                  # lavapipe present
 test -f /usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json    # layer present
 cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/spike
 ```
 
-What 22.04 cannot supply is jammy's *apt* Vulkan headers (1.3.204): they predate
-`VK_KHR_portability_enumeration` and cannot compile the MoltenVK portability opt-in. The box itself
-is fine — point the compiler at a newer headers checkout and both the build and the run work, which
-is the difference between compile-checking a renderer fix and asserting on pixels (verified on
-jammy, clang 14, lavapipe):
+Ubuntu 22.04 works, but **not** with jammy's Vulkan headers (1.3.204): they predate
+`VK_KHR_portability_enumeration` and cannot compile the MoltenVK portability opt-in. Point CMake at
+pinned headers instead of skipping the box:
 
 ```sh
+git clone --depth 1 -b v1.3.280 https://github.com/KhronosGroup/Vulkan-Headers ~/vk-headers
 cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release \
-  -DSPIKE_USE_SDL2=OFF -DCMAKE_CXX_COMPILER=clang++-14 \
-  -DCMAKE_CXX_FLAGS="-I$VULKAN_HEADERS_INCLUDE"
-cmake --build build/spike
+  -DCMAKE_CXX_COMPILER=clang++-14 -DVulkan_INCLUDE_DIR=$HOME/vk-headers/include
 ```
 
-CI's `renderer-spike-linux` job still runs on 24.04 with clang 18; a local jammy run is a
-cross-check, not a substitute for it.
+On jammy the lavapipe manifest is `lvp_icd.x86_64.json`, not `lvp_icd.json`:
+`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`.
 
 ## Assert on pixels
 
-The ICD manifest on jammy is `lvp_icd.x86_64.json`, not `lvp_icd.json` — a wrong path here means no
-lavapipe and a run that proves nothing.
-
 ```sh
-export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-export VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
 python3 scripts/ci/check-spike-render.py \
   --binary build/spike/zh-renderer-spike \
   --reference spikes/renderer/docs/spike-triangle.png \
   --out spike.png
 build/spike/zh-feature-probe
-build/spike/zh-fixedfunc-tests
-build/spike/zh-resource-lock-tests
+build/spike/zh-fixedfunc-tests --validation
+build/spike/zh-resource-lock-tests --validation
+ZH_SPIKE_NO_VIEW_SWIZZLE=1 build/spike/zh-fixedfunc-tests --validation
+ZH_SPIKE_NO_VIEW_SWIZZLE=1 build/spike/zh-resource-lock-tests --validation
+python3 scripts/ci/check-backend-coverage.py
 ```
 
-The assertion is `0 case(s) failed` **and** `validation messages: 0`.
+A validation message is a failure even when the pixels are right. The failure class to expect:
+a texture's image and a `GetSurfaceLevel` surface viewing it are two names for one image, so any
+path that transitions the image directly (`Update_Texture`, the CopyRects upload) must record the
+new layout on both — otherwise a read either side of it barriers from a layout the image left, and
+only the layer notices. Probe it as `read -> Update_Texture -> read`; each half alone is silent.
 
 If the validation layer is not loaded, the run silently proceeds unvalidated and proves nothing —
 check that it was.

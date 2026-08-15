@@ -31,7 +31,7 @@ def target_sources(target):
     function used to walk `source_dirs` unfiltered, which is why the SDL2 window backend showed
     up in native-build.py's translation-unit count as a failure to find `SDL.h`.
     """
-    if target.cmake_lists:
+    if target.cmake_lists or target.cmake_dirs:
         return probe.cmake_sources(target)
     sources = []
     for directory in target.source_dirs:

@@ -257,4 +257,53 @@ void	DX8WebBrowser::Navigate(const char* browsername, const char* url)
 	pBrowser->Navigate(_bstr_t(browsername),_bstr_t(url));
 }
 
+#else	// !ENABLE_EMBEDDED_BROWSER
+
+// The control is absent: there is no BrowserEngine COM server to host Internet Explorer in, and
+// nothing draws a web page into a D3D8 surface. The entry points remain, because DX8Wrapper calls
+// Update()/Render() from Begin_Scene()/End_Scene() and W3DDisplay initialises and shuts the browser
+// down; per-frame calls therefore do nothing quietly, while the calls that mean a caller believes
+// it is showing the player a page fail loudly.
+
+bool	DX8WebBrowser::Initialize(const char*, const char*, const char*, const char*)
+{
+	WWDEBUG_SAY(("DX8WebBrowser::Initialize - the embedded browser is not present in this build"));
+	return false;
+}
+
+void	DX8WebBrowser::Shutdown()
+{
+}
+
+void	DX8WebBrowser::Update()
+{
+}
+
+void	DX8WebBrowser::Render(int)
+{
+}
+
+void	DX8WebBrowser::CreateBrowser(const char* browsername, const char* url, int, int, int, int,
+											int, DX8WebBrowserOptions, DX8WebBrowserDispatch)
+{
+	WWASSERT_PRINT(0, "the embedded browser is not present in this build");
+	WWDEBUG_SAY(("DX8WebBrowser::CreateBrowser - no browser to show %s in (url = %s)",
+		browsername, url));
+}
+
+void	DX8WebBrowser::DestroyBrowser(const char*)
+{
+}
+
+bool	DX8WebBrowser::Is_Browser_Open(const char*)
+{
+	return false;
+}
+
+void	DX8WebBrowser::Navigate(const char* browsername, const char* url)
+{
+	WWASSERT_PRINT(0, "the embedded browser is not present in this build");
+	WWDEBUG_SAY(("DX8WebBrowser::Navigate - no browser %s to send to %s", browsername, url));
+}
+
 #endif

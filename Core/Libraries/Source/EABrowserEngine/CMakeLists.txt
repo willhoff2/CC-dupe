@@ -26,6 +26,9 @@ if(WIN32 OR "${CMAKE_SYSTEM}" MATCHES "Windows")
     if(TARGET core_browserenginewin)
         set_target_properties(core_browserenginewin PROPERTIES OUTPUT_NAME browserenginewin)
         target_link_libraries(core_browserengine INTERFACE core_browserenginewin)
+        # WW3D2 hosts the control through this engine rather than through BrowserDispatch, so it
+        # learns the browser exists here; see docs/porting/embedded-browser-seam.md.
+        target_compile_definitions(core_browserengine INTERFACE RTS_HAS_EMBEDDED_BROWSER)
     endif()
 endif()
 

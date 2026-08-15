@@ -26,6 +26,9 @@ if(WIN32 OR "${CMAKE_SYSTEM}" MATCHES "Windows")
     if(TARGET core_browserdispatchwin)
         set_target_properties(core_browserdispatchwin PROPERTIES OUTPUT_NAME browserdispatchwin)
         target_link_libraries(core_browserdispatch INTERFACE core_browserdispatchwin)
+        # The embedded Internet Explorer control needs this COM server and ATL. Where it is not
+        # built, WebBrowser/W3DWebBrowser compile out; see docs/porting/embedded-browser-seam.md.
+        target_compile_definitions(core_browserdispatch INTERFACE RTS_HAS_EMBEDDED_BROWSER)
     endif()
 endif()
 

@@ -29,6 +29,19 @@ Consequences for the implementer:
 * The 5 reading sites are the ones that must be correct; the other 16 are write-only and are
   unaffected.
 
+**Implemented** in the spike's Vulkan backend: `renderer-resource-seam.md` §4.4. Two notes on what
+the answer above assumed, both from doing it:
+
+* `Set_Render_Target` and `Copy_Rects` were **not** the whole funnel list. Binding a target is not
+  the write; the draw is. The enumerated set is `Set_Render_Target`, `Clear`, `Prepare_Draw`,
+  `Copy_Rects` and `Update_Texture`, and `Prepare_Draw` is the one #46's reasoning would have missed.
+* The bit belongs on the **image**, not on the surface handle, because a render-target texture and a
+  `Get_Surface_Level` view of it are two handles onto the same pixels.
+
+The "must not" is enforced by `C8 surface read hazard` in `zh-resource-lock-tests`, which asserts on
+the backend's `readback_stalls` counter across each read, so a clean read that transfers fails even
+with correct pixels.
+
 ## 2. Zero-on-acquire in the pooled staging path — **match Windows; generalise only where nothing depends on it**
 
 **Question**: pooled staging publishes zeroes where the old per-lock staging happened to preserve
@@ -50,6 +63,17 @@ Consequences:
   callers tolerating it.
 * Anywhere the Windows behaviour is genuinely unspecified rather than merely undocumented, prefer
   the more general implementation over one that encodes the quirk.
+
+**Implemented**: `renderer-resource-seam.md` §4.4 and §4.1.1. `Acquire_Staging` no longer zeroes; a
+lock without `D3DLOCK_DISCARD` reads the level back. The only skips are `D3DLOCK_DISCARD` (D3D8's own
+proof), a level nothing has written yet (D3D8 leaves it undefined) and a level the staging block
+still holds with no GPU write since (no transfer needed to honour the contract). No call site was
+flagged, so nothing is encoded per site.
+
+The cost, measured, is the part worth carrying forward: **residency and the 98.3% block reuse are
+unchanged**, and preservation buys that with bandwidth — 53.9 MB of image→buffer copies per 12 frames
+of the representative workload, against 0 before. The dirty bit (decision 1) hands 108 read-back
+stalls per 12 frames back, so the two decisions partly pay for each other.
 
 ## 3. Retina points versus framebuffer pixels — **points**
 

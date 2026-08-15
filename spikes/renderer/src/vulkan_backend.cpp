@@ -116,6 +116,15 @@ struct Image {
 	uint32_t width = 0;
 	uint32_t height = 0;
 	uint32_t mip_levels = 1;
+	// The GPU-write dirty bit (renderer-resource-seam.md §4.4): the image holds
+	// pixels no host copy has. Set at every write funnel, cleared by the readback a
+	// host read performs. Read locks on a clean image transfer nothing, which is the
+	// whole point of tracking it rather than reading back unconditionally.
+	bool gpu_dirty = false;
+	// The lockable texture this image belongs to, so a write funnel that only has
+	// the image (or a surface view of it) can invalidate that texture's staging
+	// copy. Null for the default targets and for non-lockable images.
+	TextureHandle* owner = nullptr;
 };
 
 // Sampler state in D3D8 is texture *stage* state, not part of the texture object.
@@ -236,6 +245,15 @@ struct LockableLevel {
 	bool locked = false;
 	uint32_t lock_flags = 0;
 	LockRect lock_rect{};
+	// Whether the staging block currently holds this level's contents. False after
+	// the block goes back to the pool (another resource's lock may have written it)
+	// and after a GPU write to the image. A lock that is not a DISCARD and finds
+	// this false has to bring the contents back, because D3D8's Lock preserves them.
+	bool staging_synced = false;
+	// Whether anything has ever been written to this level. A level nobody has
+	// written has no contents to preserve -- D3D8 leaves a fresh texture's texels
+	// undefined -- so the first lock of it skips the readback.
+	bool ever_written = false;
 };
 
 struct TextureHandle {
@@ -315,8 +333,17 @@ struct SurfaceHandle {
 	// Whether anything has been drawn into it since Begin_Scene, which is what
 	// decides between a LOAD and a DONT_CARE render pass when it is bound again.
 	bool written_this_frame = false;
+	// System-memory surface: a CopyRects into it has been recorded but the host has
+	// not waited for it. This is the screenshot/movie-capture hazard -- the copy is
+	// a queue operation and the mapped bytes are stale until it has executed. A
+	// video-memory surface's dirty bit lives on the image it views, so that the
+	// texture, its surface and any other view of it agree.
+	bool host_gpu_dirty = false;
 
 	bool system_memory() const { return image == nullptr; }
+	bool gpu_dirty() const {
+		return system_memory() ? host_gpu_dirty : image->gpu_dirty;
+	}
 };
 
 // One parsed D3D8 shader token stream. The tokens travel to the shader as they
@@ -475,6 +502,29 @@ private:
 	bool Acquire_Staging(VkDeviceSize size, StagingBlock& out);
 	void Release_Staging(StagingBlock& block);
 	bool Ensure_Texture_Staging(TextureHandle* texture);
+	// --- the GPU-write dirty bit (renderer-resource-seam.md §4.4) ---------------
+	// Called from every funnel that lets the GPU write an image: after it, a host
+	// read of that image or of any surface viewing it has to pay a readback, and
+	// the lockable texture's staging copy is no longer the contents.
+	void Mark_Gpu_Write(Image* image);
+	void Mark_Gpu_Write(SurfaceHandle* surface);
+	// Brings one level of a lockable texture back from the image into its staging
+	// block, contracting the channels again on the no-view-swizzle path. This is
+	// what makes a lock preserve what was there, and what a read lock on a dirty
+	// resource pays. Caller holds resource_mutex_.
+	bool Readback_Level(TextureHandle* texture, uint32_t level);
+	// Puts the locked level's current contents in the staging block, or proves
+	// nothing has to be: a DISCARD, or a level nobody has ever written.
+	bool Prepare_Lock_Contents(TextureHandle* texture, uint32_t level, uint32_t flags);
+	// A host read of a surface: copies a video-memory surface's pixels into its own
+	// host-visible buffer, or waits for the queued CopyRects that wrote a
+	// system-memory one. Does nothing when the surface is clean.
+	bool Resolve_Surface_Read(SurfaceHandle* surface);
+	// Submits and waits for what the open frame has recorded so far, then reopens
+	// the pass. A host read mid-frame needs it: the copy it depends on is sitting
+	// in the frame's command buffer, unsubmitted. `end_pass_first` is false when the
+	// caller has already ended the pass (Begin_Transfer does).
+	bool Flush_Frame_Commands(bool end_pass_first = true);
 	VkCommandBuffer Begin_One_Shot();
 	bool End_One_Shot(VkCommandBuffer cmd);
 
@@ -508,6 +558,12 @@ private:
 	bool Begin_Current_Pass();
 	// Moves an image surface to `to`, recording into `cmd`, and remembers the layout.
 	void Transition_Surface(VkCommandBuffer cmd, SurfaceHandle* surface, VkImageLayout to);
+	// Records that a texture's image now *is* in `layout`, for the paths that
+	// transition the image directly rather than through Transition_Surface. A
+	// GetSurfaceLevel surface is a second name for the same image, so leaving its
+	// layout behind makes the next Transition_Surface transition from a layout the
+	// image left: correct bytes, wrong barrier, and the validation layer says so.
+	void Note_Texture_Layout(TextureHandle* texture, VkImageLayout layout);
 	// Records into the frame's command buffer when a scene is open, and into a
 	// one-shot submission otherwise, so a copy stays ordered against the draws.
 	VkCommandBuffer Begin_Transfer(bool& one_shot);
@@ -1228,6 +1284,82 @@ bool VulkanBackend::End_Transfer(VkCommandBuffer cmd, bool one_shot) {
 	return Begin_Current_Pass();
 }
 
+bool VulkanBackend::Flush_Frame_Commands(bool end_pass_first) {
+	if (!in_scene_) return true;
+	// Everything recorded so far has to have executed before the host can look at
+	// what it produced. D3D8 hides this inside LockRect on a surface the device has
+	// rendered into; here it is an explicit mid-frame submit.
+	if (end_pass_first) End_Current_Pass();
+	if (vkEndCommandBuffer(frame_cmd_) != VK_SUCCESS) return false;
+	VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &frame_cmd_;
+	if (vkQueueSubmit(queue_, 1, &si, VK_NULL_HANDLE) != VK_SUCCESS) return false;
+	if (vkQueueWaitIdle(queue_) != VK_SUCCESS) return false;
+	vkResetCommandBuffer(frame_cmd_, 0);
+	VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	if (vkBeginCommandBuffer(frame_cmd_, &bi) != VK_SUCCESS) return false;
+	// The target keeps its pixels across the split, so the reopened pass loads
+	// rather than discards: written_this_frame is deliberately left alone.
+	return Begin_Current_Pass();
+}
+
+// ---------------------------------------------------------------------------
+// The GPU-write funnels, enumerated (renderer-resource-seam.md §4.4)
+//
+// Every path by which the GPU can make an image's contents newer than any host
+// copy of them goes through Mark_Gpu_Write:
+//
+//   1. Set_Render_Target      binds a surface as the colour or depth attachment,
+//                             which is what makes the following draws write it.
+//   2. Clear                  vkCmdClearAttachments into the current target.
+//   3. Prepare_Draw           a draw into the current target.
+//   4. Copy_Rects             the destination half, image or host buffer.
+//   5. Update_Texture         the destination texture's image.
+//
+// Two GPU writes are deliberately *not* funnels, and both are safe:
+//
+//   * Unlock_Texture's vkCmdCopyBufferToImage writes the image from the staging
+//     bytes the host has just written, so the two agree afterwards rather than
+//     diverging. It marks the level synced instead of dirty.
+//   * the vkCmdClearColorImage in Create_Lockable_Texture and
+//     Create_Render_Target_Texture writes zeroes, and every host copy of a
+//     never-written level starts zeroed to match, so no readback can tell the
+//     difference.
+//
+// Present's blit writes a swapchain image, which no lock can reach.
+// ---------------------------------------------------------------------------
+
+void VulkanBackend::Note_Texture_Layout(TextureHandle* texture, VkImageLayout layout) {
+	if (texture == nullptr) return;
+	texture->layout = layout;
+	for (SurfaceHandle* surface : owned_surfaces_) {
+		if (surface->owner == texture) surface->layout = layout;
+	}
+}
+
+void VulkanBackend::Mark_Gpu_Write(Image* image) {
+	if (image == nullptr) return;
+	image->gpu_dirty = true;
+	++resource_stats_.gpu_write_marks;
+	// A lockable texture's staging copy is no longer its contents. Levels stay
+	// individually tracked because a lock brings back one level, not the chain.
+	if (image->owner != nullptr) {
+		for (LockableLevel& l : image->owner->levels) l.staging_synced = false;
+	}
+}
+
+void VulkanBackend::Mark_Gpu_Write(SurfaceHandle* surface) {
+	if (surface == nullptr) return;
+	if (surface->system_memory()) {
+		surface->host_gpu_dirty = true;
+		++resource_stats_.gpu_write_marks;
+		return;
+	}
+	Mark_Gpu_Write(surface->image);
+}
+
 bool VulkanBackend::Create_Descriptor_Machinery() {
 	// Binding 1 is an array of kMaxTextureStages samplers rather than one binding
 	// per stage: D3D8's stage count is fixed at 8, and an array keeps the descriptor
@@ -1546,6 +1678,13 @@ void VulkanBackend::Shutdown() {
 		delete s;
 	}
 	owned_surfaces_.clear();
+	// The default colour target grows a host-visible buffer the first time anything
+	// reads it (Surface_Bits), and it is not in owned_surfaces_.
+	if (default_color_surface_.mapped != nullptr) {
+		vkUnmapMemory(device_, default_color_surface_.bits.memory);
+		default_color_surface_.mapped = nullptr;
+	}
+	free_buffer(default_color_surface_.bits);
 	current_color_ = nullptr;
 	current_depth_ = nullptr;
 
@@ -1762,6 +1901,63 @@ void Expand_To_Bgra8(TextureFormat format, const TextureMip& mip, const uint32_t
 		out[i * 4 + 2] = r;
 		out[i * 4 + 3] = a;
 	}
+}
+
+// The inverse of Expand_To_Bgra8, for the readback half of the no-view-swizzle
+// path: the image holds B8G8R8A8 and the caller's lock has to see the D3D8 format
+// it wrote. Every expansion above is invertible (4-bit replication n*17 contracts
+// by >>4, L8/A8/A8L8 pick the channel they came from) with one documented
+// exception: X8R8G8B8's X byte is not stored in the image, because D3D8 does not
+// sample it, so it contracts back as zero. Returns false for a format the
+// expansion pass does not produce, so a caller can refuse rather than guess.
+bool Contract_From_Bgra8(TextureFormat format, const uint8_t* bgra, uint32_t width,
+                         uint32_t height, uint8_t* dst, uint32_t dst_pitch) {
+	switch (format) {
+	case TextureFormat::R8G8B8:
+	case TextureFormat::X8R8G8B8:
+	case TextureFormat::L8:
+	case TextureFormat::A8:
+	case TextureFormat::A8L8:
+	case TextureFormat::A4R4G4B4: break;
+	default: return false;
+	}
+	for (uint32_t y = 0; y < height; ++y) {
+		const uint8_t* src = bgra + static_cast<size_t>(y) * width * 4;
+		uint8_t* row = dst + static_cast<size_t>(y) * dst_pitch;
+		for (uint32_t x = 0; x < width; ++x) {
+			const uint8_t b = src[x * 4 + 0];
+			const uint8_t g = src[x * 4 + 1];
+			const uint8_t r = src[x * 4 + 2];
+			const uint8_t a = src[x * 4 + 3];
+			switch (format) {
+			case TextureFormat::R8G8B8:
+				row[x * 3 + 0] = b;
+				row[x * 3 + 1] = g;
+				row[x * 3 + 2] = r;
+				break;
+			case TextureFormat::X8R8G8B8:
+				row[x * 4 + 0] = b;
+				row[x * 4 + 1] = g;
+				row[x * 4 + 2] = r;
+				row[x * 4 + 3] = 0; // the X byte D3D8 ignores; not stored
+				break;
+			case TextureFormat::L8: row[x] = b; break;
+			case TextureFormat::A8: row[x] = a; break;
+			case TextureFormat::A8L8:
+				row[x * 2 + 0] = b;
+				row[x * 2 + 1] = a;
+				break;
+			case TextureFormat::A4R4G4B4: {
+				const uint16_t v = static_cast<uint16_t>(
+				    ((a >> 4) << 12) | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4));
+				std::memcpy(row + x * 2, &v, sizeof(v));
+				break;
+			}
+			default: return false;
+			}
+		}
+	}
+	return true;
 }
 
 } // namespace
@@ -2002,12 +2198,11 @@ bool VulkanBackend::Acquire_Staging(VkDeviceSize size, StagingBlock& out) {
 		out = block;
 	}
 
-	// D3D8 hands out lockable surface bits whose contents are undefined, but a pooled
-	// block carries the previous lock's texels, and a partial-rect unlock copies rows
-	// the caller never wrote. Zeroing the block on acquire keeps a lock from
-	// publishing another resource's pixels. It is the pool's one added CPU cost.
-	std::memset(out.mapped, 0, static_cast<size_t>(out.size));
-
+	// The block's contents are whatever the previous holder left, and the pool does
+	// *not* publish them: a lock either has the level read back into it (the D3D8
+	// preserve contract) or has it zeroed, and Prepare_Lock_Contents decides which
+	// per level. Zeroing here instead would make "a lock loses what was there" the
+	// contract, which is not what Windows does.
 	resource_stats_.staging_live_bytes += out.capacity;
 	++resource_stats_.staging_live_blocks;
 	if (resource_stats_.staging_live_bytes > resource_stats_.staging_live_peak_bytes) {
@@ -2022,6 +2217,8 @@ bool VulkanBackend::Acquire_Staging(VkDeviceSize size, StagingBlock& out) {
 // Caller holds resource_mutex_.
 void VulkanBackend::Release_Staging(StagingBlock& block) {
 	if (!block.valid()) return;
+	// Whoever takes the block next may write any of it, so no level may still be
+	// believed to be in it: the release sites clear staging_synced.
 	resource_stats_.staging_live_bytes -= block.capacity;
 	--resource_stats_.staging_live_blocks;
 	++resource_stats_.staging_pool_blocks;
@@ -2040,8 +2237,112 @@ bool VulkanBackend::Ensure_Texture_Staging(TextureHandle* texture) {
 	}
 	if (!Acquire_Staging(needed, texture->staging)) return false;
 	texture->staging_mapped = texture->staging.mapped;
+	// A block off the free list holds someone else's texels, so no level of this
+	// texture is in it until something puts it there.
+	for (LockableLevel& l : texture->levels) l.staging_synced = false;
 	if (texture->retain_staging) ++resource_stats_.staging_retained_blocks;
 	return true;
+}
+
+// Caller holds resource_mutex_.
+bool VulkanBackend::Readback_Level(TextureHandle* texture, uint32_t level) {
+	LockableLevel& l = texture->levels[level];
+	const VkDeviceSize level_bytes = static_cast<VkDeviceSize>(l.pitch) * l.height;
+
+	// On the no-view-swizzle path the image holds expanded B8G8R8A8, so the copy
+	// lands in a scratch block and is contracted back into the caller's format. The
+	// scratch block comes from the same pool and is returned immediately, so it costs
+	// a concurrent block rather than a permanent one.
+	StagingBlock scratch;
+	VkBuffer target = texture->staging.buffer.buffer;
+	VkDeviceSize target_offset = l.offset;
+	const VkDeviceSize bgra_bytes = static_cast<VkDeviceSize>(l.width) * l.height * 4;
+	if (texture->expand_on_unlock) {
+		if (!Acquire_Staging(bgra_bytes, scratch)) return false;
+		target = scratch.buffer.buffer;
+		target_offset = 0;
+	}
+
+	VkCommandBuffer cmd = Begin_One_Shot();
+	if (cmd == VK_NULL_HANDLE) {
+		Release_Staging(scratch);
+		return false;
+	}
+	Transition(cmd, texture->image.image, texture->layout,
+	           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+	           texture->image.mip_levels);
+	VkBufferImageCopy copy{};
+	copy.bufferOffset = target_offset;
+	copy.bufferRowLength = l.width;
+	copy.bufferImageHeight = l.height;
+	copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+	copy.imageExtent = {l.width, l.height, 1};
+	vkCmdCopyImageToBuffer(cmd, texture->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	                       target, 1, &copy);
+	Transition(cmd, texture->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+	           texture->image.mip_levels);
+	const bool submitted = End_One_Shot(cmd);
+	if (submitted) texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	if (submitted && texture->expand_on_unlock) {
+		if (!Contract_From_Bgra8(texture->format,
+		                        static_cast<const uint8_t*>(scratch.mapped), l.width,
+		                        l.height,
+		                        static_cast<uint8_t*>(texture->staging_mapped) + l.offset,
+		                        l.pitch)) {
+			std::fprintf(stderr,
+			             "Readback_Level: no contraction for this format; contents "
+			             "cannot be preserved\n");
+			Release_Staging(scratch);
+			return false;
+		}
+		++resource_stats_.cpu_expansions;
+	}
+	Release_Staging(scratch);
+	if (!submitted) return false;
+
+	l.staging_synced = true;
+	++resource_stats_.readback_stalls;
+	++resource_stats_.staging_preserve_readbacks;
+	resource_stats_.staging_preserve_bytes += level_bytes;
+	// The dirty bit is cleared once every level the host could read has been brought
+	// back, which for the single-level surfaces the hazard is about is this one.
+	bool all_synced = true;
+	for (const LockableLevel& other : texture->levels) {
+		if (!other.staging_synced) all_synced = false;
+	}
+	if (all_synced) texture->image.gpu_dirty = false;
+	return true;
+}
+
+// Caller holds resource_mutex_.
+bool VulkanBackend::Prepare_Lock_Contents(TextureHandle* texture, uint32_t level,
+                                          uint32_t flags) {
+	LockableLevel& l = texture->levels[level];
+	// The two cases where skipping preservation is proven safe, and the only two:
+	//   * D3DLOCK_DISCARD, which is D3D8's own statement that the caller overwrites
+	//     everything and the previous contents may be thrown away;
+	//   * a level nothing has ever written -- neither a previous unlock nor a GPU
+	//     write funnel -- whose contents D3D8 leaves undefined.
+	// Everything else preserves, because a whole-level lock without DISCARD is
+	// exactly what W3DRadar, W3DShroud and Render2DSentenceClass do before drawing a
+	// few pixels.
+	const bool nothing_to_preserve = !l.ever_written && !texture->image.gpu_dirty;
+	if ((flags & LOCK_DISCARD) == 0 && l.staging_synced && !texture->image.gpu_dirty) {
+		// The block still holds this level and no GPU write has happened since, so the
+		// host copy *is* the contents: no transfer, no submit, no wait. This is what
+		// the dirty bit buys, and what keeps a retained block's locks free.
+		return true;
+	}
+	if ((flags & LOCK_DISCARD) != 0 || nothing_to_preserve) {
+		// Zeroed rather than left holding the previous lock's texels: the block is
+		// pooled, and another resource's pixels are not "undefined contents".
+		std::memset(static_cast<uint8_t*>(texture->staging_mapped) + l.offset, 0,
+		            static_cast<size_t>(l.pitch) * l.height);
+		++resource_stats_.staging_preserve_skips;
+		return true;
+	}
+	return Readback_Level(texture, level);
 }
 
 TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t height,
@@ -2067,6 +2368,9 @@ TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t h
 	const FormatPlan plan = Plan_For(format, view_swizzle_);
 	auto* handle = new TextureHandle();
 	handle->lockable = true;
+	// So a write funnel holding only the image (a surface view of it, for instance)
+	// can invalidate this texture's staging copy.
+	handle->image.owner = handle;
 	handle->format = format;
 	handle->vk_format = plan.vk;
 	handle->expand_on_unlock = plan.expand_to_bgra8;
@@ -2192,41 +2496,29 @@ bool VulkanBackend::Lock_Texture(TextureHandle* texture, uint32_t level,
 
 	// The staging block arrives here rather than at creation: an unlocked resource
 	// holds no host-visible memory at all.
+	const bool had_staging = texture->staging.valid();
 	if (!Ensure_Texture_Staging(texture)) return false;
 
-	if ((flags & LOCK_READONLY) != 0) {
-		if (texture->expand_on_unlock) {
-			// The image holds expanded BGRA8, the caller expects the D3D8 format:
-			// contracting back is not implemented, and no engine site needs it (no
-			// READONLY lock in the classes uses an expanded format).
-			std::fprintf(stderr,
-			             "Lock_Texture: READONLY on a CPU-expanded format is not "
-			             "implemented\n");
-			return false;
+	// D3D8's Lock without D3DLOCK_DISCARD hands back the texels that were there, and
+	// a read lock has to see what the GPU wrote. Both are the same question -- is the
+	// level's data in the block? -- so both go through one path, and it transfers
+	// only when the answer is no.
+	const uint32_t stalls_before = resource_stats_.readback_stalls;
+	if (!Prepare_Lock_Contents(texture, level, flags)) {
+		if (!had_staging) {
+			Release_Staging(texture->staging);
+			texture->staging_mapped = nullptr;
 		}
-		// This is the cost D3D8 hides: a read-only lock is a copy back out of the
-		// image, a queue submit, and a fence wait before the pointer can be handed
-		// over. Nothing else can proceed in between.
-		VkCommandBuffer cmd = Begin_One_Shot();
-		if (cmd == VK_NULL_HANDLE) return false;
-		Transition(cmd, texture->image.image, texture->layout,
-		           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
-		           texture->image.mip_levels);
-		VkBufferImageCopy copy{};
-		copy.bufferOffset = l.offset;
-		copy.bufferRowLength = l.width;
-		copy.bufferImageHeight = l.height;
-		copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
-		copy.imageExtent = {l.width, l.height, 1};
-		vkCmdCopyImageToBuffer(cmd, texture->image.image,
-		                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		                       texture->staging.buffer.buffer, 1, &copy);
-		Transition(cmd, texture->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
-		           texture->image.mip_levels);
-		if (!End_One_Shot(cmd)) return false;
-		texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		++resource_stats_.readback_stalls;
+		return false;
+	}
+	if ((flags & LOCK_READONLY) != 0) {
+		if (resource_stats_.readback_stalls != stalls_before) {
+			++resource_stats_.dirty_reads;
+		} else {
+			// A read of a resource nothing has written since the host last saw it:
+			// no copy, no submit, no fence wait.
+			++resource_stats_.clean_reads;
+		}
 	}
 
 	l.locked = true;
@@ -2249,6 +2541,9 @@ bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
 	}
 	LockableLevel& l = texture->levels[level];
 	if (!l.locked) return false;
+	// Whether the block still holds the whole level, which decides whether the
+	// upload can leave it that way. A GPU write during the lock clears it.
+	const bool was_synced = l.staging_synced;
 	l.locked = false;
 	if (texture->locked_levels > 0) --texture->locked_levels;
 	// Once no level of the chain is locked the block goes back to the pool, unless the
@@ -2257,6 +2552,10 @@ bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
 	const bool release_after = texture->locked_levels == 0 && !texture->retain_staging;
 	auto release_staging = [&]() {
 		if (!release_after) return;
+		// The block goes back to the pool, so what it holds stops being this
+		// texture's business; the image remains the authoritative copy and the next
+		// lock brings the level back from it.
+		for (LockableLevel& other : texture->levels) other.staging_synced = false;
 		Release_Staging(texture->staging);
 		texture->staging_mapped = nullptr;
 	};
@@ -2335,9 +2634,20 @@ bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
 	// every byte it needs and both blocks are safe to hand to the next lock.
 	const bool submitted = End_One_Shot(cmd);
 	Release_Staging(upload_block);
+	if (submitted) {
+		// The image now holds what the host wrote, so the two agree: this upload is a
+		// GPU write that does *not* dirty the resource. It leaves the level synced
+		// only if the block holds all of it -- a partial rect on a level that was not
+		// synced leaves the rest of the block still foreign.
+		l.ever_written = true;
+		if (was_synced || (r.left == 0 && r.top == 0 && r.right == l.width &&
+		                   r.bottom == l.height)) {
+			l.staging_synced = true;
+		}
+	}
 	release_staging();
 	if (!submitted) return false;
-	texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	Note_Texture_Layout(texture, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	++resource_stats_.texture_upload_regions;
 	++resource_stats_.upload_submits;
 	return true;
@@ -2798,6 +3108,9 @@ void VulkanBackend::Clear(bool clear_color, bool clear_z_stencil, float r, float
 	// The current target's extent, which after a SetRenderTarget is not the device's.
 	VkClearRect rect{{{0, 0}, {target_width_, target_height_}}, 0, 1};
 	vkCmdClearAttachments(frame_cmd_, count, clears, 1, &rect);
+	// Write funnel 2.
+	if (clear_color) Mark_Gpu_Write(current_color_);
+	if (clear_z_stencil) Mark_Gpu_Write(current_depth_);
 }
 
 VkRect2D VulkanBackend::Clamp_Scissor(const VkRect2D& rect) const {
@@ -3079,6 +3392,10 @@ bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHand
 	// numbering is unchanged by the renaming DISCARD does behind the handle.
 	VkDeviceSize offsets[2] = {vb.bind_offset, 0};
 	vkCmdBindVertexBuffers(frame_cmd_, 0, 2, vertex_buffers, offsets);
+	// Write funnel 3: the draw about to be recorded writes the current target, so a
+	// host read of it has to pay a readback afterwards.
+	Mark_Gpu_Write(current_color_);
+	if (current_depth_ != nullptr) Mark_Gpu_Write(current_depth_);
 	return true;
 }
 
@@ -3283,6 +3600,7 @@ TextureHandle* VulkanBackend::Create_Render_Target_Texture(uint32_t width, uint3
 	if (width == 0 || height == 0) return nullptr;
 	auto* handle = new TextureHandle();
 	handle->render_target = true;
+	handle->image.owner = handle;
 	handle->format = TextureFormat::A8R8G8B8;
 	handle->vk_format = kColorFormat;
 	handle->image.width = width;
@@ -3415,6 +3733,11 @@ bool VulkanBackend::Set_Render_Target(SurfaceHandle* color, SurfaceHandle* depth
 	// D3D8 resets the viewport to the whole of the new target.
 	viewport_ = ViewportRect{0, 0, target_width_, target_height_, 0.0f, 1.0f};
 	scissor_enabled_ = false;
+	// Write funnel 1: binding a target is what makes the draws that follow write it,
+	// and the engine's render-to-texture paths read those pixels back through
+	// SurfaceClass::Lock (screenshot, movie capture).
+	Mark_Gpu_Write(new_color);
+	if (depth_stencil != nullptr) Mark_Gpu_Write(depth_stencil);
 	return Begin_Current_Pass();
 }
 
@@ -3449,15 +3772,91 @@ SurfaceHandle* VulkanBackend::Create_Image_Surface(uint32_t width, uint32_t heig
 	return surface;
 }
 
-bool VulkanBackend::Surface_Bits(SurfaceHandle* surface, LockedRect& out) {
-	if (surface == nullptr || !surface->system_memory()) {
-		// LockRect on a video-memory surface would need the same submit-and-wait
-		// readback path a read-only texture lock has; no engine site does it.
+// The read half of the GPU-write hazard. SurfaceClass::Lock has no read/write flag
+// -- and its signature is not changing, because that would edit 21 call sites -- so
+// every lock is treated as a read and the dirty bit decides what that costs.
+bool VulkanBackend::Resolve_Surface_Read(SurfaceHandle* surface) {
+	// A video-memory surface with no host buffer yet has to be copied out whatever
+	// its dirty bit says: there is no host copy of it at all to hand back.
+	const bool have_host_copy = surface->system_memory() || surface->mapped != nullptr;
+	if (!surface->gpu_dirty() && have_host_copy) {
+		// The whole point: a clean surface issues no copy, no submit and no wait.
+		++resource_stats_.clean_reads;
+		return true;
+	}
+
+	if (surface->system_memory()) {
+		// The bytes are already addressed to this buffer -- CopyRects put them there --
+		// but the copy is a queue operation, so the host has to wait for it. This is
+		// the screenshot and movie-capture path.
+		if (in_scene_) {
+			if (!Flush_Frame_Commands()) return false;
+		} else if (vkQueueWaitIdle(queue_) != VK_SUCCESS) {
+			return false;
+		}
+		surface->host_gpu_dirty = false;
+		++resource_stats_.dirty_reads;
+		++resource_stats_.readback_stalls;
+		return true;
+	}
+
+	// A video-memory surface has no host bytes at all until one is read: the buffer
+	// is allocated on the first read and kept, because a caller that reads a render
+	// target once reads it every frame (movie capture).
+	const VkDeviceSize bytes = static_cast<VkDeviceSize>(surface->pitch) * surface->height;
+	if (surface->mapped == nullptr) {
+		if (!Allocate_Buffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+		                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		                     surface->bits) ||
+		    vkMapMemory(device_, surface->bits.memory, 0, bytes, 0, &surface->mapped) !=
+		        VK_SUCCESS) {
+			return false;
+		}
+	}
+
+	bool one_shot = false;
+	VkCommandBuffer cmd = Begin_Transfer(one_shot);
+	if (cmd == VK_NULL_HANDLE) return false;
+	const VkImageLayout was = surface->layout;
+	Transition_Surface(cmd, surface, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	VkBufferImageCopy copy{};
+	copy.bufferRowLength = surface->pitch / surface->texel_bytes;
+	copy.bufferImageHeight = surface->height;
+	copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+	copy.imageExtent = {surface->width, surface->height, 1};
+	vkCmdCopyImageToBuffer(cmd, surface->image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	                       surface->bits.buffer, 1, &copy);
+	if (was != VK_IMAGE_LAYOUT_UNDEFINED) Transition_Surface(cmd, surface, was);
+	if (one_shot) {
+		if (!End_One_Shot(cmd)) return false;
+	} else if (!Flush_Frame_Commands(false)) {
+		// Recorded into the open frame, so it has to be submitted and waited for
+		// before the mapping holds anything.
 		return false;
 	}
+
+	// Cleared only now that the copy has executed: a failure above leaves the bit
+	// set, so the next read tries again rather than handing back stale pixels.
+	surface->image->gpu_dirty = false;
+	++resource_stats_.dirty_reads;
+	++resource_stats_.readback_stalls;
+	resource_stats_.surface_readback_bytes += bytes;
+	return true;
+}
+
+bool VulkanBackend::Surface_Bits(SurfaceHandle* surface, LockedRect& out) {
+	if (surface == nullptr) return false;
+	if (surface->depth_stencil) {
+		// D3D8 refuses LockRect on a depth-stencil surface too, and no engine site
+		// asks for one.
+		std::fprintf(stderr, "Surface_Bits: a depth-stencil surface cannot be locked\n");
+		return false;
+	}
+	if (!Resolve_Surface_Read(surface)) return false;
 	out.bits = surface->mapped;
 	out.pitch = surface->pitch;
-	return true;
+	return out.bits != nullptr;
 }
 
 bool VulkanBackend::Copy_Rects(SurfaceHandle* source, const LockRect* rects,
@@ -3556,6 +3955,12 @@ bool VulkanBackend::Copy_Rects(SurfaceHandle* source, const LockRect* rects,
 		}
 	}
 
+	// Write funnel 4: the destination now holds pixels the host has not seen. For a
+	// system-memory destination -- the screenshot and movie-capture staging surface --
+	// the bytes are not even visible yet, because the copy is a queue operation that
+	// may not have executed.
+	Mark_Gpu_Write(destination);
+
 	// Back to what each surface was in: a sampled texture keeps being sampled, and a
 	// render target keeps being rendered into, neither of which the copy changed.
 	if (source_layout != VK_IMAGE_LAYOUT_UNDEFINED)
@@ -3617,11 +4022,13 @@ bool VulkanBackend::Update_Texture(TextureHandle* source, TextureHandle* destina
 	Transition(cmd, source->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
 	           source->image.mip_levels);
-	source->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	Note_Texture_Layout(source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	Transition(cmd, destination->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
 	           destination->image.mip_levels);
-	destination->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	Note_Texture_Layout(destination, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	// Write funnel 5.
+	Mark_Gpu_Write(&destination->image);
 	return End_Transfer(cmd, one_shot);
 }
 

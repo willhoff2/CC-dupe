@@ -28,7 +28,9 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-#include <winsock.h>	// This one has to be here. Prevents collisions with winsock2.h
+// TheSuperHackers @port BSD sockets behind the Winsock spellings; this is <winsock.h> on
+// Windows. It still has to be here. Prevents collisions with winsock2.h
+#include <Utility/socket_compat.h>
 
 #include "GameNetwork/GameSpy/GameResultsThread.h"
 #include "WWLib/mutex.h"

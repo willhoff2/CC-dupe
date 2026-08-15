@@ -103,6 +103,9 @@ class Target:
     # Either a CMake list to read the translation units from...
     cmake_lists: str = None
     cmake_root: str = None
+    # ...or several of them, given as the directories holding the CMakeLists.txt, for a target
+    # whose sources CMake splits across per-library lists...
+    cmake_dirs: tuple = ()
     # ...or directories to walk.
     source_dirs: tuple = ()
     defines: tuple = ()
@@ -192,26 +195,39 @@ DEVICE_INCLUDES = GAME_RENDERER_INCLUDES + GAMEENGINE_INCLUDES + [
     "GeneralsMD/Code/GameEngineDevice/Include",
 ]
 
+# `corei_wwdownload`'s sources are compiled into `z_wwdownload`, which links `zi_gameengine_include`
+# and `zi_always` -- so the patch downloader sees the GameEngine include tree (it includes
+# "Common/Debug.h") and RTS_ZEROHOUR=1, neither of which the renderer targets get. Probing it with
+# the renderer's configuration reported two diagnostics that the real build cannot produce.
+DOWNLOAD_INCLUDES = GAME_RENDERER_INCLUDES + GAMEENGINE_INCLUDES + [
+    "Core/Libraries/Source/WWVegas/WWDownload",
+]
+
 RENDERER_TARGETS = [
     Target(
         name="Core/Libraries/Source/WWVegas/WW3D2",
         includes=tuple(RENDERER_INCLUDES),
-        source_dirs=("Core/Libraries/Source/WWVegas/WW3D2",),
+        cmake_dirs=("Core/Libraries/Source/WWVegas/WW3D2",),
     ),
     Target(
         name="Core/Libraries/Source/WWVegas/WWAudio",
         includes=tuple(RENDERER_INCLUDES),
-        source_dirs=("Core/Libraries/Source/WWVegas/WWAudio",),
+        cmake_dirs=("Core/Libraries/Source/WWVegas/WWAudio",),
     ),
     Target(
         name="Core/Libraries/Source/WWVegas/WWDownload",
-        includes=tuple(RENDERER_INCLUDES),
-        source_dirs=("Core/Libraries/Source/WWVegas/WWDownload",),
+        includes=tuple(DOWNLOAD_INCLUDES),
+        cmake_dirs=("Core/Libraries/Source/WWVegas/WWDownload",),
+        defines=("RTS_ZEROHOUR=1",),
     ),
     Target(
         name="GeneralsMD/Code/Libraries/Source/WWVegas",
         includes=tuple(RENDERER_INCLUDES),
-        source_dirs=("GeneralsMD/Code/Libraries/Source/WWVegas",),
+        cmake_dirs=(
+            "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2",
+            "GeneralsMD/Code/Libraries/Source/WWVegas/WWAudio",
+            "GeneralsMD/Code/Libraries/Source/WWVegas/WWDownload",
+        ),
     ),
     Target(
         name="Core/GameEngineDevice",
@@ -222,7 +238,11 @@ RENDERER_TARGETS = [
     ),
     Target(
         name="GeneralsMD/Code/GameEngineDevice",
-        includes=tuple(DEVICE_INCLUDES),
+        # `GeneralsMD/Code/Main` is on this library's include path in the real build too:
+        # GameEngineDevice links `zi_main`, whose only content is that directory
+        # (`GeneralsMD/Code/CMakeLists.txt`). W3DDisplay.cpp's `#include "WinMain.h"` needs it, and
+        # without it the file reports a missing header rather than its real portability state.
+        includes=tuple(DEVICE_INCLUDES) + ("GeneralsMD/Code/Main",),
         cmake_lists="GeneralsMD/Code/GameEngineDevice/CMakeLists.txt",
         cmake_root="GeneralsMD/Code/GameEngineDevice",
         defines=("RTS_ZEROHOUR=1",),
@@ -332,7 +352,9 @@ def probe(job):
     return FileResult(target.name, rel, proc.returncode == 0, diagnostics)
 
 
-CMAKE_SOURCE_RE = re.compile(r"^\s+(Source/\S+\.cpp)\s*$")
+# A source list entry: an indented bare path ending in .cpp. The GameEngine lists spell them
+# "Source/...", the WWVegas libraries spell them relative to their own directory.
+CMAKE_SOURCE_RE = re.compile(r"^\s+([\w./-]+\.cpp)\s*$")
 
 # Backends that are opt-in in CMake because they need a dependency this probe deliberately does
 # not have on its include path (SDL2). They are not part of "how much of the engine compiles
@@ -366,18 +388,25 @@ def targets(include_renderer):
     return TARGETS + RENDERER_TARGETS if include_renderer else TARGETS
 
 
+def cmake_source_lists(target):
+    """The (CMakeLists.txt, directory the entries are relative to) pairs of a target."""
+    if target.cmake_lists:
+        return ((target.cmake_lists, target.cmake_root),)
+    return tuple((f"{d}/CMakeLists.txt", d) for d in target.cmake_dirs)
+
+
 def cmake_sources(target):
     """Translation units CMake actually compiles, i.e. list entries that are not commented out."""
-    text = (REPO_ROOT / target.cmake_lists).read_text().splitlines()
-    root = REPO_ROOT / target.cmake_root
     sources = []
-    for line in text:
-        match = CMAKE_SOURCE_RE.match(line)
-        if not match:
-            continue
-        path = root / match.group(1)
-        if path.is_file() and is_measured_source(path):
-            sources.append(path)
+    for lists, root_dir in cmake_source_lists(target):
+        root = REPO_ROOT / root_dir
+        for line in (REPO_ROOT / lists).read_text().splitlines():
+            match = CMAKE_SOURCE_RE.match(line)
+            if not match:
+                continue
+            path = root / match.group(1)
+            if path.is_file() and is_measured_source(path):
+                sources.append(path)
     return sorted(set(sources))
 
 
@@ -385,7 +414,7 @@ def collect_jobs(deps_dir, with_shims, include_renderer=False):
     extra = tuple(dep_includes(deps_dir))
     jobs = []
     for target in targets(include_renderer):
-        if target.cmake_lists:
+        if target.cmake_lists or target.cmake_dirs:
             sources = cmake_sources(target)
         else:
             sources = []

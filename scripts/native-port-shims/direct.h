@@ -13,6 +13,7 @@
 #define _getcwd getcwd
 #define _chdir  chdir
 #define _rmdir  rmdir
-extern "C" int _mkdir(const char* path);
+// _mkdir is deliberately not declared here: Utility/path_compat.h defines it inline, and a second
+// declaration with C linkage would conflict with that definition.
 extern "C" int _getdrive();
 extern "C" int _chdrive(int drive);

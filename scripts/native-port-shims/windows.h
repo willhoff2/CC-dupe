@@ -109,6 +109,7 @@ typedef wchar_t*            PWSTR;
 typedef wchar_t*            LPWSTR;
 typedef const wchar_t*      PCWSTR;
 typedef const wchar_t*      LPCWSTR;
+typedef DWORD               EXECUTION_STATE;
 typedef BYTE*               PBYTE;
 typedef BYTE*               LPBYTE;
 typedef WORD*               PWORD;
@@ -417,9 +418,17 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define ERROR_FILE_NOT_FOUND     2L
 #define ERROR_PATH_NOT_FOUND     3L
 #define ERROR_ACCESS_DENIED      5L
+#define ERROR_INVALID_HANDLE     6L
 #define ERROR_NO_MORE_FILES      18L
+#define ERROR_INVALID_PARAMETER  87L
 #define ERROR_ALREADY_EXISTS     183L
 #define ERROR_MORE_DATA          234L
+#define CREATE_SUSPENDED         0x00000004
+#define HEAP_NO_SERIALIZE        0x00000001
+#define HEAP_ZERO_MEMORY         0x00000008
+#define ES_SYSTEM_REQUIRED       0x00000001
+#define ES_DISPLAY_REQUIRED      0x00000002
+#define ES_CONTINUOUS            0x80000000
 #define WAIT_OBJECT_0            0L
 #define WAIT_TIMEOUT             258L
 #define WAIT_FAILED              0xFFFFFFFF
@@ -450,6 +459,8 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define MB_ICONQUESTION          0x00000020
 #define MB_ICONEXCLAMATION       0x00000030
 #define MB_ICONINFORMATION       0x00000040
+#define MB_ICONSTOP              0x00000010
+#define MB_APPLMODAL             0x00000000
 #define MB_SYSTEMMODAL           0x00001000
 #define MB_TASKMODAL             0x00002000
 #define MB_TOPMOST               0x00040000
@@ -479,6 +490,12 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define GMEM_DISCARDABLE         0x0100
 #define GMEM_SHARE               0x2000
 #define GMEM_DDESHARE            0x2000
+// OpenFile/AVIFileOpen access flags.
+#define OF_READ                  0x0000
+#define OF_WRITE                 0x0001
+#define OF_READWRITE             0x0002
+#define OF_SHARE_COMPAT          0x0000
+#define OF_CREATE                0x1000
 #define GPTR                     (GMEM_FIXED | GMEM_ZEROINIT)
 #define GHND                     (GMEM_MOVEABLE | GMEM_ZEROINIT)
 #define VER_PLATFORM_WIN32s          0
@@ -512,6 +529,19 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define VK_RIGHT     0x27
 #define VK_DOWN      0x28
 #define VK_DELETE    0x2E
+#define VK_INSERT    0x2D
+#define VK_F1        0x70
+#define VK_F2        0x71
+#define VK_F3        0x72
+#define VK_F4        0x73
+#define VK_F5        0x74
+#define VK_F6        0x75
+#define VK_F7        0x76
+#define VK_F8        0x77
+#define VK_F9        0x78
+#define VK_F10       0x79
+#define VK_F11       0x7A
+#define VK_F12       0x7B
 #define SM_CXSCREEN  0
 #define SM_CYSCREEN  1
 #define STATUS_ACCESS_VIOLATION  ((DWORD)0xC0000005L)
@@ -591,6 +621,16 @@ LONG   InterlockedDecrement(LONG volatile*);
 LONG   InterlockedExchange(LONG volatile*, LONG);
 LONG   InterlockedExchangeAdd(LONG volatile*, LONG);
 LONG   InterlockedCompareExchange(LONG volatile*, LONG, LONG);
+// TheSuperHackers @port The pointer-width forms. On Win64 these are intrinsics rather than
+// kernel32 exports, which is why they are spelled out here next to the LONG ones; VC6 gets them
+// from Utility/interlocked_adapter.h instead.
+PVOID  InterlockedExchangePointer(PVOID volatile*, PVOID);
+PVOID  InterlockedCompareExchangePointer(PVOID volatile*, PVOID, PVOID);
+HANDLE GetProcessHeap();
+LPVOID HeapAlloc(HANDLE, DWORD, SIZE_T);
+BOOL   HeapFree(HANDLE, DWORD, LPVOID);
+SIZE_T HeapSize(HANDLE, DWORD, LPCVOID);
+EXECUTION_STATE SetThreadExecutionState(EXECUTION_STATE);
 HMODULE GetModuleHandleA(LPCSTR);
 UINT   GetSystemDirectoryA(LPSTR, UINT);
 UINT   GetWindowsDirectoryA(LPSTR, UINT);
@@ -639,6 +679,8 @@ SIZE_T GlobalSize(HGLOBAL);
 LPVOID GlobalLock(HGLOBAL);
 BOOL   GlobalUnlock(HGLOBAL);
 HGLOBAL GlobalFree(HGLOBAL);
+HGLOBAL GlobalHandle(LPCVOID);
+BOOL   SetRect(LPRECT, int, int, int, int);
 // Version resource queries. Windows-only by construction -- they read a VERSIONINFO resource out
 // of a PE image -- so they are declared and never defined; see
 // docs/porting/crt-and-widechar-compat.md.
@@ -659,6 +701,11 @@ DWORD  FormatMessageA(DWORD, LPCVOID, DWORD, DWORD, LPSTR, DWORD, va_list*);
 // mbstowcs / wcstombs. Declaring them here would expand those macros and redeclare the libc
 // functions without their exception specifications.
 int    lstrlenA(LPCSTR);
+LPSTR  lstrcpyA(LPSTR, LPCSTR);
+LPSTR  lstrcpynA(LPSTR, LPCSTR, int);
+LPSTR  lstrcatA(LPSTR, LPCSTR);
+int    lstrcmpA(LPCSTR, LPCSTR);
+int    lstrcmpiA(LPCSTR, LPCSTR);
 int    wsprintfA(LPSTR, LPCSTR, ...);
 LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER);
 HRESULT CoInitialize(LPVOID);
@@ -677,6 +724,7 @@ BOOL    UpdateWindow(HWND);
 BOOL    SetWindowPos(HWND, HWND, int, int, int, int, UINT);
 BOOL    GetClientRect(HWND, LPRECT);
 BOOL    GetWindowRect(HWND, LPRECT);
+BOOL    IsIconic(HWND);
 LRESULT SendMessageA(HWND, UINT, WPARAM, LPARAM);
 BOOL    PostMessageA(HWND, UINT, WPARAM, LPARAM);
 LRESULT DefWindowProcA(HWND, UINT, WPARAM, LPARAM);
@@ -685,6 +733,7 @@ BOOL    GetMessageA(LPMSG, HWND, UINT, UINT);
 BOOL    TranslateMessage(const MSG*);
 LRESULT DispatchMessageA(const MSG*);
 int     MessageBoxA(HWND, LPCSTR, LPCSTR, UINT);
+int     MessageBoxW(HWND, LPCWSTR, LPCWSTR, UINT);
 HWND    GetActiveWindow();
 HWND    SetActiveWindow(HWND);
 HWND    GetForegroundWindow();
@@ -781,6 +830,12 @@ BOOL    InvalidateRect(HWND, LPCRECT, BOOL);
 #define GetMessage       GetMessageA
 #define DispatchMessage  DispatchMessageA
 #define MessageBox       MessageBoxA
+#define lstrlen          lstrlenA
+#define lstrcpy          lstrcpyA
+#define lstrcpyn         lstrcpynA
+#define lstrcat          lstrcatA
+#define lstrcmp          lstrcmpA
+#define lstrcmpi         lstrcmpiA
 #define LoadCursor       LoadCursorA
 #define CreateFont       CreateFontA
 #define GetTextMetrics   GetTextMetricsA

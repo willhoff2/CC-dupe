@@ -44,6 +44,9 @@
 #pragma warning (disable : 4201)		// nonstandard extension - nameless struct
 #include <windows.h>
 #include <mmsystem.h>
+// TheSuperHackers @port The driver version of D3DADAPTER_IDENTIFIER8, whose spelling depends on the
+// vendored header's own _WIN32 branch; see docs/porting/win32-runtime-and-crt-gaps.md
+#include <Utility/d3d8_compat.h>
 
 static StringClass CapsWorkString;
 
@@ -541,10 +544,13 @@ void DX8Caps::Compute_Caps(WW3DFormat display_format, const D3DADAPTER_IDENTIFIE
 	DXLOG(("Driver: %s\r\n",adapter_id.Driver));
 
 	DriverDLL=adapter_id.Driver;
-	int Product = HIWORD(adapter_id.DriverVersion.HighPart);
-	int Version = LOWORD(adapter_id.DriverVersion.HighPart);
-	int SubVersion = HIWORD(adapter_id.DriverVersion.LowPart);
-	DriverBuildVersion = LOWORD(adapter_id.DriverVersion.LowPart);
+	const __int64 driver_version = D3D8AdapterDriverVersion(adapter_id);
+	const unsigned long driver_version_high = (unsigned long)((driver_version >> 32) & 0xffffffff);
+	const unsigned long driver_version_low = (unsigned long)(driver_version & 0xffffffff);
+	int Product = HIWORD(driver_version_high);
+	int Version = LOWORD(driver_version_high);
+	int SubVersion = HIWORD(driver_version_low);
+	DriverBuildVersion = LOWORD(driver_version_low);
 
 	DXLOG(("Product=%d, Version=%d, SubVersion=%d, Build=%d\r\n",Product, Version, SubVersion, DriverBuildVersion));
 

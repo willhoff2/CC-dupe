@@ -4,7 +4,7 @@ Produced by `scripts/native-build.py`. Unlike every other number in `docs/portin
 these come from real object files and a real linker invocation, not from
 `clang++ -fsyntax-only`.
 
-Toolchain: `Ubuntu clang version 14.0.0-1ubuntu1.1`, target `x86_64-pc-linux-gnu`, levels built: 1, 2, 3.
+Toolchain: `Ubuntu clang version 14.0.0-1ubuntu1.1`, target `x86_64-pc-linux-gnu`, levels built: 1, 2, 3, 4.
 
 Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only stand-ins for the Win32 headers, so a missing platform layer shows up as an undefined symbol rather than as a failed compile. That is the point: it moves the blockers from §1 to §3, where they can be counted individually.
 
@@ -13,100 +13,69 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | Library | Objects produced | Translation units | Probe-clean |
 |---|---:|---:|---:|
 | `Core/Libraries/Source/Compression` | 11 | 11 | 11 |
-| `Core/Libraries/Source/WWVegas/WWMath` | 36 | 36 | 36 |
-| `Core/Libraries/Source/WWVegas/WWLib` | 74 | 74 | 74 |
+| `Core/Libraries/Source/WWVegas/WWMath` | 37 | 37 | 37 |
+| `Core/Libraries/Source/WWVegas/WWLib` | 78 | 78 | 78 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 | 3 | 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
-| `Core/GameEngine` | 204 | 210 | 204 |
-| `GeneralsMD/Code/GameEngine` | 378 | 380 | 378 |
-| `Core/GameEngineDevice` | 64 | 70 | 64 |
-| `GeneralsMD/Code/GameEngineDevice` | 34 | 39 | 34 |
-| `GeneralsMD/Code/Main` | 0 | 1 | 0 |
-| **Total** | **816** | **836** | **816** |
+| `Core/GameEngine` | 207 | 210 | 207 |
+| `GeneralsMD/Code/GameEngine` | 380 | 380 | 380 |
+| `Core/Libraries/Source/WWVegas/WW3D2` | 72 | 73 | 72 |
+| `Core/Libraries/Source/WWVegas/WWAudio` | 19 | 19 | 19 |
+| `Core/Libraries/Source/WWVegas/WWDownload` | 4 | 4 | 4 |
+| `GeneralsMD/Code/Libraries/Source/WWVegas` | 35 | 35 | 35 |
+| `Core/GameEngineDevice` | 70 | 70 | 70 |
+| `GeneralsMD/Code/GameEngineDevice` | 39 | 39 | 39 |
+| `GeneralsMD/Code/Main` | 1 | 1 | 1 |
+| **Total** | **968** | **972** | **968** |
 
-20 translation units produced no object file:
+4 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
-| `Core/GameEngine/Source/GameNetwork/DownloadManager.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
-| `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
+| `Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp` | `unknown type name 'HANDLE'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp` | `unknown type name 'AsnObjectIdentifier'` |
-| `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/GameResultsThread.cpp` | `unknown type name 'HOSTENT'` |
-| `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PeerThread.cpp` | `no matching function for call to 'recvfrom'` |
 | `Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp` | `unknown type name 'HOSTENT'` |
-| `Core/GameEngineDevice/Source/MilesAudioDevice/MilesAudioManager.cpp` | `unknown type name 'HANDLE'` |
-| `Core/GameEngineDevice/Source/StdDevice/Common/StdLocalFileSystem.cpp` | `use of undeclared identifier 'unNormalized'; did you mean 'nonNormalized'?` |
-| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DScreenshot.cpp` | `use of undeclared identifier 'InterlockedExchangePointer'; did you mean '_InterlockedExchangePointer'?` |
-| `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DShaderManager.cpp` | `no member named 'DriverVersion' in '_D3DADAPTER_IDENTIFIER8'` |
-| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWater.cpp` | `use of undeclared identifier 'D3DXMatrixInverse'` |
-| `Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp` | `use of undeclared identifier 'VK_F5'` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/DownloadMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
-| `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/MainMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
-| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DAssetManager.cpp` | `use of undeclared identifier 'lstrcpyn'` |
-| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp` | `no member named '_strdup' in the global namespace; did you mean 'strdup'?` |
-| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DWebBrowser.cpp` | `'IDispatch' does not refer to a value` |
-| `GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp` | `allocating an object of abstract class type 'CComObject<W3DWebBrowser>'` |
-| `GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32OSDisplay.cpp` | `use of undeclared identifier 'MB_APPLMODAL'` |
-| `GeneralsMD/Code/Main/PlatformMain.cpp` | `allocating an object of abstract class type 'CComObject<W3DWebBrowser>'` |
+| `Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp` | `no member named 'GetWindowLong' in the global namespace` |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 816 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 968 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: no; clean link: no). **457 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 14 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_openalaudiodevice`, `libthirdparty_lzhl`, `openal (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 4 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **250 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| Defined in a layer not built here (renderer / audio) | 272 |
-| Defined in a translation unit that failed to compile | 86 |
-| GameSpy SDK (cut scope, not linked) | 33 |
-| Other / unclassified | 29 |
+| Defined in a translation unit that failed to compile | 108 |
+| GameSpy SDK (cut scope, not linked) | 81 |
+| FFmpeg (not linked here) | 29 |
 | Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 |
-| Defined in a built translation unit behind a disabled #if (build option / platform) | 10 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
-| Direct3D 8 / DirectX | 3 |
-| Win32 API | 3 |
-| COM / OLE (browser embedding, cut scope) | 3 |
-
-### Defined in a layer not built here (renderer / audio)
-
-- `TheDX8MeshRenderer`
-- `Log_DX8_ErrorCode(unsigned int)`
-- `Get_Bytes_Per_Pixel(WW3DFormat)`
-- `ARGB_Color_To_WW3D_Color(WW3DFormat, unsigned int)`
-- `SetUnsignedIntInRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int)`
-- `DX8Wrapper::CurrentCaps`
-- `DX8Wrapper::Has_Stencil()`
-- `DX8Wrapper::Pixel_Shader`
-- `DX8Wrapper::RenderStates`
-- `DX8Wrapper::render_state`
-- `DX8Wrapper::RenderBackend`
-- `DX8Wrapper::Vertex_Shader`
-- `DX8Wrapper::Draw_Triangles(unsigned short, unsigned short, unsigned short, unsigned short)`
-- `DX8Wrapper::m_pCleanupHook`
-- `DX8Wrapper::FrameStatistics`
-- …and 257 more
+| Direct3D 8 / DirectX | 4 |
+| Win32 API | 4 |
+| Defined in a built translation unit behind a disabled #if (build option / platform) | 4 |
+| Other / unclassified | 1 |
+| Engine C++ not built at this level | 1 |
 
 ### Defined in a translation unit that failed to compile
 
-- `TheGameResultsQueue`
-- `TheGameSpyPeerMessageQueue`
+- `DX8Wrapper_IsWindowed`
+- `DX8Wrapper_PreserveFPU`
 - `ThePinger`
-- `TheWaterRenderObj`
-- `TheWin32Mouse`
-- `doSkyBoxSet(bool)`
-- `MainMenuInit(WindowLayout*, void*)`
-- `MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- `MainMenuUpdate(WindowLayout*, void*)`
-- `setupGameStart(AsciiString, GameDifficulty)`
-- `CreateGameEngine()`
-- `DownloadMenuInit(WindowLayout*, void*)`
-- `MainMenuShutdown(WindowLayout*, void*)`
-- `DownloadMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- …and 71 more
+- `DX8_Assert()`
+- `StartPatchCheck()`
+- `HTTPThinkWrapper()`
+- `Log_DX8_ErrorCode(unsigned int)`
+- `StopAsyncDNSCheck()`
+- `StartDownloadingPatches()`
+- `CancelPatchCheckCallback()`
+- `GetLocalChatConnectionAddress(AsciiString, unsigned short, unsigned int&)`
+- `DX8Wrapper::Draw_Strip(unsigned short, unsigned short, unsigned short, unsigned short)`
+- `DX8Wrapper::IsWindowed`
+- `DX8Wrapper::Begin_Scene()`
+- `DX8Wrapper::CurrentCaps`
+- …and 93 more
 
 ### GameSpy SDK (cut scope, not linked)
 
@@ -121,13 +90,13 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `PersistThink`
 - `PreAuthenticatePlayerCDA`
 - `PreAuthenticatePlayerPM`
-- `SendGameSnapShotA`
-- `SetPersistDataValuesA`
-- `gcd_gamename`
-- `gcd_secret_key`
-- …and 18 more
+- `SBServerGetIntValueA`
+- `SBServerGetPlayerIntValueA`
+- `SBServerGetPlayerStringValueA`
+- `SBServerGetPrivateInetAddress`
+- …and 66 more
 
-### Other / unclassified
+### FFmpeg (not linked here)
 
 - `av_frame_alloc`
 - `av_frame_clone`
@@ -161,19 +130,6 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `WWPlatform::Window_Modifier_State(void*)`
 - `WWPlatform::Window_Set_Cursor_Clip(void*, bool)`
 
-### Defined in a built translation unit behind a disabled #if (build option / platform)
-
-- `ApplicationHInstance`
-- `DX8Wrapper_IsWindowed`
-- `DX8Wrapper_PreserveFPU`
-- `FillStackAddresses(void**, unsigned int, unsigned int)`
-- `StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))`
-- `GetUnsignedIntFromRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int&)`
-- `DX8Wrapper::Set_Vertex_Buffer(VertexBufferClass const*, unsigned int)`
-- `DX8Wrapper::Set_Vertex_Buffer(DynamicVBAccessClass const&)`
-- `g_LastErrorDump`
-- `getQR2HostingStatus`
-
 ### Generated gitinfo (build-time, not a blocker)
 
 - `GitCommitAuthorName`
@@ -185,25 +141,63 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 
 ### Direct3D 8 / DirectX
 
+- `D3DXAssembleShader`
 - `D3DXFilterTexture`
-- `D3DXMatrixMultiply`
-- `D3DXMatrixTranspose`
+- `D3DXGetFVFVertexSize`
+- `D3DXLoadSurfaceFromSurface`
 
 ### Win32 API
 
 - `GetCursorPos`
+- `IsIconic`
 - `ScreenToClient`
 - `SetCursor`
 
-### COM / OLE (browser embedding, cut scope)
+### Defined in a built translation unit behind a disabled #if (build option / platform)
 
-- `IID_IBrowserDispatch`
-- `IID_IUnknown`
-- `_com_util::ConvertStringToBSTR(char const*)`
+- `FillStackAddresses(void**, unsigned int, unsigned int)`
+- `StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))`
+- `g_LastErrorDump`
+- `getQR2HostingStatus`
+
+### Other / unclassified
+
+- `MSS_auto_cleanup`
+
+## 4. What would resolve them
+
+The causes above say what each symbol *is*. They do not say what makes it go away, and the two get confused: before level 4 the renderer's 272 symbols read as port work when they were only "the build does not include that layer". Each unresolved symbol is therefore also assigned to exactly one pile, and only one of the five is remaining port work.
+
+| Pile | Symbols | Meaning |
+|---|---:|---|
+| `library-not-linked` | 42 | A library defines it and this configuration links no such library. A link line, not port work. |
+| `cut-scope-not-linked` | 82 | A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it. |
+| `compile-blocked` | 18 | An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker. |
+| `harness-artefact` | 400 | An artefact of how this harness is configured: a build-time generated definition it does not generate, one a disabled `#if` removed, or one in a layer this level selection does not build. |
+| `no-definition-anywhere` | 6 | Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work. |
+
+The libraries in the `library-not-linked` and `cut-scope-not-linked` piles, the evidence each attribution rests on, and the slice that owns it:
+
+| Library | Pile | Symbols | Evidence files | Why it is not linked | Owner |
+|---|---|---:|---:|---|---|
+| Miles AIL_* API — the `milesstub`/OpenAL backend | `library-not-linked` | 1 | 7 | `cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, and the 32-bit Windows build links the fetched miles-sdk-stub. This harness now builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links libopenal, so what is left here is the part of the Miles surface that backend does not implement rather than the whole API. | platform/audio-device (the Miles/OpenAL link) |
+| FFmpeg (libavcodec / libavformat / libavutil / libswscale) | `library-not-linked` | 29 | 823 | The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route. `fetch-probe-deps.sh` provisions the pinned headers so the code compiles, and nothing installs an FFmpeg runtime for the link. | video/bink-excision-and-harness-headers |
+| The window/input backend this configuration does not choose (SDL2, Cocoa) | `library-not-linked` | 12 | 2 | `probe.OPTIONAL_BACKENDS` keeps the SDL2 backend opt-in and the Cocoa backend is Objective-C++, so no target lists either. The definitions are in the tree; a configuration that picks one resolves all of them. | platform/macos-window-compile and platform/window-seam-wiring |
+| GameSpy SDK | `cut-scope-not-linked` | 82 | 279 | Online matchmaking is permanently cut scope (docs/porting/native-port-plan.md). The SDK's own sources are provisioned and define these symbols, so this is a link refused rather than one that is missing: they disappear when the call sites go, which is `online/absent-menu-seam`'s work, and must not be stubbed to make a link pass. | online/absent-menu-seam |
+
+Evidence is the provisioned sources or headers that define the symbols, not a library found on the measuring machine: the CI container has no FFmpeg or SDL2 runtime, and a pile split that changed with the box would not be a measurement.
+
+## 5. Strict link: is there an executable?
+
+`--strict-link` linked the same archives with no tolerance for unresolved symbols: **failed**, 544 unresolved symbol(s), executable produced: no. Nothing is stubbed to make this pass, and nothing may be — a green strict link bought with stubs would hide exactly the work this number exists to count.
+
+The linker's list and §3's `nm` scan agree, so the categorised list above is the list standing between this build and an executable.
+
+Symbol resolution is necessary and not sufficient; `docs/porting/startability.md` defines what else a first launch needs.
 
 ## Reproducing
 
 ```sh
 bash scripts/ci/fetch-probe-deps.sh
-python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims --report docs/porting/native-build-report.md --json native-build.json
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims --strict-link --report docs/porting/native-build-report.md --json native-build.json
 ```

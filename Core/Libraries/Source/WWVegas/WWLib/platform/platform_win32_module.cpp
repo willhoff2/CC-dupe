@@ -350,6 +350,16 @@ BOOL GlobalUnlock(HGLOBAL)
 }
 
 
+HGLOBAL GlobalHandle(LPCVOID memory)
+{
+	/*
+	**	The inverse of GlobalLock(), which is what <windowsx.h>'s GlobalFreePtr() family is
+	**	written in terms of. A handle here is the pointer, so its inverse is the identity too.
+	*/
+	return (HGLOBAL)memory;
+}
+
+
 HGLOBAL GlobalFree(HGLOBAL memory)
 {
 	free((void *)memory);
