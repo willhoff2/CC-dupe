@@ -19,9 +19,18 @@ cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/spike
 ```
 
-Ubuntu 22.04 cannot be used here: jammy's Vulkan headers (1.3.204) predate
-`VK_KHR_portability_enumeration` and cannot compile the MoltenVK portability opt-in. Use 24.04, as
-the `renderer-spike-linux` CI job does.
+Ubuntu 22.04 works, but **not** with jammy's Vulkan headers (1.3.204): they predate
+`VK_KHR_portability_enumeration` and cannot compile the MoltenVK portability opt-in. Point CMake at
+pinned headers instead of skipping the box:
+
+```sh
+git clone --depth 1 -b v1.3.280 https://github.com/KhronosGroup/Vulkan-Headers ~/vk-headers
+cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_COMPILER=clang++-14 -DVulkan_INCLUDE_DIR=$HOME/vk-headers/include
+```
+
+On jammy the lavapipe manifest is `lvp_icd.x86_64.json`, not `lvp_icd.json`:
+`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`.
 
 ## Assert on pixels
 
@@ -31,8 +40,18 @@ python3 scripts/ci/check-spike-render.py \
   --reference spikes/renderer/docs/spike-triangle.png \
   --out spike.png
 build/spike/zh-feature-probe
-build/spike/zh-fixedfunc-tests
+build/spike/zh-fixedfunc-tests --validation
+build/spike/zh-resource-lock-tests --validation
+ZH_SPIKE_NO_VIEW_SWIZZLE=1 build/spike/zh-fixedfunc-tests --validation
+ZH_SPIKE_NO_VIEW_SWIZZLE=1 build/spike/zh-resource-lock-tests --validation
+python3 scripts/ci/check-backend-coverage.py
 ```
+
+A validation message is a failure even when the pixels are right. The failure class to expect:
+a texture's image and a `GetSurfaceLevel` surface viewing it are two names for one image, so any
+path that transitions the image directly (`Update_Texture`, the CopyRects upload) must record the
+new layout on both — otherwise a read either side of it barriers from a layout the image left, and
+only the layer notices. Probe it as `read -> Update_Texture -> read`; each half alone is silent.
 
 If the validation layer is not loaded, the run silently proceeds unvalidated and proves nothing —
 check that it was.

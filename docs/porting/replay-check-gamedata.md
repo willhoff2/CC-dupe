@@ -32,8 +32,8 @@ workflow file.
 
 Two 7z archives holding only what a headless replay run reads — the INI/map/W3D `.big` files, the
 two DLLs the executable links against, and the script files. No textures, audio or GUI data, so the
-result is not playable. The exact file lists are in `scripts/ci/pack-gamedata.ps1` and in the
-comments of `check-replays.yml`.
+result is not playable. The exact file lists are in `scripts/ci/pack-gamedata.py` (and its Windows
+twin `pack-gamedata.ps1`) and in the comments of `check-replays.yml`.
 
 Retail game data is not redistributable. Keep the bucket private, and do not commit the archives.
 
@@ -107,8 +107,19 @@ demonstrate it is to make the check pass.
 
 ## Hosting the data yourself
 
-1. **Pack the archives** on a Windows machine with retail Generals 1.08 and Zero Hour 1.04
-   installed (7-Zip required: `winget install 7zip.7zip`):
+Packing does **not** need Windows; only running the check does.
+
+1. **Pack the archives** from a copy of the retail data. On macOS or Linux
+   (`brew install sevenzip` / `apt-get install p7zip-full`):
+
+   ```sh
+   python3 scripts/ci/pack-gamedata.py \
+       --generals   ~/devin-work/zh-data/ZH_Generals \
+       --generalsmd ~/devin-work/zh-data \
+       --output-dir gamedata-out
+   ```
+
+   or on Windows against retail installs (7-Zip required: `winget install 7zip.7zip`):
 
    ```pwsh
    pwsh scripts/ci/pack-gamedata.ps1 `
@@ -117,12 +128,28 @@ demonstrate it is to make the check pass.
        -OutputDir      .\gamedata-out
    ```
 
-   It fails loudly listing any missing file rather than packing a partial archive, and prints the
-   SHA256 of each archive at the end.
+   Either fails loudly listing any missing file rather than packing a partial archive, and prints
+   the SHA256 of each archive at the end. Both read the installs only.
+
+   The Python packer additionally: matches file names case-insensitively, so a copied tree with
+   `maps.big` packs (and lands in the archive under the retail spelling); stores no timestamps, so
+   packing the same data twice gives the same hash; and, because a Generals *data* tree has no
+   `BINKW32.DLL`/`mss32.dll` (see [above](#the-retail-data-on-hand-measured-2026-08-14)), takes
+   those two from the Zero Hour install, saying so. Pass `--no-dll-fallback` to forbid that.
 
 2. **Upload both files** to a private bucket, keeping the file names
    (`generals108_gamedata_trimmed.7z`, `zerohour104_gamedata_trimmed.7z`). Plain AWS S3 and any
-   S3-compatible service (Cloudflare R2, MinIO, Backblaze B2) all work.
+   S3-compatible service (Cloudflare R2, MinIO, Backblaze B2) all work:
+
+   ```sh
+   aws s3 cp gamedata-out/generals108_gamedata_trimmed.7z  s3://your-bucket/
+   aws s3 cp gamedata-out/zerohour104_gamedata_trimmed.7z  s3://your-bucket/
+   ```
+
+   On AWS, give CI its own IAM user with an inline policy allowing `s3:GetObject` on
+   `arn:aws:s3:::your-bucket/*` and nothing else, and keep the write-capable credentials off
+   GitHub. Note that AWS charges egress on every cache miss (~$0.09/GB, and the pair is ~1 GB);
+   Cloudflare R2 does not, which is the only reason to prefer it here.
 
 3. **Set repository variables** (Settings → Secrets and variables → Actions → *Variables*):
 
@@ -157,8 +184,9 @@ checkout that does have upstream access.
   Previously the `aws s3 cp` return value was ignored and the run died at the hash check with
   "Hash verification failed! File may be corrupted or tampered with.", which reads as data
   corruption when the real cause is missing credentials.
-- `pack-gamedata.ps1` requires Windows and a machine with both retail installs; there is no
-  POSIX packer, so packing from a macOS or Linux copy of the data is not currently possible.
+- `pack-gamedata.ps1` requires Windows; `pack-gamedata.py` is the macOS/Linux equivalent. Both have
+  been exercised only against synthetic trees with the right file names — the archives they produce
+  have never been fed to the actual gate.
 - The gate proves determinism only for the **Windows 32-bit** build. There is no equivalent for a
   native 64-bit build yet, and there cannot be until one links — see
   [`native-build.md`](native-build.md).

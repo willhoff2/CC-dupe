@@ -12,6 +12,13 @@ mistaken for progress against the smaller build's figures. Facts a bare objects/
 would hide are checked too: a changed denominator, a library that produced no archive at all, and a
 shrinking archive count -- unresolved symbols also fall when a whole library drops out of the link.
 
+Two further ratchets exist because the unresolved total alone can move for the wrong reason. The
+`no-definition-anywhere` pile -- the symbols no library, dependency or source file defines, i.e. the
+real remaining port work -- must not grow even when the total falls, which it would if a library
+were added to the link in the same change. And when the results come from `--strict-link`, the
+number of symbols the linker itself refuses is ratcheted too, since that is the only figure here
+that answers "is there an executable"; the tolerant link produces a file and exits 0 regardless.
+
 Improvements are reported, not failed, and the baseline should be refreshed in the same PR that
 earns them:
 
@@ -157,6 +164,53 @@ def main():
         now = got_categories.get(category)
         print(f"{category[:70]:70s} {'-' if now is None else now:>5} "
               f"{'-' if before is None else before:>5}")
+
+    # The piles say what would resolve each symbol, and only one of them is remaining port work, so
+    # that one is a ratchet of its own: the total can fall while port work grows, if a library is
+    # added to the link in the same change.
+    base_piles = baseline.get("undefined_by_pile") or {}
+    got_piles = results.get("undefined_by_pile") or {}
+    if got_piles:
+        print()
+        print(f"{'unresolved symbols by what would resolve them':45s} {'now':>5s} {'base':>5s}")
+        for pile in sorted(set(base_piles) | set(got_piles)):
+            print(f"{pile:45s} {got_piles.get(pile, 0):>5} "
+                  f"{'-' if pile not in base_piles else base_piles[pile]:>5}")
+    port_pile = "no-definition-anywhere"
+    if port_pile in base_piles and port_pile in got_piles:
+        if got_piles[port_pile] > base_piles[port_pile]:
+            failures.append(f"symbols nothing defines: {base_piles[port_pile]} in the baseline, "
+                            f"{got_piles[port_pile]} now")
+        elif got_piles[port_pile] < base_piles[port_pile]:
+            improvements.append(f"symbols nothing defines: {base_piles[port_pile]} -> "
+                                f"{got_piles[port_pile]}")
+
+    # The strict link is the only figure here that answers "is there an executable", so it is
+    # ratcheted whenever both runs attempted it, and a disagreement with the `nm` scan is a failure
+    # in its own right: it would mean the categorised list is not the list the linker fails on.
+    base_strict = baseline.get("strict_link") or {}
+    got_strict = results.get("strict_link") or {}
+    if got_strict.get("attempted"):
+        print(f"strict link: {'clean' if got_strict['clean'] else 'failed'}, "
+              f"{got_strict['unresolved_total']} unresolved "
+              f"(baseline {base_strict.get('unresolved_total', '-')}), executable produced: "
+              f"{'yes' if got_strict['binary_produced'] else 'no'}")
+        if not got_strict["agrees_with_nm"]:
+            failures.append(
+                f"the strict link's unresolved list and the nm scan disagree: "
+                f"{len(got_strict['only_in_linker_report'])} symbol(s) only the linker reports, "
+                f"{len(got_strict['only_in_nm_scan'])} only the scan does")
+        if base_strict.get("attempted"):
+            if got_strict["unresolved_total"] > base_strict["unresolved_total"]:
+                failures.append(
+                    f"strict link: {base_strict['unresolved_total']} unresolved symbols in the "
+                    f"baseline, {got_strict['unresolved_total']} now")
+            elif got_strict["unresolved_total"] < base_strict["unresolved_total"]:
+                improvements.append(f"strict link: {base_strict['unresolved_total']} -> "
+                                    f"{got_strict['unresolved_total']} unresolved symbols")
+    elif base_strict.get("attempted"):
+        failures.append("the baseline was measured with --strict-link and these results were not, "
+                        "so the executable figure it ratchets went unmeasured")
 
     if improvements:
         print()
