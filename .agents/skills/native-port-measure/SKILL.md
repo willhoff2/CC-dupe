@@ -95,8 +95,8 @@ python3 scripts/audio-surface-scan.py --check
 
 Ubuntu 22.04 ships CMake 3.22, which the top-level `cmake_minimum_required(3.25)` rejects; the
 `audio-surface-scan.py --check` half of the pair still runs without a build, but the symbol gate does
-not. `pip install --user cmake` provides a new enough `~/.local/bin/cmake` without touching the
-system one.
+not. `pip install --user 'cmake==4.1.2'` provides a new enough `~/.local/bin/cmake` without touching
+the system one; that is the version the audio CI job pins, so it configures the same way.
 
 ## 6. Regenerate the status document
 
@@ -104,6 +104,11 @@ system one.
 python3 scripts/porting-status.py          # rewrite docs/porting/STATUS.md
 python3 scripts/porting-status.py --check  # what CI runs
 ```
+
+The native build's `First diagnostic` column is attributed from the generator's failure block
+(`FAILED: <obj>` under Ninja), not by looking for the file's own name in the log: most failures
+report their first error inside an included header, so a basename scan silently leaves the column
+empty. If a re-measurement changes only that column, suspect the attribution and not the tree.
 
 `STATUS.md` is generated from the baselines and must never be hand-edited. Then grep the rest of
 `docs/porting/*.md` for any figure your change moved and update or mark it superseded.

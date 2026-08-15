@@ -484,6 +484,9 @@ def configure(build_dir, manifest_dir, targets, extra_slugs=()):
         raise SystemExit("cmake configure failed")
 
 
+FAILED_OBJ_RE = re.compile(r"^FAILED: (\S+\.o)\b")
+
+
 def build(build_dir, jobs):
     """Build everything, keeping going past failures.
 
@@ -518,9 +521,29 @@ def build(build_dir, jobs):
         if not obj_path.is_file():
             failed.add(pathlib.Path(source))
 
-    diagnostics = {}
+    # Attribute a diagnostic to the translation unit whose compile emitted it, by reading the
+    # generator's failure block, and only fall back to matching the file's own name. Scanning the
+    # whole log for the basename loses the diagnostic whenever clang reports the error inside an
+    # included header (61 of 79 failures here) and can pick up an error from an unrelated unit that
+    # merely includes the file.
     lines = log.splitlines()
+    diagnostics = {}
+    current = None
+    for line in lines:
+        match = FAILED_OBJ_RE.match(line)
+        if match:
+            obj = match.group(1)
+            current = pathlib.Path(obj_to_source[obj]) if obj in obj_to_source else None
+            continue
+        if current is None or current in diagnostics:
+            continue
+        if ": error:" in line or ": fatal error:" in line:
+            diagnostics[current] = line.split(": error:", 1)[-1] \
+                .split(": fatal error:", 1)[-1].strip()
+
     for source in failed:
+        if source in diagnostics:
+            continue
         for line in lines:
             if source.name not in line:
                 continue

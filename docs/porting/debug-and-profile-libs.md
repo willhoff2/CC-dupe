@@ -205,7 +205,10 @@ The denominators grew by two because this slice adds two files the probe walks:
 All 15 translation units the build actually compiles — the 10 in `core_debug` and the 5 in
 `core_profile_legacy` — are clean natively, up from 1 and 0. Repository totals move 647 / 749 →
 663 / 751 native and 694 / 749 → 703 / 751 shimmed (re-measured after rebasing onto `main` with the
-Win32 file-API seam, #45, merged).
+Win32 file-API seam, #45, merged). Superseded on `main` at 4306101: 663 / 752 native and
+704 / 752 shimmed — the denominator grew by one and the shimmed count with it, because #46 added
+`WWMath/d3dx8math.cpp`, not because anything in this slice changed. `docs/porting/STATUS.md` carries
+the current totals.
 
 The 10 remaining native failures in `debug` are all sample and tool programs that no CMake target
 builds and that this slice deliberately leaves on Wine: `test1/` … `test6/` (five of them fail only
