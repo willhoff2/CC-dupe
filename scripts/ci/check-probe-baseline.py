@@ -91,7 +91,10 @@ def main():
         elif got["clean"] > base["clean"]:
             mark = "  <-- improved"
             improvements.append(f"{name}: {base['clean']} -> {got['clean']}")
-        print(f"{name:45s} {got['clean']:>5d}/{got['total']:<6d} {base['clean']:>4d}/{base['total']:<5d}{mark}")
+        print(
+            f"{name:45s} {got['clean']:>5d}/{got['total']:<6d} "
+            f"{base['clean']:>4d}/{base['total']:<5d}{mark}"
+        )
 
     for name in results["targets"]:
         if name not in baseline["targets"]:

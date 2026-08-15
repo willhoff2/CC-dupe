@@ -8,6 +8,26 @@ name: Native Port CI
 # Deliberately NOT here: the Wine/VC6 Docker game build (scripts/docker-build.sh). It takes ~10
 # minutes, and it is the manual release gate, not a per-push check.
 #
+# When this runs, and what runs:
+#  * On a pull request, only the jobs whose measurement the diff can move. The `changes` job below
+#    classifies the diff and every heavy job is gated on one of its outputs, because this workflow
+#    is 12 jobs (~45 runner-minutes, 3 of them macOS at a 10x billing multiplier) and a
+#    docs-only change cannot move a single number in it. Measured on this repo: ~44% of recent
+#    commits touch only docs/ and .agents/.
+#  * On push to main and on workflow_dispatch, everything, unconditionally -- `changes` forces its
+#    outputs true off pull_request. Nothing lands on main unmeasured; the path gating only decides
+#    what a pull request pays for, never what main is held to.
+#  * NOT on push to 'devin/**'. Those branches always have a pull request, so a push trigger ran
+#    the whole 12-job fan-out a second time for the same commit and both halves then sat in the
+#    runner queue behind each other.
+#  * The cheap tier (lint, d3d8-surface) is not gated: it is seconds on a bare runner, it needs no
+#    container, and a docs-only change genuinely can break it -- docs/porting/STATUS.md is
+#    generated, and check-generated-baselines.py is the first diagnosis when a baseline was
+#    hand-merged.
+#
+# `required-checks` at the bottom aggregates the lot, so branch protection has one check to
+# require that stays correct as jobs are added, skipped or renamed.
+#
 # Reproducibility notes:
 #  * The Linux jobs run in a digest-pinned ubuntu:22.04 container rather than on the runner image,
 #    because the probe's clean-TU count depends on the clang version and the spike's readback
@@ -24,7 +44,6 @@ on:
   push:
     branches:
       - main
-      - 'devin/**'
   pull_request:
     branches:
       - main
@@ -49,10 +68,116 @@ concurrency:
 # measured, see the PR description. `container.image` cannot read the `env` context, so each
 # digest is repeated per job rather than named once.
 jobs:
+  # 0. What did this change touch? Every heavy job below is gated on one of these outputs.
+  #
+  #    The rules live in scripts/ci/classify-changes.py rather than in a paths-filter block here,
+  #    for one reason: `code` is the *complement* of the prose list, and expressing a complement in
+  #    a glob-matching action means negation patterns whose semantics decide whether a gate runs.
+  #    Getting that subtly wrong skips a gate silently. The script carries a --self-check the lint
+  #    job runs, so the classification is asserted against paths from real commits before a branch
+  #    is ever pushed.
+  #
+  #    Off pull_request (push to main, workflow_dispatch) every output is forced true: main is the
+  #    branch every number in docs/porting/ is quoted from and it is held to the whole suite.
+  changes:
+    name: What changed?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # `github.event_name != 'pull_request'` is the "run everything on main" clause.
+      code: ${{ steps.classify.outputs.code == 'true' || github.event_name != 'pull_request' }}
+      renderer: ${{ steps.classify.outputs.renderer == 'true' || github.event_name != 'pull_request' }}
+      window: ${{ steps.classify.outputs.window == 'true' || github.event_name != 'pull_request' }}
+      audio: ${{ steps.classify.outputs.audio == 'true' || github.event_name != 'pull_request' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The classification is against the merge base, so the base branch's history is needed.
+          fetch-depth: 0
+
+      - name: Classify the diff
+        id: classify
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # Three-dot: what this branch changed, not what main changed underneath it.
+          git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)" HEAD \
+            | python3 scripts/ci/classify-changes.py | tee -a "$GITHUB_OUTPUT"
+
+      - name: Summary
+        env:
+          CODE: ${{ steps.classify.outputs.code }}
+          RENDERER: ${{ steps.classify.outputs.renderer }}
+          WINDOW: ${{ steps.classify.outputs.window }}
+          AUDIO: ${{ steps.classify.outputs.audio }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          {
+            echo '## What changed'
+            if [ "$EVENT" != 'pull_request' ]; then
+              echo "Event \`$EVENT\`: every job runs, regardless of the paths touched."
+            else
+              echo
+              echo "| area | can this diff move it? |"
+              echo "| --- | --- |"
+              echo "| code (probe, build, seams) | $CODE |"
+              echo "| renderer | $RENDERER |"
+              echo "| window | $WINDOW |"
+              echo "| audio | $AUDIO |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # 0a. The lint rung of the verification ladder, which was not in CI at all: the scripts these
+  #     gates are written in, and the workflows that run them. Seconds, and ungated -- a broken
+  #     scripts/ci/*.py is the most common way for every other job here to fail confusingly.
+  lint:
+    name: Lint (flake8, actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install the linters
+        run: |
+          set -eux
+          python3 -m pip install --quiet 'flake8==7.1.1'
+          # Both pinned to a version rather than curl|bash from a release page, so the lint result
+          # cannot change under a commit that touched nothing.
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+      # Line length and the exclusions for the upstream tooling under scripts/cpp/ come from
+      # .flake8, so this is the same command the contributor guide and the local ladder run.
+      - name: flake8
+        run: python3 -m flake8 scripts/
+
+      - name: actionlint
+        run: |
+          set -eux
+          "$(go env GOPATH)/bin/actionlint" .github/workflows/*.yml
+
+      # The rules that decide which jobs this workflow skips, checked against paths from real
+      # commits. A wrong answer here does not fail anything by itself -- it silently does not run a
+      # gate -- so it is asserted rather than trusted.
+      - name: Check the change-classification rules
+        run: |
+          set -o pipefail
+          {
+            echo '## Change classification rules'
+            echo '```'
+            python3 scripts/ci/classify-changes.py --self-check
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   # 1. The native 64-bit clang readiness probe, gated against a checked-in baseline so a
   #    portability regression fails the build instead of printing a smaller number.
   native-probe:
     name: Native probe (Linux, clang 14)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
@@ -133,6 +258,8 @@ jobs:
   #    are compiler-version dependent, and the checker refuses to compare across clang majors.
   native-build:
     name: Native build (Linux, clang 14, 64-bit)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
@@ -326,6 +453,8 @@ jobs:
   #     per-category movement.
   native-build-renderer:
     name: Native build + renderer (Linux, clang 14, 64-bit)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
@@ -433,6 +562,8 @@ jobs:
   #     docs/porting/debug-and-profile-libs.md.
   debug-profile-seam:
     name: Debug/profile seam (Linux, clang 14)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
@@ -480,6 +611,8 @@ jobs:
   #     asserted from Linux.
   debug-profile-seam-macos:
     name: Debug/profile seam (macOS arm64)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -516,6 +649,8 @@ jobs:
   # all four to agree, and requires the pre-port spelling to still fail.
   lanmessage-layout:
     name: LAN packet layout (32/64-bit)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
@@ -555,6 +690,8 @@ jobs:
   #    validation layer must be loaded and silent.
   renderer-spike-linux:
     name: Renderer spike (Linux, lavapipe)
+    needs: changes
+    if: needs.changes.outputs.renderer == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
@@ -752,6 +889,8 @@ jobs:
   #    jammy ships CMake 3.22 and the root CMakeLists needs 3.25, hence the pip install.
   openal-backend:
     name: OpenAL backend build (Linux)
+    needs: changes
+    if: needs.changes.outputs.audio == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
@@ -847,6 +986,8 @@ jobs:
   #    It does NOT assert pixel equality with the Linux reference: the Linux job owns that.
   renderer-spike-macos:
     name: Renderer spike (macOS arm64, MoltenVK)
+    needs: changes
+    if: needs.changes.outputs.renderer == 'true'
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -965,6 +1106,8 @@ jobs:
   #    verified by hand on a desktop X session - see the doc.
   window-seam-linux:
     name: Window seam (Linux, Xvfb + lavapipe)
+    needs: changes
+    if: needs.changes.outputs.window == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
@@ -1065,6 +1208,8 @@ jobs:
   #        bottom-left-to-top-left mouse flip is unexercised.
   window-seam-macos:
     name: Window seam (macOS arm64, CAMetalLayer)
+    needs: changes
+    if: needs.changes.outputs.window == 'true'
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -1165,3 +1310,60 @@ jobs:
           name: window-spike-macos
           path: window-spike-macos.png
           if-no-files-found: ignore
+
+  # 8. One check for branch protection to require. Every job above is now conditional, and a
+  #    required check that is skipped never reports, so requiring them individually would either
+  #    block a docs-only pull request forever or have to be edited every time a job is added or
+  #    renamed. This job runs unconditionally, so it always reports, and it fails if anything it
+  #    depends on failed or was cancelled -- a skipped job is a pass, which is the whole point of
+  #    the gating above.
+  required-checks:
+    name: Native port CI
+    if: always()
+    needs:
+      - changes
+      - lint
+      - native-probe
+      - native-build
+      - native-build-renderer
+      - debug-profile-seam
+      - debug-profile-seam-macos
+      - lanmessage-layout
+      - renderer-spike-linux
+      - d3d8-surface
+      - openal-backend
+      - renderer-spike-macos
+      - window-seam-linux
+      - window-seam-macos
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report every job's result and fail on any failure
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS"])
+          lines = ["## Job results", "", "| job | result |", "| --- | --- |"]
+          bad = []
+          for job in sorted(needs):
+              result = needs[job]["result"]
+              lines.append(f"| {job} | {result} |")
+              # `skipped` is a pass: the change could not move that measurement.
+              if result not in ("success", "skipped"):
+                  bad.append(f"{job}: {result}")
+
+          summary = "\n".join(lines)
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write(summary + "\n")
+
+          if bad:
+              print("\nfailed: " + ", ".join(bad))
+              sys.exit(1)
+          PY

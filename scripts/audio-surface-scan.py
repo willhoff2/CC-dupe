@@ -225,7 +225,8 @@ def measure_supply():
         callees = set()
         for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", body):
             callees.add(match.group(1))
-        for match in re.finditer(r"\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(|->\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(", body):
+        member_call_re = r"\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(|->\s*([A-Za-z_][A-Za-z0-9_]*)\s*\("
+        for match in re.finditer(member_call_re, body):
             callees.add(match.group(1) or match.group(2))
         edges[name] = callees
 
