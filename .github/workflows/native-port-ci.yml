@@ -710,6 +710,13 @@ jobs:
         if: always()
         run: python3 spikes/renderer/tools/backend-coverage-scan.py | tee backend-coverage.txt
 
+      # Before any gate compares a number: assert the baselines are still readable. A hand-resolved
+      # merge conflict once left native-build-shimmed-level1-2-3-4.json syntactically invalid on
+      # main, and because every gate that reads it crashes rather than fails, it looked like a broken
+      # script. This runs in the cheap job so the diagnosis arrives first.
+      - name: Check the checked-in baselines parse
+        run: python3 scripts/ci/check-generated-baselines.py
+
       # docs/porting/STATUS.md is generated from the same baselines and allowlist these gates read,
       # so it can only go stale if someone edits it by hand or refreshes a baseline without
       # regenerating it. Both are failures.

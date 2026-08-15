@@ -1,0 +1,16 @@
+# Generated measurement artefacts. Every port slice rewrites these because every slice moves the
+# numbers, so left to git's textual merge they conflict in every rebase of every concurrent slice --
+# and a hand resolution is worse than a conflict: one produced a syntactically invalid
+# native-build-shimmed-level1-2-3-4.json on main (two compile_failures blocks concatenated), which
+# no reviewer spotted because nobody reads these files by eye.
+#
+# `merge=generated` keeps the current branch's copy instead of interleaving the two, on the
+# understanding that the copy is then *regenerated* rather than trusted -- see
+# scripts/git-merge-generated.sh, which says so on every use, and
+# scripts/ci/check-generated-baselines.py, which fails CI if a baseline does not parse.
+#
+# Register the driver in your clone with scripts/install-git-hooks.sh (git cannot ship a merge
+# driver in-tree: .gitattributes names it, local config defines it).
+docs/porting/ci-baselines/*.json  merge=generated
+docs/porting/native-build-report.md  merge=generated
+docs/porting/STATUS.md  merge=generated
