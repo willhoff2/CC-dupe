@@ -11,7 +11,7 @@
     "stb-src"
   ],
   "clean": 670,
-  "total": 758,
+  "total": 759,
   "targets": {
     "Core/Libraries/Source/Compression": {
       "clean": 11,
@@ -19,7 +19,7 @@
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
       "clean": 33,
-      "total": 36
+      "total": 37
     },
     "Core/Libraries/Source/WWVegas/WWLib": {
       "clean": 69,

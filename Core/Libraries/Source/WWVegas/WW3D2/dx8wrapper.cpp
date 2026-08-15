@@ -85,6 +85,9 @@
 #include "dx8texman.h"
 #include "WWLib/bound.h"
 #include "WWLib/DbgHelpGuard.h"
+// TheSuperHackers @port The driver version of D3DADAPTER_IDENTIFIER8, whose spelling depends on the
+// vendored header's own _WIN32 branch; see docs/porting/win32-runtime-and-crt-gaps.md
+#include <Utility/d3d8_compat.h>
 
 #include "shdlib.h"
 
@@ -699,12 +702,16 @@ void DX8Wrapper::Enumerate_Devices()
 			desc.set_device_name(id.Description);
 			desc.set_driver_name(id.Driver);
 
+			const __int64 driver_version = D3D8AdapterDriverVersion(id);
+			const unsigned long driver_version_high = (unsigned long)((driver_version >> 32) & 0xffffffff);
+			const unsigned long driver_version_low = (unsigned long)(driver_version & 0xffffffff);
+
 			char buf[64];
 			sprintf(buf,"%d.%d.%d.%d", //"%04x.%04x.%04x.%04x",
-				HIWORD(id.DriverVersion.HighPart),
-				LOWORD(id.DriverVersion.HighPart),
-				HIWORD(id.DriverVersion.LowPart),
-				LOWORD(id.DriverVersion.LowPart));
+				HIWORD(driver_version_high),
+				LOWORD(driver_version_high),
+				HIWORD(driver_version_low),
+				LOWORD(driver_version_low));
 
 			desc.set_driver_version(buf);
 

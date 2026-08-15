@@ -57,6 +57,17 @@ own counts move by the same single file: native 669/757 → 670/758, shimmed 712
 `HANDLE`/`HOSTENT`/`AsnObjectIdentifier` (GameSpy, cut scope). The 157 symbols still attributed to
 uncompiled units are theirs, plus the Miles and FFmpeg layers that are not linked here.
 
+### Re-measured after the browser and D3DX slices landed
+
+Both columns above were measured before `main` gained the browser excision (#65) and the D3DX math
+family (#66), so they no longer describe the tree. Re-measured on `8bb8aff56`, levels 1-4 stand at
+**968 / 972 objects, 4 failures, 339 undefined symbols**; the only failure left outside GameSpy is
+`dx8wrapper.cpp`, which needs the user32 window-management surface (`GetWindowLong`, `GWL_STYLE`,
+`AdjustWindowRect`, `GetMonitorInfo`) that the window/input slice owns. `dx8wrapper.cpp` had a second
+copy of the `DriverVersion` arithmetic below, which now calls `D3D8AdapterDriverVersion()` too, so
+there is one answer to that vendored-header split in the tree rather than three. The generated
+`docs/porting/ci-baselines/*.json` are the authority for all of these.
+
 ## 2. The two new shims
 
 Both follow the existing style: declarations and macros only, no definitions, and the vendored
