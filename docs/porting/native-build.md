@@ -480,3 +480,37 @@ Drop `--level 4` for the smaller build; the baseline the gate compares against i
 levels in the results, so the two cannot be confused with each other.
 
 Add `--update` to the last command, in the PR that earns it, when the counts improve.
+
+## The generated files, and why they stopped conflicting
+
+`docs/porting/ci-baselines/*.json`, `docs/porting/native-build-report.md` and
+`docs/porting/STATUS.md` are outputs of the two scripts above. Every port slice moves the numbers, so
+through waves 3-5 every concurrent slice conflicted in exactly these three files on every rebase, and
+each conflict invited a hand resolution of a file no human reads by eye. One such resolution
+concatenated both sides' `compile_failures` objects and put a `native-build-shimmed-level1-2-3-4.json`
+on `main` that was not JSON at all:
+
+```
+json.decoder.JSONDecodeError: Expecting ',' delimiter: line 14 column 5
+```
+
+Three things now hold, in increasing order of how much they can be trusted:
+
+1. **Convention.** A slice's PR contains its source change; the baselines are regenerated in one
+   commit, once, after the slice's source is settled — never merged, never edited. This is the same
+   rule `docs/porting/concurrent-slices.md` states as single-writer ownership of these paths, applied
+   to rebases rather than to authorship.
+2. **`.gitattributes` marks them `merge=generated`,** whose driver
+   (`scripts/git-merge-generated.sh`, registered by `scripts/install-git-hooks.sh`) resolves to the
+   copy already on the branch being rebased onto — i.e. `main`'s — rather than interleaving two
+   generated documents. **This discards your measurement by design**: the slice then regenerates.
+   A slice commit that touched *only* these files therefore becomes empty and git drops it, which is
+   the correct outcome, and one that touches source keeps its source change untouched.
+3. **`scripts/ci/check-generated-baselines.py`** fails the build if a checked-in baseline does not
+   parse or has lost a key its gate needs. The ratchets cannot do this: they load the baseline, so a
+   corrupt one crashes them, and a crashing gate reads as a broken script rather than a broken file.
+
+The driver is a convenience with a sharp edge — it is silent about *which* number it dropped — so the
+re-measure is not optional. `check-native-build-baseline.py` compares a fresh measurement against the
+checked-in one on every push, which is what makes a forgotten regeneration visible: it shows up as an
+improvement or a regression against a baseline nobody meant to keep.

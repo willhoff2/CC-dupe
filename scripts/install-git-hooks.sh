@@ -1,6 +1,7 @@
 #!/bin/sh
 # Point this clone's hooks at the tracked .githooks directory, so the hooks are versioned with the
-# code instead of living in each contributor's .git/hooks. Idempotent; safe to re-run.
+# code instead of living in each contributor's .git/hooks, and register the merge driver
+# .gitattributes names. Idempotent; safe to re-run.
 set -e
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -20,3 +21,12 @@ echo "Installed the hooks in .githooks:"
 for hook in .githooks/*; do
 	echo "  $(basename "$hook")"
 done
+
+# .gitattributes marks the generated measurement artefacts merge=generated, but a merge driver
+# cannot be defined in-tree: the attribute names it and local config has to supply the command.
+# Without this the attribute is inert and those files conflict textually, as they did through
+# waves 3-5.
+chmod +x scripts/git-merge-generated.sh
+git config merge.generated.name "keep this branch's copy of a generated file, then regenerate it"
+git config merge.generated.driver "scripts/git-merge-generated.sh %O %A %B %P"
+echo "Registered the merge=generated driver for docs/porting/ci-baselines/*.json and friends."
