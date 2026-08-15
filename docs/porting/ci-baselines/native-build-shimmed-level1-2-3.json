@@ -81,13 +81,13 @@
   "link_entry_point_archives": [
     "libgeneralsmd_code_main"
   ],
-  "objects": 837,
-  "probe_clean": 837,
+  "objects": 838,
+  "probe_clean": 838,
   "third_party_linked": [
     "libthirdparty_lzhl",
     "z (system)"
   ],
-  "translation_units": 840,
+  "translation_units": 841,
   "undefined_by_category": {
     "Defined in a built translation unit behind a disabled #if (build option / platform)": 10,
     "Defined in a layer not built here (renderer / audio)": 385,
