@@ -163,7 +163,16 @@ jobs:
       - name: flake8
         run: python3 -m flake8 scripts/
 
+      # --severity=error for shellcheck, which actionlint shells out to whenever it is on PATH: it
+      # is on the hosted runners and is absent from most local environments, so without this the job
+      # reports findings the local rung of the ladder cannot reproduce. The workflows carry 45
+      # info/style/warning findings, mostly SC2086 unquoted "$GITHUB_OUTPUT" in upstream files;
+      # fixing those means rewriting shell this port does not own, and conflicting with every future
+      # upstream merge. Errors -- the ones where the script does not do what it reads as -- still
+      # fail the job.
       - name: actionlint
+        env:
+          SHELLCHECK_OPTS: --severity=error
         run: |
           set -eux
           "$(go env GOPATH)/bin/actionlint" .github/workflows/*.yml
@@ -178,6 +187,50 @@ jobs:
             echo '## Change classification rules'
             echo '```'
             python3 scripts/ci/classify-changes.py --self-check
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # 0b. The gates that read the tree and nothing else: no toolchain, no container, no build, about a
+  #     minute in total. Ungated for a reason -- window-input-scan.py walks the whole repository and
+  #     compares the Win32 window/event/input surface against a checked-in baseline, so *any* engine
+  #     file can move its count. Gating that on a path list would let an unrelated file grow the
+  #     surface with the count unchecked, which is the failure mode the classifier is written to
+  #     avoid. These ran inside the (gated, build-heavy) window-seam jobs before.
+  source-scans:
+    name: Source scans (no build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Scan the Win32 window/event/input surface against the baseline
+        run: |
+          set -o pipefail
+          {
+            echo '## Win32 window / event loop / input surface'
+            echo '```'
+            python3 scripts/window-input-scan.py --check
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Check both backends' scan-code tables against KeyScanCodes.h
+        run: |
+          set -o pipefail
+          {
+            echo '## Scan-code tables'
+            echo '```'
+            python3 scripts/ci/check-window-scancodes.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the engine's non-Windows window/input path goes through the seam
+        run: |
+          set -o pipefail
+          {
+            echo '## Window seam wiring'
+            echo '```'
+            python3 scripts/ci/check-window-seam-wiring.py
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -1137,35 +1190,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Scan the Win32 window/event/input surface against the baseline
-        run: |
-          set -o pipefail
-          {
-            echo '## Win32 window / event loop / input surface'
-            echo '```'
-            python3 scripts/window-input-scan.py --check
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Check both backends' scan-code tables against KeyScanCodes.h
-        run: |
-          set -o pipefail
-          {
-            echo '## Scan-code tables'
-            echo '```'
-            python3 scripts/ci/check-window-scancodes.py
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Check the engine's non-Windows window/input path goes through the seam
-        run: |
-          set -o pipefail
-          {
-            echo '## Window seam wiring'
-            echo '```'
-            python3 scripts/ci/check-window-seam-wiring.py
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+      # The three source-only window checks that used to run here are in `source-scans` now: they
+      # need no build, and window-input-scan.py walks the whole repository, so gating them on the
+      # window path list would have let an unrelated engine file move a counted surface unchecked.
 
       - name: Build the seam and the window spike
         env:
@@ -1332,6 +1359,7 @@ jobs:
     needs:
       - changes
       - lint
+      - source-scans
       - native-probe
       - native-build
       - native-build-renderer

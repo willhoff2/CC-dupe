@@ -29,7 +29,7 @@ Queue snapshot while measuring: **18 runs queued against 2 running**, and GenCI'
 
 | event | what runs |
 | --- | --- |
-| `pull_request` to `main` | lint, D3D8 surface scanner, and only the heavy jobs whose measurement the diff can move |
+| `pull_request` to `main` | lint, the source scans, the D3D8 surface scanner, and only the heavy jobs whose measurement the diff can move |
 | `push` to `main` | everything, unconditionally |
 | `workflow_dispatch` | everything, unconditionally |
 | `push` to `devin/**` | nothing — the pull request covers it |
@@ -44,23 +44,33 @@ The `changes` job classifies the diff against the merge base with
 | --- | --- | --- |
 | `code` | native probe, native build, native build + renderer, debug/profile seam (Linux + macOS), LAN packet layout | any changed path that is not prose (`docs/**`, `.agents/**`, `*.md`) |
 | `renderer` | renderer spike (Linux + macOS) | `spikes/**`, `WW3D2/`, `W3DDevice/`, `cmake/dx8.cmake` |
-| `window` | window seam (Linux + macOS) | `spikes/**`, `WWLib/platform/`, `KeyScanCodes.h`, `scripts/window-input-scan.py` |
+| `window` | window seam spike builds (Linux + macOS) | `spikes/**`, `WWLib/platform/`, `KeyScanCodes.h`, `PlatformWindowHost.*`, `PlatformMain.cpp`, `Win32Device/`, `scripts/window-input-scan.py` |
 | `audio` | OpenAL backend build | `OpenALAudioDevice/`, `WWAudio/`, `GameAudio/`, `cmake/openal.cmake`, `CMakeLists.txt`, `scripts/audio-surface-scan.py` |
 
 Two properties matter more than the table:
 
 * **Conservative by construction.** `code` is the complement of the prose list, so a path nobody
   thought about lands in `code` rather than being skipped. A change to CI plumbing itself
-  (`native-port-ci.yml`, `scripts/ci/**`) sets *every* area, because a change to a gate must be
-  run through that gate.
+  (`native-port-ci.yml`, `scripts/ci/**`) sets *every* area, because a change to a gate has to be
+  run through that gate. `docs/porting/ci-baselines/**` counts as plumbing rather than prose for the
+  same reason: those files *are* the recorded numbers, so a diff that loosens one is the last diff
+  that should skip the gate comparing against it.
 * **Asserted, not trusted.** The rules are Python with a `--self-check` covering paths taken from
   real commits on this repo, and the `lint` job runs it. A misclassification does not fail
   anything by itself — it silently does not run a gate — which is exactly the failure mode that
   has to be tested rather than reviewed.
 
-`d3d8-surface` and the new `lint` job are ungated: both are seconds on a bare runner, and a
-docs-only change genuinely can break them (`docs/porting/STATUS.md` is generated, and
-`check-generated-baselines.py` is the first diagnosis when a baseline was hand-merged).
+Three jobs are ungated, because they need no build and a docs-only change can genuinely break them:
+`lint`, `d3d8-surface` (`docs/porting/STATUS.md` is generated, and `check-generated-baselines.py` is
+the first diagnosis when a baseline was hand-merged) and `source-scans`.
+
+`source-scans` is new and holds the three source-only window checks that used to sit inside the
+build-heavy, gated window-seam jobs: `window-input-scan.py --check`,
+`ci/check-window-scancodes.py` and `ci/check-window-seam-wiring.py`. The first walks the **whole
+repository** and compares the Win32 window/event/input surface against a checked-in baseline, so any
+engine file can move its count — gating it on a path list would let an unrelated file grow the
+surface with the count unchecked. Splitting it out means the whole-repo ratchet runs on every PR
+while the expensive spike builds stay gated.
 
 ## Branch protection
 
@@ -76,7 +86,13 @@ need editing every time a job is added or renamed.
   no workflow. It is a job now. `.flake8` excludes the upstream tools under `scripts/cpp/` and
   `run-clang-tidy.py`/`fix_compile_commands.py`, which hold all 909 pre-existing violations;
   reformatting them would conflict with every future upstream merge. Everything the port owns is
-  clean and gated.
+  clean and gated. Two determinism notes, both learned from this branch's own CI:
+  * The job pins Python to 3.10, the version the dev environment provides. Since PEP 701 (3.12)
+    pycodestyle tokenizes inside f-strings, so a 3.12 runner reports E741/E501 inside f-string
+    expressions that a 3.10 one cannot — the local rung passed while CI failed.
+  * `SHELLCHECK_OPTS=--severity=error`. `actionlint` shells out to `shellcheck` whenever it is on
+    PATH; it is on the hosted runners and usually absent locally. At `info`/`style`/`warning` the
+    workflows carry 45 findings, mostly `SC2086` unquoted `$GITHUB_OUTPUT` in upstream files.
 * `replaycheck-generalsmd` in `ci.yml` read `needs.detect-changes.outputs` without listing
   `detect-changes` in `needs`, so those outputs were the empty string and the replay check only
   ever ran on `workflow_dispatch`. `actionlint` reports it; adding the lint job surfaced it.

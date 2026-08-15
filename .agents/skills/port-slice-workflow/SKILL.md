@@ -85,7 +85,10 @@ Cheapest first; run the rungs your change can affect. Details in the `native-por
 # .flake8 -- reformatting them would conflict with every future upstream merge.
 python3 -m flake8 scripts/                        # settings come from .flake8; do not pass overrides
 python3 scripts/ci/classify-changes.py --self-check   # which CI jobs a diff is allowed to skip
-actionlint .github/workflows/*.yml                # the glob, not the directory, which is rejected
+# Match CI exactly: it pins Python 3.10 (3.12's pycodestyle looks inside f-strings) and caps
+# shellcheck at errors (actionlint invokes shellcheck when it is on PATH, and the upstream
+# workflows carry 45 info/style/warning findings this port does not own).
+SHELLCHECK_OPTS=--severity=error actionlint .github/workflows/*.yml   # the glob; the dir is rejected
 ./scripts/ci/fetch-probe-deps.sh && CLANGXX=clang++-14 python3 scripts/native-port-probe.py --json probe-native.json
 python3 scripts/ci/check-probe-baseline.py --results probe-native.json
 python3 scripts/porting-status.py --check

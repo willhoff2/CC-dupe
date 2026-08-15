@@ -40,6 +40,14 @@ PROSE = (
     "*.md",
 )
 
+# Paths that live under a PROSE directory but are a gate's *input* rather than writing about one.
+# docs/porting/ci-baselines/ holds the ratchets themselves -- the probe counts, the undefined-symbol
+# budget, the window/input surface -- so a diff that loosens a recorded number is the last diff that
+# should skip the gate that reads it.
+NOT_PROSE = (
+    "docs/porting/ci-baselines/*",
+)
+
 # Positive patterns per area, matched with fnmatch against repository-relative paths. `code` is not
 # here: it is the complement of PROSE.
 AREAS = {
@@ -50,11 +58,21 @@ AREAS = {
         "*/W3DDevice/*",
         "cmake/dx8.cmake",
     ),
-    # The window / event loop / input seam, on both backends.
+    # The window / event loop / input seam, on both backends. The engine-side half is here too:
+    # PlatformWindowHost and the Win32Device consumers are the subjects of
+    # scripts/ci/check-window-seam-wiring.py, so editing one has to run the seam's jobs.
+    #
+    # The repo-wide scanners those jobs used to carry (window-input-scan.py --check and the
+    # scan-code table check) are in the ungated `source-scans` job instead, because any engine file
+    # can move a whole-repo count and gating that on a path list would be exactly the silent skip
+    # this file exists to avoid. What is left behind these patterns needs a build.
     "window": (
         "spikes/*",
         "*/WWLib/platform/*",
         "*/KeyScanCodes.h",
+        "*/PlatformWindowHost.*",
+        "*/PlatformMain.cpp",
+        "*/Win32Device/*",
         "scripts/window-input-scan.py",
     ),
     # The OpenAL replacement for Miles and its WWAudio consumers. CMakeLists.txt is in because the
@@ -69,10 +87,12 @@ AREAS = {
     ),
 }
 
-# The CI plumbing moves every measurement by definition: it is what runs them.
+# The CI plumbing moves every measurement by definition: it is what runs them, and -- for the
+# baselines -- what they are compared against.
 PLUMBING = (
     ".github/workflows/native-port-ci.yml",
     "scripts/ci/*",
+    "docs/porting/ci-baselines/*",
 )
 
 
@@ -81,7 +101,7 @@ def _matches(path, patterns):
 
 
 def is_prose(path):
-    return _matches(path, PROSE)
+    return _matches(path, PROSE) and not _matches(path, NOT_PROSE)
 
 
 def classify(paths):
@@ -127,6 +147,25 @@ SELF_CHECK = (
     (
         ["scripts/ci/check-probe-baseline.py"],
         {"code": True, "renderer": True, "window": True, "audio": True},
+    ),
+    # A baseline lives under docs/ but is a gate input, not prose: loosening a recorded number runs
+    # everything that compares against one.
+    (
+        ["docs/porting/ci-baselines/window-input-scan.json"],
+        {"code": True, "renderer": True, "window": True, "audio": True},
+    ),
+    # The seam's engine-side wiring: the subjects of check-window-seam-wiring.py.
+    (
+        ["Core/GameEngine/Source/GameClient/PlatformWindowHost.cpp"],
+        {"code": True, "renderer": False, "window": True, "audio": False},
+    ),
+    (
+        ["Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp"],
+        {"code": True, "renderer": False, "window": True, "audio": False},
+    ),
+    (
+        ["GeneralsMD/Code/Main/PlatformMain.cpp"],
+        {"code": True, "renderer": False, "window": True, "audio": False},
     ),
     # Docs plus one source file is a source change: the prose does not dilute it.
     (
