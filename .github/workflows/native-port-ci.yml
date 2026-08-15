@@ -200,6 +200,22 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Same argument for the kernel32 runtime seam: that it links says nothing about whether the
+      # mutex is recursive, whether the Interlocked calls return the value the lock-free queue
+      # compares against, or whether lstrcpyn() counts the terminator.
+      # See docs/porting/win32-runtime-and-crt-gaps.md.
+      - name: Run the Win32 runtime seam's behaviour test
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Win32 runtime seam behaviour'
+            echo '```'
+            python3 scripts/native-win32-runtime-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Bink is Windows-only and the port plays video through RTS_BUILD_OPTION_FFMPEG, so an
       # unconditional `bink.h` include is a regression rather than a missing port. This also asserts
       # the headers fetch-probe-deps.sh provisions are there, so the counts above cannot come from a

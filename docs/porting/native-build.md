@@ -256,6 +256,10 @@ Unresolved symbols rise for the reason the slices each predicted: 272 of the 457
 `WW3D2`, which levels 1+2+3 do not build. The total will not fall until the renderer library is
 built.
 
+The kernel32/CRT gap slice has since moved this on to 826/839 objects with 13 compile failures, and
+the unresolved total to 546 for the same reason — see `docs/porting/win32-runtime-and-crt-gaps.md`.
+`docs/porting/native-build-report.md` is the generated, authoritative version of these counts.
+
 ## What this does not show
 
 - **This is Linux x86-64, not macOS arm64.** Nothing here has been run on Apple Silicon. The
