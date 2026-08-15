@@ -881,6 +881,75 @@ Outcome Case_Surface_Read_Hazard(Harness& h) {
 }
 
 // ---------------------------------------------------------------------------
+// C8, continued: the same read, either side of an Update_Texture. This is the
+//     movie-capture shape -- read a surface, refresh the texture, read it again --
+//     and it is the sequence that caught a layout-tracking divergence: the copy
+//     transitions the image directly, so a GetSurfaceLevel surface viewing it kept
+//     the layout the image had left. The bytes stayed right and the validation
+//     layer objected, which is why this case asserts on the message count.
+// ---------------------------------------------------------------------------
+
+Outcome Case_Update_Texture_Surface_Read(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	const uint32_t before_messages = g.Validation_Message_Count();
+	TextureHandle* source =
+	    g.Create_Lockable_Texture(kTexWidth, kTexHeight, TextureFormat::A8R8G8B8, 1);
+	// The destination is an ordinary uploaded texture, which is what the engine
+	// updates into: its image sits in SHADER_READ_ONLY from creation, so the surface
+	// and the image can only disagree once a transfer has moved one of them.
+	std::vector<uint32_t> black(static_cast<size_t>(kTexWidth) * kTexHeight, 0u);
+	const TextureMip mip{black.data(), black.size() * sizeof(uint32_t), kTexWidth, kTexHeight};
+	TextureDesc desc;
+	desc.format = TextureFormat::A8R8G8B8;
+	desc.mip_count = 1;
+	desc.mips = &mip;
+	TextureHandle* destination = g.Create_Texture(desc);
+	if (source == nullptr || destination == nullptr) return Fail("texture creation failed");
+	SurfaceHandle* surface = g.Get_Surface_Level(destination, 0);
+	if (surface == nullptr) return Fail("Get_Surface_Level failed");
+
+	const uint32_t copied = 0xff336699u;
+	LockedRect locked;
+	if (!g.Lock_Texture(source, 0, nullptr, LOCK_NONE, locked)) return Fail("lock failed");
+	for (uint32_t y = 0; y < kTexHeight; ++y) {
+		auto* row = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(locked.bits) +
+		                                       static_cast<size_t>(y) * locked.pitch);
+		for (uint32_t x = 0; x < kTexWidth; ++x) row[x] = copied;
+	}
+	if (!g.Unlock_Texture(source, 0)) return Fail("unlock failed");
+
+	// The read *before* the update is what makes the divergence reachable: it leaves
+	// the surface in the layout its own transfer chose.
+	LockedRect bits;
+	if (!g.Surface_Bits(surface, bits)) return Fail("first Surface_Bits failed");
+
+	ResourceStats before = g.Get_Resource_Stats();
+	if (!g.Update_Texture(source, destination)) return Fail("Update_Texture failed");
+	ResourceStats after = g.Get_Resource_Stats();
+	if (after.gpu_write_marks == before.gpu_write_marks) {
+		return Fail("Update_Texture did not mark the destination GPU-written");
+	}
+
+	before = after;
+	if (!g.Surface_Bits(surface, bits)) return Fail("second Surface_Bits failed");
+	after = g.Get_Resource_Stats();
+	if (after.dirty_reads == before.dirty_reads) {
+		return Fail("the read after Update_Texture was not treated as dirty");
+	}
+	const Rgba got = From_Argb(*static_cast<const uint32_t*>(bits.bits));
+	if (!Near(got, From_Argb(copied), 2)) {
+		char detail[176];
+		std::snprintf(detail, sizeof(detail), "updated surface read as %s, expected %s",
+		              To_String(got).c_str(), To_String(From_Argb(copied)).c_str());
+		return Fail(detail);
+	}
+	if (g.Validation_Message_Count() != before_messages) {
+		return Fail("read -> Update_Texture -> read raised a validation message");
+	}
+	return Pass("a read either side of Update_Texture saw the copy, with the layer silent");
+}
+
+// ---------------------------------------------------------------------------
 // C5: dynamic ring stream. DynamicVBAccessClass::WriteLockClass and the six
 //     call sites that stream through it, plus W3DSnowManager::renderSubBox.
 // ---------------------------------------------------------------------------
@@ -1098,6 +1167,7 @@ int main(int argc, char** argv) {
 	report("C4 concurrent locks", Case_Concurrent_Locks(harness));
 	report("C6 full-level relock", Case_Whole_Lock_Preserves(harness));
 	report("C8 surface read hazard", Case_Surface_Read_Hazard(harness));
+	report("C8 read across update", Case_Update_Texture_Surface_Read(harness));
 	report("C5 dynamic ring stream", Case_Dynamic_Ring_Stream(harness));
 	report("L8 lock (no swizzle)", Case_L8_Lock(harness));
 	report("staging pool recycling", Case_Pool_Recycles_Staging(harness));
