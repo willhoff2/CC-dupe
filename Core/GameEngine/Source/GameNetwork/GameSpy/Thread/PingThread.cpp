@@ -28,7 +28,9 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-#include <winsock.h>	// This one has to be here. Prevents collisions with windsock2.h
+// TheSuperHackers @port BSD sockets behind the Winsock spellings; this is <winsock.h> on
+// Windows. It still has to be here. Prevents collisions with windsock2.h
+#include <Utility/socket_compat.h>
 
 #include "GameNetwork/GameSpy/PingThread.h"
 #include "WWLib/mutex.h"
@@ -333,6 +335,14 @@ void PingThreadClass::Thread_Function()
 //-------------------------------------------------------------------------
 //-------------------------------------------------------------------------
 
+// TheSuperHackers @port The round trip itself is Windows' ICMP API, hand-declared here because it
+// never had a public header: icmp.dll, loaded at run time. Off Windows there is no icmp.dll and no
+// portable equivalent that works unprivileged, so doPing() below takes the same path this code
+// already takes on a Windows box where LoadLibrary("ICMP.DLL") fails - it reports -1, "no ping".
+// Everything above is portable and still runs: the worker threads resolve hostnames and answer
+// every request. See docs/porting/online-path-excision.md.
+#ifdef _WIN32
+
 HANDLE WINAPI IcmpCreateFile(); /* INVALID_HANDLE_VALUE on error */
 BOOL WINAPI IcmpCloseHandle(HANDLE IcmpHandle); /* FALSE on error */
 
@@ -568,6 +578,15 @@ cleanup:
 
    return pingTime;
 }
+
+#else // _WIN32
+
+Int PingThreadClass::doPing(UnsignedInt /* IP */, Int /* timeout */)
+{
+	return -1;
+}
+
+#endif // _WIN32
 
 
 //-------------------------------------------------------------------------

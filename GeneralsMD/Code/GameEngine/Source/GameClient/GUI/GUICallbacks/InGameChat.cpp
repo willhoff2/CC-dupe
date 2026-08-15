@@ -154,9 +154,13 @@ Bool IsInGameChatActive() {
 }
 
 // Slash commands -------------------------------------------------------------------------
+// TheSuperHackers @port getQR2HostingStatus() lives in the GameSpy SDK's query & reporting
+// library, which is not linked off Windows. See docs/porting/online-path-excision.md.
+#ifdef RTS_HAS_GAMESPY
 extern "C" {
 int getQR2HostingStatus();
 }
+#endif
 extern int isThreadHosting;
 
 Bool handleInGameSlashCommands(UnicodeString uText)
@@ -177,7 +181,11 @@ Bool handleInGameSlashCommands(UnicodeString uText)
 	if (token == "host")
 	{
 		UnicodeString s;
+#ifdef RTS_HAS_GAMESPY
 		s.format(L"Hosting qr2:%d thread:%d", getQR2HostingStatus(), isThreadHosting);
+#else
+		s.format(L"Hosting thread:%d", isThreadHosting);
+#endif
 		TheInGameUI->message(s);
 		return TRUE; // was a slash command
 	}

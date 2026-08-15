@@ -29,6 +29,11 @@
 
 #pragma once
 
+// TheSuperHackers @port HTTPStartupWrapper/HTTPCleanupWrapper wrap ghttpStartup/ghttpCleanup so the
+// main menu, which is single-player code, does not name the GameSpy SDK itself. The wrappers do
+// nothing in a build without the SDK. See docs/porting/online-path-excision.md.
+void HTTPStartupWrapper();
+void HTTPCleanupWrapper();
 void HTTPThinkWrapper();
 void StopAsyncDNSCheck();
 void StartPatchCheck();

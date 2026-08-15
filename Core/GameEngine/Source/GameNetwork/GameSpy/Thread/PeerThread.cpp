@@ -389,6 +389,9 @@ void PeerThreadClass::clearPlayerStats(RoomType roomType)
 	}
 }
 
+// TheSuperHackers @port The room key push/pull is peer SDK traffic; the local stat bookkeeping above
+// is not. See docs/porting/online-path-excision.md.
+#ifdef RTS_HAS_GAMESPY
 void PeerThreadClass::pushStatsToRoom(PEER peer)
 {
 	DEBUG_LOG(("PeerThreadClass::pushStatsToRoom(): stats are %s=%s,%s=%s,%s=%s,%s=%s,%s=%s,%s=%s",
@@ -407,7 +410,15 @@ void PeerThreadClass::getStatsFromRoom(PEER peer, RoomType roomType)
 {
 	peerGetRoomKeys(peer, GroupRoom, "*", NumKeys, s_keys, getRoomKeysCallback, this, PEERFalse);
 }
+#endif // RTS_HAS_GAMESPY
 #endif // USE_BROADCAST_KEYS
+
+// TheSuperHackers @port From here to the end of the message queue's callback wrappers, and again from
+// the peer callbacks down, this file is the GameSpy peer/server-browser/QR2 client. The message queue
+// itself is what the menus hold, and it is built either way, so the single-player code that owns those
+// menus keeps compiling while nothing off Windows can open a chat or a staging room.
+// See docs/porting/online-path-excision.md.
+#ifdef RTS_HAS_GAMESPY
 
 Int PeerThreadClass::addServerToMap( SBServer server )
 {
@@ -530,6 +541,8 @@ void nickErrorCallbackWrapper( PEER peer, Int type, const char *nick, int numSug
 
 static void joinRoomCallback(PEER peer, PEERBool success, PEERJoinResult result, RoomType roomType, void *param);
 
+#endif // RTS_HAS_GAMESPY
+
 //-------------------------------------------------------------------------
 
 GameSpyPeerMessageQueue::GameSpyPeerMessageQueue()
@@ -635,6 +648,9 @@ PeerThreadClass* GameSpyPeerMessageQueue::getThread()
 }
 
 //-------------------------------------------------------------------------
+
+#ifdef RTS_HAS_GAMESPY
+
 static void disconnectedCallback(PEER peer, const char * reason, void * param);
 static void roomMessageCallback(PEER peer, RoomType roomType, const char * nick, const char * message, MessageType messageType, void * param);
 static void playerMessageCallback(PEER peer, const char * nick, const char * message, MessageType messageType, void * param);
@@ -2993,3 +3009,15 @@ static void listingGamesCallback(PEER peer, PEERBool success, const char * name,
 
 //-------------------------------------------------------------------------
 
+#else // RTS_HAS_GAMESPY
+
+// TheSuperHackers @port Without the SDK there is no peer connection to service, so the worker the
+// queue would start has nothing to do. The queue still refuses to report a connection, which is the
+// state the menus already handle. See docs/porting/online-path-excision.md.
+void PeerThreadClass::Thread_Function()
+{
+}
+
+#endif // RTS_HAS_GAMESPY
+
+//-------------------------------------------------------------------------
