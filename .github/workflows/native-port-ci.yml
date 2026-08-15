@@ -145,7 +145,7 @@ jobs:
           apt-get update -qq
           apt-get install -y --no-install-recommends \
             clang-14 cmake ninja-build python3 git ca-certificates binutils zlib1g-dev \
-            fonts-dejavu-core
+            libopenal-dev fonts-dejavu-core
           clang++-14 --version
 
       - name: Checkout
@@ -182,6 +182,20 @@ jobs:
             echo '## Undefined Win32 API symbols'
             echo '```'
             python3 scripts/ci/check-win32-undefined.py --results native-build.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The audio backend is the engine's real audio device off 32-bit Windows, so the build links
+      # it and no AIL_* symbol may be unresolved. Both halves matter: the archive being absent would
+      # take the count back up by 60 with nothing else changed, and an AIL_* the backend does not
+      # define is a hole neither surface scan can see. See docs/porting/audio-device-seam.md.
+      - name: Gate the audio backend in the link
+        run: |
+          set -o pipefail
+          {
+            echo '## OpenAL audio backend linked'
+            echo '```'
+            python3 scripts/ci/check-audio-backend-linked.py --results native-build.json
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -323,7 +337,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            clang-14 cmake ninja-build python3 git ca-certificates binutils zlib1g-dev
+            clang-14 cmake ninja-build python3 git ca-certificates binutils zlib1g-dev \
+            libopenal-dev
           clang++-14 --version
 
       - name: Checkout
@@ -375,6 +390,17 @@ jobs:
             echo '## Patch downloader seam'
             echo '```'
             python3 scripts/ci/check-download-seam.py --results native-build-level4.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Levels 1-4 are where the whole Miles surface is reached: WWAudio's 19 units compile here.
+      - name: Gate the audio backend in the link
+        run: |
+          set -o pipefail
+          {
+            echo '## OpenAL audio backend linked (levels 1-4)'
+            echo '```'
+            python3 scripts/ci/check-audio-backend-linked.py --results native-build-level4.json
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
