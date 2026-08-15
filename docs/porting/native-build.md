@@ -414,9 +414,12 @@ Levels 1-3 keep their own ratchet.
   produce objects, and what do those objects reference". `WW3D2` producing 66 objects says nothing
   about whether the D3D8-to-Vulkan backend draws a frame; that is `spikes/renderer` and
   `renderer-spike-verify`.
-- **The Windows build was not run for the compat-header change.** `string_compat.h` is reachable
-  only through the `#ifndef _WIN32` branch of `Utility/compat.h`, so the 13 Windows configurations
-  cannot see the added names, but that is an argument from the guard rather than a measurement.
+- **The compat-header change is guarded, and CI confirms it.** `string_compat.h` is reachable only
+  through the `#ifndef _WIN32` branch of `Utility/compat.h`, so the Windows configurations cannot see
+  the added names; all 13 `Build Generals`/`Build GeneralsMD` jobs are green on the branch that added
+  them. Behaviour under those builds is unchanged by construction, not by replay evidence — the
+  replay jobs need game-data credentials this fork does not have
+  (`docs/porting/replay-check-gamedata.md`).
 - **The remaining compile failures are reported, not fixed.** The Win32 surface (`HWND`/`HFONT`/
   `HRESULT`/`SetWindowText`), the GameSpy socket units and the Bink/FFmpeg/stb video devices belong
   to other slices or to cut scope. This build's job is to count them and name them.
