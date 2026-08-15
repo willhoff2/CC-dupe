@@ -43,17 +43,25 @@
 #pragma once
 
 #include "Common/SubsystemInterface.h"
+#include <windows.h>
+#include <Common/GameMemory.h>
+#include <Lib/BaseType.h>
+
+// The embedded browser is EA's in-process Internet Explorer control, reached through the
+// BrowserDispatch COM server that only exists in the Windows configuration. RTS_HAS_EMBEDDED_BROWSER
+// is defined by Core/Libraries/Source/EABrowserDispatch when that server is built; where it is not,
+// the control is absent and WebBrowser is a browser-less subsystem that still carries the Webpages
+// INI table. See docs/porting/embedded-browser-seam.md.
+#ifdef RTS_HAS_EMBEDDED_BROWSER
 // TheSuperHackers @port ATL compatibility used to arrive via PreRTS.h, which no longer includes
 // platform headers; see docs/porting/prerts-win32-surgery.md
 #if defined __MINGW32__
 #include "Utility/atl_compat.h"
 #endif
 #include <atlbase.h>
-#include <windows.h>
-#include <Common/GameMemory.h>
 #include "EABrowserDispatch/BrowserDispatch.h"
 #include "FEBDispatch.h"
-#include <Lib/BaseType.h>
+#endif // RTS_HAS_EMBEDDED_BROWSER
 
 class GameWindow;
 
@@ -78,6 +86,8 @@ public:
 };
 
 
+
+#ifdef RTS_HAS_EMBEDDED_BROWSER
 
 class WebBrowser :
 		public FEBDispatch<WebBrowser, IBrowserDispatch, &IID_IBrowserDispatch>,
@@ -127,3 +137,41 @@ class WebBrowser :
 	};
 
 extern CComObject<WebBrowser> *TheWebBrowser;
+
+#else // !RTS_HAS_EMBEDDED_BROWSER
+
+/**
+	* The browser-less WebBrowser: same subsystem, same Webpages INI table, no browser. Every
+	* consumer already guards on TheWebBrowser being null (retail leaves it null -- GameEngine.cpp's
+	* initSubsystem call is commented out), and the factory that would have created one returns
+	* nothing in this configuration, so createBrowserWindow() is reached only by a caller that
+	* constructed one itself. It complains and opens nothing rather than pretending to browse.
+	*/
+class WebBrowser : public SubsystemInterface
+	{
+	public:
+		virtual void init() override;
+		virtual void reset() override;
+		virtual void update() override;
+
+		virtual Bool createBrowserWindow(const char *tag, GameWindow *win);
+		virtual void closeBrowserWindow(GameWindow *win);
+
+		WebBrowserURL *makeNewURL(AsciiString tag);
+		WebBrowserURL *findURL(AsciiString tag);
+
+	protected:
+		WebBrowser();
+		virtual ~WebBrowser() override;
+
+		// Protected to prevent copy and assignment
+		WebBrowser(const WebBrowser&);
+		const WebBrowser& operator=(const WebBrowser&);
+
+	protected:
+		WebBrowserURL *m_urlList;
+	};
+
+extern WebBrowser *TheWebBrowser;
+
+#endif // RTS_HAS_EMBEDDED_BROWSER

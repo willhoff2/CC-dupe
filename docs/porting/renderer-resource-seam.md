@@ -356,25 +356,32 @@ formats, see §4.3), and **1 buffer→image copy + 2 layout transitions per unlo
 *read-only* lock it costs an image→buffer copy, a queue submit and a fence wait, i.e. a full
 CPU/GPU sync point. §4.1 has what the pool costs across a frame's worth of locks.
 
-Measured, by `zh-resource-lock-tests` on lavapipe, for the nine cases in §5 — which now include
-two cross-thread cases and a recycling case, so 79 acquires over the run:
+Measured, by `zh-resource-lock-tests` on lavapipe, for the eleven cases in §5 — which now include
+two cross-thread cases, a recycling case, the preserve case and the dirty-bit case, so 84 acquires
+over the run:
 
 ```
 staging blocks the pool ever allocated:               1 (4096 bytes)
 dynamic vertex-buffer memory (not poolable):          1 (672 bytes)
 staging peak checked out at once:                    4096 bytes in 1 block(s)
 staging still checked out now:                       0 bytes
-pool: 1 free block(s), 4096 bytes, 78/79 acquires reused, 0 pinned
-buffer-to-image copy regions issued from Unlock:     86
-queue submits caused by locks:                       103
-read-back stalls (submit + fence wait inside Lock):  1
+pool: 1 free block(s), 4096 bytes, 83/84 acquires reused, 0 pinned
+buffer-to-image copy regions issued from Unlock:     91
+queue submits caused by locks:                       111
+read-back stalls (submit + fence wait inside Lock):  66
 CPU channel expansions at unlock:                    0
+GPU writes that dirtied a resource:                  63
+host reads: 4 dirty (paid a transfer), 2 clean (paid nothing)
+surface bytes read back:                            2048
+preserving a lock's previous contents: 63 level(s), 156672 bytes, 29 skipped
 dynamic ring: 2 DISCARD, 1 NOOVERWRITE, 336 bytes, 0 wrap stalls
 ```
 
-One 4 KiB block serves all 79 lock acquisitions in the suite. With `ZH_SPIKE_NO_VIEW_SWIZZLE=1`,
+One 4 KiB block serves all 84 lock acquisitions in the suite. With `ZH_SPIKE_NO_VIEW_SWIZZLE=1`,
 which is MoltenVK's case: 2 blocks / 8192 bytes and 1 CPU expansion, the second block being the
-expansion buffer for the 16×16 L8 texture, taken from the same pool and returned at unlock.
+expansion buffer for the 16×16 L8 texture, taken from the same pool and returned at unlock. The 66
+stalls are the price of §4.4's preserve-by-default: 63 of them are a level being read back into a
+recycled block, 3 are surface reads, and 2 reads were served from a clean resource for free.
 
 ### 4.1 Memory: pooled, and measured
 
@@ -387,7 +394,7 @@ resident whether or not anything is locked. That is what the pool replaces.
 
 - staging is a **pool of mapped host-visible blocks in power-of-two size classes from 4 KiB**
   up. `Lock` takes the smallest free block that fits the whole mip chain of the resource being
-  locked and zeroes the requested bytes; `Unlock` returns it to the free list once the last
+  locked; `Unlock` returns it to the free list once the last
   locked level of that resource is unlocked. Nothing is unmapped or freed until shutdown, so a
   reused block costs no `vkAllocateMemory` and no `vkMapMemory`.
 - **one block per resource, not per level**: a C4 caller locks every level at once and keeps the
@@ -399,8 +406,10 @@ resident whether or not anything is locked. That is what the pool replaces.
 - the CPU-expansion path (no image-view swizzle, MoltenVK's case) takes a *second* block from
   the same pool for the duration of one unlock and returns it immediately, instead of holding a
   second per-resource allocation.
-- **zeroing on acquire changes what an unflagged lock sees**, and this is a real semantic
-  difference, not an implementation detail: see §7.7.
+- **acquire does not publish anything**: the block keeps whatever the previous holder left, and
+  each locked level is then either read back from the image (D3D8's preserve-on-`Lock`) or zeroed
+  where skipping is proven safe. See §4.4; the earlier zero-on-acquire behaviour was a semantic
+  difference from Windows and is gone.
 - `ZH_SPIKE_STAGING_RETAIN=1` restores the old per-resource-lifetime behaviour. It exists so the
   before/after below is one binary and one workload, and so CI can assert that the pre-pool cost
   actually breaks the committed ceiling (§4.1.2).
@@ -427,8 +436,32 @@ Measured on Linux/lavapipe (`llvmpipe`, LLVM 20.1.2), same binary, same workload
 
 and with `ZH_SPIKE_NO_VIEW_SWIZZLE=1`, i.e. MoltenVK's expansion path forced on: 18 → **9**
 allocations, 2,969,600 → **1,703,936** resident bytes, 2,904,064 → **327,680** steady state,
-reuse 98.2% (497 acquires, 488 reused), 36 CPU expansions. Both modes: 0 validation messages,
+reuse 98.3% (532 acquires, 523 reused), 71 CPU expansions. Both modes: 0 validation messages,
 `pixels_ok`.
+
+**Preserve-by-default (§4.4) changed none of those figures and is not free.** Re-measured on the
+same binary and workload, against a clean build of the base commit:
+
+| | zero on acquire (before) | preserve by default (after) |
+|---|---:|---:|
+| resident staging bytes | 1,638,400 | **1,638,400** |
+| steady-state staging bytes | 327,680 | **327,680** |
+| block reuse rate | 98.26% | **98.26%** |
+| host-visible allocations | 8 | **8** |
+| read-back stalls per 12 frames | 108 | **513** |
+| bytes read back to preserve contents | 0 | **53,870,904** |
+| locks that skipped preservation (DISCARD or never written) | n/a | **140** |
+| reads served from a clean resource, for free | 0 | **108** |
+
+So the 98.3% reuse claim survives intact — preservation costs *bandwidth and sync points*, not
+residency, because the block a lock preserves into is the same pooled block it was already getting.
+The 108 read-back stalls the base build paid on `D3DLOCK_READONLY` locks are now the 108 free clean
+reads: the dirty bit gave those back, and preservation spent 513 elsewhere. 53.9 MB per 12 frames is
+≈4.5 MB/frame of image→buffer traffic at spike scale, and the honest reading is that this is the
+expensive half of matching Windows: a level whose pooled block was recycled cannot be preserved
+without re-reading it. The cheap fixes are all at call sites — a site that provably overwrites every
+byte should pass `D3DLOCK_DISCARD` — which is why §4.4 names the exceptions rather than widening the
+default.
 
 Read those numbers precisely:
 
@@ -451,10 +484,12 @@ Read those numbers precisely:
 #### 4.1.2 The gate
 
 `scripts/ci/check-staging-cost.py` runs the workload in both swizzle modes and fails if
-allocations, resident bytes, peak bytes or steady-state bytes exceed
+allocations, resident bytes, peak bytes, steady-state bytes or **preservation read-back bytes** exceed
 `docs/porting/ci-baselines/staging-cost-ceiling.json` (the measured figures + 25% on bytes, +2
 on allocation counts), if allocations per texture lock exceed 0.05, if the reuse rate drops
-below 0.90, if `pixels_ok` is false, or if the validation layer says anything. `--self-check`,
+below 0.90, if **no read at all was served from a clean resource** (which is what a dirty bit that is
+never cleared, or a lock path that reads back unconditionally, looks like from outside), if
+`pixels_ok` is false, or if the validation layer says anything. `--self-check`,
 which is what CI runs, additionally runs the *pre-pool* mode and requires that it **violates**
 that ceiling — so the gate is known to catch the regression it exists for rather than merely to
 pass. It does, on all four byte/allocation limits.
@@ -477,10 +512,79 @@ copies and no submits.
 | `D3DLOCK_DISCARD` | rename: advance to the next region of a ring of `kDynamicRingRegions = 3` copies of the buffer (frames-in-flight + 1) and hand out its base. The draw path applies the region's byte offset when binding, so the engine's vertex indices do not change. If the ring wraps onto a region a submitted frame may still read, the promise "DISCARD never blocks" cannot be kept and the honest answer is to grow the ring; the spike counts the event (`ring_wrap_waits`) and, having only one frame in flight, waits on that frame's fence. |
 | `D3DLOCK_NOOVERWRITE` | append within the current region. Nothing to do beyond not renaming — this is exactly what a persistently mapped host-visible buffer already provides, and it is the one class that is free. |
 | `0` (no flags) on a buffer | treated as C6: write into the region, no rename. Correct only because no C6 site relocks a buffer the GPU is still reading; a `WriteLockClass` user that did would need a fence wait. |
-| `D3DLOCK_READONLY` | `vkCmdCopyImageToBuffer` for the locked level, submit, `vkWaitForFences`, then hand out the pointer. Unavoidably a stall. |
+| `D3DLOCK_READONLY` | `vkCmdCopyImageToBuffer` for the locked level, submit, `vkWaitForFences`, then hand out the pointer — **only if the level is not already in the staging block, or the image is GPU-dirty** (§4.4). A read of a level the block still holds, with no GPU write since, is free. |
 | `D3DLOCK_NO_DIRTY_UPDATE` | ignored. It is a hint about `UpdateTexture`'s dirty-region tracking; the seam has no `UpdateTexture` (§1) and always copies the region the caller locked. |
 | `D3DLOCK_NOSYSLOCK` | ignored. It is about the Win32 critical section D3D8 held during a lock. |
-| no flags at all on a texture/surface | must be assumed read-write (C8), because D3D8 has no `WRITEONLY`. A retained staging copy is what makes that assumption cheap: reads hit the staging bytes, which hold whatever was last written through them, so a C8 resource keeps its pooled block for its lifetime (§4.1). **This is a real semantic gap: a C8 caller that reads a surface the GPU wrote (a render target) would see the staging copy, not the GPU's result.** No C8 caller in the 19 files does that; the callers outside them are now counted — 21 sites, 18 of which read, 5 of which read a surface the GPU can have written (§7.1). |
+| no flags at all on a texture/surface | must be assumed read-write (C8), because D3D8 has no `WRITEONLY`. The host copy serves the read, and the **GPU-dirty bit decides whether that copy has to be refreshed first** (§4.4): a resource the GPU has written since the last read pays one image→buffer copy and one wait; a resource it has not pays nothing. That closes the gap this row used to describe — the 5 audited sites that read a surface the GPU can have written (§7.1) now get the GPU's result rather than the staging bytes, without any of the other 21 sites paying for it. |
+
+### 4.4 The GPU-dirty bit, and preserve-on-lock
+
+This is `decisions-resolved.md` decisions 1 and 2, implemented. Both come down to one question the
+backend has to answer per lock: **is the host's copy of these bytes the truth?** Two flags per level
+plus one per image answer it, and every transfer the lock path performs is one of the answers being
+"no".
+
+**Where the GPU becomes the writer.** The decision said "`Set_Render_Target`, `Copy_Rects` and any
+other funnel you find — enumerate them rather than assuming those two". Enumerated, in
+`vulkan_backend.cpp`, and all five call one `Mark_Gpu_Write`:
+
+| # | Funnel | Why it is one |
+|---|---|---|
+| 1 | `Set_Render_Target` | binds a surface as the colour or depth attachment, which is what makes the following draws write it |
+| 2 | `Clear` | `vkCmdClearAttachments` into the current target |
+| 3 | `Prepare_Draw` | a draw into the current target — the funnel the decision's "already funnel through `Set_Render_Target`" would have missed if binding were tracked but drawing were not |
+| 4 | `Copy_Rects` | the destination half, whether that is an image or a system-memory buffer |
+| 5 | `Update_Texture` | the destination texture's image |
+
+Two GPU writes are deliberately **not** funnels, and both are safe rather than overlooked:
+`Unlock_Texture`'s `vkCmdCopyBufferToImage` writes the image *from* the host bytes, so the two agree
+afterwards (it marks the level synced, not dirty); and the one-shot `vkCmdClearColorImage` in
+`Create_Lockable_Texture`/`Create_Render_Target_Texture` writes zeroes, which is exactly what a
+never-written level's host copy reads as. `Present`'s blit writes a swapchain image, which no lock
+can reach.
+
+**Where the bit lives.** On the `Image`, not on the handle, with an `owner` back-pointer to the
+owning `TextureHandle`. A `SurfaceHandle` obtained from `Get_Surface_Level` is a *view* of that
+image, so a write through the surface invalidates the texture's staging copy and vice versa —
+tracking it per handle would have let a render target be read through its surface view while the
+texture still believed its host bytes were current. A system-memory surface has no image, so it
+carries its own bit for the queued `Copy_Rects` that has not executed yet.
+
+**What a read does.** `Surface_Bits` (the backend under `SurfaceClass::Lock`, whose signature does
+not change) and `Lock_Texture` both go through the same decision:
+
+- clean, and a host copy exists ⇒ **return the pointer. No copy, no submit, no fence wait.**
+  Counted as `clean_reads`.
+- dirty video memory ⇒ one `vkCmdCopyImageToBuffer`, submitted and waited for, then the bit is
+  cleared — *after* the copy has executed, so a failure leaves it set and the next read retries
+  instead of publishing stale pixels. Counted as `dirty_reads` + `readback_stalls`.
+- dirty system memory ⇒ the bytes are already addressed to that buffer, so the read waits for the
+  queued copy rather than issuing one. This is the screenshot/movie-capture shape.
+
+`C8 surface read hazard` in `zh-resource-lock-tests` is the test the decision asked for: it asserts
+on `readback_stalls` around each read, so a clean read that transfers anything **fails even though
+its pixels are correct**. It then re-clears the target and requires the bit to come back, which is
+the failure an over-eager "clear the bit once" would produce.
+
+**Preserve by default.** `Acquire_Staging` no longer zeroes. A lock without `D3DLOCK_DISCARD` gets
+the level's previous contents, which is what `Lock` does on Windows and what `W3DRadar`,
+`W3DShroud` and `Render2DSentenceClass` depend on when they lock a whole level and draw a few
+pixels. Preservation is skipped in exactly three cases, all named:
+
+1. **`D3DLOCK_DISCARD`** — D3D8's own statement that the caller overwrites everything. The one
+   "proven full overwrite" the API gives us, and the only one a call site can assert.
+2. **a level nothing has ever written**, by host unlock or by a GPU funnel: D3D8 leaves a fresh
+   resource's contents undefined, so there is nothing to preserve.
+3. **the level is already in the block and the image is not dirty** — no transfer needed, because
+   the host copy *is* the contents. Not an exception to the contract; the contract met for free.
+
+In cases 1 and 2 the block is **zeroed rather than handed over as-is**: the pool is shared, and
+another resource's texels are not "undefined contents".
+
+What this costs, measured, is in §4.1.1: **no additional resident or steady-state memory at all**,
+and 513 preservation read-backs (53.9 MB copied) over the 12-frame workload. That is the tradeoff
+the decision named, and `check-staging-cost.py` now bounds the byte figure so that quietly going
+back to zero-on-acquire shows up as a gate change rather than as a silent speedup.
 
 ### 4.3 MoltenVK
 
@@ -522,8 +626,10 @@ against the real backend and asserts on read-back pixels and read-back bytes, no
 | **cross-thread fill** | C4 | all 5 levels locked on the main thread, filled on a second thread through the kept `LockedRect` pointers, joined, unlocked on the original thread, level 2 sampled back — the loader's actual thread hand-off |
 | **concurrent locks** | C4 | 4 threads × 8 lock/fill/unlock rounds on 4 textures against one shared pool; every texture must sample back its own thread's colour, so a block handed to two threads at once fails |
 | **pool recycling** | C1/C2 | 6 textures × 6 rounds = 36 sequential locks must cost **0** new allocations after the first, end with 0 bytes checked out, and still sample back correctly |
+| **full-level relock** | C6-shape | the radar/shroud/sentence pattern: fill a level, let another texture churn the pooled block, relock the whole level without `DISCARD`, write 4 texels, unlock — all 252 untouched texels must sample back as the original pattern, and a `DISCARD` lock of the same level must cost **no** preservation read-back |
+| **surface read hazard** | C8 | a `Copy_Rects` destination and a rendered-into target read through `Surface_Bits`: the first read of each must transfer, the **second must transfer nothing** (asserted on `readback_stalls`, so correct pixels are not enough to pass), and a second clear must make the target dirty again and yield the new colour |
 
-All nine pass on lavapipe with zero validation messages, in both swizzle modes, over 10 repeats
+All eleven pass on lavapipe with zero validation messages, in both swizzle modes, over 10 repeats
 of each mode, and again with the tests rebuilt `-fsanitize=thread` (3 runs, **0 ThreadSanitizer
 warnings**, which is the evidence for the pool's locking rather than the repeats). Both modes run
 in CI on Linux (`Renderer spike (Linux, lavapipe)`); the default mode runs on `macos-15`.
@@ -546,7 +652,14 @@ None. No engine file is modified by this slice: the changes are `docs/porting/`,
 
 ## 7. What is not resolved
 
-1. **The C8 read hazard — audited, and it needs a decision this slice did not take.**
+1. ~~**The C8 read hazard.**~~ Decided (`decisions-resolved.md` §1: the GPU-dirty bit) and now
+   implemented and tested — §4.4 has the funnel list, the read behaviour and the no-transfer
+   assertion. What remains open is that the bit lives in the *spike's* backend: the engine's
+   `SurfaceClass` does not yet route through `Surface_Bits`, so the 5 reading sites below are
+   correct-by-construction only once the surface path moves onto the seam. The audit that follows is
+   unchanged and is what that move has to satisfy.
+
+   **The audit.**
    `spikes/renderer/tools/surface-lock-audit.py` (`--check` in CI, counts committed in
    `surface-lock-audit.json`) counts every `SurfaceClass::Lock` caller: **26 sites, 5 inside the
    19 files that hold a direct D3D8 lock and 21 outside them**. Of the 21 outside, **18 read
@@ -559,13 +672,12 @@ None. No engine file is modified by this slice: the changes are `docs/porting/`,
    `Lock` with no flags, read every pixel. The other 13 read only bytes the CPU itself wrote
    (radar/shroud read-modify-write, `Blit_Char`, palette remap), which the staging copy serves
    correctly.
-   **The decision, not taken here:** those 5 need an unflagged C8 lock on a blit destination to
+   **How it is resolved:** those 5 need an unflagged C8 lock on a blit destination to
    perform the C3 image→buffer read-back, and the seam cannot tell that case from an ordinary
    write-only C8 lock without either (a) making every C8 lock read back — a stall on locks that
    do not need one, (b) tracking "the GPU wrote this resource since the last lock" as a
    dirty bit on the resource, or (c) splitting `SurfaceClass::Lock` into read and write variants,
-   an engine change. It also depends on `CopyRects`/blit, which is an unimplemented backend
-   method owned by another slice, so the pool cannot close it alone. Raised, not chosen.
+   an engine change. (b) was chosen and built; (c) was rejected because it edits call sites.
 2. **`WriteLockClass`'s pass-through flags.** 2 lock sites take their flags from ~200 callers.
    Their effective flag distribution is unmeasured.
 3. ~~**Staging pooling.**~~ Written and measured: §4.1. Pooled, recycled, 98% block reuse, and a
@@ -590,7 +702,10 @@ None. No engine file is modified by this slice: the changes are `docs/porting/`,
    `Unlock` still submits from the calling thread on a single queue — an engine that unlocked
    from two threads at once would be serialised, not parallel, which matches D3D8's own
    single-threaded device but is worth knowing.
-7. **Pooling makes an unflagged lock return zeroes, not the previous contents.** A pooled block
+7. ~~**Pooling makes an unflagged lock return zeroes, not the previous contents.**~~ Fixed
+   (`decisions-resolved.md` §2: match Windows). §4.4 has the contract, the three named skip cases
+   and what preservation costs; §4.1.1 has the before/after. The historical description of the bug
+   follows, because the measurement in it is the reason the fix is shaped this way. A pooled block
    carries whatever the last lock wrote, and a partial-rect unlock uploads rows the caller never
    touched, so `Acquire_Staging` zeroes the requested bytes. That is safe but it is *not* D3D8:
    D3D8 hands back the surface's current contents on a lock without `D3DLOCK_DISCARD`, so a
@@ -603,13 +718,18 @@ None. No engine file is modified by this slice: the changes are `docs/porting/`,
    likewise `W3DRadar::setShroudLevel`, `W3DShroud::render` and
    `Render2DSentenceClass::Build_Sentence*`. Before pooling moves behind the real
    `SurfaceClass`, those locks need either a read-modify-write lock (read the image back into the
-   block, i.e. pay C3's stall) or an explicit discard at the call site. Same shape as the C8
-   decision in item 1 and blocked on the same missing piece; not chosen here.
+   block, i.e. pay C3's stall) or an explicit discard at the call site. **The read-modify-write lock
+   is what was built**, because it is the one that does not need the call sites edited; the discard
+   remains available per site and is the cheap optimisation for any site that can prove it
+   overwrites everything.
 8. **`P8`.** `Create_Lockable_Texture` refuses paletted textures: expansion needs the palette at
    unlock time and a lockable P8 texture could have its palette replaced between locks. No lock
    site uses P8, so no policy was invented.
-9. **`D3DLOCK_READONLY` on an expanded format** returns failure rather than contracting BGRA8
-   back to L8/A8/A8L8. No engine site needs it; a Mac-only future one would.
+9. **`D3DLOCK_READONLY` on an expanded format** now contracts BGRA8 back to L8/A8/A8L8/X8R8G8B8,
+   because preserve-on-lock needs the same operation on the no-view-swizzle path and a read that
+   could not preserve would silently break the radar on a Mac. It costs one CPU pass over the level
+   (the 71 `cpu_expansions` in the no-swizzle workload, up from 36). Formats with no contraction
+   still fail the lock rather than publish wrong bytes; none of them is a lockable engine format.
 10. **Everything about MoltenVK is unverified by the author.** The CPU-expansion-at-unlock path,
     the portability-subset assumption, and the whole macOS run are inference plus CI. There is no
     Mac on this end. Specifically for the pool: the `macos-15` job *prints* the workload's staging

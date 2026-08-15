@@ -11,20 +11,20 @@ python3 scripts/porting-status.py
 
 ## Native 64-bit compile readiness
 
-Measured with clang 14. Vendor headers present: dx8-src, gamespy-src/include, lzhl-src, miles-src, miles-src/mss.
+Measured with clang 14. Vendor headers present: dx8-src, ffmpeg-src, gamespy-src/include, lzhl-src, miles-src, miles-src/mss, stb-src.
 
 | Target | Native clean | Shimmed clean |
 |---|---:|---:|
 | `Core/Libraries/Source/Compression` | 11 / 11 | 11 / 11 |
-| `Core/Libraries/Source/WWVegas/WWMath` | 33 / 35 | 35 / 35 |
-| `Core/Libraries/Source/WWVegas/WWLib` | 65 / 72 | 72 / 72 |
+| `Core/Libraries/Source/WWVegas/WWMath` | 33 / 36 | 36 / 36 |
+| `Core/Libraries/Source/WWVegas/WWLib` | 68 / 77 | 77 / 77 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 / 3 | 3 / 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 11 / 12 | 12 / 12 |
 | `Core/Libraries/Source/debug` | 12 / 22 | 13 / 22 |
 | `Core/Libraries/Source/profile` | 5 / 6 | 5 / 6 |
-| `Core/GameEngine` | 180 / 210 | 193 / 210 |
-| `GeneralsMD/Code/GameEngine` | 343 / 380 | 359 / 380 |
-| **total** | **663 / 751** | **703 / 751** |
+| `Core/GameEngine` | 182 / 210 | 195 / 210 |
+| `GeneralsMD/Code/GameEngine` | 344 / 380 | 360 / 380 |
+| **total** | **669 / 757** | **712 / 757** |
 
 ## D3D8 call surface
 

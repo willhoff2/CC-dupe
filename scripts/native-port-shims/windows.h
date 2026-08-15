@@ -109,6 +109,7 @@ typedef wchar_t*            PWSTR;
 typedef wchar_t*            LPWSTR;
 typedef const wchar_t*      PCWSTR;
 typedef const wchar_t*      LPCWSTR;
+typedef DWORD               EXECUTION_STATE;
 typedef BYTE*               PBYTE;
 typedef BYTE*               LPBYTE;
 typedef WORD*               PWORD;
@@ -167,7 +168,10 @@ DECLARE_HANDLE(HRSRC);
 // on the implicit conversion that a distinct handle struct would refuse.
 typedef HANDLE HGLOBAL;
 typedef HANDLE HLOCAL;
-DECLARE_HANDLE(HGDIOBJ);
+// Not DECLARE_HANDLE either: wingdi.h typedefs HGDIOBJ to void*, and SelectObject()'s callers --
+// WW3D2/render2dsentence.cpp's Create_GDI_Font() -- hand it an HBITMAP or an HFONT and cast the
+// result back, which a distinct handle struct would refuse.
+typedef void* HGDIOBJ;
 #ifndef HMONITOR_DECLARED
 #define HMONITOR_DECLARED
 DECLARE_HANDLE(HMONITOR);
@@ -287,6 +291,15 @@ typedef struct _BITMAPINFOHEADER {
 	DWORD biClrUsed, biClrImportant;
 } BITMAPINFOHEADER, *LPBITMAPINFOHEADER;
 typedef struct _BITMAPINFO { BITMAPINFOHEADER bmiHeader; RGBQUAD bmiColors[1]; } BITMAPINFO, *LPBITMAPINFO;
+typedef struct _TEXTMETRICA {
+	LONG tmHeight, tmAscent, tmDescent, tmInternalLeading, tmExternalLeading;
+	LONG tmAveCharWidth, tmMaxCharWidth, tmWeight, tmOverhang;
+	LONG tmDigitizedAspectX, tmDigitizedAspectY;
+	BYTE tmFirstChar, tmLastChar, tmDefaultChar, tmBreakChar;
+	BYTE tmItalic, tmUnderlined, tmStruckOut, tmPitchAndFamily, tmCharSet;
+} TEXTMETRICA, *PTEXTMETRICA, *LPTEXTMETRICA;
+typedef TEXTMETRICA TEXTMETRIC, *PTEXTMETRIC, *LPTEXTMETRIC;
+
 typedef struct _BITMAPFILEHEADER {
 	WORD bfType; DWORD bfSize; WORD bfReserved1, bfReserved2; DWORD bfOffBits;
 } BITMAPFILEHEADER, *LPBITMAPFILEHEADER;
@@ -405,9 +418,17 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define ERROR_FILE_NOT_FOUND     2L
 #define ERROR_PATH_NOT_FOUND     3L
 #define ERROR_ACCESS_DENIED      5L
+#define ERROR_INVALID_HANDLE     6L
 #define ERROR_NO_MORE_FILES      18L
+#define ERROR_INVALID_PARAMETER  87L
 #define ERROR_ALREADY_EXISTS     183L
 #define ERROR_MORE_DATA          234L
+#define CREATE_SUSPENDED         0x00000004
+#define HEAP_NO_SERIALIZE        0x00000001
+#define HEAP_ZERO_MEMORY         0x00000008
+#define ES_SYSTEM_REQUIRED       0x00000001
+#define ES_DISPLAY_REQUIRED      0x00000002
+#define ES_CONTINUOUS            0x80000000
 #define WAIT_OBJECT_0            0L
 #define WAIT_TIMEOUT             258L
 #define WAIT_FAILED              0xFFFFFFFF
@@ -438,6 +459,8 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define MB_ICONQUESTION          0x00000020
 #define MB_ICONEXCLAMATION       0x00000030
 #define MB_ICONINFORMATION       0x00000040
+#define MB_ICONSTOP              0x00000010
+#define MB_APPLMODAL             0x00000000
 #define MB_SYSTEMMODAL           0x00001000
 #define MB_TASKMODAL             0x00002000
 #define MB_TOPMOST               0x00040000
@@ -500,6 +523,19 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define VK_RIGHT     0x27
 #define VK_DOWN      0x28
 #define VK_DELETE    0x2E
+#define VK_INSERT    0x2D
+#define VK_F1        0x70
+#define VK_F2        0x71
+#define VK_F3        0x72
+#define VK_F4        0x73
+#define VK_F5        0x74
+#define VK_F6        0x75
+#define VK_F7        0x76
+#define VK_F8        0x77
+#define VK_F9        0x78
+#define VK_F10       0x79
+#define VK_F11       0x7A
+#define VK_F12       0x7B
 #define SM_CXSCREEN  0
 #define SM_CYSCREEN  1
 #define STATUS_ACCESS_VIOLATION  ((DWORD)0xC0000005L)
@@ -513,6 +549,30 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define LOBYTE(w)        ((BYTE)((DWORD_PTR)(w) & 0xFF))
 #define HIBYTE(w)        ((BYTE)(((DWORD_PTR)(w) >> 8) & 0xFF))
 #define RGB(r, g, b)     ((COLORREF)(((BYTE)(r)) | ((WORD)((BYTE)(g)) << 8) | ((DWORD)((BYTE)(b)) << 16)))
+// wingdi.h: the CreateFont()/CreateDIBSection()/ExtTextOut() arguments the font seam passes
+// (docs/porting/gdi-font-seam.md). Only the values the engine actually names.
+#define FW_DONTCARE          0
+#define FW_NORMAL            400
+#define FW_BOLD              700
+#define ANSI_CHARSET         0
+#define DEFAULT_CHARSET      1
+#define OUT_DEFAULT_PRECIS   0
+#define OUT_TT_PRECIS        4
+#define CLIP_DEFAULT_PRECIS  0
+#define DEFAULT_QUALITY      0
+#define ANTIALIASED_QUALITY  4
+#define DEFAULT_PITCH        0
+#define FIXED_PITCH          1
+#define VARIABLE_PITCH       2
+#define FF_DONTCARE          0
+#define TMPF_FIXED_PITCH     0x01
+#define TMPF_TRUETYPE        0x04
+#define BI_RGB               0
+#define DIB_RGB_COLORS       0
+#define ETO_OPAQUE           0x0002
+#define ETO_CLIPPED          0x0004
+#define CLR_INVALID          ((COLORREF)0xFFFFFFFF)
+#define GDI_ERROR            ((DWORD)0xFFFFFFFFL)
 #define GetRValue(c)     ((BYTE)(c))
 #define GetGValue(c)     ((BYTE)(((WORD)(c)) >> 8))
 #define GetBValue(c)     ((BYTE)((c) >> 16))
@@ -555,6 +615,16 @@ LONG   InterlockedDecrement(LONG volatile*);
 LONG   InterlockedExchange(LONG volatile*, LONG);
 LONG   InterlockedExchangeAdd(LONG volatile*, LONG);
 LONG   InterlockedCompareExchange(LONG volatile*, LONG, LONG);
+// TheSuperHackers @port The pointer-width forms. On Win64 these are intrinsics rather than
+// kernel32 exports, which is why they are spelled out here next to the LONG ones; VC6 gets them
+// from Utility/interlocked_adapter.h instead.
+PVOID  InterlockedExchangePointer(PVOID volatile*, PVOID);
+PVOID  InterlockedCompareExchangePointer(PVOID volatile*, PVOID, PVOID);
+HANDLE GetProcessHeap();
+LPVOID HeapAlloc(HANDLE, DWORD, SIZE_T);
+BOOL   HeapFree(HANDLE, DWORD, LPVOID);
+SIZE_T HeapSize(HANDLE, DWORD, LPCVOID);
+EXECUTION_STATE SetThreadExecutionState(EXECUTION_STATE);
 HMODULE GetModuleHandleA(LPCSTR);
 UINT   GetSystemDirectoryA(LPSTR, UINT);
 UINT   GetWindowsDirectoryA(LPSTR, UINT);
@@ -623,6 +693,11 @@ DWORD  FormatMessageA(DWORD, LPCVOID, DWORD, DWORD, LPSTR, DWORD, va_list*);
 // mbstowcs / wcstombs. Declaring them here would expand those macros and redeclare the libc
 // functions without their exception specifications.
 int    lstrlenA(LPCSTR);
+LPSTR  lstrcpyA(LPSTR, LPCSTR);
+LPSTR  lstrcpynA(LPSTR, LPCSTR, int);
+LPSTR  lstrcatA(LPSTR, LPCSTR);
+int    lstrcmpA(LPCSTR, LPCSTR);
+int    lstrcmpiA(LPCSTR, LPCSTR);
 int    wsprintfA(LPSTR, LPCSTR, ...);
 LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER);
 HRESULT CoInitialize(LPVOID);
@@ -649,6 +724,7 @@ BOOL    GetMessageA(LPMSG, HWND, UINT, UINT);
 BOOL    TranslateMessage(const MSG*);
 LRESULT DispatchMessageA(const MSG*);
 int     MessageBoxA(HWND, LPCSTR, LPCSTR, UINT);
+int     MessageBoxW(HWND, LPCWSTR, LPCWSTR, UINT);
 HWND    GetActiveWindow();
 HWND    SetActiveWindow(HWND);
 HWND    GetForegroundWindow();
@@ -681,8 +757,25 @@ HMODULE GetModuleHandleW(LPCWSTR);
 int     GetDateFormatW(LCID, DWORD, const SYSTEMTIME*, LPCWSTR, LPWSTR, int);
 int     GetTimeFormatW(LCID, DWORD, const SYSTEMTIME*, LPCWSTR, LPWSTR, int);
 DWORD   FormatMessageW(DWORD, LPCVOID, DWORD, DWORD, LPWSTR, DWORD, va_list*);
+BOOL    GetTextExtentPoint32W(HDC, LPCWSTR, int, LPSIZE);
+BOOL    ExtTextOutW(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
 HDC     GetDC(HWND);
 int     ReleaseDC(HWND, HDC);
+
+// The GDI text entry points the WW3D2 font cache rasterises glyphs with. Implemented off Windows
+// by WWLib/platform/platform_win32_gdi_font.cpp -- one portable rasteriser on every non-Windows
+// platform, with GDI's metrics as the reference (docs/porting/gdi-font-seam.md).
+HFONT    CreateFontA(int, int, int, int, int, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD,
+                     DWORD, LPCSTR);
+HDC      CreateCompatibleDC(HDC);
+BOOL     DeleteDC(HDC);
+HBITMAP  CreateDIBSection(HDC, const BITMAPINFO*, UINT, void**, HANDLE, DWORD);
+HGDIOBJ  SelectObject(HDC, HGDIOBJ);
+BOOL     DeleteObject(HGDIOBJ);
+COLORREF SetBkColor(HDC, COLORREF);
+COLORREF SetTextColor(HDC, COLORREF);
+BOOL     GetTextMetricsA(HDC, LPTEXTMETRICA);
+int      MulDiv(int, int, int);
 BOOL    InvalidateRect(HWND, LPCRECT, BOOL);
 }
 
@@ -728,6 +821,14 @@ BOOL    InvalidateRect(HWND, LPCRECT, BOOL);
 #define GetMessage       GetMessageA
 #define DispatchMessage  DispatchMessageA
 #define MessageBox       MessageBoxA
+#define lstrlen          lstrlenA
+#define lstrcpy          lstrcpyA
+#define lstrcpyn         lstrcpynA
+#define lstrcat          lstrcatA
+#define lstrcmp          lstrcmpA
+#define lstrcmpi         lstrcmpiA
 #define LoadCursor       LoadCursorA
+#define CreateFont       CreateFontA
+#define GetTextMetrics   GetTextMetricsA
 #define LoadIcon         LoadIconA
 #define wsprintf         wsprintfA

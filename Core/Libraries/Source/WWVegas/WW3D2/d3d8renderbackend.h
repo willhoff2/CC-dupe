@@ -50,16 +50,18 @@ public:
 	/*
 	** Direct access to the underlying D3D8 objects.
 	**
-	** This is the documented escape hatch out of the seam, not part of RenderBackendClass,
-	** and it is non-virtual so that DX8Wrapper::_Get_D3D_Device8() stays as cheap as it was.
+	** This is the documented escape hatch out of the seam.  It is declared on
+	** RenderBackendClass (returning nullptr there) and overridden here, so that
+	** DX8Wrapper::_Get_D3D_Device8() can be spelled against the seam instead of against this
+	** Windows-only class; see docs/porting/renderer-seam.md §6.
 	** It exists for three groups of callers that this slice does not move:
 	**   - engine code that only asks "do we have a device yet?" before rendering,
 	**   - the D3DX helper calls (D3DXCreateTexture and friends) which take a device,
 	**   - the embedded browser and the WorldBuilder/W3DView tools.
 	** See docs/porting/renderer-seam.md; a second backend has to make these callers go away.
 	*/
-	IDirect3DDevice8* Peek_D3D_Device8() const { return D3DDevice; }
-	IDirect3D8* Peek_D3D8() const { return D3DInterface; }
+	virtual IDirect3DDevice8* Peek_D3D_Device8() const { return D3DDevice; }
+	virtual IDirect3D8* Peek_D3D8() const { return D3DInterface; }
 
 	/*
 	** Lifecycle

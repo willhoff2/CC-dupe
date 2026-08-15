@@ -38,6 +38,11 @@
 /*		7/18/2002 : Initial creation                                           */
 /*---------------------------------------------------------------------------*/
 
+// TheSuperHackers @port The Win32 mutex and Interlocked spellings this file uses reached it through
+// <dsound.h> on Windows, which is Windows-only. <windows.h> is where they are declared on both
+// platforms - off Windows over the portable implementations in WWLib's platform_win32_kernel.cpp
+// (docs/porting/win32-runtime-and-crt-gaps.md) - so include it in its own right.
+#include <windows.h>
 #ifdef _WIN32
 #include <dsound.h>
 #endif
@@ -1031,13 +1036,20 @@ void MilesAudioManager::releasePlayingAudio( PlayingAudio *release )
 	delete release;
 }
 
+// TheSuperHackers @port The reinterpret_casts below hand PlayingAudio::m_status to the Interlocked
+// functions, so its representation must match theirs exactly. MilesAudioManager.h asserts the size
+// against Int, which is all a header without the Win32 types can say; here, where LONG exists, the
+// two are tied together.
+static_assert(sizeof(LONG) == sizeof(PlayingStatus),
+	"Interlocked functions operate on LONG, so PlayingStatus must have the same representation");
+
 //-------------------------------------------------------------------------------------------------
 void MilesAudioManager::stopPlayingAudio( PlayingAudio *release )
 {
 	// Advance from Playing to Stopping
-	InterlockedCompareExchange(reinterpret_cast<volatile long*>(&release->m_status), PS_Stopping, PS_Playing);
+	InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&release->m_status), PS_Stopping, PS_Playing);
 	// Advance from Stopping to Stopped
-	const long prevStatus = InterlockedCompareExchange(reinterpret_cast<volatile long*>(&release->m_status), PS_Stopped, PS_Stopping);
+	const LONG prevStatus = InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&release->m_status), PS_Stopped, PS_Stopping);
 	if (prevStatus != PS_Stopping) {
 		return;
 	}
@@ -1492,7 +1504,7 @@ void MilesAudioManager::notifyOfAudioCompletion( UnsignedInt handle, UnsignedInt
 	}
 
 	// it will be cleaned up on the next frame update
-	InterlockedCompareExchange(reinterpret_cast<volatile long*>(&playing->m_status), PS_Stopping, PS_Playing);
+	InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&playing->m_status), PS_Stopping, PS_Playing);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2635,7 +2647,7 @@ Bool MilesAudioManager::startNextLoop( PlayingAudio *looping )
 			// fake it out so that this sound appears done, but also so that it will not
 			// delete the sound on completion (which would suck)
 			looping->m_cleanupAudioEventRTS = false;
-			InterlockedCompareExchange(reinterpret_cast<volatile long*>(&looping->m_status), PS_Stopping, PS_Playing);
+			InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&looping->m_status), PS_Stopping, PS_Playing);
 
 			AudioRequest *req = allocateAudioRequest(true);
 			req->m_pendingEvent = looping->m_audioEventRTS;
