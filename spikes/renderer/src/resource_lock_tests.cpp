@@ -656,6 +656,231 @@ Outcome Case_Pool_Recycles_Staging(Harness& h) {
 }
 
 // ---------------------------------------------------------------------------
+// C6: the whole level locked without DISCARD, a few texels drawn, unlocked --
+//     W3DRadar::buildTerrainTexture's incremental refresh, W3DShroud::fillShroudData
+//     and Render2DSentenceClass::Draw_Sentence blitting one glyph at a time. The
+//     level is uploaded in full on unlock, so anything the lock did not hand back is
+//     lost: this is the case a pool that publishes zeroes on acquire breaks.
+// ---------------------------------------------------------------------------
+
+Outcome Case_Whole_Lock_Preserves(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	TextureHandle* tex =
+	    g.Create_Lockable_Texture(kTexWidth, kTexHeight, TextureFormat::A8R8G8B8, 1);
+	TextureHandle* other =
+	    g.Create_Lockable_Texture(kTexWidth, kTexHeight, TextureFormat::A8R8G8B8, 1);
+	if (tex == nullptr || other == nullptr) return Fail("Create_Lockable_Texture failed");
+
+	LockedRect locked;
+	if (!g.Lock_Texture(tex, 0, nullptr, LOCK_NONE, locked)) return Fail("first lock failed");
+	Fill_Argb(locked, 0, 0, kTexWidth, kTexHeight);
+	if (!g.Unlock_Texture(tex, 0)) return Fail("first unlock failed");
+
+	// Another texture takes the block out of the pool and fills it with its own
+	// texels, so preservation cannot pass by finding the previous contents still
+	// lying in the same memory.
+	if (!g.Lock_Texture(other, 0, nullptr, LOCK_NONE, locked)) return Fail("churn lock failed");
+	std::memset(locked.bits, 0x7e, static_cast<size_t>(locked.pitch) * kTexHeight);
+	if (!g.Unlock_Texture(other, 0)) return Fail("churn unlock failed");
+
+	// The radar/shroud shape: lock everything, write four texels, unlock everything.
+	const uint32_t fill = 0xff0080ffu;
+	if (!g.Lock_Texture(tex, 0, nullptr, LOCK_NONE, locked)) return Fail("second lock failed");
+	auto* bytes = static_cast<uint8_t*>(locked.bits);
+	for (uint32_t y = 0; y < 2; ++y) {
+		auto* row = reinterpret_cast<uint32_t*>(bytes + static_cast<size_t>(y) * locked.pitch);
+		for (uint32_t x = 0; x < 2; ++x) row[x] = fill;
+	}
+	if (!g.Unlock_Texture(tex, 0)) return Fail("second unlock failed");
+
+	h.Reset_State();
+	g.Set_Texture(0, tex);
+	h.Begin();
+	h.Draw_Textured_Quad(0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight));
+	h.End();
+	if (!h.Read_Back()) return Fail("read back failed");
+
+	const float sx = static_cast<float>(kWidth) / kTexWidth;
+	const float sy = static_cast<float>(kHeight) / kTexHeight;
+	for (uint32_t ty = 0; ty < kTexHeight; ++ty) {
+		for (uint32_t tx = 0; tx < kTexWidth; ++tx) {
+			const bool drawn = tx < 2 && ty < 2;
+			const Rgba expected = From_Argb(drawn ? fill : Pattern_Argb(tx, ty));
+			const Rgba actual = h.Pixel(static_cast<uint32_t>((tx + 0.5f) * sx),
+			                            static_cast<uint32_t>((ty + 0.5f) * sy));
+			if (!Near(actual, expected)) {
+				char detail[208];
+				std::snprintf(detail, sizeof(detail),
+				              "texel (%u,%u) %s got=%s expected=%s -- the lock did not "
+				              "preserve what was there",
+				              tx, ty, drawn ? "drawn" : "untouched",
+				              To_String(actual).c_str(), To_String(expected).c_str());
+				return Fail(detail);
+			}
+		}
+	}
+
+	// DISCARD is the caller stating it overwrites everything, and is the only reason
+	// besides a never-written level to skip the preservation copy. It must not cost
+	// one.
+	const ResourceStats before = g.Get_Resource_Stats();
+	if (!g.Lock_Texture(tex, 0, nullptr, LOCK_DISCARD, locked)) {
+		return Fail("DISCARD lock failed");
+	}
+	const ResourceStats after = g.Get_Resource_Stats();
+	if (!g.Unlock_Texture(tex, 0)) return Fail("DISCARD unlock failed");
+	if (after.readback_stalls != before.readback_stalls) {
+		return Fail("a DISCARD lock paid for preserving contents it discards");
+	}
+	if (after.staging_preserve_skips == before.staging_preserve_skips) {
+		return Fail("a DISCARD lock was not counted as a skipped preservation");
+	}
+	return Pass("a full-level relock preserved the 252 texels it did not write; "
+	            "DISCARD skipped the copy");
+}
+
+// ---------------------------------------------------------------------------
+// C8: a surface the GPU has written, read through the flagless
+//     SurfaceClass::Lock -- W3DDisplay::takeScreenShot, the movie-capture path and
+//     the three other GPU-provenance readers in the audit. The dirty bit decides
+//     whether the read costs a transfer.
+// ---------------------------------------------------------------------------
+
+// The render target's colour format is the presentation format, which is not any
+// TextureFormat a system-memory surface can be created in, so its bytes are read as
+// they are laid out rather than through From_Argb.
+Rgba From_Rgba_Bytes(const void* bits) {
+	const auto* b = static_cast<const uint8_t*>(bits);
+	return Rgba{b[0], b[1], b[2], b[3]};
+}
+
+// Ends the scene however the case leaves, so one failed assertion cannot strand the
+// frame's fence and hang every case after it.
+class SceneGuard {
+public:
+	explicit SceneGuard(RenderBackend& g) : gfx_(g) {}
+	~SceneGuard() { gfx_.End_Scene(false); }
+
+private:
+	RenderBackend& gfx_;
+};
+
+Outcome Case_Surface_Read_Hazard(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	TextureHandle* rt = g.Create_Render_Target_Texture(kTexWidth, kTexHeight);
+	TextureHandle* source =
+	    g.Create_Lockable_Texture(kTexWidth, kTexHeight, TextureFormat::A8R8G8B8, 1);
+	if (rt == nullptr || source == nullptr) return Fail("texture creation failed");
+	SurfaceHandle* rt_surface = g.Get_Surface_Level(rt, 0);
+	SurfaceHandle* source_surface = g.Get_Surface_Level(source, 0);
+	SurfaceHandle* sys =
+	    g.Create_Image_Surface(kTexWidth, kTexHeight, TextureFormat::A8R8G8B8);
+	if (rt_surface == nullptr || source_surface == nullptr || sys == nullptr) {
+		return Fail("surface creation failed");
+	}
+
+	const uint32_t copied = 0xff2080c0u;
+	LockedRect locked;
+	if (!g.Lock_Texture(source, 0, nullptr, LOCK_NONE, locked)) return Fail("lock failed");
+	for (uint32_t y = 0; y < kTexHeight; ++y) {
+		auto* row = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(locked.bits) +
+		                                       static_cast<size_t>(y) * locked.pitch);
+		for (uint32_t x = 0; x < kTexWidth; ++x) row[x] = copied;
+	}
+	if (!g.Unlock_Texture(source, 0)) return Fail("unlock failed");
+
+	SurfaceHandle* saved_color = g.Get_Render_Target();
+	SurfaceHandle* saved_depth = g.Get_Depth_Stencil_Target();
+	h.Reset_State();
+	g.Begin_Scene();
+	SceneGuard scene(g);
+
+	// The capture shape: CopyRects into a system-memory surface, then lock it. The
+	// copy is a queue operation, so the bytes are not there until it has executed --
+	// this is the hazard the audit found in the screenshot and movie paths.
+	if (!g.Copy_Rects(source_surface, nullptr, 0, sys, nullptr)) return Fail("Copy_Rects failed");
+
+	ResourceStats before = g.Get_Resource_Stats();
+	LockedRect bits;
+	if (!g.Surface_Bits(sys, bits)) return Fail("Surface_Bits failed");
+	ResourceStats after = g.Get_Resource_Stats();
+	const Rgba got = From_Argb(*static_cast<const uint32_t*>(bits.bits));
+	if (!Near(got, From_Argb(copied), 2)) {
+		char detail[176];
+		std::snprintf(detail, sizeof(detail), "copied surface read as %s, expected %s",
+		              To_String(got).c_str(), To_String(From_Argb(copied)).c_str());
+		return Fail(detail);
+	}
+	if (after.dirty_reads == before.dirty_reads) {
+		return Fail("reading a GPU-written surface was not treated as dirty");
+	}
+
+	// The assertion this case exists for: a second read, with nothing written in
+	// between, must transfer nothing at all. An unconditional readback fails here
+	// while still returning the right pixels.
+	before = after;
+	if (!g.Surface_Bits(sys, bits)) return Fail("second Surface_Bits failed");
+	after = g.Get_Resource_Stats();
+	if (after.readback_stalls != before.readback_stalls) {
+		return Fail("a clean surface read performed a readback");
+	}
+	if (after.clean_reads == before.clean_reads) {
+		return Fail("a clean surface read was not counted as clean");
+	}
+
+	// The other half of the audit, a surface of a render target: the first read has
+	// no host copy to hand back and must transfer, the second must not, and a clear
+	// into it must make it dirty again.
+	if (!g.Set_Render_Target(rt_surface, nullptr)) return Fail("Set_Render_Target failed");
+	g.Clear(true, false, 1.0f, 0.5f, 0.0f, 1.0f);
+	if (!g.Set_Render_Target(saved_color, saved_depth)) return Fail("restore failed");
+
+	before = g.Get_Resource_Stats();
+	if (!g.Surface_Bits(rt_surface, bits)) return Fail("render-target Surface_Bits failed");
+	after = g.Get_Resource_Stats();
+	if (after.readback_stalls == before.readback_stalls) {
+		return Fail("reading a rendered-into target transferred nothing");
+	}
+	const Rgba cleared = From_Rgba_Bytes(bits.bits);
+	const Rgba cleared_expected{255, 128, 0, 255};
+	if (!Near(cleared, cleared_expected, 2)) {
+		char detail[176];
+		std::snprintf(detail, sizeof(detail), "cleared target read as %s, expected %s",
+		              To_String(cleared).c_str(), To_String(cleared_expected).c_str());
+		return Fail(detail);
+	}
+
+	before = after;
+	if (!g.Surface_Bits(rt_surface, bits)) return Fail("second render-target read failed");
+	after = g.Get_Resource_Stats();
+	if (after.readback_stalls != before.readback_stalls) {
+		return Fail("a clean render-target read performed a readback");
+	}
+
+	// One more clear, so the bit has to come back: the copy the previous read made
+	// is now stale, and a read that trusts it hands back the old colour.
+	if (!g.Set_Render_Target(rt_surface, nullptr)) return Fail("second bind failed");
+	g.Clear(true, false, 0.0f, 1.0f, 0.25f, 1.0f);
+	if (!g.Set_Render_Target(saved_color, saved_depth)) return Fail("second restore failed");
+	before = after;
+	if (!g.Surface_Bits(rt_surface, bits)) return Fail("third render-target read failed");
+	after = g.Get_Resource_Stats();
+	if (after.readback_stalls == before.readback_stalls) {
+		return Fail("a target written again was still considered clean");
+	}
+	const Rgba second = From_Rgba_Bytes(bits.bits);
+	const Rgba second_expected{0, 255, 64, 255};
+	if (!Near(second, second_expected, 2)) {
+		char detail[176];
+		std::snprintf(detail, sizeof(detail), "re-cleared target read as %s, expected %s",
+		              To_String(second).c_str(), To_String(second_expected).c_str());
+		return Fail(detail);
+	}
+	return Pass("dirty reads transferred, clean reads transferred nothing, a second "
+	            "GPU write re-dirtied the surface");
+}
+
+// ---------------------------------------------------------------------------
 // C5: dynamic ring stream. DynamicVBAccessClass::WriteLockClass and the six
 //     call sites that stream through it, plus W3DSnowManager::renderSubBox.
 // ---------------------------------------------------------------------------
@@ -871,6 +1096,8 @@ int main(int argc, char** argv) {
 	report("C4 mip-chain lock", Case_Mip_Chain_Lock(harness));
 	report("C4 cross-thread fill", Case_Mip_Chain_Cross_Thread(harness));
 	report("C4 concurrent locks", Case_Concurrent_Locks(harness));
+	report("C6 full-level relock", Case_Whole_Lock_Preserves(harness));
+	report("C8 surface read hazard", Case_Surface_Read_Hazard(harness));
 	report("C5 dynamic ring stream", Case_Dynamic_Ring_Stream(harness));
 	report("L8 lock (no swizzle)", Case_L8_Lock(harness));
 	report("staging pool recycling", Case_Pool_Recycles_Staging(harness));
@@ -904,6 +1131,17 @@ int main(int argc, char** argv) {
 	            stats.readback_stalls);
 	std::printf("  CPU channel expansions at unlock:                    %u\n",
 	            stats.cpu_expansions);
+	std::printf("  GPU writes that dirtied a resource:                  %u\n",
+	            stats.gpu_write_marks);
+	std::printf("  host reads: %u dirty (paid a transfer), %u clean (paid nothing)\n",
+	            stats.dirty_reads, stats.clean_reads);
+	std::printf("  surface bytes read back:                            %llu\n",
+	            static_cast<unsigned long long>(stats.surface_readback_bytes));
+	std::printf("  preserving a lock's previous contents: %u level(s), %llu bytes, "
+	            "%u skipped\n",
+	            stats.staging_preserve_readbacks,
+	            static_cast<unsigned long long>(stats.staging_preserve_bytes),
+	            stats.staging_preserve_skips);
 	std::printf("  dynamic ring: %u DISCARD, %u NOOVERWRITE, %llu bytes, %u wrap stalls\n",
 	            stats.ring_discards, stats.ring_appends,
 	            static_cast<unsigned long long>(stats.ring_bytes), stats.ring_wrap_waits);

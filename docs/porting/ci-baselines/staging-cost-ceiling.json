@@ -8,6 +8,7 @@
       "staging_resident_bytes": 2048001,
       "staging_peak_bytes": 2048001,
       "staging_steady_state_bytes": 409601,
+      "staging_preserve_bytes": 67338631,
       "measured": {
         "staging_allocations": 8,
         "staging_resident_bytes": 1638400,
@@ -15,7 +16,13 @@
         "staging_steady_state_bytes": 327680,
         "staging_reuse_rate": 0.9826,
         "texture_locks": 653,
-        "buffer_locks": 480
+        "buffer_locks": 480,
+        "staging_preserve_readbacks": 513,
+        "staging_preserve_bytes": 53870904,
+        "staging_preserve_skips": 140,
+        "gpu_write_marks": 28,
+        "dirty_reads": 0,
+        "clean_reads": 108
       }
     },
     "no_swizzle": {
@@ -24,14 +31,21 @@
       "staging_resident_bytes": 2129921,
       "staging_peak_bytes": 2129921,
       "staging_steady_state_bytes": 409601,
+      "staging_preserve_bytes": 67338631,
       "measured": {
         "staging_allocations": 9,
         "staging_resident_bytes": 1703936,
         "staging_peak_bytes": 1703936,
         "staging_steady_state_bytes": 327680,
-        "staging_reuse_rate": 0.9819,
+        "staging_reuse_rate": 0.9831,
         "texture_locks": 653,
-        "buffer_locks": 480
+        "buffer_locks": 480,
+        "staging_preserve_readbacks": 513,
+        "staging_preserve_bytes": 53870904,
+        "staging_preserve_skips": 140,
+        "gpu_write_marks": 28,
+        "dirty_reads": 0,
+        "clean_reads": 108
       }
     }
   }
