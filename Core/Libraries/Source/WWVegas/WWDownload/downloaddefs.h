@@ -18,6 +18,10 @@
 
 #pragma once
 
+// TheSuperHackers @port HRESULT and MAKE_HRESULT under their Win32 spelling; see
+// docs/porting/online-absent-menu-seam.md
+#include <Utility/hresult_compat.h>
+
 // CDownload statuses
 
 #define DOWNLOADSTATUS_NONE				0
