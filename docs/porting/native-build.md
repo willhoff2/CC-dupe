@@ -328,7 +328,8 @@ a third library ever does.
 
 Both of those have since been resolved and `libraries_without_archive` is now empty: the browser
 excision earned `GeneralsMD/Code/Main` its archive, and the patch downloader's four units were ported
-rather than excluded — 962/971 objects at levels 1-4, with `check-download-seam.py` holding it. See
+rather than excluded — 968/972 objects at levels 1-4 as of `40fdfd066`, with `check-download-seam.py`
+holding the downloader. See
 [`ww3d2-and-download-headers.md`](ww3d2-and-download-headers.md). `docs/porting/native-build-report.md`
 and `STATUS.md` are the generated, authoritative counts.
 

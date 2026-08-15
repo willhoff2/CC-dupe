@@ -5,7 +5,7 @@
     "Core/GameEngine/Source/GameNetwork/GameSpy/MainMenuUtils.cpp": "unknown type name 'HANDLE'",
     "Core/GameEngine/Source/GameNetwork/GameSpy/StagingRoomGameInfo.cpp": "unknown type name 'AsnObjectIdentifier'",
     "Core/GameEngine/Source/GameNetwork/GameSpy/Thread/PingThread.cpp": "unknown type name 'HOSTENT'",
-    "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp": "no member named 'DriverVersion' in '_D3DADAPTER_IDENTIFIER8'"
+    "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp": "no member named 'GetWindowLong' in the global namespace"
   },
   "compiled": {
     "Core/GameEngine": {

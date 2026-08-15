@@ -10,16 +10,16 @@
     "miles-src/mss",
     "stb-src"
   ],
-  "clean": 713,
-  "total": 758,
+  "clean": 714,
+  "total": 759,
   "targets": {
     "Core/Libraries/Source/Compression": {
       "clean": 11,
       "total": 11
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
-      "clean": 36,
-      "total": 36
+      "clean": 37,
+      "total": 37
     },
     "Core/Libraries/Source/WWVegas/WWLib": {
       "clean": 78,
