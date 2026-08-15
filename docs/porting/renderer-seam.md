@@ -241,8 +241,8 @@ emulating `Lock`/`Unlock` over Vulkan measured by a running test rather than est
 
 ## 6. Remaining holes in the seam, stated plainly
 
-**`_Get_D3D_Device8()` / `_Get_D3D8()` still exist.** They now read through the backend
-(`TheD3D8RenderBackend.Peek_D3D_Device8()`), but they still return raw D3D8 pointers. 26 sites
+**`_Get_D3D_Device8()` / `_Get_D3D8()` still exist.** They now read through the *installed*
+backend (`Get_Render_Backend()->Peek_D3D_Device8()`), but they still return raw D3D8 pointers. 26 sites
 remain in `Core/` and `GeneralsMD/` outside `dx8wrapper.{h,cpp}`. 22 of them are
 device-presence tests (`if (!DX8Wrapper::_Get_D3D_Device8()) return;`,
 `DEBUG_ASSERTCRASH(..., "without device")`) that a `Has_Device()` predicate would satisfy
@@ -295,6 +295,47 @@ inside `d3d8renderbackend.cpp` as kind `backend` rather than `direct`, via a fix
 call added to any other file still fails the gate. The gate additionally fails if the backend
 implementation stops containing D3D8 calls at all, which would mean the file was renamed and
 the scanner had gone blind.
+
+## 6a. Why `dx8wrapper.h` no longer names the D3D8 backend
+
+`Peek_D3D_Device8()` / `Peek_D3D8()` were non-virtual members of `D3D8RenderBackendClass`, and
+`dx8wrapper.h` called them on `TheD3D8RenderBackend` by name. That class and that object are
+wholly inside `#ifdef _WIN32`, so off Windows every translation unit that included
+`dx8wrapper.h` — directly or through `w3d`/device headers — failed with `use of undeclared
+identifier 'TheD3D8RenderBackend'`. Measured with
+`scripts/native-build.py --level 1 --level 2 --level 3 --with-shims` on clang 14 / x86-64
+Linux: **37 translation units, the reason `Core/GameEngineDevice` and
+`GeneralsMD/Code/GameEngineDevice` did not build at all.**
+
+The fix declares the two accessors on `RenderBackendClass` with a `nullptr` default
+implementation, overrides them in the D3D8 backend, and has `DX8Wrapper::_Get_D3D_Device8()` /
+`_Get_D3D8()` ask `Get_Render_Backend()`. `DX8Wrapper::RenderBackend` is initialised to
+`&TheD3D8RenderBackend` under `_WIN32` and to `nullptr` otherwise, which is the only place in
+the renderer that knows a backend can be absent.
+
+Three properties are worth stating, because they are what made this the right option:
+
+- **No call site changed.** All 26 raw-accessor consumers and all 155 `DX8CALL*` sites are
+  untouched, and none of the 37 translation units gained an `#ifdef`.
+- **Off Windows the answer is `nullptr`, which is not a new state.** It is exactly what these
+  accessors returned between `DX8Wrapper::Init()` and `Create_Device()`, and the 22
+  presence-test consumers exist precisely to handle it.
+- **A non-D3D8 backend does not have to mention D3D8 to say "no D3D8 here".** These are the
+  only methods on `RenderBackendClass` with a default implementation, deliberately.
+
+Two alternatives were rejected:
+
+1. **`#ifdef` the two accessors in `dx8wrapper.h`** (declare them Windows-only). Cheapest diff,
+   but it moves the failure rather than removing it: the 26 consumers then need their own
+   guards, which is the per-consumer conditional compilation this slice was told not to write,
+   and it makes the header's API differ by platform.
+2. **Provide a `TheD3D8RenderBackend` off Windows** — i.e. take `d3d8renderbackend.h` out of
+   `#ifdef _WIN32` and let it compile against the D3D8 shim types. This keeps call sites
+   unchanged too, but it asserts something false: it puts a class whose whole body is D3D8
+   `LoadLibrary`/`Direct3DCreate8`/`IDirect3DDevice8` work into the native build, where it can
+   only ever be a stub that lies about being a backend. The seam exists so that the D3D8
+   implementation is *one* plug; compiling it everywhere would make "which backend am I" a
+   link-time accident instead of an explicit choice.
 
 ## 7. What a second backend still has to solve
 

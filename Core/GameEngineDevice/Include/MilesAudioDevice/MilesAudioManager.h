@@ -80,7 +80,10 @@ struct PlayingAudio
 		, m_cleanupAudioEventRTS(true)
 	{}
 
-	static_assert(sizeof(m_status) == sizeof(long), "Must be size of long, because it is used with Interlocked functions");
+	// TheSuperHackers @port The Interlocked functions operate on LONG, which is 32 bits wherever
+	// they exist, not on `long`, which is 64 bits under LP64. Int is asserted against rather than
+	// LONG because this header is included where the Win32 types are not declared.
+	static_assert(sizeof(m_status) == sizeof(Int), "Must be size of Int (== Win32 LONG), because it is used with Interlocked functions");
 };
 
 struct ProviderInfo
@@ -133,7 +136,9 @@ class AudioFileCache
 		OpenFilesHash m_openFiles;
 		UnsignedInt m_currentlyUsedSize;
 		UnsignedInt m_maxSize;
-		HANDLE m_mutex;
+		// TheSuperHackers @port Held as void* (what HANDLE is) so this header does not require the
+		// Win32 types; same treatment as rts::ClientInstance::s_instanceLock.
+		void* m_mutex;
 		const char *m_mutexName;
 };
 
