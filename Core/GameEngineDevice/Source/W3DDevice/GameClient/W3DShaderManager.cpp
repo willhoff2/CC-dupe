@@ -72,6 +72,7 @@
 #include "Common/GameLOD.h"
 #include "d3dx8tex.h"
 #include "WW3D2/dx8caps.h"
+#include <Utility/d3d8_compat.h>
 
 
 // Turn this on to turn off pixel shaders. jba[4/3/2003]
@@ -2918,7 +2919,7 @@ ChipsetType W3DShaderManager::getChipset()
 		D3DADAPTER_IDENTIFIER8 did;
 		::ZeroMemory(&did, sizeof(D3DADAPTER_IDENTIFIER8));
 	/*	HRESULT res = */ DX8Wrapper::Get_DX8_Adapter_Identifier(0,D3DENUM_NO_WHQL_LEVEL,&did);
-		*((LARGE_INTEGER*)&m_driverVersion) = did.DriverVersion;
+		m_driverVersion = D3D8AdapterDriverVersion(did);
 
 		if(did.VendorId == DC_NVIDIA_VENDOR_ID)
 		{

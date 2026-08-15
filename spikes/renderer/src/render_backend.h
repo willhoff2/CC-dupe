@@ -148,6 +148,23 @@ struct ResourceStats {
 	uint32_t upload_submits = 0;
 	// Lock(READONLY) round trips: copy-to-buffer, submit, fence wait.
 	uint32_t readback_stalls = 0;
+	// The GPU-write hazard (renderer-resource-seam.md §4.4). `gpu_write_marks` is
+	// how often a write funnel set a resource's dirty bit; `dirty_reads` the host
+	// reads that had to pay a transfer or a wait because of it; `clean_reads` the
+	// host reads that transferred nothing at all. A clean read that costs a
+	// transfer shows up as a `dirty_reads` that should have been a `clean_reads`,
+	// which is what the resource-lock tests assert on.
+	uint32_t gpu_write_marks = 0;
+	uint32_t dirty_reads = 0;
+	uint32_t clean_reads = 0;
+	uint64_t surface_readback_bytes = 0;
+	// What preserving a pooled staging block's previous contents costs: the levels
+	// brought back from the image because the lock was not a DISCARD, and the
+	// locks that skipped it because nothing was there to preserve or the caller
+	// proved it overwrites every byte.
+	uint32_t staging_preserve_readbacks = 0;
+	uint64_t staging_preserve_bytes = 0;
+	uint32_t staging_preserve_skips = 0;
 	// CPU channel expansions forced by the absence of view swizzle (MoltenVK).
 	uint32_t cpu_expansions = 0;
 	// Dynamic buffer ring: DISCARD renames, NOOVERWRITE appends, bytes handed out,
@@ -298,8 +315,12 @@ public:
 	                        const SurfacePoint* points) = 0;
 	// UpdateTexture: the managed-pool system-memory-to-video copy, level by level.
 	virtual bool Update_Texture(TextureHandle* source, TextureHandle* destination) = 0;
-	// Spike-only: the bits of a system-memory surface, so a test can assert on what
-	// CopyRects produced. Shaped like IDirect3DSurface8::LockRect minus the flags.
+	// IDirect3DSurface8::LockRect minus the flags, which is the shape
+	// SurfaceClass::Lock has: one read-write pointer, no way for the caller to say
+	// whether it reads. It is therefore treated as a read: a surface the GPU has
+	// written since the host last saw it pays a readback (a copy for a
+	// video-memory surface, a wait for a system-memory one whose CopyRects is
+	// still queued), and a clean surface pays nothing at all.
 	virtual bool Surface_Bits(SurfaceHandle* surface, LockedRect& out) = 0;
 
 	// --- user clip planes: SetClipPlane ---------------------------------------

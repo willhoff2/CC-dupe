@@ -14,6 +14,10 @@ Checked per swizzle mode:
     hundreds of locks, so an implementation without a pool cannot stay under it;
   * resident, peak and steady-state staging bytes, against their ceilings;
   * the reuse rate, against a floor;
+  * the bytes preservation reads back. A pool that publishes zeroes on acquire is
+    cheaper than one that honours D3D8's preserve-on-Lock contract, and the honest way
+    to keep the cheaper one from creeping back is to bound what the contract costs
+    rather than to leave it unmeasured;
   * allocations per lock, which must stay below a small fraction: it is the shape of
     the regression rather than its size, so it holds even if the workload grows;
   * the pixel check and the validation layer, both of which the workload itself
@@ -82,6 +86,7 @@ def ceiling_from(result):
         "staging_resident_bytes": up(result["staging_resident_bytes"], BYTE_HEADROOM),
         "staging_peak_bytes": up(result["staging_peak_bytes"], BYTE_HEADROOM),
         "staging_steady_state_bytes": up(result["staging_steady_state_bytes"], BYTE_HEADROOM),
+        "staging_preserve_bytes": up(result["staging_preserve_bytes"], BYTE_HEADROOM),
         "measured": {
             "staging_allocations": result["staging_allocations"],
             "staging_resident_bytes": result["staging_resident_bytes"],
@@ -90,6 +95,12 @@ def ceiling_from(result):
             "staging_reuse_rate": result["staging_reuse_rate"],
             "texture_locks": result["texture_locks"],
             "buffer_locks": result["buffer_locks"],
+            "staging_preserve_readbacks": result["staging_preserve_readbacks"],
+            "staging_preserve_bytes": result["staging_preserve_bytes"],
+            "staging_preserve_skips": result["staging_preserve_skips"],
+            "gpu_write_marks": result["gpu_write_marks"],
+            "dirty_reads": result["dirty_reads"],
+            "clean_reads": result["clean_reads"],
         },
     }
 
@@ -98,7 +109,9 @@ def check_mode(name, result, ceiling, failures):
     print(f"\n  {name}")
     print(f"    {'metric':32s} {'measured':>12s} {'ceiling':>12s}")
     for key in ("staging_allocations", "staging_resident_bytes", "staging_peak_bytes",
-                "staging_steady_state_bytes"):
+                "staging_steady_state_bytes", "staging_preserve_bytes"):
+        if key not in ceiling:
+            continue
         measured = result[key]
         limit = ceiling[key]
         ok = measured <= limit
@@ -125,6 +138,13 @@ def check_mode(name, result, ceiling, failures):
         failures.append(f"{name}: the probe texture read back wrong, so the pool is not correct")
     if result["validation_messages"]:
         failures.append(f"{name}: {result['validation_messages']} validation message(s)")
+
+    # A read that finds the resource clean must cost nothing, which is the whole point
+    # of the GPU-dirty bit: if every read is a transfer again, this is 0.
+    print(f"    {'reads served without a transfer':32s} {result['clean_reads']:12d}")
+    if result["clean_reads"] == 0:
+        failures.append(f"{name}: no read was served from a clean resource, so either the "
+                        f"dirty bit is always set or the workload stopped reading")
 
     # The mode has to have actually been the mode.
     if result["mode"] != "pool":
