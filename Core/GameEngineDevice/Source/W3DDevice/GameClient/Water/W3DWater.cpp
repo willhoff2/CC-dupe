@@ -44,7 +44,11 @@
 #include "WW3D2/scene.h"
 #include "WW3D2/dx8wrapper.h"
 #include "WW3D2/light.h"
-#include "d3dx8math.h"
+// This unit needs ID3DXBuffer and D3DXAssembleShader as well as the matrix helpers, and only
+// d3dx8core.h declares them; it includes the D3DX math declarations itself, so it has to be the
+// single source of them here -- the port's stand-in d3dx8math.h replaces the vendored math header
+// rather than adding to it, and taking both would define D3DXMATRIX twice.
+#include <d3dx8core.h>
 #include "WWLib/simplevec.h"
 #include "WW3D2/mesh.h"
 #include "WW3D2/matinfo.h"

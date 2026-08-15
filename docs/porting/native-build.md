@@ -374,7 +374,7 @@ No level-1-3 failure disappeared or appeared: the 33 are the 19 above plus these
 | Cause | Units | Owner |
 |---|---:|---|
 | The Windows-only patch downloader (`HRESULT`, `KEY_READ` registry access, `Common/Debug.h`, an undeclared `sku`) | 4 — all of `WWDownload` | cut scope (online/patching), same cut as GameSpy |
-| D3DX math not yet in the vendored surface (`D3DX_PI`, `D3DXMATRIX * D3DXMATRIX`) | 2 — `pointgr.cpp`, `sortingrenderer.cpp` | the D3DX math slice, which already owns `D3DXMatrixInverse` in `W3DWater.cpp` |
+| D3DX math not yet in the vendored surface (`D3DX_PI`, `D3DXMATRIX * D3DXMATRIX`) | 2 — `pointgr.cpp`, `sortingrenderer.cpp` | the D3DX math slice, which already owns `D3DXMatrixInverse` in `W3DWater.cpp`; since done, `docs/porting/d3dx8-math-seam.md` |
 | COM browser embedding (`LPDISPATCH`) | 2 — `dx8webbrowser.cpp`, `dx8wrapper.cpp` | the COM browser excision slice, which owns the same failure in `W3DDisplay.cpp`/`W3DWebBrowser.cpp` |
 | Harness headers with no stand-in (`windowsx.h`, `ddraw.h`) | 3 — `FramGrab.cpp`, `ww3d.cpp`, `ddsfile.cpp` | this harness (`scripts/native-port-shims/`), reachable only through the shimmed build |
 | `_D3DADAPTER_IDENTIFIER8` has no `DriverVersion` in the vendored `d3d8.h` | 1 — `dx8caps.cpp` | the Win32-residue slice, which owns the identical failure in `W3DShaderManager.cpp` |
@@ -405,6 +405,16 @@ later, and Windows is unaffected: the header is only reachable through the `#ifn
 Measured effect at level 4: 927 → 935 objects, 41 → 33 failures, 432 → 386 unresolved symbols
 (`agg_def.cpp`, `rendobj.cpp`, `soundrobj.cpp`, `assetmgr.cpp`, `hlod.cpp`, `part_emt.cpp`,
 `part_ldr.cpp` and `W3DAssetManager.cpp`).
+
+### Since: the D3DX math entry points
+
+The three D3DX units above are gone, and with them the five matrix symbols they left unresolved:
+952/971 → 956/972 objects, 19 → 16 failures, 412 → 364 unresolved at level 4 (834/839 → 836/840, 5 →
+4, 577 → 561 at levels 1-3). `Direct3D 8 / DirectX` 8 → 4, and `D3DXAssembleShader` appears in it for
+the first time because `W3DWater.cpp` now compiles and its pixel-shader path calls it. The denominator
+grows by one for `WWMath/tests/d3dx8math_test.cpp`, whose `main()` is removed from the archives like
+the other standalone tests'. Full account, including why an object count is the *weaker* half of that
+slice's evidence: `docs/porting/d3dx8-math-seam.md`.
 
 ### Is level 4 stable enough for CI
 
