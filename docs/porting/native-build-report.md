@@ -38,13 +38,12 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 
 ## 3. Undefined symbols
 
-The 10 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 4 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **608 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 10 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_openalaudiodevice`, `libthirdparty_lzhl`, `openal (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 4 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **548 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
 | Defined in a layer not built here (renderer / audio) | 385 |
 | GameSpy SDK (cut scope, not linked) | 81 |
-| Miles Sound System | 60 |
 | FFmpeg (not linked here) | 29 |
 | Defined in a translation unit that failed to compile | 18 |
 | Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 |
@@ -91,25 +90,6 @@ The 10 archives were linked into one binary with `--whole-archive`, plus the thi
 - `SBServerGetPlayerStringValueA`
 - `SBServerGetPrivateInetAddress`
 - …and 66 more
-
-### Miles Sound System
-
-- `AIL_3D_sample_playback_rate`
-- `AIL_WAV_info`
-- `AIL_allocate_3D_sample_handle`
-- `AIL_allocate_sample_handle`
-- `AIL_close_3D_listener`
-- `AIL_close_3D_provider`
-- `AIL_close_stream`
-- `AIL_decompress_ADPCM`
-- `AIL_enumerate_3D_providers`
-- `AIL_enumerate_filters`
-- `AIL_get_DirectSound_info`
-- `AIL_init_sample`
-- `AIL_mem_free_lock`
-- `AIL_open_3D_listener`
-- `AIL_open_3D_provider`
-- …and 45 more
 
 ### FFmpeg (not linked here)
 
