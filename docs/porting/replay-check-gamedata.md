@@ -10,23 +10,32 @@ gate cannot run there by default — which matters for this port: it is the only
 catch a save/serialisation or 64-bit change desyncing the simulation. Everything else in CI only
 proves the code still builds.
 
-There are two ways to run it, and this document covers both: **manually against a local data
-directory** (what this fork does), and **from your own bucket in CI** (how to get the automatic
-gate back).
+There are two ways to run it, and this document covers both: **from your own bucket in CI** (what
+this fork now does) and **manually against a local data directory**.
 
-## Status in this fork: manual
+## Status in this fork: running (first pass 2026-08-15)
 
-No game data is configured, so `Replay Check GeneralsMD` **skips** with a reason in the job summary
-instead of failing red. The decision is deliberate: hosting the data was not wanted, and a job that
-fails for a missing input tells you nothing about the code.
+The fork hosts its own copy of the data in a private S3 bucket, and the gate passes. Measured, in
+[run 31912666731](https://github.com/willhoff2/CC-dupe/actions/runs/31912666731), presets `vc6+t+e`
+and `vc6-releaselog+t+e`:
 
-> **The cost of that choice: with the gate manual, replay determinism — specifically PR #27's
-> save/serialisation change — is unverified against desync until somebody runs it.**
+```
+download: s3://<bucket>/generals108_gamedata_trimmed.7z
+Downloaded file SHA256: 15332B5D…  Expected file SHA256: 15332B5D…
+download: s3://<bucket>/zerohour104_gamedata_trimmed.7z
+Downloaded file SHA256: 2D137F6C…  Expected file SHA256: 2D137F6C…
+Run build/generalszh.exe -jobs 4 -headless -replay *.rep
+1/10 … 10/10 Simulating Replay …
+Simulation of all replays completed. Errors occurred: 0
+```
 
-The skip is driven by the `Game data available?` job in `check-replays.yml`, which checks whether
-`R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` are both set. Setting them (see
-[Hosting the data yourself](#hosting-the-data-yourself)) re-enables the gate with no change to any
-workflow file.
+Before this the gate had never passed in this fork, so nothing had checked the simulation against
+desync — including PR #27's save/serialisation change, which these ten replays now exercise.
+
+If the two credential secrets are ever removed, `Replay Check GeneralsMD` **skips** with a reason in
+the job summary rather than failing red: the `Game data available?` job in `check-replays.yml`
+checks whether `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` are both set. A job that fails for a
+missing input tells you nothing about the code.
 
 ## What the data is
 
@@ -100,10 +109,10 @@ Measured, read-only, on the Apple Silicon machine's copy of the retail data:
   both `.scb` scripts), but `BINKW32.DLL` and `mss32.dll` are **not** in that tree. The only copies
   of those two DLLs are the Zero Hour ones, and both are `PE32 ... Intel 80386` DLLs.
 
-Inference, not verified: a Generals archive packed without those two DLLs is expected to be enough
-for the headless Zero Hour run, because the Generals tree is only ever read as data — the executable
-under test is Zero Hour's and links its own copies. This has not been demonstrated; the way to
-demonstrate it is to make the check pass.
+**Now demonstrated.** The archives the gate consumes were packed from exactly this tree with
+`pack-gamedata.py`, taking `BINKW32.DLL` and `mss32.dll` from the Zero Hour install, and the run
+above passed all ten replays. The Generals tree is only ever read as data; the executable under test
+is Zero Hour's and links its own copies.
 
 ## Hosting the data yourself
 
@@ -170,7 +179,7 @@ Packing does **not** need Windows; only running the check does.
    Give the credentials read-only access to those two objects and nothing else.
 
 5. **Re-run `GenCI`.** Once the two credential secrets exist the `Game data available?` job stops
-   skipping the run. The job is change-gated, so if it does not trigger, dispatch it or push a
+   skipping the run (this is how the passing run above was obtained). The job is change-gated, so if it does not trigger, dispatch it or push a
    commit touching engine code.
 
 Unset variables fall back to the upstream bucket and its hashes, so this changes nothing for a
@@ -184,9 +193,9 @@ checkout that does have upstream access.
   Previously the `aws s3 cp` return value was ignored and the run died at the hash check with
   "Hash verification failed! File may be corrupted or tampered with.", which reads as data
   corruption when the real cause is missing credentials.
-- `pack-gamedata.ps1` requires Windows; `pack-gamedata.py` is the macOS/Linux equivalent. Both have
-  been exercised only against synthetic trees with the right file names — the archives they produce
-  have never been fed to the actual gate.
+- `pack-gamedata.ps1` requires Windows; `pack-gamedata.py` is the macOS/Linux equivalent. The
+  archives the passing run consumed were produced by `pack-gamedata.py` from a macOS copy of the
+  retail data; `pack-gamedata.ps1` has still only been exercised against a synthetic tree.
 - The gate proves determinism only for the **Windows 32-bit** build. There is no equivalent for a
   native 64-bit build yet, and there cannot be until one links — see
   [`native-build.md`](native-build.md).

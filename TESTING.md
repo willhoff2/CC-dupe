@@ -13,4 +13,4 @@ PAUSE
 ```
 It will run the game in the background and check that each replay is compatible. You need to use a VC6 build with optimizations and RTS_BUILD_OPTION_DEBUG = OFF, otherwise the game won't be compatible.
 
-`scripts/ci/run-replays-local.ps1` does all of the above for you, including the Generals `InstallPath` registry value the game needs, and restores your Replays and Maps folders afterwards. See [docs/porting/replay-check-gamedata.md](docs/porting/replay-check-gamedata.md), which also covers why the CI job skips in a fork with no game data.
+`scripts/ci/run-replays-local.ps1` does all of the above for you, including the Generals `InstallPath` registry value the game needs, and restores your Replays and Maps folders afterwards. See [docs/porting/replay-check-gamedata.md](docs/porting/replay-check-gamedata.md), which also covers how the CI job gets its game data (and why it skips in a fork that has none).
