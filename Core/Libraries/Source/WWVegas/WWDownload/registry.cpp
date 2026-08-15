@@ -22,7 +22,19 @@
 
 #include "Registry.h"
 #include <string>
+
+#ifdef _WIN32
 #include "WWLib/win.h"
+#else
+// TheSuperHackers @port There is no registry off Windows; the same key paths become sections of a
+// per user settings file. This is the transformation
+// GameEngine/Source/Common/System/registry.cpp already applies to its copy of these functions --
+// the two read and write the same store, under the same key paths, so the patch downloader still
+// sees the values the game wrote. See docs/porting/filesystem-and-registry.md.
+#include "WWLib/platform/platform_settings.h"
+#endif
+
+#ifdef _WIN32
 
 bool  getStringFromRegistry(HKEY root, std::string path, std::string key, std::string& val)
 {
@@ -108,6 +120,130 @@ bool setUnsignedIntInRegistry( HKEY root, std::string path, std::string key, uns
 	return (returnValue == ERROR_SUCCESS);
 }
 
+#else	// !_WIN32
+
+//
+// There is one settings store per user off Windows, so the two registry roots collapse into it:
+// a read of HKEY_CURRENT_USER goes to the store and the HKEY_LOCAL_MACHINE fallback that follows
+// every read here has nothing further to look in. That is deliberate -- HKLM held values written
+// by the retail installer (install path, language, SKU, version) and there is no installer, and
+// no machine wide store, on a native build.
+//
+static bool getStringFromStore(std::string path, std::string key, std::string& val)
+{
+	int handle = WWPlatform::Settings::Open_Key(path.c_str(), false);
+	if (handle == 0)
+		return false;
+
+	StringClass value;
+	bool found = WWPlatform::Settings::Get_String(handle, key.c_str(), value);
+	WWPlatform::Settings::Close_Key(handle);
+
+	if (found)
+		val = value.str();
+
+	return found;
+}
+
+static bool getUnsignedIntFromStore(std::string path, std::string key, unsigned int& val)
+{
+	int handle = WWPlatform::Settings::Open_Key(path.c_str(), false);
+	if (handle == 0)
+		return false;
+
+	int value = 0;
+	bool found = WWPlatform::Settings::Get_Int(handle, key.c_str(), value);
+	WWPlatform::Settings::Close_Key(handle);
+
+	if (found)
+		val = (unsigned int)value;
+
+	return found;
+}
+
+static bool setStringInStore(std::string path, std::string key, std::string val)
+{
+	int handle = WWPlatform::Settings::Open_Key(path.c_str(), true);
+	if (handle == 0)
+		return false;
+
+	WWPlatform::Settings::Set_String(handle, key.c_str(), val.c_str());
+	WWPlatform::Settings::Close_Key(handle);
+	return true;
+}
+
+static bool setUnsignedIntInStore(std::string path, std::string key, unsigned int val)
+{
+	int handle = WWPlatform::Settings::Open_Key(path.c_str(), true);
+	if (handle == 0)
+		return false;
+
+	WWPlatform::Settings::Set_Int(handle, key.c_str(), (int)val);
+	WWPlatform::Settings::Close_Key(handle);
+	return true;
+}
+
+#endif	// _WIN32
+
+//
+// The per root entry points the functions below are written in terms of. On Windows they are the
+// registry calls above; elsewhere they are the settings store.
+//
+static bool getStringFromCurrentUser(std::string path, std::string key, std::string& val)
+{
+#ifdef _WIN32
+	return getStringFromRegistry(HKEY_CURRENT_USER, path, key, val);
+#else
+	return getStringFromStore(path, key, val);
+#endif
+}
+
+static bool getStringFromLocalMachine(std::string path, std::string key, std::string& val)
+{
+#ifdef _WIN32
+	return getStringFromRegistry(HKEY_LOCAL_MACHINE, path, key, val);
+#else
+	// See above: no machine wide store exists, and the per user one has already been consulted.
+	return false;
+#endif
+}
+
+static bool getUnsignedIntFromCurrentUser(std::string path, std::string key, unsigned int& val)
+{
+#ifdef _WIN32
+	return getUnsignedIntFromRegistry(HKEY_CURRENT_USER, path, key, val);
+#else
+	return getUnsignedIntFromStore(path, key, val);
+#endif
+}
+
+static bool getUnsignedIntFromLocalMachine(std::string path, std::string key, unsigned int& val)
+{
+#ifdef _WIN32
+	return getUnsignedIntFromRegistry(HKEY_LOCAL_MACHINE, path, key, val);
+#else
+	return false;
+#endif
+}
+
+static bool setStringInCurrentUser(std::string path, std::string key, std::string val)
+{
+#ifdef _WIN32
+	return setStringInRegistry(HKEY_CURRENT_USER, path, key, val);
+#else
+	return setStringInStore(path, key, val);
+#endif
+}
+
+static bool setUnsignedIntInCurrentUser(std::string path, std::string key, unsigned int val)
+{
+#ifdef _WIN32
+	return setUnsignedIntInRegistry(HKEY_CURRENT_USER, path, key, val);
+#else
+	return setUnsignedIntInStore(path, key, val);
+#endif
+}
+
 bool GetStringFromRegistry(std::string path, std::string key, std::string& val)
 {
 #if RTS_GENERALS
@@ -117,12 +253,12 @@ bool GetStringFromRegistry(std::string path, std::string key, std::string& val)
 #endif
 
 	fullPath.append(path);
-	if (getStringFromRegistry(HKEY_CURRENT_USER, fullPath.c_str(), key.c_str(), val))
+	if (getStringFromCurrentUser(fullPath.c_str(), key.c_str(), val))
 	{
 		return true;
 	}
 
-	return getStringFromRegistry(HKEY_LOCAL_MACHINE, fullPath.c_str(), key.c_str(), val);
+	return getStringFromLocalMachine(fullPath.c_str(), key.c_str(), val);
 }
 
 bool GetUnsignedIntFromRegistry(std::string path, std::string key, unsigned int& val)
@@ -134,12 +270,12 @@ bool GetUnsignedIntFromRegistry(std::string path, std::string key, unsigned int&
 #endif
 
 	fullPath.append(path);
-	if (getUnsignedIntFromRegistry(HKEY_CURRENT_USER, fullPath.c_str(), key.c_str(), val))
+	if (getUnsignedIntFromCurrentUser(fullPath.c_str(), key.c_str(), val))
 	{
 		return true;
 	}
 
-	return getUnsignedIntFromRegistry(HKEY_LOCAL_MACHINE, fullPath.c_str(), key.c_str(), val);
+	return getUnsignedIntFromLocalMachine(fullPath.c_str(), key.c_str(), val);
 }
 
 bool SetStringInRegistry( std::string path, std::string key, std::string val)
@@ -153,7 +289,7 @@ bool SetStringInRegistry( std::string path, std::string key, std::string val)
 
 	// TheSuperHackers @fix bobtista 12/02/2026 Always write to HKCU. Per-user settings belong
 	// in HKEY_CURRENT_USER and writes there should always succeed without admin privileges.
-	return setStringInRegistry( HKEY_CURRENT_USER, fullPath, key, val );
+	return setStringInCurrentUser( fullPath, key, val );
 }
 
 bool SetUnsignedIntInRegistry( std::string path, std::string key, unsigned int val)
@@ -167,6 +303,6 @@ bool SetUnsignedIntInRegistry( std::string path, std::string key, unsigned int v
 
 	// TheSuperHackers @fix bobtista 12/02/2026 Always write to HKCU. Per-user settings belong
 	// in HKEY_CURRENT_USER and writes there should always succeed without admin privileges.
-	return setUnsignedIntInRegistry( HKEY_CURRENT_USER, fullPath, key, val );
+	return setUnsignedIntInCurrentUser( fullPath, key, val );
 }
 

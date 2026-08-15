@@ -30,9 +30,9 @@
       "total": 3
     },
     "Core/Libraries/Source/WWVegas/WWLib": {
-      "objects": 77,
-      "probe_clean": 77,
-      "total": 77
+      "objects": 78,
+      "probe_clean": 78,
+      "total": 78
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
       "objects": 36,
@@ -82,13 +82,13 @@
   "link_entry_point_archives": [
     "libgeneralsmd_code_main"
   ],
-  "objects": 834,
-  "probe_clean": 834,
+  "objects": 835,
+  "probe_clean": 835,
   "third_party_linked": [
     "libthirdparty_lzhl",
     "z (system)"
   ],
-  "translation_units": 839,
+  "translation_units": 840,
   "undefined_by_category": {
     "Defined in a built translation unit behind a disabled #if (build option / platform)": 10,
     "Defined in a layer not built here (renderer / audio)": 323,

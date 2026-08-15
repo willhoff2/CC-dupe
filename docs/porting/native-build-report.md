@@ -14,7 +14,7 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 |---|---:|---:|---:|
 | `Core/Libraries/Source/Compression` | 11 | 11 | 11 |
 | `Core/Libraries/Source/WWVegas/WWMath` | 36 | 36 | 36 |
-| `Core/Libraries/Source/WWVegas/WWLib` | 77 | 77 | 77 |
+| `Core/Libraries/Source/WWVegas/WWLib` | 78 | 78 | 78 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 | 3 | 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
 | `Core/GameEngine` | 207 | 210 | 207 |
@@ -22,7 +22,7 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/GameEngineDevice` | 69 | 70 | 69 |
 | `GeneralsMD/Code/GameEngineDevice` | 38 | 39 | 38 |
 | `GeneralsMD/Code/Main` | 1 | 1 | 1 |
-| **Total** | **834** | **839** | **834** |
+| **Total** | **835** | **840** | **835** |
 
 5 translation units produced no object file:
 
@@ -36,7 +36,7 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 834 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 835 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 

@@ -490,6 +490,12 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define GMEM_DISCARDABLE         0x0100
 #define GMEM_SHARE               0x2000
 #define GMEM_DDESHARE            0x2000
+// OpenFile/AVIFileOpen access flags.
+#define OF_READ                  0x0000
+#define OF_WRITE                 0x0001
+#define OF_READWRITE             0x0002
+#define OF_SHARE_COMPAT          0x0000
+#define OF_CREATE                0x1000
 #define GPTR                     (GMEM_FIXED | GMEM_ZEROINIT)
 #define GHND                     (GMEM_MOVEABLE | GMEM_ZEROINIT)
 #define VER_PLATFORM_WIN32s          0
@@ -673,6 +679,8 @@ SIZE_T GlobalSize(HGLOBAL);
 LPVOID GlobalLock(HGLOBAL);
 BOOL   GlobalUnlock(HGLOBAL);
 HGLOBAL GlobalFree(HGLOBAL);
+HGLOBAL GlobalHandle(LPCVOID);
+BOOL   SetRect(LPRECT, int, int, int, int);
 // Version resource queries. Windows-only by construction -- they read a VERSIONINFO resource out
 // of a PE image -- so they are declared and never defined; see
 // docs/porting/crt-and-widechar-compat.md.

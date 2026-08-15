@@ -25,6 +25,8 @@
 #include <direct.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+// TheSuperHackers @port _mkdir(), which MSVC declares in <direct.h>.
+#include <Utility/path_compat.h>
 
 /////////////////////////////////////////////////////////////////////////////
 // CDownload

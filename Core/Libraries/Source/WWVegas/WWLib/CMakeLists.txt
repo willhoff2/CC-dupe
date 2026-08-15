@@ -199,6 +199,7 @@ else()
         platform/platform_win32_module.cpp
         platform/platform_win32_stub.cpp
         platform/platform_win32_user.cpp
+        platform/platform_win32_vfw.cpp
     )
     # The window/event-loop/input backends (docs/porting/window-event-loop.md). The header
     # above is always listed because it is pure declarations; a backend is opt-in and off by

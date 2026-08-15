@@ -115,6 +115,22 @@ int MessageBoxW(HWND, LPCWSTR text, LPCWSTR caption, UINT flags)
 }
 
 
+BOOL SetRect(LPRECT rect, int left, int top, int right, int bottom)
+{
+	/*
+	**	Pure arithmetic on a RECT, with no display involved. Win32 fails only for a null pointer.
+	*/
+	if (rect == nullptr) {
+		return FALSE;
+	}
+	rect->left = left;
+	rect->top = top;
+	rect->right = right;
+	rect->bottom = bottom;
+	return TRUE;
+}
+
+
 short GetAsyncKeyState(int)
 {
 	WWPlatform::Win32::Report_Stub("GetAsyncKeyState",

@@ -27,6 +27,9 @@
 // docs/porting/sockets-and-text-encoding.md
 #include <Utility/socket_compat.h>
 #include <Utility/stdio_adapter.h>
+// TheSuperHackers @port LPCSTR, which this interface is declared in terms of. Empty on Windows,
+// where <windows.h> supplies it as before.
+#include <Utility/compat.h>
 
 #include "ftpdefs.h"
 
