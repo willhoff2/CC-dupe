@@ -167,7 +167,10 @@ DECLARE_HANDLE(HRSRC);
 // on the implicit conversion that a distinct handle struct would refuse.
 typedef HANDLE HGLOBAL;
 typedef HANDLE HLOCAL;
-DECLARE_HANDLE(HGDIOBJ);
+// Not DECLARE_HANDLE either: wingdi.h typedefs HGDIOBJ to void*, and SelectObject()'s callers --
+// WW3D2/render2dsentence.cpp's Create_GDI_Font() -- hand it an HBITMAP or an HFONT and cast the
+// result back, which a distinct handle struct would refuse.
+typedef void* HGDIOBJ;
 #ifndef HMONITOR_DECLARED
 #define HMONITOR_DECLARED
 DECLARE_HANDLE(HMONITOR);
@@ -287,6 +290,15 @@ typedef struct _BITMAPINFOHEADER {
 	DWORD biClrUsed, biClrImportant;
 } BITMAPINFOHEADER, *LPBITMAPINFOHEADER;
 typedef struct _BITMAPINFO { BITMAPINFOHEADER bmiHeader; RGBQUAD bmiColors[1]; } BITMAPINFO, *LPBITMAPINFO;
+typedef struct _TEXTMETRICA {
+	LONG tmHeight, tmAscent, tmDescent, tmInternalLeading, tmExternalLeading;
+	LONG tmAveCharWidth, tmMaxCharWidth, tmWeight, tmOverhang;
+	LONG tmDigitizedAspectX, tmDigitizedAspectY;
+	BYTE tmFirstChar, tmLastChar, tmDefaultChar, tmBreakChar;
+	BYTE tmItalic, tmUnderlined, tmStruckOut, tmPitchAndFamily, tmCharSet;
+} TEXTMETRICA, *PTEXTMETRICA, *LPTEXTMETRICA;
+typedef TEXTMETRICA TEXTMETRIC, *PTEXTMETRIC, *LPTEXTMETRIC;
+
 typedef struct _BITMAPFILEHEADER {
 	WORD bfType; DWORD bfSize; WORD bfReserved1, bfReserved2; DWORD bfOffBits;
 } BITMAPFILEHEADER, *LPBITMAPFILEHEADER;
@@ -513,6 +525,30 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define LOBYTE(w)        ((BYTE)((DWORD_PTR)(w) & 0xFF))
 #define HIBYTE(w)        ((BYTE)(((DWORD_PTR)(w) >> 8) & 0xFF))
 #define RGB(r, g, b)     ((COLORREF)(((BYTE)(r)) | ((WORD)((BYTE)(g)) << 8) | ((DWORD)((BYTE)(b)) << 16)))
+// wingdi.h: the CreateFont()/CreateDIBSection()/ExtTextOut() arguments the font seam passes
+// (docs/porting/gdi-font-seam.md). Only the values the engine actually names.
+#define FW_DONTCARE          0
+#define FW_NORMAL            400
+#define FW_BOLD              700
+#define ANSI_CHARSET         0
+#define DEFAULT_CHARSET      1
+#define OUT_DEFAULT_PRECIS   0
+#define OUT_TT_PRECIS        4
+#define CLIP_DEFAULT_PRECIS  0
+#define DEFAULT_QUALITY      0
+#define ANTIALIASED_QUALITY  4
+#define DEFAULT_PITCH        0
+#define FIXED_PITCH          1
+#define VARIABLE_PITCH       2
+#define FF_DONTCARE          0
+#define TMPF_FIXED_PITCH     0x01
+#define TMPF_TRUETYPE        0x04
+#define BI_RGB               0
+#define DIB_RGB_COLORS       0
+#define ETO_OPAQUE           0x0002
+#define ETO_CLIPPED          0x0004
+#define CLR_INVALID          ((COLORREF)0xFFFFFFFF)
+#define GDI_ERROR            ((DWORD)0xFFFFFFFFL)
 #define GetRValue(c)     ((BYTE)(c))
 #define GetGValue(c)     ((BYTE)(((WORD)(c)) >> 8))
 #define GetBValue(c)     ((BYTE)((c) >> 16))
@@ -681,8 +717,25 @@ HMODULE GetModuleHandleW(LPCWSTR);
 int     GetDateFormatW(LCID, DWORD, const SYSTEMTIME*, LPCWSTR, LPWSTR, int);
 int     GetTimeFormatW(LCID, DWORD, const SYSTEMTIME*, LPCWSTR, LPWSTR, int);
 DWORD   FormatMessageW(DWORD, LPCVOID, DWORD, DWORD, LPWSTR, DWORD, va_list*);
+BOOL    GetTextExtentPoint32W(HDC, LPCWSTR, int, LPSIZE);
+BOOL    ExtTextOutW(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
 HDC     GetDC(HWND);
 int     ReleaseDC(HWND, HDC);
+
+// The GDI text entry points the WW3D2 font cache rasterises glyphs with. Implemented off Windows
+// by WWLib/platform/platform_win32_gdi_font.cpp -- one portable rasteriser on every non-Windows
+// platform, with GDI's metrics as the reference (docs/porting/gdi-font-seam.md).
+HFONT    CreateFontA(int, int, int, int, int, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD,
+                     DWORD, LPCSTR);
+HDC      CreateCompatibleDC(HDC);
+BOOL     DeleteDC(HDC);
+HBITMAP  CreateDIBSection(HDC, const BITMAPINFO*, UINT, void**, HANDLE, DWORD);
+HGDIOBJ  SelectObject(HDC, HGDIOBJ);
+BOOL     DeleteObject(HGDIOBJ);
+COLORREF SetBkColor(HDC, COLORREF);
+COLORREF SetTextColor(HDC, COLORREF);
+BOOL     GetTextMetricsA(HDC, LPTEXTMETRICA);
+int      MulDiv(int, int, int);
 BOOL    InvalidateRect(HWND, LPCRECT, BOOL);
 }
 
@@ -729,5 +782,7 @@ BOOL    InvalidateRect(HWND, LPCRECT, BOOL);
 #define DispatchMessage  DispatchMessageA
 #define MessageBox       MessageBoxA
 #define LoadCursor       LoadCursorA
+#define CreateFont       CreateFontA
+#define GetTextMetrics   GetTextMetricsA
 #define LoadIcon         LoadIconA
 #define wsprintf         wsprintfA

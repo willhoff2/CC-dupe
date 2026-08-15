@@ -41,6 +41,12 @@
 
 #pragma once
 
+// The Bink SDK is Windows-only: `binkstub`, and the retail SDK it stands in for, exist only in
+// the 32-bit Windows configuration, and the port plays video through RTS_HAS_FFMPEG instead. Off
+// Windows this header declares nothing rather than declaring a player that cannot decode.
+// See docs/porting/video-and-harness-headers.md.
+#ifdef RTS_HAS_BINK
+
 //----------------------------------------------------------------------------
 //           Includes
 //----------------------------------------------------------------------------
@@ -134,3 +140,5 @@ class BinkVideoPlayer : public VideoPlayer
 //----------------------------------------------------------------------------
 //           Inlining
 //----------------------------------------------------------------------------
+
+#endif // RTS_HAS_BINK

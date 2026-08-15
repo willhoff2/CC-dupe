@@ -81,6 +81,22 @@ public:
 	virtual ~RenderBackendClass() {}
 
 	/*
+	** The documented hole in the seam: the raw D3D8 objects, for the callers this seam did
+	** not move (the "is there a device yet?" tests, the D3DX helpers that take a device, the
+	** embedded browser and the Win32 tools).  DX8Wrapper::_Get_D3D_Device8() / _Get_D3D8()
+	** forward to these, so those callers reach the *installed* backend rather than naming a
+	** D3D8 backend that only exists on Windows.
+	**
+	** A backend that is not D3D8 has no such objects and returns nullptr, which is the same
+	** answer the D3D8 backend gives before Create_Device().  Every existing caller already
+	** handles a null device, because that is the state it tests for.  These are the only
+	** methods here with a default implementation, and deliberately so: an implementation must
+	** not have to know about D3D8 in order to say "no D3D8 here".
+	*/
+	virtual IDirect3DDevice8* Peek_D3D_Device8() const { return nullptr; }
+	virtual IDirect3D8* Peek_D3D8() const { return nullptr; }
+
+	/*
 	** Backend and device lifecycle.  These are the only entry points that do not mirror a
 	** D3D8 method, because device *ownership* is what moved across the seam.
 	**

@@ -82,5 +82,19 @@ void __cdecl Print_Win32Error(unsigned long win32Error);
 #endif // RTS_DEBUG
 
 #else // _WIN32
-//#include <unistd.h>	// file does not exist
+
+//
+//	Off Windows this header still has to supply the Win32 spellings its includers use in their own
+//	declarations -- HFONT, HDC and HBITMAP in WW3D2/render2dsentence.h, which is what made 18
+//	translation units fail with "unknown type name 'HFONT'". The port's own <windows.h> declares
+//	them, so include it where it is on the include path, exactly as
+//	WWLib/platform/platform_win32_compat.h does. Where it is not, this header stays empty rather
+//	than inventing a second, possibly divergent, set of Win32 typedefs.
+//
+#if defined(__has_include)
+#if __has_include(<windows.h>)
+#include <windows.h>
+#endif
+#endif
+
 #endif // _WIN32

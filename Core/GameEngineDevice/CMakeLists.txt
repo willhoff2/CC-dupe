@@ -1,6 +1,7 @@
 set(GAMEENGINEDEVICE_SRC
     Include/MilesAudioDevice/MilesAudioManager.h
     Include/VideoDevice/Bink/BinkVideoPlayer.h
+    Include/VideoDevice/Null/NullVideoPlayer.h
 #    Include/W3DDevice/Common/W3DConvert.h
 #    Include/W3DDevice/Common/W3DFunctionLexicon.h
 #    Include/W3DDevice/Common/W3DModuleFactory.h
@@ -227,11 +228,19 @@ target_link_libraries(corei_gameenginedevice_private INTERFACE
 )
 
 target_link_libraries(corei_gameenginedevice_public INTERFACE
-    binkstub
     corei_gameengine_public
     d3d8lib
     milesstub
 )
+
+# The Bink SDK exists only in the 32-bit Windows configuration, where cmake/bink.cmake supplies
+# `binkstub`. RTS_HAS_BINK is what BinkVideoPlayer.{h,cpp} and the video-backend selection in
+# W3DGameClient.h key off, so off Windows the Bink player compiles out instead of needing a
+# `bink.h` that does not exist. See docs/porting/video-and-harness-headers.md.
+if(TARGET binkstub)
+    target_link_libraries(corei_gameenginedevice_public INTERFACE binkstub)
+    target_compile_definitions(corei_gameenginedevice_public INTERFACE RTS_HAS_BINK)
+endif()
 
 if(RTS_BUILD_OPTION_FFMPEG)
     find_package(FFMPEG REQUIRED)

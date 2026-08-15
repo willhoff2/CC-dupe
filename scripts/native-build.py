@@ -376,7 +376,10 @@ def well_known_keys_category(owner, failed, built_sources):
 # because it adds the directory anyway. Adding it here rather than in the probe keeps the probe's
 # published baselines stable; the divergence measurement is unaffected because the probe pass in
 # this script uses the same include set as the build it is compared against.
-EXTRA_DEP_INCLUDES = ["gamespy-src/include/gamespy"]
+# stb-src for the same reason: <stb_truetype.h> is what WWLib's GDI text entry points rasterise
+# glyphs with off Windows (docs/porting/gdi-font-seam.md), and the real CMake build gets it from
+# the `stb` interface target that cmake/stb.cmake fetches.
+EXTRA_DEP_INCLUDES = ["gamespy-src/include/gamespy", "stb-src"]
 
 
 def includes_for(target, deps_dir, with_shims):
@@ -484,9 +487,6 @@ def configure(build_dir, manifest_dir, targets, extra_slugs=()):
         raise SystemExit("cmake configure failed")
 
 
-FAILED_OBJ_RE = re.compile(r"^FAILED: (\S+\.o)\b")
-
-
 def build(build_dir, jobs):
     """Build everything, keeping going past failures.
 
@@ -521,36 +521,31 @@ def build(build_dir, jobs):
         if not obj_path.is_file():
             failed.add(pathlib.Path(source))
 
-    # Attribute a diagnostic to the translation unit whose compile emitted it, by reading the
-    # generator's failure block, and only fall back to matching the file's own name. Scanning the
-    # whole log for the basename loses the diagnostic whenever clang reports the error inside an
-    # included header (61 of 79 failures here) and can pick up an error from an unrelated unit that
-    # merely includes the file.
-    lines = log.splitlines()
+    # Attribute each diagnostic to the translation unit that printed it: either the error line
+    # names the .cpp, or clang's "In file included from" chain does, its head being the unit. Only
+    # accepting the first form recorded an empty diagnostic for every error inside a header, which
+    # is most of them (56 of 72 in the shimmed level 1-3 build). Ninja prints each edge's output
+    # atomically, so the chain and the error it introduces stay adjacent.
     diagnostics = {}
+    by_name = {source.name: source for source in failed}
+    include_chain = re.compile(r"^In file included from (\S+?):\d+")
     current = None
-    for line in lines:
-        match = FAILED_OBJ_RE.match(line)
-        if match:
-            obj = match.group(1)
-            current = pathlib.Path(obj_to_source[obj]) if obj in obj_to_source else None
+    for line in log.splitlines():
+        chain = include_chain.match(line)
+        if chain:
+            # The head of the chain is the translation unit; deeper lines are its headers.
+            head = by_name.get(pathlib.Path(chain.group(1)).name)
+            if head is not None:
+                current = head
             continue
-        if current is None or current in diagnostics:
+        if ": error:" not in line and ": fatal error:" not in line:
             continue
-        if ": error:" in line or ": fatal error:" in line:
-            diagnostics[current] = line.split(": error:", 1)[-1] \
+        named = next((source for name, source in by_name.items()
+                      if line.startswith(("/", ".")) and name in line.split(":", 1)[0]), None)
+        source = named or current
+        if source is not None and source not in diagnostics:
+            diagnostics[source] = line.split(": error:", 1)[-1] \
                 .split(": fatal error:", 1)[-1].strip()
-
-    for source in failed:
-        if source in diagnostics:
-            continue
-        for line in lines:
-            if source.name not in line:
-                continue
-            if ": error:" in line or ": fatal error:" in line:
-                diagnostics[source] = line.split(": error:", 1)[-1] \
-                    .split(": fatal error:", 1)[-1].strip()
-                break
     return failed, diagnostics
 
 
