@@ -47,6 +47,8 @@
 #include "GameClient/Display.h"
 
 
+#ifdef RTS_HAS_EMBEDDED_BROWSER
+
 /**
 	* OLEInitializer class - Init and shutdown OLE & COM as a global
 	* object.  Scary, nasty stuff, COM.  /me shivers.
@@ -69,6 +71,12 @@ CComModule _Module;
 
 CComObject<WebBrowser> * TheWebBrowser = nullptr;
 
+#else // !RTS_HAS_EMBEDDED_BROWSER
+
+WebBrowser * TheWebBrowser = nullptr;
+
+#endif // RTS_HAS_EMBEDDED_BROWSER
+
 
 /******************************************************************************
 *
@@ -86,8 +94,10 @@ CComObject<WebBrowser> * TheWebBrowser = nullptr;
 *
 ******************************************************************************/
 
-WebBrowser::WebBrowser() :
-		mRefCount(1)
+WebBrowser::WebBrowser()
+#ifdef RTS_HAS_EMBEDDED_BROWSER
+		: mRefCount(1)
+#endif
 {
 	DEBUG_LOG(("Instantiating embedded WebBrowser"));
 	m_urlList = nullptr;
@@ -232,6 +242,8 @@ WebBrowserURL * WebBrowser::makeNewURL(AsciiString tag)
 *
 ******************************************************************************/
 
+#ifdef RTS_HAS_EMBEDDED_BROWSER
+
 STDMETHODIMP WebBrowser::QueryInterface(REFIID iid, void** ppv) IUNKNOWN_NOEXCEPT
 {
 	*ppv = nullptr;
@@ -308,3 +320,23 @@ STDMETHODIMP WebBrowser::TestMethod(Int num1)
 	DEBUG_LOG(("WebBrowser::TestMethod - num1 = %d", num1));
 	return S_OK;
 }
+
+#else // !RTS_HAS_EMBEDDED_BROWSER
+
+// There is no embedded browser in this configuration; see docs/porting/embedded-browser-seam.md.
+// These fail loudly rather than quietly reporting success, because a caller that gets here believes
+// it is showing the player a web page.
+
+Bool WebBrowser::createBrowserWindow(const char *tag, GameWindow *win)
+{
+	DEBUG_CRASH(("WebBrowser::createBrowserWindow('%s'): this build has no embedded browser",
+		tag != nullptr ? tag : ""));
+	return FALSE;
+}
+
+void WebBrowser::closeBrowserWindow(GameWindow *win)
+{
+	DEBUG_CRASH(("WebBrowser::closeBrowserWindow: this build has no embedded browser"));
+}
+
+#endif // RTS_HAS_EMBEDDED_BROWSER

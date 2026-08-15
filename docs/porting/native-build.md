@@ -256,6 +256,26 @@ Unresolved symbols rise for the reason the slices each predicted: 272 of the 457
 `WW3D2`, which levels 1+2+3 do not build. The total will not fall until the renderer library is
 built.
 
+## The browser excision, and the first link of the real game target (current baseline)
+
+| | wave-3 stack | with the browser excised |
+|---|---:|---:|
+| Translation units | 836 | 836 |
+| Object files produced | 816 | **819** |
+| Compile failures | 20 | **17** |
+| Unresolved symbols after linking | 457 | **467** |
+| `GeneralsMD/Code/Main` | 0 / 1, no archive | **1 / 1, archive** |
+| Link entry point | this script's stub `main()` | **`PlatformMain.cpp`'s `main()`** |
+
+The `CComObject<W3DWebBrowser>` blocker above is gone, so the sentence "`GeneralsMD/Code/Main`
+produces no archive" is no longer true and the link is anchored by the game's own entry point rather
+than by a `main()` the harness writes. `docs/porting/embedded-browser-seam.md` has the seam, the
+per-category movement (the total rises because three more translation units contribute their
+references) and what the categorised link says is missing for a binary that could start. Two facts
+that only appear once the game target links: `native-build.py` had to reproduce `Main`'s
+CMake-generated `BuildVersion.h`/`GeneratedVersion.h`, and it removes the two standalone test tools'
+`main()` objects from the archives, since a duplicate entry point is otherwise all the linker reports.
+
 ## What this does not show
 
 - **This is Linux x86-64, not macOS arm64.** Nothing here has been run on Apple Silicon. The

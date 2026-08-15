@@ -20,11 +20,11 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/GameEngine` | 204 | 210 | 204 |
 | `GeneralsMD/Code/GameEngine` | 378 | 380 | 378 |
 | `Core/GameEngineDevice` | 64 | 70 | 64 |
-| `GeneralsMD/Code/GameEngineDevice` | 34 | 39 | 34 |
-| `GeneralsMD/Code/Main` | 0 | 1 | 0 |
-| **Total** | **816** | **836** | **816** |
+| `GeneralsMD/Code/GameEngineDevice` | 36 | 39 | 36 |
+| `GeneralsMD/Code/Main` | 1 | 1 | 1 |
+| **Total** | **819** | **836** | **819** |
 
-20 translation units produced no object file:
+17 translation units produced no object file:
 
 | Translation unit | First diagnostic |
 |---|---|
@@ -44,31 +44,27 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/MainMenu.cpp` | `unknown type name 'HRESULT'; did you mean 'MMRESULT'?` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DAssetManager.cpp` | `use of undeclared identifier 'lstrcpyn'` |
 | `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp` | `no member named '_strdup' in the global namespace; did you mean 'strdup'?` |
-| `GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DWebBrowser.cpp` | `'IDispatch' does not refer to a value` |
-| `GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp` | `allocating an object of abstract class type 'CComObject<W3DWebBrowser>'` |
 | `GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32OSDisplay.cpp` | `use of undeclared identifier 'MB_APPLMODAL'` |
-| `GeneralsMD/Code/Main/PlatformMain.cpp` | `allocating an object of abstract class type 'CComObject<W3DWebBrowser>'` |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 816 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 819 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 9 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: no; clean link: no). **457 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 10 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libthirdparty_lzhl`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 2 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`). **467 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
 | Defined in a layer not built here (renderer / audio) | 272 |
-| Defined in a translation unit that failed to compile | 86 |
+| Defined in a translation unit that failed to compile | 100 |
 | GameSpy SDK (cut scope, not linked) | 33 |
-| Other / unclassified | 29 |
+| FFmpeg (not linked here) | 29 |
 | Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 12 |
-| Defined in a built translation unit behind a disabled #if (build option / platform) | 10 |
+| Defined in a built translation unit behind a disabled #if (build option / platform) | 9 |
 | Generated gitinfo (build-time, not a blocker) | 6 |
 | Direct3D 8 / DirectX | 3 |
 | Win32 API | 3 |
-| COM / OLE (browser embedding, cut scope) | 3 |
 
 ### Defined in a layer not built here (renderer / audio)
 
@@ -95,18 +91,18 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `TheGameSpyPeerMessageQueue`
 - `ThePinger`
 - `TheWaterRenderObj`
-- `TheWin32Mouse`
 - `doSkyBoxSet(bool)`
 - `MainMenuInit(WindowLayout*, void*)`
 - `MainMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
 - `MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
 - `MainMenuUpdate(WindowLayout*, void*)`
 - `setupGameStart(AsciiString, GameDifficulty)`
-- `CreateGameEngine()`
 - `DownloadMenuInit(WindowLayout*, void*)`
 - `MainMenuShutdown(WindowLayout*, void*)`
 - `DownloadMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)`
-- …and 71 more
+- `DoResolutionDialog()`
+- `DownloadMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)`
+- …and 85 more
 
 ### GameSpy SDK (cut scope, not linked)
 
@@ -127,7 +123,7 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `gcd_secret_key`
 - …and 18 more
 
-### Other / unclassified
+### FFmpeg (not linked here)
 
 - `av_frame_alloc`
 - `av_frame_clone`
@@ -163,7 +159,6 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 
 ### Defined in a built translation unit behind a disabled #if (build option / platform)
 
-- `ApplicationHInstance`
 - `DX8Wrapper_IsWindowed`
 - `DX8Wrapper_PreserveFPU`
 - `FillStackAddresses(void**, unsigned int, unsigned int)`
@@ -194,12 +189,6 @@ The 9 archives were linked into one binary with `--whole-archive`, plus the thir
 - `GetCursorPos`
 - `ScreenToClient`
 - `SetCursor`
-
-### COM / OLE (browser embedding, cut scope)
-
-- `IID_IBrowserDispatch`
-- `IID_IUnknown`
-- `_com_util::ConvertStringToBSTR(char const*)`
 
 ## Reproducing
 

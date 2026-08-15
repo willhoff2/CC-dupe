@@ -1,5 +1,5 @@
 {
-  "archives": 9,
+  "archives": 10,
   "clang_major": "14",
   "compile_failures": {
     "Core/GameEngine/Source/GameNetwork/DownloadManager.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
@@ -18,10 +18,7 @@
     "GeneralsMD/Code/GameEngine/Source/GameClient/GUI/GUICallbacks/Menus/MainMenu.cpp": "unknown type name 'HRESULT'; did you mean 'MMRESULT'?",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DAssetManager.cpp": "use of undeclared identifier 'lstrcpyn'",
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp": "no member named '_strdup' in the global namespace; did you mean 'strdup'?",
-    "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DWebBrowser.cpp": "'IDispatch' does not refer to a value",
-    "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp": "allocating an object of abstract class type 'CComObject<W3DWebBrowser>'",
-    "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32OSDisplay.cpp": "use of undeclared identifier 'MB_APPLMODAL'",
-    "GeneralsMD/Code/Main/PlatformMain.cpp": "allocating an object of abstract class type 'CComObject<W3DWebBrowser>'"
+    "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32OSDisplay.cpp": "use of undeclared identifier 'MB_APPLMODAL'"
   },
   "compiled": {
     "Core/GameEngine": {
@@ -65,13 +62,13 @@
       "total": 380
     },
     "GeneralsMD/Code/GameEngineDevice": {
-      "objects": 34,
-      "probe_clean": 34,
+      "objects": 36,
+      "probe_clean": 36,
       "total": 39
     },
     "GeneralsMD/Code/Main": {
-      "objects": 0,
-      "probe_clean": 0,
+      "objects": 1,
+      "probe_clean": 1,
       "total": 1
     }
   },
@@ -86,38 +83,36 @@
     2,
     3
   ],
-  "libraries_without_archive": [
-    "GeneralsMD/Code/Main"
+  "libraries_without_archive": [],
+  "link_binary_produced": true,
+  "link_clean": true,
+  "link_dropped_entry_points": [
+    "libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)",
+    "libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)"
   ],
-  "link_binary_produced": false,
-  "link_clean": false,
-  "objects": 816,
-  "probe_clean": 816,
+  "link_entry_point_archives": [
+    "libgeneralsmd_code_main"
+  ],
+  "objects": 819,
+  "probe_clean": 819,
   "third_party_linked": [
     "libthirdparty_lzhl",
     "z (system)"
   ],
   "translation_units": 836,
   "undefined_by_category": {
-    "COM / OLE (browser embedding, cut scope)": 3,
-    "Defined in a built translation unit behind a disabled #if (build option / platform)": 10,
+    "Defined in a built translation unit behind a disabled #if (build option / platform)": 9,
     "Defined in a layer not built here (renderer / audio)": 272,
-    "Defined in a translation unit that failed to compile": 86,
+    "Defined in a translation unit that failed to compile": 100,
     "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": 12,
     "Direct3D 8 / DirectX": 3,
+    "FFmpeg (not linked here)": 29,
     "GameSpy SDK (cut scope, not linked)": 33,
     "Generated gitinfo (build-time, not a blocker)": 6,
-    "Other / unclassified": 29,
     "Win32 API": 3
   },
   "undefined_symbols": {
-    "COM / OLE (browser embedding, cut scope)": [
-      "IID_IBrowserDispatch",
-      "IID_IUnknown",
-      "_com_util::ConvertStringToBSTR(char const*)"
-    ],
     "Defined in a built translation unit behind a disabled #if (build option / platform)": [
-      "ApplicationHInstance",
       "DX8Wrapper::Set_Vertex_Buffer(DynamicVBAccessClass const&)",
       "DX8Wrapper::Set_Vertex_Buffer(VertexBufferClass const*, unsigned int)",
       "DX8Wrapper_IsWindowed",
@@ -403,7 +398,6 @@
       "vtable for RenderObjClass"
     ],
     "Defined in a translation unit that failed to compile": [
-      "CreateGameEngine()",
       "DoResolutionDialog()",
       "DownloadMenuInit(WindowLayout*, void*)",
       "DownloadMenuInput(GameWindow*, unsigned int, unsigned int, unsigned int)",
@@ -426,6 +420,23 @@
       "MainMenuShutdown(WindowLayout*, void*)",
       "MainMenuSystem(GameWindow*, unsigned int, unsigned int, unsigned int)",
       "MainMenuUpdate(WindowLayout*, void*)",
+      "MilesAudioManager::MilesAudioManager()",
+      "MilesAudioManager::MilesAudioManager()",
+      "MilesAudioManager::closeDevice()",
+      "MilesAudioManager::findPlayingAudioFrom(unsigned int, unsigned int)",
+      "MilesAudioManager::getFileLengthMS(AsciiString) const",
+      "MilesAudioManager::init()",
+      "MilesAudioManager::isCurrentlyPlaying(unsigned int)",
+      "MilesAudioManager::openDevice()",
+      "MilesAudioManager::postProcessLoad()",
+      "MilesAudioManager::processFadingList()",
+      "MilesAudioManager::processPlayingList()",
+      "MilesAudioManager::processRequestList()",
+      "MilesAudioManager::reset()",
+      "MilesAudioManager::setHardwareAccelerated(bool)",
+      "MilesAudioManager::setSpeakerSurround(bool)",
+      "MilesAudioManager::update()",
+      "MilesAudioManager::~MilesAudioManager()",
       "OSDisplaySetBusyState(bool, bool)",
       "PingerInterface::createNewPingerInterface()",
       "ScreenBWFilter::m_curFadeFrame",
@@ -440,7 +451,6 @@
       "TheGameSpyPeerMessageQueue",
       "ThePinger",
       "TheWaterRenderObj",
-      "TheWin32Mouse",
       "W3DDisplay::W3DDisplay()",
       "W3DDisplay::m_2DScene",
       "W3DDisplay::m_3DInterfaceScene",
@@ -483,11 +493,10 @@
       "WaterRenderObjClass::update()",
       "WaterRenderObjClass::updateMapOverrides()",
       "doSkyBoxSet(bool)",
-      "g_csfFile",
-      "g_strFile",
       "isThreadHosting",
       "setupGameStart(AsciiString, GameDifficulty)",
       "testMinimumRequirements(ChipsetType*, CpuType*, int*, unsigned long long*, float*, float*, float*)",
+      "typeinfo for MilesAudioManager",
       "vtable for GameSpyStagingRoom"
     ],
     "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": [
@@ -508,6 +517,37 @@
       "D3DXFilterTexture",
       "D3DXMatrixMultiply",
       "D3DXMatrixTranspose"
+    ],
+    "FFmpeg (not linked here)": [
+      "av_frame_alloc",
+      "av_frame_clone",
+      "av_frame_free",
+      "av_freep",
+      "av_get_bytes_per_sample",
+      "av_malloc",
+      "av_packet_alloc",
+      "av_packet_free",
+      "av_packet_unref",
+      "av_read_frame",
+      "av_samples_get_buffer_size",
+      "av_seek_frame",
+      "av_strerror",
+      "avcodec_alloc_context3",
+      "avcodec_find_decoder",
+      "avcodec_free_context",
+      "avcodec_open2",
+      "avcodec_parameters_to_context",
+      "avcodec_receive_frame",
+      "avcodec_send_packet",
+      "avformat_alloc_context",
+      "avformat_close_input",
+      "avformat_find_stream_info",
+      "avformat_open_input",
+      "avio_alloc_context",
+      "avio_context_free",
+      "sws_freeContext",
+      "sws_getCachedContext",
+      "sws_scale"
     ],
     "GameSpy SDK (cut scope, not linked)": [
       "CloseStatsConnection",
@@ -552,43 +592,12 @@
       "GitTag",
       "GitUncommittedChanges"
     ],
-    "Other / unclassified": [
-      "av_frame_alloc",
-      "av_frame_clone",
-      "av_frame_free",
-      "av_freep",
-      "av_get_bytes_per_sample",
-      "av_malloc",
-      "av_packet_alloc",
-      "av_packet_free",
-      "av_packet_unref",
-      "av_read_frame",
-      "av_samples_get_buffer_size",
-      "av_seek_frame",
-      "av_strerror",
-      "avcodec_alloc_context3",
-      "avcodec_find_decoder",
-      "avcodec_free_context",
-      "avcodec_open2",
-      "avcodec_parameters_to_context",
-      "avcodec_receive_frame",
-      "avcodec_send_packet",
-      "avformat_alloc_context",
-      "avformat_close_input",
-      "avformat_find_stream_info",
-      "avformat_open_input",
-      "avio_alloc_context",
-      "avio_context_free",
-      "sws_freeContext",
-      "sws_getCachedContext",
-      "sws_scale"
-    ],
     "Win32 API": [
       "GetCursorPos",
       "ScreenToClient",
       "SetCursor"
     ]
   },
-  "undefined_total": 457,
+  "undefined_total": 467,
   "with_shims": true
 }

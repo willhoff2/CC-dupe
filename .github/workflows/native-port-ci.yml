@@ -185,6 +185,19 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The embedded Internet Explorer control was the last thing stopping GeneralsMD/Code/Main --
+      # the game's entry point -- from producing an object. It stays Windows-only, and the excision
+      # stays out of its consumers. See docs/porting/embedded-browser-seam.md.
+      - name: Gate the embedded-browser seam
+        run: |
+          set -o pipefail
+          {
+            echo '## Embedded browser seam'
+            echo '```'
+            python3 scripts/ci/check-embedded-browser.py --results native-build.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Linking the seam says nothing about what it does. This runs FindFirstFile()'s patterns,
       # the directory attribute, GetFullPathName()'s buffer protocol and the case-insensitive
       # lookup against a real directory tree. See docs/porting/win32-file-api-seam.md.
