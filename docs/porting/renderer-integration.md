@@ -229,9 +229,9 @@ What this does and does not establish:
 
 - **Measured:** with the game allocator active, this driver crashes in its JIT during device
   creation; with libstdc++'s, the same code creates a device and a swapchain.
-- **Not established:** that MoltenVK has the same problem. It is a Metal driver with no LLVM JIT in
-  this path. Whether the engine's 4-byte alignment is a real constraint on the target, or only on
-  lavapipe, is a Mac measurement (§7).
+- **Since measured on the target, and it is lavapipe's:** on MoltenVK the pool allocator is active
+  and `Create_Device` still returns `D3D_OK`, and `--stdlib-new` moves the wall nowhere
+  (`docs/porting/renderer-integration-arm64.md` §3). So this does not block the later slices.
 - Either way the alignment is a latent defect: C++17 requires `operator new` to return memory
   aligned to `__STDCPP_DEFAULT_NEW_ALIGNMENT__` (16 on x86-64 and arm64), and the engine's does not.
   Fixing that is a memory-manager slice, not a renderer one.
@@ -268,18 +268,35 @@ class stays where #85 put it — the D3DX creation entry points do not reach the
 - Whether the presented frame is correct at `backingScaleFactor` 2.00 once §4's next slice lands:
   the points/pixels boundary is asserted here only at 1.00x.
 
-Nothing in this document should be read as an Apple Silicon result. `spikes/renderer` itself is
-verified on an M1 Pro under MoltenVK 1.4.2 (`docs/porting/moltenvk-findings.md`,
-`docs/porting/macos-hardware-verification.md`); the *engine calling it* is not, yet.
+Nothing else in this document should be read as an Apple Silicon result: it is a lavapipe
+measurement. The three questions above have since been answered on an M1 Pro under MoltenVK 1.4.2 —
+`docs/porting/renderer-integration-arm64.md`, summarised in §7.1.
 
-### 7.1 The outpost run, exactly
+### 7.1 The outpost run, as measured
 
-`scripts/native-render-backend-run.py` now selects Mach-O link flags, the Cocoa/QuartzCore/Metal/IOKit
+It has now been run: **`docs/porting/renderer-integration-arm64.md`** is the M1 Pro / MoltenVK 1.4.2
+measurement, and it answers the three questions above.
+
+- The engine reaches the **same** wall, `MissingTexture::_Init()` on a null `D3DXCreateTexture`
+  device, with the same backtrace and `D3DERR_INVALIDCALL`. No Apple-specific wall comes first.
+- The allocator finding of §5 is **lavapipe's**: with `GameMemory.cpp`'s 4-byte-aligned pool
+  allocator active, `Create_Device` returns `D3D_OK` on MoltenVK and `--stdlib-new` changes nothing.
+- The points/pixels boundary holds at `backingScaleFactor` **2.00**: 800x600 points of client size,
+  a 1600x1200 `CAMetalLayer` drawable.
+- Additionally, and not visible from here: `scripts/native-build.py` compiles the backend without
+  `SPIKE_WITH_PLATFORM_WINDOW`, so the engine's copy has no surface and no swapchain and
+  `Present()` would have returned success without presenting. That is a second thing the next slice
+  must fix; see §5 of the arm64 document.
+
+`scripts/native-render-backend-run.py` selects Mach-O link flags, the Cocoa/QuartzCore/Metal/IOKit
 frameworks, MoltenVK's ICD and LLVM's `objcopy`/`nm` when `sys.platform == "darwin"`. That selection
-is written from the documented toolchain differences and has never been executed — this slice was
-measured on Linux — so treat any correction it needs as part of the outpost's findings rather than as
-an accident. Prerequisites: `brew install llvm molten-vk vulkan-headers glslang` (llvm because
-cctools cannot rename a symbol, so the game's `main()` could not otherwise be moved aside).
+was written on Linux from the documented toolchain differences and needed four corrections on the
+hardware, each of them a platform finding rather than a typo (§1 of the arm64 document): the ICD path
+under Homebrew's keg, the layer dylib's `DYLD_LIBRARY_PATH`, `DYLD_*` being stripped from `lldb`'s
+inferior, and `lldb -o` abandoning the remaining commands at the first signal — which is why the
+`lldb` line below is now `--lldb` rather than a hand-written invocation. Prerequisites:
+`brew install llvm molten-vk vulkan-headers glslang` (llvm because cctools cannot rename a symbol, so
+the game's `main()` could not otherwise be moved aside).
 
 ```sh
 ./scripts/ci/fetch-probe-deps.sh
@@ -289,9 +306,8 @@ python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
 # the ledger first: this stops before the D3DX wall, so it prints what the engine asked for
 python3 scripts/native-render-backend-run.py --stop-after-init --validation
 
-# then the wall itself: --keep leaves the linked binary in place for lldb
-python3 scripts/native-render-backend-run.py --keep --validation
-lldb -b -o run -o bt -o "frame variable" -- build/native/render-run/native_render_run
+# then the wall itself, with the backtrace: --lldb, not a hand-written lldb line
+python3 scripts/native-render-backend-run.py --keep --validation --lldb
 
 # the allocator control (§5): does MoltenVK survive the pool allocator where lavapipe did not?
 python3 scripts/native-render-backend-run.py --keep --validation --stdlib-new
@@ -299,7 +315,4 @@ python3 scripts/native-render-backend-run.py --keep --validation --stdlib-new
 
 What to record, in the shape §4 uses: window creation and the client size **in points**, MoltenVK's
 adapter string, whether `CreateDevice` succeeds, the first failing call with its arguments and
-`HRESULT`, the backtrace, the ledger contents, and whether `--stdlib-new` changes the outcome. The
-last of those decides §5: if the normal allocator survives `vkCreateDevice` on MoltenVK, the
-4-byte-alignment finding is lavapipe's LLVM JIT and not a port defect; if it crashes there too, it is
-the engine's and it blocks every later slice.
+`HRESULT`, the backtrace, the ledger contents, and whether `--stdlib-new` changes the outcome.
