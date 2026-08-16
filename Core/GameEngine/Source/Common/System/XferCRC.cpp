@@ -34,6 +34,7 @@
 #include "Common/XferDeepCRC.h"
 #include "Common/crc.h"
 #include "Common/Snapshot.h"
+#include "Common/WideCharWire.h"
 #include "Utility/endian_compat.h"
 
 //-------------------------------------------------------------------------------------------------
@@ -323,8 +324,13 @@ void XferDeepCRC::xferAsciiString( AsciiString *asciiStringData )
 void XferDeepCRC::xferUnicodeString( UnicodeString *unicodeStringData )
 {
 
+	// TheSuperHackers @port The CRC covers the 16 bit code units of the text, the same bytes the
+	// Windows build fed it, so that a native CRC and a Windows CRC of the same game state agree.
+	// See docs/porting/widechar-wire.md.
+	const Int units = wideCharWireUnitCount( unicodeStringData->str(), unicodeStringData->getLength() );
+
 	// sanity
-	if( unicodeStringData->getLength() > 255 )
+	if( units > 255 )
 	{
 
 		DEBUG_CRASH(( "XferSave cannot save this unicode string because it's too long.  Change the size of the length header (but be sure to preserve save file compatability" ));
@@ -333,11 +339,16 @@ void XferDeepCRC::xferUnicodeString( UnicodeString *unicodeStringData )
 	}
 
 	// save length of string to follow
-	Byte len = unicodeStringData->getLength();
+	Byte len = (Byte)units;
 	xferByte( &len );
 
 	// save string data
-	if( len > 0 )
-		xferUser( (void *)unicodeStringData->str(), sizeof( WideChar ) * len );
+	if( units > 0 )
+	{
+		WideWireChar wire[ WIDECHAR_WIRE_MAX_UNITS ];
+		wideCharToWire( wire, WIDECHAR_WIRE_MAX_UNITS, unicodeStringData->str(),
+			unicodeStringData->getLength() );
+		xferUser( (void *)wire, wideCharWireBytes( units ) );
+	}
 
 }

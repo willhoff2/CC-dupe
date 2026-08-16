@@ -35,6 +35,7 @@
 #include "Common/GameState.h"
 #include "Common/Xfer.h"
 #include "Common/BitFlagsIO.h"
+#include "Common/WideCharWire.h"
 
 
 //-------------------------------------------------------------------------------------------------
@@ -201,7 +202,18 @@ void Xfer::xferMarkerLabel( AsciiString asciiStringData )
 void Xfer::xferUnicodeString( UnicodeString *unicodeStringData )
 {
 
-	xferImplementation( (void *)unicodeStringData->str(), sizeof( WideChar ) * unicodeStringData->getLength() );
+	// TheSuperHackers @port The text of a UnicodeString leaves the process as 16 bit code units -
+	// which is what the Windows build always wrote, because its WideChar is one. Handing the raw
+	// WideChar bytes over instead makes a native save, and a native CRC, disagree with Windows and
+	// with itself. See docs/porting/widechar-wire.md.
+	WideWireChar wire[ WIDECHAR_WIRE_MAX_UNITS ];
+	const Int units = wideCharToWire( wire, WIDECHAR_WIRE_MAX_UNITS, unicodeStringData->str(),
+		unicodeStringData->getLength() );
+
+	DEBUG_ASSERTCRASH( units == wideCharWireUnitCount( unicodeStringData->str(), unicodeStringData->getLength() ),
+		("Xfer::xferUnicodeString: string is longer than %d code units and was truncated", WIDECHAR_WIRE_MAX_UNITS) );
+
+	xferImplementation( (void *)wire, wideCharWireBytes( units ) );
 
 }
 

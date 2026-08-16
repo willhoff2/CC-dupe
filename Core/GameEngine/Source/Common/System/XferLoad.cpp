@@ -33,6 +33,7 @@
 #include "Common/GameState.h"
 #include "Common/Snapshot.h"
 #include "Common/XferLoad.h"
+#include "Common/WideCharWire.h"
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
@@ -225,12 +226,19 @@ void XferLoad::xferUnicodeString( UnicodeString *unicodeStringData )
 	xferUnsignedByte( &len );
 
 	// read all the string data
+	// TheSuperHackers @port `len` counts the 16 bit code units on disk, not WideChar, so read that
+	// many units and decode them. See docs/porting/widechar-wire.md.
 	const Int MAX_XFER_LOAD_STRING_BUFFER = 1024;
 	static WideChar buffer[ MAX_XFER_LOAD_STRING_BUFFER ];
+	WideWireChar wire[ WIDECHAR_WIRE_MAX_UNITS ];
+	Int chars = 0;
 
 	if( len > 0 )
-		xferUser( buffer, sizeof( WideChar ) * len );
-	buffer[ len ] = 0;  // terminate
+	{
+		xferUser( wire, wideCharWireBytes( len ) );
+		chars = wireToWideChar( buffer, MAX_XFER_LOAD_STRING_BUFFER - 1, wire, len );
+	}
+	buffer[ chars ] = 0;  // terminate
 
 	// save into unicode string
 	unicodeStringData->set( buffer );

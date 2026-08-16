@@ -27,6 +27,7 @@
 #include "Common/STLTypedefs.h"
 #include "Common/AsciiString.h"
 #include "Common/UnicodeString.h"
+#include "Common/WideCharWire.h"
 
 class File;
 
@@ -62,6 +63,9 @@ typedef std::map<UnicodeString, Bool, UnicodeStringLessThan>::iterator LangMapIt
 static const int LANGUAGE_XOR_KEY = 0x5555;
 static const char BadWordFileName[] = "langdata.dat";
 
+/// Units of one word read out of the bad word list, terminator included.
+static const int LANGUAGE_FILTER_MAX_WORD_UNITS = 128;
+
 class LanguageFilter : public SubsystemInterface {
 public:
 	LanguageFilter();
@@ -73,7 +77,7 @@ public:
 	void filterLine(UnicodeString &line);
 
 protected:
-	Bool readWord(File *file1, WideChar *buf);
+	Bool readWord(File *file1, WideWireChar *buf);
 	void unHaxor(UnicodeString &word);
 	LangMap m_wordList;
 	LangMap m_subWordList;

@@ -19,6 +19,8 @@
 #pragma once
 
 #include "GameNetwork/NetworkDefs.h"
+#include "Common/UnicodeString.h"
+#include "Common/WideCharWire.h"
 #include "WWLib/stringex.h"
 
 class AsciiString;
@@ -117,16 +119,37 @@ inline size_t readBytes(UnsignedByte *dest, size_t destLen, NetPacketBuf src)
 	return readLen;
 }
 
+// TheSuperHackers @port The wire carries 16 bit code units, and the packet's length field counts
+// those units, not WideChar. maxStrLen is therefore a unit count, and the decoded native string can
+// be shorter than it where a surrogate pair collapses into one WideChar.
+// See docs/porting/widechar-wire.md.
+
+/// Units a UnicodeString occupies on the wire, capped at maxUnits without splitting a pair.
+inline size_t stringWireUnits(const UnicodeString &value, size_t maxUnits)
+{
+	const Int units = wideCharWireUnitCount(value.str(), value.getLength());
+	if ((size_t)units <= maxUnits)
+		return (size_t)units;
+
+	// Truncating must not leave half a surrogate pair, so ask the converter what actually fits.
+	WideWireChar wire[WIDECHAR_WIRE_MAX_UNITS];
+	const size_t cap = min(maxUnits, (size_t)WIDECHAR_WIRE_MAX_UNITS);
+	return (size_t)wideCharToWire(wire, (Int)cap, value.str(), value.getLength());
+}
+
 inline size_t readStringWithoutNull(UnicodeString &str, size_t maxStrLen, NetPacketBuf src)
 {
-	const size_t strLen = min(maxStrLen, src.size() / sizeof(WideChar));
-	const size_t cpyLen = strLen * sizeof(WideChar);
+	const size_t units = min(maxStrLen, src.size() / sizeof(WideWireChar));
+	const size_t cpyLen = units * sizeof(WideWireChar);
 
-	if (strLen > 0)
+	if (units > 0)
 	{
-		WideChar *strBuf = str.getBufferForRead(strLen);
-		memcpy(strBuf, src.data(), cpyLen);
-		strBuf[strLen] = 0;
+		WideChar *strBuf = str.getBufferForRead(units);
+		WideWireChar wire[WIDECHAR_WIRE_MAX_UNITS];
+		const size_t safeUnits = min(units, (size_t)WIDECHAR_WIRE_MAX_UNITS);
+		memcpy(wire, src.data(), safeUnits * sizeof(WideWireChar));
+		const Int chars = wireToWideChar(strBuf, (Int)units, wire, (Int)safeUnits);
+		strBuf[chars] = 0;
 	}
 	return cpyLen;
 }
@@ -167,12 +190,36 @@ inline size_t writeBytes(UnsignedByte *dest, const UnsignedByte *src, size_t len
 	return len;
 }
 
-inline size_t writeStringWithoutNull(UnsignedByte *dest, const UnicodeString &value, size_t maxLen)
+/// Writes exactly maxUnits 16 bit code units, zero filling if the string encodes to fewer.
+inline size_t writeStringWithoutNull(UnsignedByte *dest, const UnicodeString &value, size_t maxUnits)
 {
-	const size_t copyLen = std::min<size_t>(value.getLength(), maxLen);
-	const size_t copyBytes = copyLen * sizeof(WideChar);
-	memcpy(dest, value.str(), copyBytes);
+	const size_t units = min(maxUnits, (size_t)WIDECHAR_WIRE_MAX_UNITS);
+	WideWireChar wire[WIDECHAR_WIRE_MAX_UNITS];
+	const Int written = wideCharToWire(wire, (Int)units, value.str(), value.getLength());
+	for (size_t i = (size_t)written; i < units; ++i)
+		wire[i] = 0;
+
+	const size_t copyBytes = units * sizeof(WideWireChar);
+	memcpy(dest, wire, copyBytes);
 	return copyBytes;
+}
+
+/// One game message wide character argument is one 16 bit code unit on the wire.
+inline size_t writeWideCharArg(UnsignedByte *dest, WideChar value)
+{
+	WideWireChar wire[2] = { 0, 0 };
+	if (wideCharToWire(wire, 2, &value, 1) != 1)
+		wire[0] = (WideWireChar)WideCharWire::REPLACEMENT;
+	return writePrimitive(dest, wire[0]);
+}
+
+inline size_t readWideCharArg(WideChar &value, NetPacketBuf src)
+{
+	WideWireChar wire = 0;
+	const size_t read = readObject(wire, src);
+	value = 0;
+	wireToWideChar(&value, 1, &wire, 1);
+	return read;
 }
 
 inline size_t writeStringWithNull(UnsignedByte *dest, const AsciiString &value)
