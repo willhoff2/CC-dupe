@@ -73,6 +73,14 @@ Two structural facts about it:
 `.bik` movies are *not* in any `.big` — they are loose under `Data/Movies` (452 KB, the two menu
 backgrounds) and `Data/English/Movies` (281 MB of campaign cutscenes). Neither is in this object.
 
+It is packed at `-mx=5`, not the `-mx=9` the trimmed pair uses, and that was measured rather than
+assumed. On a 216 MB slice of the real payload — one highly compressible `.big`, one
+incompressible, one very compressible — `-mx=5` finished in 78 s; `-mx=9` had not finished the same
+slice after 510 s. Over the ~2.4 GB this object holds that is roughly 15 minutes against 96+, for
+an archive about 1% smaller. A first attempt at `-mx=9` was abandoned after 40 minutes, having
+written 184 MB with its output offset frozen. The trimmed pair stays at `-mx=9` because the hashes
+CI pins were produced with it.
+
 ## Running it manually
 
 `scripts/ci/run-replays-local.ps1` is the manual equivalent of the CI job, against local

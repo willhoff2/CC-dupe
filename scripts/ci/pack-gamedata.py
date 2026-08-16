@@ -72,6 +72,17 @@ TRIMMED_GENERALSMD_ARCHIVE = "zerohour104_gamedata_trimmed.7z"
 # separate from the trimmed pair, whose pinned hashes must keep matching.
 FULL_ARCHIVE = "zerohour104_gamedata_full.7z"
 
+# -mx=9 for the trimmed pair, because the hashes CI pins were produced with it and repacking
+# must keep reproducing them.
+#
+# -mx=5 for the full archive, measured rather than assumed. On a 216 MB slice of the real
+# payload (one highly compressible .big, one incompressible, one very compressible), -mx=5
+# packed it in 78s; -mx=9 had not finished the same slice after 510s. Extrapolated over the
+# ~2.4 GB the full archive holds that is ~15 minutes against 96+, to land ~1% smaller. The
+# level is part of what the SHA256 covers, so changing it re-hashes the object.
+TRIMMED_COMPRESSION_LEVEL = 9
+FULL_COMPRESSION_LEVEL = 5
+
 
 def find_seven_zip() -> str:
     for candidate in ("7z", "7zz", "7za"):
@@ -152,7 +163,7 @@ def sha256(path: Path) -> str:
     return digest.hexdigest().upper()
 
 
-def pack_stage_dir(label: str, stage: Path, archive: Path, seven_zip: str) -> None:
+def pack_stage_dir(label: str, stage: Path, archive: Path, seven_zip: str, level: int) -> None:
     if archive.exists():
         archive.unlink()
 
@@ -162,7 +173,7 @@ def pack_stage_dir(label: str, stage: Path, archive: Path, seven_zip: str) -> No
     # the same install twice would otherwise produce two different hashes, because the
     # staging directory entries carry the time they were created.
     result = subprocess.run(
-        [seven_zip, "a", "-t7z", "-mx=9", "-mtm=off", "-mtc=off", "-mta=off",
+        [seven_zip, "a", "-t7z", f"-mx={level}", "-mtm=off", "-mtc=off", "-mta=off",
          str(archive), "."],
         cwd=stage, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
@@ -177,7 +188,7 @@ def build_archive(label: str, root: Path, files: list[str], archive: Path, seven
     with tempfile.TemporaryDirectory(prefix="packgamedata-") as temp:
         stage = Path(temp)
         stage_files(label, root, files, stage, dll_source)
-        pack_stage_dir(label, stage, archive, seven_zip)
+        pack_stage_dir(label, stage, archive, seven_zip, TRIMMED_COMPRESSION_LEVEL)
 
     return sha256(archive)
 
@@ -225,7 +236,8 @@ def build_full_archive(generals: Path, generalsmd: Path, archive: Path,
         staged_bytes = sum(size for _, _, size in manifest)
         print(f"Packing {len(manifest)} .big files ({staged_bytes / 1024**3:.2f} GiB) from "
               f"{generals} and {generalsmd}", flush=True)
-        pack_stage_dir("full game data", stage, archive, seven_zip)
+        pack_stage_dir("full game data", stage, archive, seven_zip,
+                       FULL_COMPRESSION_LEVEL)
 
     return sha256(archive), manifest
 
