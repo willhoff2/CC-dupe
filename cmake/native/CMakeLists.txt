@@ -64,6 +64,15 @@ foreach(slug IN LISTS NATIVE_TARGETS)
     unset(NATIVE_DEFINES)
     include("${manifest}")
 
+    # The Cocoa window backend is Objective-C++, the one language this project needs beyond C++ and
+    # only on macOS. Enabled on demand rather than in `project()` so a Linux configure never asks
+    # for a compiler it has no use for.
+    if(NATIVE_SOURCES MATCHES "\\.mm(;|$)")
+        enable_language(OBJCXX)
+        set(CMAKE_OBJCXX_STANDARD 17)
+        set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+    endif()
+
     add_library(${slug} STATIC ${NATIVE_SOURCES})
     # SYSTEM keeps the vendored and engine headers' own warnings out of the way; the interesting
     # diagnostics are errors, and every one of these trees predates -Wall by two decades.

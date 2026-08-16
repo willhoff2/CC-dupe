@@ -7,11 +7,15 @@ On Windows these come from d3dx8.lib. Off Windows the port implements them in WW
     d3dx8texture.cpp  D3DXFilterTexture      -- mip-chain generation
                       D3DXLoadSurfaceFromSurface -- surface blit with format conversion
     d3dx8shader.cpp   D3DXAssembleShader     -- a deliberate, loud refusal
+    d3dx8texcreate.cpp D3DXCreateTexture / D3DXCreateCubeTexture / D3DXCreateVolumeTexture
+                                             -- the fitting a texture is created with
+                      D3DXGetErrorStringA    -- the text the engine's error loggers print
+                      D3DXCreateTextureFromFileExA -- a second deliberate, loud refusal
 
 None of these can be checked by building the game: a stride that is four bytes short, a box filter
 that averages the wrong footprint, a 5-bit channel widened by 8 instead of by 255/31, and a shader
 assembler that returns success with no bytecode all compile, link and start. They are checked by
-asserting the values, which is what these three suites do -- see the header comment of each for
+asserting the values, which is what these suites do -- see the header comment of each for
 what is asserted and, for the choices D3DX does not document, what was asserted instead.
 
 The suites are built with AddressSanitizer and UndefinedBehaviorSanitizer when the toolchain has
@@ -102,6 +106,13 @@ SUITES = {
         "sources": [
             f"{WW3D2_DIR}/d3dx8shader.cpp",
             f"{WW3D2_DIR}/tests/d3dx8shader_test.cpp",
+        ],
+    },
+    "texcreate": {
+        "description": "textures are created with the size, mip count and format the device allows",
+        "sources": [
+            f"{WW3D2_DIR}/d3dx8texcreate.cpp",
+            f"{WW3D2_DIR}/tests/d3dx8texcreate_test.cpp",
         ],
     },
 }

@@ -152,14 +152,24 @@ TARGETS = [
         includes=tuple(GAMEENGINE_INCLUDES),
         cmake_lists="Core/GameEngine/CMakeLists.txt",
         cmake_root="Core/GameEngine",
-        defines=("RTS_ZEROHOUR=1",),
+        # `IG_DEBUG_STACKTRACE` is what Core/GameEngine/CMakeLists.txt defines on
+        # `corei_gameengine_private`, whose INTERFACE sources are these files and whose consumer is
+        # the game-engine library both source sets compile into. Missing it here was not a harmless
+        # omission: StackDump.h *self*-defines the macro if nothing else has, so every caller saw
+        # the real declarations while StackDump.cpp -- which tests the macro above its own include
+        # of that header -- compiled to nothing, and `FillStackAddresses`,
+        # `StackDumpFromAddresses` and `g_LastErrorDump` were unresolved because the harness's flags
+        # disagreed with the real build's, not because the port lacks the code.
+        defines=("RTS_ZEROHOUR=1", "IG_DEBUG_STACKTRACE"),
     ),
     Target(
         name="GeneralsMD/Code/GameEngine",
         includes=tuple(GAMEENGINE_INCLUDES),
         cmake_lists="GeneralsMD/Code/GameEngine/CMakeLists.txt",
         cmake_root="GeneralsMD/Code/GameEngine",
-        defines=("RTS_ZEROHOUR=1",),
+        # `z_gameengine` links `corei_gameengine_private`, so these files get IG_DEBUG_STACKTRACE
+        # from it in the real build exactly as Core/GameEngine's do.
+        defines=("RTS_ZEROHOUR=1", "IG_DEBUG_STACKTRACE"),
     ),
 ]
 

@@ -6,16 +6,17 @@ non-Windows target, and no linker had ever run over the engine. Code generation 
 undefined symbols were entirely unmeasured, so there was no way to know how much the probe's
 `621/742` native and `650/742` shimmed clean counts were worth.
 
-This slice closes that gap. The deliverable is not a binary — it is the categorised undefined-symbol
-list, plus an explicit count of translation units the probe called clean that then failed to
-compile.
+This slice closes that gap. Its own deliverable was not a binary — it was the categorised
+undefined-symbol list, plus an explicit count of translation units the probe called clean that then
+failed to compile. **A later slice produced the binary**; the last section of this file is that
+measurement, and every figure above it is dated history.
 
 - Driver: `scripts/native-build.py` (`scripts/native_probe_targets.py` reuses the probe's own target,
   source and include definitions, so the two measurements cannot silently diverge)
 - CMake project: `cmake/native/CMakeLists.txt`
 - Generated report: `docs/porting/native-build-report.md` (levels 1-4 with `--strict-link`, the
   largest build measured)
-- What a binary would still need: [`startability.md`](startability.md)
+- What the binary does and does not demonstrate: [`startability.md`](startability.md)
 - CI ratchets: the `Native build (Linux, clang 14, 64-bit)` and
   `Native build + renderer (Linux, clang 14, 64-bit)` jobs in
   `.github/workflows/native-port-ci.yml`, gated by `scripts/ci/check-native-build-baseline.py`
@@ -570,6 +571,68 @@ seconds; two consecutive runs produced byte-identical JSON including the 250 `re
 and the per-pile symbol lists. Because it exits non-zero today by design, the step records its exit
 status in the job summary and asserts the JSON exists; the ratchet is the baseline check, which fails
 if the count the linker refuses grows.
+
+## The strict link produces an executable, measured 2026-08-16 on `4d4b096b3` with clang 14 (current baseline)
+
+Every figure above this line was a count of what does not link. This one is a file.
+
+| Levels 1-4, `--with-shims`, `--strict-link` | branch point `4d4b096b3` | now |
+|---|---:|---:|
+| Translation units | 976 | 977 |
+| Object files produced | 976 | **977** |
+| Compile failures | 0 | 0 |
+| Archives linked | 14 (+2 support) | 14 (+4 support) |
+| Unresolved symbols (strict) | 68 | **0** |
+| Strict link produced an executable | no | **yes** |
+
+The file is `build/native/native_strict_link`: **80.7 MiB, ELF 64-bit x86-64, `ET_DYN`** (PIE), read
+out of its own header by `native-build.py` rather than from `file(1)`, which is not installed
+everywhere it measures. `strict_link.binary` records the format, word size, machine and size, and
+`strict_link.agrees_with_nm` still holds — the linker's verdict and the `nm` scan agree, now at zero.
+
+What closed the 68, and why none of it is a stub, is per-symbol in
+[`startability.md`](startability.md) §2. In one line each: a window backend is now *selected*
+(SDL2 off Apple, Cocoa on macOS — `decisions-resolved.md` §6) instead of both being excluded; FFmpeg
+is built at the pinned tag and linked (§7); `gitinfo` comes from `git_watcher.cmake`, the real
+generator; the three stack-debug definitions come from #47's `backtrace()` walker, selected by
+defining `IG_DEBUG_STACKTRACE`; `MSS_auto_cleanup` was an include-order bug in this harness, not a
+missing definition; and the five D3DX creation entry points are implemented in `d3dx8texcreate.cpp`
+with a behaviour test, except `D3DXCreateTextureFromFileExA`, which loudly returns `E_NOTIMPL`.
+
+The harness gained three things worth naming, because they are the difference between a link and a
+measurable link:
+
+1. **Evidence before name pattern in the attribution.** `D3DXFilterTexture` and `D3DXAssembleShader`
+   were reported as "Direct3D 8 / DirectX" at levels 1-3 when the true cause was "defined in WW3D2, a
+   layer this level set does not build". Any symbol sharing a vendor prefix while living in a
+   higher-level library was misfiled the same way. The categoriser now consults the evidence sets
+   (uncompiled units, built-but-`#if`-disabled definitions, excluded backends, unbuilt layers) first
+   and the name patterns last, pinned by `scripts/native-build-categorise-test.py`.
+2. **The include order for the audio backend.** The fetched Miles SDK's `mss.h` shadowed
+   `OpenALAudioDevice`'s own header, so the backend's `MSS_auto_cleanup` never compiled and appeared
+   as port work. The backend's directories are prepended now.
+3. **The executable is described from its own header**, so CI can gate the *identity* of the file
+   (64-bit, format, machine) and not merely its existence.
+
+### The ratchet inverts: the link must not break
+
+`check-native-build-baseline.py` ratcheted counts while there was no file. Once the **baseline**
+records `strict_link.binary_produced` true, `check_binary_gate()` takes over and requires a clean
+strict link with zero unresolved symbols, an executable that is produced *and described*, 64-bit, with
+the format and machine the baseline recorded. A regression is then a broken build rather than a bigger
+number, and it is reported as one. Level 1-3 has no entry point to link and keeps the old count
+ratchet unchanged — the switch is per baseline, not a flag day. Binary **size** is reported and not
+gated: it moves with the compiler and would fail with no defect behind it.
+
+The levels 1-4 job now runs the strict link without `set +e`, so a link that stops producing a file
+fails the job, and prints `ls -l` plus `file` on the artefact into the step summary.
+
+### What the executable does when run
+
+It loads, executes, reaches `GameEngine::init()`, and fails in the game's own code asking for retail
+data it does not have (`INI::loadFileDirectory("Data\INI\Default\GameData")` throws; the handler
+calls `ReleaseCrash`). That failure message, in full, and the exact list of what linking does and does
+not prove, is [`startability.md`](startability.md) §4. **A linked binary is not a running game.**
 
 ## What this does not show
 

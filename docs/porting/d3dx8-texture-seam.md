@@ -120,12 +120,40 @@ If the port ever wants these three shaders, the honest route is the one `W3DShad
 uses for `shaders\wave.pso` — precompiled bytecode as an asset, or a translation to the backend's own
 shading language.
 
-## 4. Still unresolved: the five D3DX texture *creation* entry points
+## 4. The five D3DX texture *creation* entry points
 
 `D3DXCreateTexture`, `D3DXCreateCubeTexture`, `D3DXCreateVolumeTexture`,
 `D3DXCreateTextureFromFileExA` and `D3DXGetErrorStringA` (all referenced by `dx8wrapper.cpp`, which
-began compiling off Windows in #79) are **not** in this slice and are the whole of the
-`no-definition-anywhere` pile at levels 1-4 afterwards. They are a different seam: the first three are
-device-resource creation belonging with the renderer backend, and `D3DXCreateTextureFromFileExA` is an
-image *decode* path (DDS/TGA, format fitting, mip generation) that deserves the same
-exact-pixel treatment as §2 rather than a signature.
+began compiling off Windows in #79) were the whole of the `no-definition-anywhere` pile at levels 1-4
+after the slice above. They are a different seam — device-resource creation rather than pixel maths —
+and they are what the strict-link slice had to answer to produce an executable at all. They live in
+`d3dx8texcreate.cpp`, with `scripts/native-d3dx8-entrypoints-test.py`'s `texcreate` suite over them.
+
+**Four of the five are implementations, not signatures.** What `D3DXCreateTexture` actually does over
+`IDirect3DDevice8::CreateTexture` is *fit the request to the device*, and each step of that fitting is
+observable and asserted:
+
+| Step | Rule | Where the rule comes from |
+|---|---|---|
+| Unspecified extents | `D3DX_DEFAULT` width/height become 256; a specified one mirrors to the other | D3DX's documented default for a size-less request |
+| Power of two | rounded **up**, unless `D3DPTEXTURECAPS_NONPOW2CONDITIONAL` | `D3DCAPS8::TextureCaps` |
+| Square only | width and height become their maximum | `D3DPTEXTURECAPS_SQUAREONLY` |
+| Device maximum | clamped to `MaxTextureWidth`/`MaxTextureHeight` (`MaxVolumeExtent` for volumes) | `D3DCAPS8` |
+| Mip count | `D3DX_DEFAULT`/0 becomes the full chain for the *fitted* extents; clamped when the device reports no mip caps | `D3DPTEXTURECAPS_MIPMAP`, `MIPCUBEMAP`, `MIPVOLUMEMAP` |
+| Format | `D3DFMT_UNKNOWN` expands to an ordered candidate list, alpha-preserving if the request had alpha | D3DX's "nearest supported format" behaviour |
+| Retry | a create that fails on a *format* is retried with the next candidate; a failure that is not about the format is returned | `D3DERR_INVALIDCALL` vs `D3DERR_OUTOFVIDEOMEMORY` |
+
+`D3DX_DEFAULT` is worth one note, because it is a portability trap rather than a design choice: the
+macro expands through `ULONG_MAX`, which is 64-bit here and 32-bit in the SDK, so the value a `UINT`
+parameter actually receives is `0xffffffff`. The implementation and its test both compare against
+what arrives, not against the macro.
+
+**`D3DXCreateTextureFromFileExA` is a loud refusal**, on the §3 standard: it nulls its out-parameter
+and its `D3DXIMAGE_INFO`, prints one line naming itself and the file, and returns `E_NOTIMPL`. It is
+an image *decode* path (DDS/TGA, format fitting, mip generation) reached through a native file and
+device seam that does not exist yet, and inventing a decoder to satisfy a linker is exactly what this
+slice forbade. The cost is bounded and known: `MissingTexture::_Create_Missing_Texture` supplies the
+engine's own magenta/black checkerboard, so a caller gets the missing-texture texture rather than a
+null pointer, which is the behaviour the engine already has for a texture that is not on disk.
+
+`D3DXGetErrorStringA` is the D3D8 `HRESULT` names, buffer-truncating like the original.
