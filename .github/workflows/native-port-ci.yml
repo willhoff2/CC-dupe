@@ -353,12 +353,13 @@ jobs:
           set -eux
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
-          # make/nasm build FFmpeg's libraries (fetch-probe-deps.sh), libsdl2-dev is the window
+          # make/gcc/nasm build FFmpeg's libraries (fetch-probe-deps.sh; its configure wants a C
+          # compiler that is not clang++), libsdl2-dev is the window
           # backend this build chooses off Apple, and `file` is what the report quotes for the
           # executable's architecture.
           apt-get install -y --no-install-recommends \
             clang-14 cmake ninja-build python3 git ca-certificates binutils zlib1g-dev \
-            libopenal-dev fonts-dejavu-core make nasm libsdl2-dev file
+            libopenal-dev fonts-dejavu-core make gcc nasm libsdl2-dev file
           clang++-14 --version
 
       - name: Checkout
@@ -600,13 +601,14 @@ jobs:
           set -eux
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
-          # make/nasm build FFmpeg's libraries (fetch-probe-deps.sh), libsdl2-dev is the window
+          # make/gcc/nasm build FFmpeg's libraries (fetch-probe-deps.sh; its configure wants a C
+          # compiler that is not clang++), libsdl2-dev is the window
           # backend this build chooses off Apple, and `file` is what the report quotes for the
           # executable's architecture. Without the first two the strict link is short 29 av_*
           # symbols and produces no executable, which is what this job now gates on.
           apt-get install -y --no-install-recommends \
             clang-14 cmake ninja-build python3 git ca-certificates binutils zlib1g-dev \
-            libopenal-dev make nasm libsdl2-dev file
+            libopenal-dev make gcc nasm libsdl2-dev file
           clang++-14 --version
 
       - name: Checkout

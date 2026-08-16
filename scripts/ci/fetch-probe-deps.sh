@@ -151,16 +151,37 @@ else
         echo "   no nasm/yasm: configuring --disable-x86asm (slower decode, same API)"
         asm_flag=--disable-x86asm
     fi
+    # FFmpeg's configure defaults to `gcc`, and the CI container installs clang only -- the whole
+    # point of measuring with clang 14 -- so a missing gcc fails the C compiler test five seconds
+    # in. Name a compiler that exists instead of assuming one, and if configure still fails, print
+    # the tail of its own log: the failure was invisible once and cost a CI round trip.
+    ffmpeg_cc=
+    for candidate in "${CC:-}" cc gcc clang clang-14; do
+        if [ -n "$candidate" ] && command -v "$candidate" >/dev/null 2>&1; then
+            ffmpeg_cc="$candidate"
+            break
+        fi
+    done
+    if [ -z "$ffmpeg_cc" ]; then
+        echo "   no C compiler found for FFmpeg's configure: skipping the library build" >&2
+        echo "   (the link will report the FFmpeg symbols as unresolved)" >&2
+        exit 1
+    fi
+    echo "   configuring with --cc=$ffmpeg_cc"
     rm -rf "$ffmpeg_lib_dir"
     (
         cd "$ffmpeg_build_dir"
         # shellcheck disable=SC2086  # asm_flag is one optional word, deliberately unquoted.
-        ./configure --prefix="$ffmpeg_lib_dir" $asm_flag \
+        if ! ./configure --prefix="$ffmpeg_lib_dir" --cc="$ffmpeg_cc" $asm_flag \
             --disable-programs --disable-doc --disable-network --disable-autodetect \
             --disable-everything --enable-shared --disable-static \
             --enable-decoder=bink,binkaudio_dct,binkaudio_rdft,pcm_s16le \
             --enable-demuxer=bink,binka,avi,wav \
-            --enable-protocol=file --enable-swscale --enable-swresample >/dev/null
+            --enable-protocol=file --enable-swscale --enable-swresample >/dev/null; then
+            echo "   FFmpeg configure failed; the tail of ffbuild/config.log:" >&2
+            tail -n 40 ffbuild/config.log >&2 || true
+            exit 1
+        fi
         make -j"$(getconf _NPROCESSORS_ONLN)" >/dev/null
         make install >/dev/null
     )
