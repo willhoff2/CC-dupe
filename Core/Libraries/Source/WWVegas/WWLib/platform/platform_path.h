@@ -34,6 +34,8 @@
 
 #pragma once
 
+#include <stdio.h>
+
 #include "WWLib/always.h"
 #include "WWLib/Vector.h"
 #include "WWLib/wwstring.h"
@@ -76,6 +78,15 @@ public:
 */
 bool Exists(const char * path);
 bool Create_Directory(const char * path);
+
+/*
+**	fopen() for a Windows spelled path. On Windows this *is* fopen(). Off Windows the path is put
+**	through Resolve() first, so a call site that hands a `Dir\File.ini` literal to the C runtime
+**	stops creating a file whose name contains a backslash. Modes that write only need the parent
+**	directory to resolve, which is what Resolve()'s parent_must_exist_only argument is for.
+*/
+FILE * Open_Stream(const char * path, const char * mode);
+
 bool Delete_File(const char * path);
 bool Copy_File(const char * source, const char * destination, bool fail_if_exists);
 

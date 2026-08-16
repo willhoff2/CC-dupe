@@ -81,6 +81,83 @@ DECLARE_PERF_TIMER(FileSystem)
 //         Private Data
 //----------------------------------------------------------------------------
 
+#ifndef _WIN32
+namespace
+{
+
+// TheSuperHackers @port The engine's path spelling is the Windows one: the retail data, the INI
+// literals and every path the engine builds itself use '\'. A path crossing into the host
+// filesystem is translated on the way in (WWPlatform::Path::Resolve, called from LocalFile::open
+// and from the Win32 file API seam), and a name coming back out of a directory listing has to be
+// translated the other way, or the caller receives a path spelled in a way it never asked for.
+// That is not cosmetic: enumerated names are used as map cache keys, compared against '\' built
+// suffixes and written into MapCache.ini, so the spelling is part of the value.
+//
+// The listing is therefore respelled here, at the one boundary every engine caller goes through,
+// rather than in each LocalFileSystem implementation: the two implementations (Win32Device and
+// StdDevice) disagree today, and the archive file system has its own spelling again, so the
+// guarantee belongs to the interface, not to one backend.
+//
+// The requested directory is put back verbatim -- it may legitimately contain host separators,
+// because the user data path is a host path -- and only the part the listing appended is
+// respelled. See docs/porting/path-separator-seam.md.
+Bool sameCharIgnoringSeparator(char left, char right)
+{
+	if (left == right)
+	{
+		return TRUE;
+	}
+	return (left == '/' || left == '\\') && (right == '/' || right == '\\');
+}
+
+void respellAsRequested(const AsciiString& directory, FilenameList& filenameList)
+{
+	const Int prefixLength = directory.getLength();
+	FilenameList respelled;
+
+	FilenameListIter it = filenameList.begin();
+	for (; it != filenameList.end(); ++it)
+	{
+		const AsciiString& name = *it;
+		Int index = 0;
+
+		// Only a name that really is the requested directory plus something keeps the prefix.
+		if (name.getLength() >= prefixLength)
+		{
+			for (; index < prefixLength; ++index)
+			{
+				if (!sameCharIgnoringSeparator(name.getCharAt(index), directory.getCharAt(index)))
+				{
+					break;
+				}
+			}
+		}
+
+		AsciiString result;
+		if (index == prefixLength)
+		{
+			result = directory;
+		}
+		else
+		{
+			index = 0;
+		}
+
+		for (; index < name.getLength(); ++index)
+		{
+			const char c = name.getCharAt(index);
+			result.concat(c == '/' ? '\\' : c);
+		}
+
+		respelled.insert(result);
+	}
+
+	filenameList.swap(respelled);
+}
+
+}	// anonymous namespace
+#endif	// !_WIN32
+
 
 
 //----------------------------------------------------------------------------
@@ -288,6 +365,10 @@ void FileSystem::getFileListInDirectory(const AsciiString& directory, const Asci
 	USE_PERF_TIMER(FileSystem)
 	TheLocalFileSystem->getFileListInDirectory(AsciiString::TheEmptyString, directory, searchName, filenameList, searchSubdirectories);
 	TheArchiveFileSystem->getFileListInDirectory(AsciiString::TheEmptyString, directory, searchName, filenameList, searchSubdirectories);
+
+#ifndef _WIN32
+	respellAsRequested(directory, filenameList);
+#endif
 }
 
 //============================================================================

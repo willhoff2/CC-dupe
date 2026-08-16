@@ -29,6 +29,7 @@
 // Modes:
 //   chunks   <file>              walk a DataChunk file's chunk table and structure
 //   mapcache <dir>               MapCache::updateCache -- the engine's own .map header parse
+//   mapcachekeys <dir> [name..]  MapCache.ini read back, then looked up by the given map names
 //   filecrc  <file> [runs]       the engine CRC class over a file, repeatedly
 //   xfercrc  <file> [runs]       XferCRC (the desync check's CRC) over the same bytes
 //   replayhdr <file>             RecorderClass::readReplayHeader over a retail replay
@@ -49,15 +50,18 @@
 #include "Common/FileSystem.h"
 #include "Common/GameMemory.h"
 #include "Common/GlobalData.h"
+#include "Common/INI.h"
 #include "Common/LocalFileSystem.h"
 #include "Common/NameKeyGenerator.h"
 #include "Common/Recorder.h"
 #include "Common/Xfer.h"
 #include "Common/XferCRC.h"
+#include "Common/ThingFactory.h"
 #include "GameClient/GameText.h"
 #include "GameClient/MapUtil.h"
 #include "StdDevice/Common/StdBIGFileSystem.h"
 #include "StdDevice/Common/StdLocalFileSystem.h"
+#include "Win32Device/Common/Win32LocalFileSystem.h"
 
 static CriticalSection critSec1, critSec2, critSec3, critSec4, critSec5;
 
@@ -67,6 +71,26 @@ const Char *g_strFile = "data\\Generals.str";
 const Char *g_csfFile = "data\\%s\\Generals.csf";
 // Only referenced in the debug configuration, where DebugInit() names the log file with it.
 const char *gAppPrefix = "sim_";
+
+// Which LocalFileSystem implementation the harness brings up. The game's own factory,
+// Win32GameEngine::createLocalFileSystem(), returns Win32LocalFileSystem on every platform, so
+// "win32" is what the game actually runs and "std" is what this harness used to assume
+// unconditionally. Both are compiled into the native build and they do different things with a
+// Windows spelled path, so being able to run the same mode through either is how that difference
+// gets measured instead of argued about. See docs/porting/path-separator-seam.md.
+static LocalFileSystem *createSelectedLocalFileSystem(void)
+{
+	const char *choice = getenv("SIM_PROBE_LOCALFS");
+
+	if (choice != nullptr && strcmp(choice, "win32") == 0)
+	{
+		printf("localFileSystem=win32 (the implementation the game's factory returns)\n");
+		return MSGNEW("SimProbe") Win32LocalFileSystem;
+	}
+
+	printf("localFileSystem=std\n");
+	return MSGNEW("SimProbe") StdLocalFileSystem;
+}
 
 // The engine's own file system, in the order GameEngine::init brings it up. The archive file system
 // finds whatever `.big` archives are in the working directory and is content with none, so a missing
@@ -84,7 +108,7 @@ static void bringUpFileSystem(void)
 	TheFileSystem = MSGNEW("SimProbe") FileSystem;
 	TheNameKeyGenerator = MSGNEW("SimProbe") NameKeyGenerator;
 	TheNameKeyGenerator->init();
-	TheLocalFileSystem = MSGNEW("SimProbe") StdLocalFileSystem;
+	TheLocalFileSystem = createSelectedLocalFileSystem();
 	TheLocalFileSystem->init();
 	TheArchiveFileSystem = MSGNEW("SimProbe") StdBIGFileSystem;
 	TheArchiveFileSystem->init();
@@ -159,9 +183,34 @@ static int modeMapCache(const char *dir)
 
 	TheWritableGlobalData = MSGNEW("SimProbe") GlobalData;
 	TheWritableGlobalData->m_buildMapCache = TRUE;
+
+	// The cache reads a localized display name per map, and GameTextManager::fetch asserts if the
+	// string manager was never brought up, so it is brought up here for real. Its string table lives
+	// in the retail archives; when those are absent the engine reports that as an init failure, which
+	// is printed and not swallowed -- init() has already marked itself initialized by then, so the
+	// maps still parse and every field except the localized display name is still measured.
 	TheGameText = CreateGameTextInterface();
+	try
+	{
+		TheGameText->init();
+		printf("gameText init=ok\n");
+	}
+	catch (...)
+	{
+		printf("gameText init=FAILED (no string table; display names will be missing)\n");
+	}
+
+	// The map's object chunk asks the thing factory for each object's template, so the factory has
+	// to exist even though no template INI is loaded here: findTemplate then answers "no such
+	// template", which is what the cache parse does with an unknown object anyway.
+	TheThingFactory = MSGNEW("SimProbe") ThingFactory;
+	TheThingFactory->init();
 
 	MapCache cache;
+	// INI::parseMapCacheDefinition files what it reads in TheMapCache, so without this the harness
+	// could not reach the cache *hit* path at all: every MapCache.ini entry would be parsed into a
+	// null cache and every map on disk would look like one the cache had never seen.
+	TheMapCache = &cache;
 	cache.updateCache();
 	printf("cache entries=%u\n", (UnsignedInt)cache.size());
 
@@ -178,7 +227,75 @@ static int modeMapCache(const char *dir)
 			md.m_displayName.str());
 	}
 	printf("RESULT mapcache maps=%d\n", parsed);
+	TheMapCache = nullptr;
 	return parsed > 0 ? 0 : 3;
+}
+
+//----------------------------------------------------------------------------------------------
+// mapcachekeys: the map cache as a *key* store, without needing a `.map` on disk.
+//
+// A MapCache.ini is read with the engine's own INI reader and then queried through
+// MapCache::findMap with whatever spellings are named on the command line. That isolates the half of
+// the path-separator seam that is not an open() failure: a cache key is an identifier, and a lookup
+// that misses does not fail loudly, it re-derives metadata or reports the map as absent. Nothing
+// retail is required, so this runs anywhere -- see scripts/ci/check-path-separator-keys.py.
+//----------------------------------------------------------------------------------------------
+static int modeMapCacheKeys(const char *dir, char **names, int nameCount)
+{
+	if (chdir(dir) != 0)
+	{
+		printf("RESULT mapcachekeys chdir=FAIL dir=%s\n", dir);
+		return 2;
+	}
+
+	TheWritableGlobalData = MSGNEW("SimProbe") GlobalData;
+
+	// Reached for any entry that carries a localized name tag, and it asserts if the string manager
+	// was never brought up. Its table lives in the retail archives, which this mode does not need,
+	// so a failure to read one is reported and the run continues with the tag unresolved.
+	TheGameText = CreateGameTextInterface();
+	try
+	{
+		TheGameText->init();
+		printf("gameText init=ok\n");
+	}
+	catch (...)
+	{
+		printf("gameText init=FAILED (no string table; display names will be missing)\n");
+	}
+
+	MapCache cache;
+	TheMapCache = &cache;
+
+	INI ini;
+	ini.load(AsciiString("Maps\\MapCache.ini"), INI_LOAD_OVERWRITE, nullptr);
+
+	printf("cache entries=%u\n", (UnsignedInt)cache.size());
+	for (MapCache::const_iterator it = cache.begin(); it != cache.end(); ++it)
+	{
+		printf("RESULT entry key=%s multiplayer=%s players=%d\n", it->first.str(),
+			it->second.m_isMultiplayer ? "yes" : "no", it->second.m_numPlayers);
+	}
+
+	Int missed = 0;
+	for (int i = 0; i < nameCount; ++i)
+	{
+		const MapMetaData *md = cache.findMap(AsciiString(names[i]));
+		if (md == nullptr)
+		{
+			++missed;
+			printf("RESULT lookup name=%s found=no\n", names[i]);
+			continue;
+		}
+		printf("RESULT lookup name=%s found=yes multiplayer=%s players=%d official=%s\n",
+			names[i], md->m_isMultiplayer ? "yes" : "no", md->m_numPlayers,
+			md->m_isOfficial ? "yes" : "no");
+	}
+
+	printf("RESULT mapcachekeys entries=%u lookups=%d missed=%d\n", (UnsignedInt)cache.size(),
+		nameCount, missed);
+	TheMapCache = nullptr;
+	return missed == 0 ? 0 : 3;
 }
 
 //----------------------------------------------------------------------------------------------
@@ -358,6 +475,7 @@ static void usage(void)
 		"usage: sim_probe <mode> [args]\n"
 		"  chunks    <file>\n"
 		"  mapcache  <dir>\n"
+		"  mapcachekeys <dir> [map name ...]\n"
 		"  filecrc   <file> [runs]\n"
 		"  xfercrc   <file> [runs]\n"
 		"  replayhdr <file>\n");
@@ -379,6 +497,8 @@ int main(int argc, char **argv)
 		return modeChunks(argv[2]);
 	if (strcmp(mode, "mapcache") == 0)
 		return modeMapCache(argv[2]);
+	if (strcmp(mode, "mapcachekeys") == 0)
+		return modeMapCacheKeys(argv[2], argv + 3, argc - 3);
 	if (strcmp(mode, "filecrc") == 0)
 		return modeFileCRC(argv[2], argc > 3 ? atoi(argv[3]) : 3);
 	if (strcmp(mode, "xfercrc") == 0)
