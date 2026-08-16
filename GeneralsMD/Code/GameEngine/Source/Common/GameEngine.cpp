@@ -776,6 +776,11 @@ void GameEngine::init()
 		{
 			RELEASE_CRASHLOCALIZED("ERROR:D3DFailurePrompt", "ERROR:D3DFailureMessage");
 		}
+		// TheSuperHackers @port Any other ErrorCode used to be swallowed here, and initialization
+		// continued into the main loop having skipped whatever came after the throw.
+		AsciiString reason;
+		reason.format("Error code %d during initialization.", (Int)ec);
+		RELEASE_CRASH((reason.str()));
 	}
 	catch (INIException e)
 	{

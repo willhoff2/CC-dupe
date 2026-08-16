@@ -56,6 +56,7 @@
 #include "Common/GlobalData.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
+#include "Common/InitFailure.h"
 #include "Common/version.h"
 
 
@@ -318,12 +319,17 @@ void GameTextManager::init()
 	}
 	else
 	{
-		return;
+		// TheSuperHackers @port Report the failure instead of returning with no strings loaded.
+		// Returning here leaves every localized string missing, and the only symptom is m_failed
+		// being rendered as UI. See docs/porting/init-failure-reporting.md.
+		rts::throwInitFailure("TheGameText", "cannot read the string table from '%s' or '%s'",
+			g_strFile, csfFile.str());
 	}
 
 	if( m_textCount == 0 )
 	{
-		return;
+		rts::throwInitFailure("TheGameText", "the string table '%s' contains no strings",
+			format == STRING_FILE ? g_strFile : csfFile.str());
 	}
 
 	//Allocate StringInfo Array
@@ -333,7 +339,7 @@ void GameTextManager::init()
 	if( m_stringInfo == nullptr )
 	{
 		deinit();
-		return;
+		rts::throwInitFailure("TheGameText", "cannot allocate %d strings", m_textCount);
 	}
 
 	if ( format == STRING_FILE )
@@ -341,7 +347,7 @@ void GameTextManager::init()
 		if( parseStringFile( g_strFile ) == FALSE )
 		{
 			deinit();
-			return;
+			rts::throwInitFailure("TheGameText", "cannot parse the string file '%s'", g_strFile);
 		}
 	}
 	else
@@ -349,7 +355,8 @@ void GameTextManager::init()
 		if ( !parseCSF ( csfFile.str() ) )
 		{
 			deinit();
-			return;
+			rts::throwInitFailure("TheGameText", "cannot parse the compiled string file '%s'",
+				csfFile.str());
 		}
 	}
 
