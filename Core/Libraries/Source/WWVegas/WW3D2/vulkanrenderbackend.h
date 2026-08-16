@@ -117,6 +117,8 @@ public:
 	** Resource creation
 	*/
 	virtual HRESULT CreateTexture(UINT width, UINT height, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DTexture8** texture);
+	virtual HRESULT CreateCubeTexture(UINT edge_length, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DCubeTexture8** cube_texture);
+	virtual HRESULT CreateVolumeTexture(UINT width, UINT height, UINT depth, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DVolumeTexture8** volume_texture);
 	virtual HRESULT CreateVertexBuffer(UINT length, DWORD usage, DWORD fvf, D3DPOOL pool, IDirect3DVertexBuffer8** vertex_buffer);
 	virtual HRESULT CreateIndexBuffer(UINT length, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DIndexBuffer8** index_buffer);
 	virtual HRESULT CreateImageSurface(UINT width, UINT height, D3DFORMAT format, IDirect3DSurface8** surface);
@@ -192,6 +194,32 @@ public:
 	static unsigned Unimplemented_Call_Kinds();
 	static const UnimplementedCallClass * Unimplemented_Call(unsigned index);
 	static void Log_Unimplemented_Calls();
+
+	/*
+	** Frame proof.  NOT a D3D8 entry point and never called by the engine: this reads the colour
+	** target the engine just drew back to host memory and measures it, so a harness can say what
+	** is IN a frame instead of trusting Present's HRESULT.  The project's worst defect to date was
+	** 13,500 "successful" frames of an empty map, so a presented frame is only evidence once its
+	** contents have been read.
+	*/
+	struct FrameProofClass
+	{
+		unsigned Width;
+		unsigned Height;
+		unsigned long Pixels;			// pixels read back
+		unsigned long Matching;			// pixels within Tolerance of the expected colour
+		unsigned char MinRGB[3];
+		unsigned char MaxRGB[3];
+		unsigned char CentreRGBA[4];
+	};
+	bool Measure_Frame(unsigned char expect_r, unsigned char expect_g, unsigned char expect_b,
+		unsigned char tolerance, const char * png_path, FrameProofClass & proof);
+
+	/*
+	** Validation-layer messages the backend has seen, so a run can report that the layer was
+	** loaded AND silent rather than only that nothing crashed.  -1 before a device exists.
+	*/
+	long Validation_Message_Count() const;
 
 private:
 	/*

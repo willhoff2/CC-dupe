@@ -587,6 +587,14 @@ private:
 
 	bool validation_ = false;
 	bool headless_ = true;
+	// Whether this backend was asked to put frames on a screen: constructed non-headless AND
+	// given a window. When it was, a missing surface or swapchain is a failure at Init() and
+	// Present() cannot report success, because there is nothing it could have presented to.
+	// Without this, a build compiled with neither SPIKE_WITH_PLATFORM_WINDOW nor SPIKE_WITH_SDL
+	// created no swapchain, presented nothing, and returned true from Present() - which is how
+	// the native engine build was measured "presenting" on Apple Silicon while showing nothing.
+	bool presentation_required_ = false;
+	bool present_refusal_reported_ = false;
 	uint32_t width_ = 0, height_ = 0;
 	std::string device_description_ = "<uninitialised>";
 
@@ -1460,14 +1468,31 @@ bool VulkanBackend::Create_Shaders() {
 
 bool VulkanBackend::Create_Swapchain(void* window_handle) {
 #if defined(SPIKE_WITH_SDL) || defined(SPIKE_WITH_PLATFORM_WINDOW)
-	if (headless_ || window_handle == nullptr) return true;
+	if (!presentation_required_) return true;
+	(void)window_handle;
 	if (!Build_Swapchain()) return false;
+	if (swapchain_ == VK_NULL_HANDLE) {
+		std::fprintf(stderr, "Vulkan backend: no swapchain was created for a window, so nothing "
+		                     "could be presented; failing initialisation rather than running "
+		                     "blind.\n");
+		return false;
+	}
 
 	VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
 	VK_CHECK(vkCreateFence(device_, &fci, nullptr, &acquire_fence_));
 	return true;
 #else
 	(void)window_handle;
+	if (presentation_required_) {
+		// The build-time half of the guard. This translation unit has no surface code at all, so
+		// a windowed run cannot present and must not start: it would draw every frame and show
+		// none of them. Compile the backend with SPIKE_WITH_PLATFORM_WINDOW (what
+		// scripts/native-build.py defines for the engine) or SPIKE_WITH_SDL.
+		std::fprintf(stderr, "Vulkan backend: compiled without SPIKE_WITH_PLATFORM_WINDOW and "
+		                     "without SPIKE_WITH_SDL, so it has no surface and no swapchain and "
+		                     "cannot present to a window.\n");
+		return false;
+	}
 	return true;
 #endif
 }
@@ -1482,7 +1507,16 @@ void VulkanBackend::Destroy_Swapchain() {
 
 bool VulkanBackend::Build_Swapchain() {
 #if defined(SPIKE_WITH_SDL) || defined(SPIKE_WITH_PLATFORM_WINDOW)
-	if (surface_ == VK_NULL_HANDLE) return true;
+	if (surface_ == VK_NULL_HANDLE) {
+		// A windowed backend with no surface has nothing to build a swapchain on. Succeeding here
+		// is what let Present() report success with no swapchain.
+		if (presentation_required_) {
+			std::fprintf(stderr, "Vulkan backend: no Vulkan surface for the window, so no "
+			                     "swapchain can be built.\n");
+			return false;
+		}
+		return true;
+	}
 
 	VkSurfaceCapabilitiesKHR caps{};
 	VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &caps));
@@ -1522,13 +1556,14 @@ bool VulkanBackend::Build_Swapchain() {
 	VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain_, &image_count, swapchain_images_.data()));
 	return true;
 #else
-	return true;
+	return !presentation_required_;
 #endif
 }
 
 bool VulkanBackend::Init(void* window_handle, uint32_t width, uint32_t height) {
 	width_ = width;
 	height_ = height;
+	presentation_required_ = (!headless_ && window_handle != nullptr);
 
 	if (!Create_Instance(window_handle)) return false;
 
@@ -3520,7 +3555,7 @@ void VulkanBackend::End_Scene(bool flip_frame) {
 }
 
 bool VulkanBackend::Resize_Presentation(uint32_t width, uint32_t height) {
-	if (swapchain_ == VK_NULL_HANDLE) return true;
+	if (swapchain_ == VK_NULL_HANDLE) return !presentation_required_;
 	(void)width;
 	(void)height;
 	// The surface's own currentExtent is authoritative; the reported size is only the trigger.
@@ -3529,7 +3564,19 @@ bool VulkanBackend::Resize_Presentation(uint32_t width, uint32_t height) {
 }
 
 bool VulkanBackend::Present() {
-	if (swapchain_ == VK_NULL_HANDLE) return true;
+	if (swapchain_ == VK_NULL_HANDLE) {
+		// The run-time half of the guard: no swapchain means no image was handed to a
+		// presentation engine, so this reports failure whatever the reason. A headless backend
+		// reaches this too - Read_Back_Color_Target() is how a headless frame is observed, and a
+		// caller that asked to flip instead deserves to be told it did not happen.
+		if (!present_refusal_reported_) {
+			present_refusal_reported_ = true;
+			std::fprintf(stderr, "Vulkan backend: Present() with no swapchain presents nothing and "
+			                     "reports failure%s.\n",
+			             headless_ ? " (this backend is headless)" : "");
+		}
+		return false;
+	}
 
 	uint32_t index = 0;
 	VK_CHECK(vkResetFences(device_, 1, &acquire_fence_));

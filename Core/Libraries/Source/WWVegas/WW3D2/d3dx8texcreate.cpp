@@ -24,8 +24,12 @@
 //
 // THESE ARE NOT TEXTURE CREATION. THE DEVICE CREATES THE TEXTURE.
 //
-// Every one of the three creation helpers ends in the corresponding IDirect3DDevice8::Create*()
-// call. What D3DX adds -- and what the engine relies on it adding, because dx8wrapper.cpp says so
+// Every one of the three creation helpers ends in the corresponding Create*() call on whatever
+// device the engine has: the IDirect3DDevice8 the caller passed when there is one, and otherwise
+// the installed RenderBackendClass, which is what the engine has off Windows and is why these
+// helpers no longer refuse every call the engine makes (see Resolve_Target below).
+//
+// What D3DX adds -- and what the engine relies on it adding, because dx8wrapper.cpp says so
 // in a comment at every call site -- is the fitting: filling in the arguments the caller left as
 // D3DX_DEFAULT, obeying the device's power-of-two/square/maximum-extent caps, turning a mip level
 // count of zero into a whole chain, and retrying with a different format when the device rejects
@@ -34,10 +38,11 @@
 //
 // That fitting is arithmetic and policy, so it lives in Plan()/Should_Try_Next_Format() in
 // d3dx8texcreate.h where scripts/native-d3dx8-entrypoints-test.py can assert it without a device.
-// The entry points themselves are the loop around it. WHAT IS THEREFORE NOT COVERED BY A TEST is
-// the ten lines that call the device: no D3D8 device exists off Windows yet (the Vulkan backend is
-// spikes/renderer), so there is nothing to call. When one does, these are the first functions a
-// texture goes through and the first place to look.
+// The entry points themselves are the loop around it, and the entry-point test now covers the
+// lines that call the device too: it passes a recording RenderBackendClass and asserts the shape,
+// format and level count that arrive at CreateTexture()/CreateCubeTexture()/CreateVolumeTexture().
+// What no test off Windows can cover is the IDirect3DDevice8 branch, because there is no D3D8
+// device to call there; on Windows d3dx8.lib is used and this file is not compiled at all.
 //
 // WHAT THE FITTING DOES, AND WHERE IT DIFFERS FROM D3DX
 //
@@ -78,6 +83,8 @@
 #if !defined(_WIN32)
 
 #include "d3dx8texcreate.h"
+
+#include "renderbackend.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -323,20 +330,59 @@ const char * Error_String(HRESULT hr)
 } // namespace D3DX8TexCreate
 
 //
+//	What a creation helper creates through: the IDirect3DDevice8 the caller passed, or - when
+//	that is null, which is every call the engine makes behind a non-D3D8 backend - the installed
+//	RenderBackendClass. Exactly one of the two is set; both null means there is no device at all
+//	yet, which is a refusal rather than a null dereference.
+//
+//	The D3D8 member is named D3DDevice8 rather than Device so that the D3D8 surface scanner counts
+//	the calls made on it: the scanner drops `Device` as too generic a receiver name, which would
+//	hide this file's direct call sites from the gate whose job is to budget them.
+//
+struct TargetType
+{
+	LPDIRECT3DDEVICE8			D3DDevice8;
+	RenderBackendClass *		Backend;
+
+	bool Is_Valid() const { return D3DDevice8 != nullptr || Backend != nullptr; }
+	HRESULT Get_Caps(D3DCAPS8 & caps) const
+	{
+		memset(&caps, 0, sizeof(caps));
+		if (D3DDevice8 != nullptr) return D3DDevice8->GetDeviceCaps(&caps);
+		return Backend->GetDeviceCaps(&caps);
+	}
+};
+
+//
+//	A device argument wins when there is one, so a caller that holds a real IDirect3DDevice8 (the
+//	D3D8 backend, and the tests that pass a stub) reaches exactly what it passed. Only a null
+//	device falls through to the backend, and only once the backend has a device: before
+//	Create_Device() there is nothing to create with, and the request has to fail rather than
+//	reach a half-built backend.
+//
+static TargetType Resolve_Target(LPDIRECT3DDEVICE8 device)
+{
+	TargetType target = { device, nullptr };
+	if (device != nullptr) return target;
+	RenderBackendClass * backend = D3DX8TexCreate::Peek_Render_Backend();
+	if (backend != nullptr && backend->Has_Device()) target.Backend = backend;
+	return target;
+}
+
+//
 //	The three creation helpers. Each one plans, then walks the candidate formats, and reports what
 //	it substituted. On failure the out-parameter is written null before anything else, so a caller
 //	that ignores the HRESULT cannot read a pointer that was never set.
 //
 template <typename OutType, typename CreateType>
-static HRESULT Create_Fitted(LPDIRECT3DDEVICE8 device, D3DX8TexCreate::KindType kind,
+static HRESULT Create_Fitted(const TargetType & target, D3DX8TexCreate::KindType kind,
 	const D3DX8TexCreate::RequestType & request, OutType ** out, CreateType create)
 {
 	if (out != nullptr) *out = nullptr;
-	if (device == nullptr || out == nullptr) return D3DERR_INVALIDCALL;
+	if (!target.Is_Valid() || out == nullptr) return D3DERR_INVALIDCALL;
 
 	D3DCAPS8 caps;
-	memset(&caps, 0, sizeof(caps));
-	HRESULT caps_result = device->GetDeviceCaps(&caps);
+	HRESULT caps_result = target.Get_Caps(caps);
 	if (FAILED(caps_result)) return caps_result;
 
 	const D3DX8TexCreate::PlanType plan = D3DX8TexCreate::Plan(caps, request, kind);
@@ -370,11 +416,16 @@ HRESULT WINAPI D3DXCreateTexture(
 	LPDIRECT3DTEXTURE8 * ppTexture)
 {
 	const D3DX8TexCreate::RequestType request = { Width, Height, 1, MipLevels, Usage, Format };
-	return Create_Fitted(pDevice, D3DX8TexCreate::KIND_TEXTURE, request, ppTexture,
-		[pDevice, Usage, Pool](const D3DX8TexCreate::PlanType & plan, D3DFORMAT format,
+	const TargetType target = Resolve_Target(pDevice);
+	return Create_Fitted(target, D3DX8TexCreate::KIND_TEXTURE, request, ppTexture,
+		[&target, Usage, Pool](const D3DX8TexCreate::PlanType & plan, D3DFORMAT format,
 				LPDIRECT3DTEXTURE8 * out) {
-			return pDevice->CreateTexture(plan.Width, plan.Height, plan.MipLevels, Usage, format,
-				Pool, out);
+			if (target.D3DDevice8 != nullptr) {
+				return target.D3DDevice8->CreateTexture(plan.Width, plan.Height, plan.MipLevels, Usage,
+					format, Pool, out);
+			}
+			return target.Backend->CreateTexture(plan.Width, plan.Height, plan.MipLevels, Usage,
+				format, Pool, out);
 		});
 }
 
@@ -388,11 +439,16 @@ HRESULT WINAPI D3DXCreateCubeTexture(
 	LPDIRECT3DCUBETEXTURE8 * ppCubeTexture)
 {
 	const D3DX8TexCreate::RequestType request = { Size, Size, 1, MipLevels, Usage, Format };
-	return Create_Fitted(pDevice, D3DX8TexCreate::KIND_CUBE, request, ppCubeTexture,
-		[pDevice, Usage, Pool](const D3DX8TexCreate::PlanType & plan, D3DFORMAT format,
+	const TargetType target = Resolve_Target(pDevice);
+	return Create_Fitted(target, D3DX8TexCreate::KIND_CUBE, request, ppCubeTexture,
+		[&target, Usage, Pool](const D3DX8TexCreate::PlanType & plan, D3DFORMAT format,
 				LPDIRECT3DCUBETEXTURE8 * out) {
-			return pDevice->CreateCubeTexture(plan.Width, plan.MipLevels, Usage, format, Pool,
-				out);
+			if (target.D3DDevice8 != nullptr) {
+				return target.D3DDevice8->CreateCubeTexture(plan.Width, plan.MipLevels, Usage, format,
+					Pool, out);
+			}
+			return target.Backend->CreateCubeTexture(plan.Width, plan.MipLevels, Usage, format,
+				Pool, out);
 		});
 }
 
@@ -408,10 +464,15 @@ HRESULT WINAPI D3DXCreateVolumeTexture(
 	LPDIRECT3DVOLUMETEXTURE8 * ppVolumeTexture)
 {
 	const D3DX8TexCreate::RequestType request = { Width, Height, Depth, MipLevels, Usage, Format };
-	return Create_Fitted(pDevice, D3DX8TexCreate::KIND_VOLUME, request, ppVolumeTexture,
-		[pDevice, Usage, Pool](const D3DX8TexCreate::PlanType & plan, D3DFORMAT format,
+	const TargetType target = Resolve_Target(pDevice);
+	return Create_Fitted(target, D3DX8TexCreate::KIND_VOLUME, request, ppVolumeTexture,
+		[&target, Usage, Pool](const D3DX8TexCreate::PlanType & plan, D3DFORMAT format,
 				LPDIRECT3DVOLUMETEXTURE8 * out) {
-			return pDevice->CreateVolumeTexture(plan.Width, plan.Height, plan.Depth,
+			if (target.D3DDevice8 != nullptr) {
+				return target.D3DDevice8->CreateVolumeTexture(plan.Width, plan.Height, plan.Depth,
+					plan.MipLevels, Usage, format, Pool, out);
+			}
+			return target.Backend->CreateVolumeTexture(plan.Width, plan.Height, plan.Depth,
 				plan.MipLevels, Usage, format, Pool, out);
 		});
 }

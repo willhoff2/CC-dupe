@@ -50,16 +50,22 @@
  *      failing HRESULT with a null out-parameter, which is the contract its one caller relies   *
  *      on when it falls back to the missing-texture checkerboard.                              *
  *                                                                                             *
- *  NOT ASSERTED HERE: the device calls themselves. There is no IDirect3DDevice8 implementation   *
- *  off Windows yet, so there is nothing to call and nothing to fake that would prove anything    *
- *  the plan does not already prove. When a backend exists, the loop in d3dx8texcreate.cpp is     *
- *  ten lines and this is the file to extend.                                                   *
+ *    - the device calls: a recording RenderBackendClass receives the PLANNED width, height,      *
+ *      depth, mip count, format and pool for all three shapes, its caps are what the fitting     *
+ *      used, a format it rejects is retried on it, and a backend with no device yet (or none at  *
+ *      all) is a refusal with a null out-parameter rather than a call.                           *
+ *                                                                                             *
+ *  NOT ASSERTED HERE: the IDirect3DDevice8 branch of those same calls. There is no D3D8 device   *
+ *  implementation off Windows to call, and on Windows d3dx8.lib is used and this file is not     *
+ *  compiled at all -- the Windows behaviour is the oracle, not something this can check.        *
  *                                                                                             *
  *  Run through scripts/native-d3dx8-entrypoints-test.py.                                       *
  *                                                                                             *
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "d3dx8texcreate.h"
+
+#include "renderbackend.h"
 
 // D3DX_DEFAULT is ULONG_MAX, which does not fit the UINT parameters these entry points take;
 // what the implementation sees is the truncation, so that is what the test passes.
@@ -374,6 +380,283 @@ static void Test_File_Load_Refusal()
 	Check(hr == E_NOTIMPL, "a null filename and null out-parameters are accepted, not crashed on");
 }
 
+/***********************************************************************************************
+**	The device calls.
+**
+**	Off Windows the device the engine has is a RenderBackendClass, not an IDirect3DDevice8, so
+**	these helpers ask the installed backend when their device argument is null - which it always
+**	is, because dx8wrapper.cpp passes _Get_D3D_Device8() and that answers null behind a non-D3D8
+**	backend. Before this, every one of those calls returned D3DERR_INVALIDCALL without calling
+**	anything, and MissingTexture::_Init() locked the null result.
+**
+**	Asserted below: the arguments that arrive at the backend are the PLANNED ones (the fitting is
+**	not bypassed), the caps come from the backend, the format retry walks the candidates through
+**	it, and a backend without a device is a refusal rather than a call.
+***********************************************************************************************/
+
+class RecordingBackendClass : public RenderBackendClass
+{
+public:
+	struct CallType
+	{
+		unsigned		Width;
+		unsigned		Height;
+		unsigned		Depth;
+		unsigned		Levels;
+		DWORD			Usage;
+		D3DFORMAT	Format;
+		D3DPOOL		Pool;
+	};
+
+	RecordingBackendClass() :
+		DeviceExists(true),
+		Caps(Permissive_Caps()),
+		CapsResult(D3D_OK),
+		RejectFirst(0),
+		TextureCalls(0),
+		CubeCalls(0),
+		VolumeCalls(0)
+	{
+		memset(&LastTexture, 0, sizeof(LastTexture));
+		memset(&LastCube, 0, sizeof(LastCube));
+		memset(&LastVolume, 0, sizeof(LastVolume));
+	}
+
+	bool				DeviceExists;
+	D3DCAPS8			Caps;
+	HRESULT			CapsResult;
+	//	How many creation attempts to reject with a format error before accepting one, which is
+	//	how a device that does not support the requested format behaves.
+	unsigned			RejectFirst;
+
+	unsigned			TextureCalls;
+	unsigned			CubeCalls;
+	unsigned			VolumeCalls;
+	CallType			LastTexture;
+	CallType			LastCube;
+	CallType			LastVolume;
+
+	virtual bool Has_Device() const { return DeviceExists; }
+	virtual HRESULT GetDeviceCaps(D3DCAPS8* caps)
+	{
+		if (FAILED(CapsResult)) return CapsResult;
+		*caps = Caps;
+		return D3D_OK;
+	}
+
+	virtual HRESULT CreateTexture(UINT width, UINT height, UINT levels, DWORD usage,
+		D3DFORMAT format, D3DPOOL pool, IDirect3DTexture8** texture)
+	{
+		TextureCalls++;
+		const CallType call = { width, height, 1, levels, usage, format, pool };
+		LastTexture = call;
+		if (TextureCalls <= RejectFirst) return D3DERR_INVALIDCALL;
+		//	A non-null pointer nobody dereferences: what is under test is the arguments and the
+		//	HRESULT, and the caller only stores what it is handed.
+		*texture = reinterpret_cast<IDirect3DTexture8 *>(this);
+		return D3D_OK;
+	}
+
+	virtual HRESULT CreateCubeTexture(UINT edge_length, UINT levels, DWORD usage, D3DFORMAT format,
+		D3DPOOL pool, IDirect3DCubeTexture8** cube_texture)
+	{
+		CubeCalls++;
+		const CallType call = { edge_length, edge_length, 1, levels, usage, format, pool };
+		LastCube = call;
+		if (CubeCalls <= RejectFirst) return D3DERR_INVALIDCALL;
+		*cube_texture = reinterpret_cast<IDirect3DCubeTexture8 *>(this);
+		return D3D_OK;
+	}
+
+	virtual HRESULT CreateVolumeTexture(UINT width, UINT height, UINT depth, UINT levels,
+		DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DVolumeTexture8** volume_texture)
+	{
+		VolumeCalls++;
+		const CallType call = { width, height, depth, levels, usage, format, pool };
+		LastVolume = call;
+		if (VolumeCalls <= RejectFirst) return D3DERR_INVALIDCALL;
+		*volume_texture = reinterpret_cast<IDirect3DVolumeTexture8 *>(this);
+		return D3D_OK;
+	}
+
+	//	The rest of the seam, which these entry points do not touch. Each one refuses, so a helper
+	//	that started calling something else would fail rather than appear to work.
+	virtual bool Open() { return false; }
+	virtual void Release_Interface() {}
+	virtual void Free_Library() {}
+	virtual bool Has_Interface() const { return false; }
+	virtual HRESULT Create_Device(UINT, D3DDEVTYPE, HWND, DWORD, D3DPRESENT_PARAMETERS*) { return D3DERR_INVALIDCALL; }
+	virtual void Release_Device() {}
+	virtual HRESULT BeginScene() { return D3DERR_INVALIDCALL; }
+	virtual HRESULT EndScene() { return D3DERR_INVALIDCALL; }
+	virtual HRESULT Clear(DWORD, CONST D3DRECT*, DWORD, D3DCOLOR, float, DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT Present(CONST RECT*, CONST RECT*, HWND, CONST RGNDATA*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetRenderState(D3DRENDERSTATETYPE, DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT GetRenderState(D3DRENDERSTATETYPE, DWORD*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetTextureStageState(DWORD, D3DTEXTURESTAGESTATETYPE, DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetTexture(DWORD, IDirect3DBaseTexture8*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetTransform(D3DTRANSFORMSTATETYPE, CONST D3DMATRIX*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT GetTransform(D3DTRANSFORMSTATETYPE, D3DMATRIX*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetViewport(CONST D3DVIEWPORT8*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT GetViewport(D3DVIEWPORT8*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetMaterial(CONST D3DMATERIAL8*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetLight(DWORD, CONST D3DLIGHT8*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT LightEnable(DWORD, BOOL) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetClipPlane(DWORD, CONST float*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CreateVertexShader(CONST DWORD*, CONST DWORD*, DWORD*, DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT DeleteVertexShader(DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetVertexShader(DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetVertexShaderConstant(DWORD, CONST void*, DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CreatePixelShader(CONST DWORD*, DWORD*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT DeletePixelShader(DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetPixelShader(DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetPixelShaderConstant(DWORD, CONST void*, DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CreateVertexBuffer(UINT, DWORD, DWORD, D3DPOOL, IDirect3DVertexBuffer8**) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CreateIndexBuffer(UINT, DWORD, D3DFORMAT, D3DPOOL, IDirect3DIndexBuffer8**) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CreateImageSurface(UINT, UINT, D3DFORMAT, IDirect3DSurface8**) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CreateAdditionalSwapChain(D3DPRESENT_PARAMETERS*, IDirect3DSwapChain8**) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT UpdateTexture(IDirect3DBaseTexture8*, IDirect3DBaseTexture8*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CopyRects(IDirect3DSurface8*, CONST RECT*, UINT, IDirect3DSurface8*, CONST POINT*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetStreamSource(UINT, IDirect3DVertexBuffer8*, UINT) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetIndices(IDirect3DIndexBuffer8*, UINT) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT DrawPrimitive(D3DPRIMITIVETYPE, UINT, UINT) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT DrawIndexedPrimitive(D3DPRIMITIVETYPE, UINT, UINT, UINT, UINT) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT DrawPrimitiveUP(D3DPRIMITIVETYPE, UINT, CONST void*, UINT) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT ProcessVertices(UINT, UINT, UINT, IDirect3DVertexBuffer8*, DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT GetRenderTarget(IDirect3DSurface8**) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT GetDepthStencilSurface(IDirect3DSurface8**) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT SetRenderTarget(IDirect3DSurface8*, IDirect3DSurface8*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT GetFrontBuffer(IDirect3DSurface8*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT GetBackBuffer(UINT, D3DBACKBUFFER_TYPE, IDirect3DSurface8**) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT TestCooperativeLevel() { return D3DERR_INVALIDCALL; }
+	virtual HRESULT Reset(D3DPRESENT_PARAMETERS*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT ValidateDevice(DWORD*) { return D3DERR_INVALIDCALL; }
+	virtual UINT GetAvailableTextureMem() { return 0; }
+	virtual HRESULT ResourceManagerDiscardBytes(DWORD) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT GetDisplayMode(D3DDISPLAYMODE*) { return D3DERR_INVALIDCALL; }
+	virtual BOOL ShowCursor(BOOL) { return 0; }
+	virtual HRESULT SetCursorProperties(UINT, UINT, IDirect3DSurface8*) { return D3DERR_INVALIDCALL; }
+	virtual void SetCursorPosition(UINT, UINT, DWORD) {}
+	virtual void SetGammaRamp(DWORD, CONST D3DGAMMARAMP*) {}
+	virtual UINT GetAdapterCount() { return 0; }
+	virtual HRESULT GetAdapterIdentifier(UINT, DWORD, D3DADAPTER_IDENTIFIER8*) { return D3DERR_INVALIDCALL; }
+	virtual UINT GetAdapterModeCount(UINT) { return 0; }
+	virtual HRESULT EnumAdapterModes(UINT, UINT, D3DDISPLAYMODE*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT GetAdapterDisplayMode(UINT, D3DDISPLAYMODE*) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CheckDeviceType(UINT, D3DDEVTYPE, D3DFORMAT, D3DFORMAT, BOOL) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CheckDeviceFormat(UINT, D3DDEVTYPE, D3DFORMAT, DWORD, D3DRESOURCETYPE, D3DFORMAT) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CheckDeviceMultiSampleType(UINT, D3DDEVTYPE, D3DFORMAT, BOOL, D3DMULTISAMPLE_TYPE) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT CheckDepthStencilMatch(UINT, D3DDEVTYPE, D3DFORMAT, D3DFORMAT, D3DFORMAT) { return D3DERR_INVALIDCALL; }
+	virtual HRESULT GetDeviceCaps(UINT, D3DDEVTYPE, D3DCAPS8*) { return D3DERR_INVALIDCALL; }
+};
+
+//	What d3dx8texcreate.cpp asks for the installed backend. In the engine this is
+//	DX8Wrapper::Get_Render_Backend() (defined in dx8wrapper.cpp); here it is whatever the case
+//	under test installed, including nothing at all.
+static RenderBackendClass * _Installed_Backend = nullptr;
+
+RenderBackendClass * D3DX8TexCreate::Peek_Render_Backend()
+{
+	return _Installed_Backend;
+}
+
+static void Test_Backend_Creation()
+{
+	RecordingBackendClass backend;
+	_Installed_Backend = &backend;
+
+	/*
+	**	MissingTexture::_Init()'s own shape: 32x32 A8R8G8B8 with the whole mip chain, created with
+	**	a null device argument. This is the call the engine died on.
+	*/
+	IDirect3DTexture8 * texture = nullptr;
+	HRESULT hr = D3DXCreateTexture(nullptr, 32, 32, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
+		&texture);
+	Check(hr == D3D_OK, "a null device argument creates through the installed backend");
+	Check(texture != nullptr, "and hands back the texture the backend created");
+	Check_Equal(backend.TextureCalls, 1, "the backend was asked exactly once");
+	Check_Equal(backend.LastTexture.Width, 32, "the planned width reaches the backend");
+	Check_Equal(backend.LastTexture.Height, 32, "the planned height reaches the backend");
+	Check_Equal(backend.LastTexture.Levels, 6, "a mip count of zero reaches it as the full chain");
+	Check_Equal(backend.LastTexture.Format, D3DFMT_A8R8G8B8, "the requested format is tried first");
+	Check_Equal(backend.LastTexture.Pool, D3DPOOL_MANAGED, "the pool is passed through");
+
+	/*
+	**	The caps used for the fitting are the BACKEND's, not a permissive default: a backend with a
+	**	2048 maximum must clamp, or the engine would ask a device for something it cannot make.
+	*/
+	backend.Caps.MaxTextureWidth = 128;
+	backend.Caps.MaxTextureHeight = 128;
+	hr = D3DXCreateTexture(nullptr, 256, 256, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &texture);
+	Check(hr == D3D_OK, "a clamped request still creates");
+	Check_Equal(backend.LastTexture.Width, 128, "the backend's own maximum extent is what clamps");
+
+	/*
+	**	Format substitution against the backend: it rejects the first candidate the way a device
+	**	that cannot make that format does, and the next candidate is tried on the same backend.
+	*/
+	backend.Caps = Permissive_Caps();
+	backend.TextureCalls = 0;
+	backend.RejectFirst = 1;
+	hr = D3DXCreateTexture(nullptr, 64, 64, 1, 0, D3DFMT_A4R4G4B4, D3DPOOL_MANAGED, &texture);
+	Check(hr == D3D_OK, "a format the backend rejects is retried on it");
+	Check_Equal(backend.TextureCalls, 2, "which took a second call to the backend");
+	Check(backend.LastTexture.Format != D3DFMT_A4R4G4B4, "with a different format");
+
+	/*
+	**	Cube and volume creation reach the backend too. This backend accepts them; the Vulkan one
+	**	refuses and records the refusal in its unimplemented ledger, which is the finding rather
+	**	than something to paper over -- what is asserted here is that the call ARRIVES, because a
+	**	refusal nobody reaches is not a measurement.
+	*/
+	backend.RejectFirst = 0;
+	IDirect3DCubeTexture8 * cube = nullptr;
+	hr = D3DXCreateCubeTexture(nullptr, 64, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &cube);
+	Check(hr == D3D_OK, "a cube texture is created through the backend");
+	Check_Equal(backend.CubeCalls, 1, "the backend's CreateCubeTexture is what was called");
+	Check_Equal(backend.LastCube.Width, 64, "with the planned edge length");
+	Check_Equal(backend.LastCube.Levels, 7, "and the full mip chain");
+
+	IDirect3DVolumeTexture8 * volume = nullptr;
+	hr = D3DXCreateVolumeTexture(nullptr, 32, 32, 16, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
+		&volume);
+	Check(hr == D3D_OK, "a volume texture is created through the backend");
+	Check_Equal(backend.VolumeCalls, 1, "the backend's CreateVolumeTexture is what was called");
+	Check_Equal(backend.LastVolume.Depth, 16, "with the planned depth");
+
+	/*
+	**	A caps failure is the caller's answer, not a substituted default: fitting against zeroed
+	**	caps would ask for a texture no device agreed to.
+	*/
+	backend.TextureCalls = 0;
+	backend.CapsResult = D3DERR_INVALIDCALL;
+	texture = reinterpret_cast<IDirect3DTexture8 *>(0xdeadbeef);
+	hr = D3DXCreateTexture(nullptr, 64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &texture);
+	Check(hr == D3DERR_INVALIDCALL, "a backend that cannot report caps fails the creation");
+	Check(texture == nullptr, "and the out-parameter is null");
+	Check_Equal(backend.TextureCalls, 0, "without creating anything");
+	backend.CapsResult = D3D_OK;
+
+	/*
+	**	Before Create_Device() there is a backend but no device, and the request has to fail
+	**	rather than reach a half-built one. Same for no backend at all, which is what the tests of
+	**	the fitting above run with.
+	*/
+	backend.TextureCalls = 0;
+	backend.DeviceExists = false;
+	texture = reinterpret_cast<IDirect3DTexture8 *>(0xdeadbeef);
+	hr = D3DXCreateTexture(nullptr, 64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &texture);
+	Check(hr == D3DERR_INVALIDCALL, "a backend with no device yet refuses the creation");
+	Check(texture == nullptr, "and the out-parameter is null rather than left as it was");
+	Check_Equal(backend.TextureCalls, 0, "and nothing was created");
+
+	_Installed_Backend = nullptr;
+	texture = reinterpret_cast<IDirect3DTexture8 *>(0xdeadbeef);
+	hr = D3DXCreateTexture(nullptr, 64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &texture);
+	Check(hr == D3DERR_INVALIDCALL, "no backend at all refuses the creation");
+	Check(texture == nullptr, "and the out-parameter is null");
+}
+
 int main()
 {
 	Test_Extents();
@@ -383,6 +666,7 @@ int main()
 	Test_Retry_Policy();
 	Test_Error_Strings();
 	Test_File_Load_Refusal();
+	Test_Backend_Creation();
 
 	printf("%d checks, %d failures\n", _Checks, _Failures);
 	return (_Failures == 0) ? 0 : 1;

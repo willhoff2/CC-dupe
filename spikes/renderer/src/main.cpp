@@ -200,7 +200,10 @@ int main(int argc, char** argv) {
 		gfx->Set_Index_Buffer(quad_ib, 0);
 		gfx->Draw_Triangles(0, 2, 0, 4);
 
-		gfx->End_Scene(true);
+		// No flip: this spike is headless, so there is no swapchain and nothing to present to.
+		// Its proof is the framebuffer readback below, and Present() now says so rather than
+		// reporting success for a presentation that did not happen.
+		gfx->End_Scene(false);
 	}
 
 	// --- proof --------------------------------------------------------------

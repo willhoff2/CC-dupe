@@ -247,6 +247,16 @@ HRESULT D3D8RenderBackendClass::CreateTexture(UINT width, UINT height, UINT leve
 	return D3DDevice->CreateTexture(width, height, levels, usage, format, pool, texture);
 }
 
+HRESULT D3D8RenderBackendClass::CreateCubeTexture(UINT edge_length, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DCubeTexture8** cube_texture)
+{
+	return D3DDevice->CreateCubeTexture(edge_length, levels, usage, format, pool, cube_texture);
+}
+
+HRESULT D3D8RenderBackendClass::CreateVolumeTexture(UINT width, UINT height, UINT depth, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DVolumeTexture8** volume_texture)
+{
+	return D3DDevice->CreateVolumeTexture(width, height, depth, levels, usage, format, pool, volume_texture);
+}
+
 HRESULT D3D8RenderBackendClass::CreateVertexBuffer(UINT length, DWORD usage, DWORD fvf, D3DPOOL pool, IDirect3DVertexBuffer8** vertex_buffer)
 {
 	return D3DDevice->CreateVertexBuffer(length, usage, fvf, pool, vertex_buffer);

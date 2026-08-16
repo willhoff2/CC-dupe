@@ -72,6 +72,11 @@ const int WIDTH_POINTS = 800;
 const int HEIGHT_POINTS = 600;
 const int BIT_DEPTH = 32;
 const int FRAMES = 3;
+// The clear colour, kept here because the frame proof below has to compare against the same value
+// the engine was asked to clear with rather than against a colour written twice.
+const float CLEAR_R = 0.10f;
+const float CLEAR_G = 0.20f;
+const float CLEAR_B = 0.45f;
 
 int Failures = 0;
 
@@ -108,9 +113,15 @@ int main(int argc, char ** argv)
 {
 	bool present = true;
 	bool stop_after_init = false;
+	const char * frame_png = NULL;
 	for (int index = 1; index < argc; index++) {
 		if (strcmp(argv[index], "--no-present") == 0) present = false;
 		if (strcmp(argv[index], "--stop-after-init") == 0) stop_after_init = true;
+		// Where to write the frame the engine drew, so the picture can be looked at as well as
+		// measured.
+		if (strcmp(argv[index], "--frame-png") == 0 && index + 1 < argc) {
+			frame_png = argv[++index];
+		}
 	}
 
 	Engine_Prologue();
@@ -173,17 +184,59 @@ int main(int argc, char ** argv)
 	if (device) {
 		std::printf("\n== %d frames of Begin_Scene / Clear / End_Scene%s\n", FRAMES,
 			present ? " with a flip" : " without a flip");
+		const unsigned long frames_before = DX8Wrapper::Get_FrameCount();
 		for (int frame = 0; frame < FRAMES; frame++) {
 			WWPlatform::Window_Pump(window);
 			DX8Wrapper::Begin_Scene();
 			// A colour that is not black, so a window that presents nothing is distinguishable
 			// from a window that presented a cleared frame.
-			DX8Wrapper::Clear(true, true, Vector3(0.10f, 0.20f, 0.45f), 0.0f, 1.0f, 0);
+			DX8Wrapper::Clear(true, true, Vector3(CLEAR_R, CLEAR_G, CLEAR_B), 0.0f, 1.0f, 0);
 			DX8Wrapper::End_Scene(present);
-			std::printf("frame %d: submitted%s\n", frame, present ? " and flipped" : "");
+			std::printf("frame %d: submitted\n", frame);
 			std::fflush(stdout);
 		}
 		Stage("frames submitted", true);
+
+		// Not "and flipped", printed because the loop ran: DX8Wrapper::End_Scene advances
+		// FrameCount only when Present() SUCCEEDED and sets IsDeviceLost when it did not, so
+		// these two are the engine's own answer to "did the flip happen". A backend with no
+		// swapchain fails Present, which lands here rather than passing silently.
+		char detail[128];
+		const unsigned long flipped = DX8Wrapper::Get_FrameCount() - frames_before;
+		std::snprintf(detail, sizeof(detail), "(FrameCount advanced %lu, device lost %s)",
+			flipped, DX8Wrapper::Is_Device_Lost() ? "yes" : "no");
+		if (present) {
+			Stage("frames actually presented", flipped == (unsigned long)FRAMES &&
+				!DX8Wrapper::Is_Device_Lost(), detail);
+		} else {
+			// Without a flip nothing should have been presented, and claiming otherwise would be
+			// the same defect from the other direction.
+			Stage("no frame presented without a flip", flipped == 0, detail);
+		}
+
+		// What is IN the frame, read back rather than assumed. A Present that succeeded proves a
+		// swapchain, not a picture.
+		VulkanRenderBackendClass::FrameProofClass proof;
+		const unsigned char expect_r = (unsigned char)(CLEAR_R * 255.0f + 0.5f);
+		const unsigned char expect_g = (unsigned char)(CLEAR_G * 255.0f + 0.5f);
+		const unsigned char expect_b = (unsigned char)(CLEAR_B * 255.0f + 0.5f);
+		std::printf("\n== what was in the frame (read back from the colour target)\n");
+		const bool measured = TheVulkanRenderBackend.Measure_Frame(expect_r, expect_g, expect_b,
+			2 /* tolerance */, frame_png, proof);
+		if (measured) {
+			std::printf("%ux%u, %lu/%lu pixels within 2 of the clear colour %u,%u,%u\n",
+				proof.Width, proof.Height, proof.Matching, proof.Pixels, expect_r, expect_g,
+				expect_b);
+			std::printf("centre pixel rgba = %u,%u,%u,%u; channel range r %u..%u g %u..%u "
+				"b %u..%u\n", proof.CentreRGBA[0], proof.CentreRGBA[1], proof.CentreRGBA[2],
+				proof.CentreRGBA[3], proof.MinRGB[0], proof.MaxRGB[0], proof.MinRGB[1],
+				proof.MaxRGB[1], proof.MinRGB[2], proof.MaxRGB[2]);
+			if (frame_png != NULL) std::printf("wrote %s\n", frame_png);
+		}
+		// The engine cleared every pixel, so every pixel must be the clear colour: a partial
+		// match would mean something else was in the target, which is a finding either way.
+		Stage("frame contents are the engine's clear colour",
+			measured && proof.Pixels > 0 && proof.Matching == proof.Pixels);
 	}
 
 	std::printf("\n== the unimplemented-call ledger (each entry is a finding, not a fallback)\n");
@@ -197,6 +250,13 @@ int main(int argc, char ** argv)
 		if (call == NULL) continue;
 		std::printf("%6u x  %s\n            %s\n", call->Count, call->Name, call->Why);
 	}
+
+	// The layer's silence only means something if the layer was there: -1 says no device, and any
+	// positive count is a finding about the Vulkan the seam emits.
+	const long validation_messages = TheVulkanRenderBackend.Validation_Message_Count();
+	std::printf("\nvalidation messages: %ld%s\n", validation_messages,
+		validation_messages < 0 ? " (no device: the layer was never asked anything)" : "");
+	if (device) Stage("validation layer silent", validation_messages == 0);
 
 	std::printf("\n== shutdown\n");
 	DX8Wrapper::Shutdown();

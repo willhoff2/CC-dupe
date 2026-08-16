@@ -28,11 +28,11 @@ Measured with clang 14. Vendor headers present: dx8-src, ffmpeg-src, gamespy-src
 
 ## D3D8 call surface
 
-Direct (non-wrapper, non-backend) call sites permitted: **3**.
+Direct (non-wrapper, non-backend) call sites permitted: **4**.
 
 | File | Budget | Why |
 |---|---:|---|
-| `Core/Libraries/Source/WWVegas/WW3D2/d3dx8texcreate.cpp` | 3 | d3dx8.lib's three creation entry points off Windows, not engine call sites: D3DXCreateTexture/CubeTexture/VolumeTexture each end in the matching IDirect3DDevice8::Create* call on the device their CALLER passes in, and that caller is DX8Wrapper -- routing them back through DX8CALL would be circular. PR #8's documented exception 4 covers the calls INTO this library; these are the three it makes back out. The count is exact, so a fourth fails. |
+| `Core/Libraries/Source/WWVegas/WW3D2/d3dx8texcreate.cpp` | 4 | d3dx8.lib's creation entry points off Windows, not engine call sites: D3DXCreateTexture/CubeTexture/VolumeTexture each end in the matching IDirect3DDevice8::Create* call on the device their CALLER passes in, plus the GetDeviceCaps that decides the size, mip count and format to create -- and that caller is DX8Wrapper, so routing them back through DX8CALL would be circular. PR #8's documented exception 4 covers the calls INTO this library; these 4 are the ones it makes back out. When the caller passes no device (every call behind a non-D3D8 backend) none of these 4 sites runs at all: the helpers dispatch through RenderBackendClass instead. The count is exact, so a fifth fails. |
 
 ## What the numbers mean
 

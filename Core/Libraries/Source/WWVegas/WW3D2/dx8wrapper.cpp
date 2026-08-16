@@ -92,8 +92,24 @@
 // TheSuperHackers @port The driver version of D3DADAPTER_IDENTIFIER8, whose spelling depends on the
 // vendored header's own _WIN32 branch; see docs/porting/win32-runtime-and-crt-gaps.md
 #include <Utility/d3d8_compat.h>
+#ifndef _WIN32
+// TheSuperHackers @port This tree's own D3DX creation entry points, which ask below for the
+// backend to create through when their IDirect3DDevice8 argument is null.
+#include "d3dx8texcreate.h"
+#endif
 
 #include "shdlib.h"
+
+#ifndef _WIN32
+// TheSuperHackers @port Off Windows the D3DXCreate* helpers are this tree's (d3dx8texcreate.cpp),
+// and the device the engine passes them is _Get_D3D_Device8(), which is null because a non-D3D8
+// backend has no IDirect3DDevice8. This is how they reach the device the engine does have. It
+// lives here because this file owns the installed backend; the helpers only get to look.
+RenderBackendClass * D3DX8TexCreate::Peek_Render_Backend()
+{
+	return DX8Wrapper::Get_Render_Backend();
+}
+#endif
 
 const int DEFAULT_RESOLUTION_WIDTH = 640;
 const int DEFAULT_RESOLUTION_HEIGHT = 480;
