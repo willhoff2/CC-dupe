@@ -79,7 +79,10 @@
     "probe_clean_compile_failed": [],
     "probe_failed_compile_ok": []
   },
+  "entry_point_symbol": "main",
+  "game_entry_target_built": true,
   "host": "x86_64-pc-linux-gnu",
+  "host_translated": null,
   "levels": [
     1,
     2,
@@ -99,6 +102,7 @@
   "link_entry_point_archives": [
     "libgeneralsmd_code_main"
   ],
+  "link_entry_point_stub": false,
   "objects": 977,
   "pile_meaning": {
     "compile-blocked": "An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker.",
@@ -183,7 +187,7 @@
     "agrees_with_nm": true,
     "attempted": true,
     "binary": {
-      "bytes": 84657560,
+      "bytes": 84657584,
       "elf_type": "DYN",
       "format": "ELF",
       "machine": "x86-64",
@@ -192,12 +196,24 @@
     },
     "binary_produced": true,
     "clean": true,
+    "linker_name_form": "demangled",
     "only_in_linker_report": [],
     "only_in_nm_scan": [],
     "referenced_by": {},
     "symbol_name_form": "demangled",
     "unresolved_total": 0
   },
+  "symbol_prefix": "",
+  "system_symbol_sources": [
+    "/lib/x86_64-linux-gnu/libc.so.6",
+    "/lib/x86_64-linux-gnu/libm.so.6",
+    "/lib/x86_64-linux-gnu/libpthread.so.0",
+    "/lib/x86_64-linux-gnu/libdl.so.2",
+    "/lib/x86_64-linux-gnu/libgcc_s.so.1",
+    "/lib/x86_64-linux-gnu/libstdc++.so.6",
+    "/usr/lib/x86_64-linux-gnu/libstdc++.so.6"
+  ],
+  "system_symbols_discounted": 10008,
   "third_party_linked": [
     "libsupport_gitinfo",
     "libsupport_openalaudiodevice",

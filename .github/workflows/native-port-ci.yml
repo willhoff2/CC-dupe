@@ -866,6 +866,20 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The same width question one layer down: every external wide-text format (.csf, .map, save
+      # game, replay, CRC, network packet) stores 16-bit code units, so this runs the real
+      # WideCharWire.h at both wchar_t widths and requires the external bytes to be identical --
+      # and requires the pre-port sizeof(WideChar) sizing to still desynchronise the .csf reader.
+      - name: Convert wide text at the process boundary at both wchar_t widths
+        run: |
+          set -o pipefail
+          {
+            echo '## Wide character wire conversion'
+            echo '```'
+            python3 scripts/ci/check-widechar-wire.py --clangxx clang++-14
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   # 3. Build the D3D8 -> Vulkan spike and render with it. Exit status is not the assertion:
   #    the framebuffer is read back and compared against the committed reference image, and the
   #    validation layer must be loaded and silent.

@@ -141,7 +141,7 @@ compile. Implementing them is the wide-character slice's job, after the `char16_
 | Header | Consumer | What was done |
 |---|---|---|
 | `mbstring.h` | `IMEManager.cpp` | Forwards to the new `Utility/mbstring_compat.h`. `_mbsnccnt` is implemented over `mblen()`. |
-| `gnu_regex.h` | `regexpr.cpp` | Forwards to glibc's `<regex.h>`, which has the GNU `re_*` extensions this file uses. `regexpr.cpp` is commented out of `WWLib/CMakeLists.txt`, so this is compile-only support. |
+| ~~`gnu_regex.h`~~ | ~~`regexpr.cpp`~~ | **Deleted since.** It forwarded to glibc's `<regex.h>` for the GNU `re_*` extensions, which macOS does not have; `regexpr.cpp` now uses POSIX `<regex.h>` directly and the shim had no other consumer ([`regexpr-posix-port.md`](regexpr-posix-port.md)). |
 | `winnt.h` | `verchk.cpp` | Declares `IMAGE_DOS_HEADER`/`IMAGE_FILE_HEADER`. These are the on-disk PE layout, which is fixed by the file format, so they are exact — but there is no PE image to read off Windows. |
 | `oaidl.h`, `atlcom.h`, `comutil.h` | `WWCOMUtil.cpp`, `FEBDispatch.h` | OLE Automation and ATL's COM object plumbing, declaration-only. |
 | `EABrowserDispatch/BrowserDispatch.h` | six files | **Loud stub.** See below. |
@@ -240,10 +240,11 @@ Written on Linux, reasoned from documentation, and **not executed anywhere**:
 - The `iswascii` guard. The BSD C library, and so macOS, already supplies it — as a macro on some
   releases and as an inline function on others, which is why the guard tests `!defined(iswascii)`
   *and* `!defined(__APPLE__)`. Whether that is the right shape on a current macOS SDK is unverified.
-- `gnu_regex.h` forwarding to `<regex.h>`. The `re_*` functions and `RE_*` syntax constants
-  `regexpr.cpp` uses are **GNU extensions that macOS and the BSDs do not have**. This header cannot
-  work there as written. It is not currently reached (`regexpr.cpp` is commented out of the CMake
-  target), so this is a deferred problem, not a hidden one.
+- ~~`gnu_regex.h` forwarding to `<regex.h>`~~. The prediction held exactly: the Apple Silicon build
+  failed on `reg_syntax_t`, this being the one translation unit of 977 that did not compile. Resolved
+  by porting `regexpr.cpp` to POSIX `<regex.h>` and deleting the shim
+  ([`regexpr-posix-port.md`](regexpr-posix-port.md)); the port itself is measured on Linux and not yet
+  recompiled on a Mac.
 - The claim that `_PC_24` has no arm64 NEON equivalent. True for x86-64 SSE2 by inspection; for
   arm64 it is read from the architecture reference, not tested.
 - `_mbsnccnt` over `mblen()` assumes a UTF-8 `MB_CUR_MAX` locale. Not exercised on macOS, and not

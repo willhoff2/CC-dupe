@@ -26,6 +26,7 @@
 
 #include "Common/Recorder.h"
 #include "Common/file.h"
+#include "Common/WideCharWire.h"
 #include "Common/FileSystem.h"
 #include "Common/PlayerList.h"
 #include "Common/Player.h"
@@ -833,8 +834,17 @@ void RecorderClass::writeArgument(GameMessageArgumentDataType type, const GameMe
 			m_file->write( &(arg.timestamp), sizeof(arg.timestamp) );
 			break;
 		case ARGUMENTDATATYPE_WIDECHAR:
-			m_file->write( &(arg.wChar), sizeof(arg.wChar) );
+		{
+			// TheSuperHackers @port A replay holds one 16 bit code unit here, so a code point that needs a
+			// surrogate pair - which no typed game message argument is - becomes U+FFFD rather than half a
+			// pair or a truncated value. See docs/porting/widechar-wire.md.
+			WideWireChar wire[2] = { 0, 0 };
+			const Int units = wideCharToWire( wire, 2, &(arg.wChar), 1 );
+			if ( units != 1 )
+				wire[0] = (WideWireChar)WideCharWire::REPLACEMENT;
+			m_file->write( wire, wideCharWireBytes( 1 ) );
 			break;
+		}
 		default:
 			DEBUG_LOG(("Unknown GameMessageArgumentDataType in RecorderClass::writeArgument"));
 			break;
@@ -1216,25 +1226,24 @@ Bool RecorderClass::playbackFile(AsciiString filename)
  * Read a unicode string from the current file position. The string is assumed to be 0-terminated.
  */
 UnicodeString RecorderClass::readUnicodeString() {
-	WideChar str[1024] = L"";
-	Int index = 0;
+	// TheSuperHackers @port The file holds 16 bit code units, so they are collected as units and
+	// decoded once the string is complete: a surrogate pair is one WideChar natively and two units
+	// here. See docs/porting/widechar-wire.md.
+	const Int MAX_UNITS = 1024;
+	WideWireChar wire[MAX_UNITS];
+	Int units = 0;
 
-	Int c = m_file->readWideChar();
-	if (c == EOF) {
-		str[index] = 0;
-	}
-	str[index] = c;
-
-	while (index < 1024 && str[index] != 0) {
-		++index;
-		Int c = m_file->readWideChar();
-		if (c == EOF) {
-			str[index] = 0;
+	while (units < MAX_UNITS - 1) {
+		const Int c = m_file->readWideChar();
+		if (c == EOF || c == WEOF || c == 0) {
 			break;
 		}
-		str[index] = c;
+		wire[units++] = (WideWireChar)c;
 	}
-	str[1023] = L'\0';
+
+	WideChar str[MAX_UNITS];
+	const Int chars = wireToWideChar(str, MAX_UNITS - 1, wire, units);
+	str[chars] = L'\0';
 
 	UnicodeString retval(str);
 	return retval;
@@ -1502,8 +1511,10 @@ void RecorderClass::readArgument(GameMessageArgumentDataType type, GameMessage *
 			break;
 		}
 		case ARGUMENTDATATYPE_WIDECHAR: {
-			WideChar theid;
-			m_file->read(&theid, sizeof(theid));
+			WideWireChar wire = 0;
+			m_file->read(&wire, wideCharWireBytes(1));
+			WideChar theid = 0;
+			wireToWideChar(&theid, 1, &wire, 1);
 			msg->appendWideCharArgument(theid);
 #ifdef DEBUG_LOGGING
 			if (m_doingAnalysis)

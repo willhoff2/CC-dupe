@@ -31,6 +31,7 @@
 #include "stdlib.h"
 #include "Compression.h"
 #include "Common/DataChunk.h"
+#include "Common/WideCharWire.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
 
@@ -355,9 +356,16 @@ void DataChunkOutput::writeAsciiString( const AsciiString& theString )
 
 void DataChunkOutput::writeUnicodeString( UnicodeString theString )
 {
-	UnsignedShort len = theString.getLength();
+	// TheSuperHackers @port A chunk stores a count of 16 bit code units followed by those units, so
+	// the string is encoded rather than copied - natively a WideChar is 4 bytes and can need two
+	// units. See docs/porting/widechar-wire.md.
+	const Int capacity = wideCharWireUnitCount( theString.str(), theString.getLength() );
+	std::vector<WideWireChar> wire( capacity + 1, 0 );
+	const Int units = wideCharToWire( &wire[0], capacity, theString.str(), theString.getLength() );
+	UnsignedShort len = (UnsignedShort)units;
 	::fwrite( (const char *)&len, sizeof(UnsignedShort) , 1, m_tmp_file );
-	::fwrite( theString.str(), len*sizeof(WideChar) , 1, m_tmp_file );
+	if ( units > 0 )
+		::fwrite( &wire[0], wideCharWireBytes( units ) , 1, m_tmp_file );
 }
 
 void DataChunkOutput::writeNameKey( const NameKeyType key )
@@ -969,11 +977,16 @@ UnicodeString DataChunkInput::readUnicodeString()
 	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=len, ("Read past end of chunk."));
 	UnicodeString theString;
 	if (len>0) {
+		// TheSuperHackers @port len counts 16 bit code units on disk, so read units and decode them:
+		// the native string can be shorter where a surrogate pair becomes one WideChar.
+		// See docs/porting/widechar-wire.md.
 		WideChar *str = theString.getBufferForRead(len);
-		m_file->read( (char*)str, len*sizeof(WideChar) );
-		decrementDataLeft( len*sizeof(WideChar) );
+		std::vector<WideWireChar> wire( len, 0 );
+		m_file->read( (char*)&wire[0], wideCharWireBytes( len ) );
+		decrementDataLeft( wideCharWireBytes( len ) );
+		const Int chars = wireToWideChar( str, len, &wire[0], len );
 		// add null delimiter to string.  Note that getBufferForRead allocates space for terminating null.
-		str[len] = '\000';
+		str[chars] = '\000';
 	}
 
 	return theString;
