@@ -66,7 +66,14 @@ public:
 	//
 	//	Inherited
 	//
-	virtual void							Initialize (SoundBufferClass *buffer) override;
+	//	There is deliberately no Initialize() override here. Retail declared one and defined it
+	//	nowhere, in this tree or upstream: the class is never constructed and As_ListenerHandleClass
+	//	is never called, so the constructor's COMDAT - and with it the vtable that would have
+	//	referenced the missing definition - is discarded before the Windows link ever asks for it.
+	//	A whole-archive link does ask, which is how it surfaced. Declaring it without a body cannot
+	//	be right either way, so the slot inherits Sound3DHandleClass::Initialize rather than gaining
+	//	an invented body.
+	//
 	virtual void							Start_Sample () override { }
 	virtual void							Stop_Sample () override { }
 	virtual void							Resume_Sample () override { }

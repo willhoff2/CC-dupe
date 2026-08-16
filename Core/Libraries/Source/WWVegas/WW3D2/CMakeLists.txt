@@ -34,6 +34,10 @@ set(WW3D2_SRC
     composite.h
     d3d8renderbackend.cpp
     d3d8renderbackend.h
+    d3dx8fvf.cpp
+    d3dx8shader.cpp
+    d3dx8texture.cpp
+    d3dx8texture.h
     #dazzle.cpp
     #dazzle.h
     #ddsfile.cpp

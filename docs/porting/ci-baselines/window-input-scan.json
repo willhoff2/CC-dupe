@@ -2,12 +2,12 @@
   "_comment": "Produced by scripts/window-input-scan.py; gated in CI by the same script's --check mode. Update with --check --update.",
   "files": {
     "in_scope": {
-      "cursor": 9,
+      "cursor": 11,
       "message_pump": 7,
       "mode_change": 8,
-      "placement": 5,
+      "placement": 7,
       "polled_input": 12,
-      "window_handle": 31,
+      "window_handle": 32,
       "wndproc": 9
     },
     "out_of_scope": {
@@ -36,6 +36,7 @@
       "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h",
       "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_gdi_font.cpp",
       "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp",
       "Core/Libraries/Source/WWVegas/WWLib/win.h",
       "Core/Libraries/Source/debug/debug_debug.cpp",
       "Core/Libraries/Source/debug/debug_dlg/debug_dlg.cpp",
@@ -231,6 +232,8 @@
   "in_scope_symbol_files": {
     "AdjustWindowRect": [
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp",
       "GeneralsMD/Code/Main/WinMain.cpp"
     ],
     "ApplicationHWnd": [
@@ -298,13 +301,17 @@
     "GetClientRect": [
       "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp",
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp",
       "Core/Libraries/Source/debug/test2/test2.cpp",
       "GeneralsMD/Code/Main/WinMain.cpp"
     ],
     "GetCursorPos": [
       "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp",
       "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp",
-      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp"
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp"
     ],
     "GetDoubleClickTime": [
       "Core/GameEngine/Source/GameClient/GUI/Gadget/GadgetListBox.cpp",
@@ -354,6 +361,7 @@
       "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h",
       "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_gdi_font.cpp",
       "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp",
       "Core/Libraries/Source/WWVegas/WWLib/win.h",
       "Core/Libraries/Source/debug/debug_debug.cpp",
       "Core/Libraries/Source/debug/debug_dlg/debug_dlg.cpp",
@@ -368,6 +376,8 @@
       "GeneralsMD/Code/Main/WinMain.h"
     ],
     "IsIconic": [
+      "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp",
       "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp",
       "GeneralsMD/Code/GameEngineDevice/Source/Win32Device/Common/Win32GameEngine.cpp"
     ],
@@ -421,7 +431,9 @@
       "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp",
       "Core/GameEngineDevice/Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp",
       "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp",
-      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp"
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp"
     ],
     "SetCapture": [
       "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp"
@@ -429,7 +441,9 @@
     "SetCursor": [
       "Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DMouse.cpp",
       "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp",
-      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp"
+      "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp"
     ],
     "SetCursorPos": [
       "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32DIMouse.cpp"
@@ -442,6 +456,8 @@
     ],
     "SetWindowPos": [
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
+      "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp",
       "GeneralsMD/Code/Main/WinMain.cpp"
     ],
     "Set_Device_Resolution": [
@@ -545,12 +561,12 @@
       "wndproc": 217
     },
     "libraries": {
-      "cursor": 6,
+      "cursor": 26,
       "message_pump": 13,
       "mode_change": 50,
-      "placement": 8,
+      "placement": 18,
       "polled_input": 3,
-      "window_handle": 46,
+      "window_handle": 82,
       "wndproc": 74
     },
     "main": {
@@ -606,7 +622,7 @@
   },
   "symbols": {
     "in_scope": {
-      "AdjustWindowRect": 2,
+      "AdjustWindowRect": 9,
       "ApplicationHWnd": 76,
       "BeginPaint": 2,
       "ClientToScreen": 4,
@@ -619,8 +635,8 @@
       "DispatchMessage": 2,
       "EndPaint": 2,
       "GetAsyncKeyState": 7,
-      "GetClientRect": 4,
-      "GetCursorPos": 3,
+      "GetClientRect": 13,
+      "GetCursorPos": 9,
       "GetDoubleClickTime": 3,
       "GetKeyState": 3,
       "GetKeyboardLayout": 2,
@@ -629,8 +645,8 @@
       "GetWindowLong": 2,
       "GetWindowRect": 3,
       "HKL": 2,
-      "HWND": 58,
-      "IsIconic": 2,
+      "HWND": 72,
+      "IsIconic": 8,
       "LPARAM": 43,
       "LRESULT": 5,
       "LoadCursor": 4,
@@ -641,13 +657,13 @@
       "RegisterClassEx": 1,
       "ReleaseCapture": 1,
       "Reset_Device": 8,
-      "ScreenToClient": 4,
+      "ScreenToClient": 13,
       "SetCapture": 1,
-      "SetCursor": 9,
+      "SetCursor": 14,
       "SetCursorPos": 2,
       "SetFocus": 1,
       "SetForegroundWindow": 2,
-      "SetWindowPos": 4,
+      "SetWindowPos": 14,
       "Set_Device_Resolution": 9,
       "Set_Render_Device": 19,
       "ShowCursor": 5,
@@ -724,12 +740,12 @@
   },
   "totals": {
     "in_scope": {
-      "cursor": 36,
+      "cursor": 56,
       "message_pump": 25,
       "mode_change": 53,
-      "placement": 21,
+      "placement": 31,
       "polled_input": 32,
-      "window_handle": 156,
+      "window_handle": 192,
       "wndproc": 342
     },
     "out_of_scope": {

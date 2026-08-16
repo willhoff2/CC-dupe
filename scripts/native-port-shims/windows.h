@@ -287,6 +287,7 @@ typedef struct _PAINTSTRUCT {
 typedef struct _MONITORINFO {
 	DWORD cbSize; RECT rcMonitor; RECT rcWork; DWORD dwFlags;
 } MONITORINFO, *LPMONITORINFO;
+#define MONITORINFOF_PRIMARY 0x00000001
 
 typedef struct _RGBQUAD { BYTE rgbBlue, rgbGreen, rgbRed, rgbReserved; } RGBQUAD;
 typedef struct _PALETTEENTRY { BYTE peRed, peGreen, peBlue, peFlags; } PALETTEENTRY, *LPPALETTEENTRY;
@@ -489,6 +490,24 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define SWP_NOSIZE               0x0001
 #define SWP_NOMOVE               0x0002
 #define SWP_NOZORDER             0x0004
+#define SWP_NOACTIVATE           0x0010
+#define SWP_SHOWWINDOW           0x0040
+// The window styles GetWindowLong(GWL_STYLE) reports and AdjustWindowRect() sizes a frame from.
+// Their values are the documented ones, because the pair has to agree about which bits mean a
+// frame and debug_debug.cpp tests WS_CAPTION against the result.
+#define WS_OVERLAPPED            0x00000000L
+#define WS_POPUP                 0x80000000L
+#define WS_VISIBLE               0x10000000L
+#define WS_MINIMIZE              0x20000000L
+#define WS_BORDER                0x00800000L
+#define WS_DLGFRAME              0x00400000L
+#define WS_CAPTION               (WS_BORDER | WS_DLGFRAME)
+#define WS_SYSMENU               0x00080000L
+#define WS_THICKFRAME            0x00040000L
+#define WS_MINIMIZEBOX           0x00020000L
+#define WS_MAXIMIZEBOX           0x00010000L
+#define WS_OVERLAPPEDWINDOW      (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | \
+                                  WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
 // MonitorFromWindow fallbacks when the window intersects no monitor.
 #define MONITOR_DEFAULTTONULL    0x00000000
 #define MONITOR_DEFAULTTOPRIMARY 0x00000001

@@ -528,6 +528,127 @@ bool Window_Set_Mode(void * window, int width, int height, bool fullscreen)
 	return true;
 }
 
+bool Window_Frame_Insets(void * window, int & left, int & top, int & right, int & bottom)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+
+	left = 0;
+	top = 0;
+	right = 0;
+	bottom = 0;
+
+	// A borderless-fullscreen window has no frame at all, and asking the window manager for the
+	// borders of one is how a stale title-bar height gets added to a fullscreen resolution.
+	if (Window_Is_Fullscreen(window)) return true;
+
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+	// SDL_GetWindowBordersSize() reports the window manager's decorations in points, and fails
+	// where the window manager does not tell it (Wayland with client-side decorations, and X11
+	// before the window is mapped). A failure is reported rather than papered over with zeros,
+	// because a caller sizing a frame needs to know it got no answer.
+	if (SDL_GetWindowBordersSize(state->Sdl_Window, &top, &left, &bottom, &right) != 0) {
+		TheLastError = std::string("SDL_GetWindowBordersSize failed: ") + SDL_GetError();
+		left = 0;
+		top = 0;
+		right = 0;
+		bottom = 0;
+		return false;
+	}
+	return true;
+#else
+	return false;
+#endif
+}
+
+bool Window_Is_Fullscreen(void * window)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+	const Uint32 flags = SDL_GetWindowFlags(state->Sdl_Window);
+	return (flags & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP)) != 0;
+}
+
+bool Window_Set_Position(void * window, int x, int y)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+	// SDL positions by the client area's top-left, which is the corner the caller means.
+	SDL_SetWindowPosition(state->Sdl_Window, x, y);
+	return true;
+}
+
+bool Window_Set_Client_Size(void * window, int width, int height)
+{
+	WindowState * state = State(window);
+	if (state == nullptr || width <= 0 || height <= 0) return false;
+	SDL_SetWindowSize(state->Sdl_Window, width, height);
+	SDL_GetWindowSize(state->Sdl_Window, &state->Width, &state->Height);
+	return true;
+}
+
+void Window_Set_Always_On_Top(void * window, bool on_top)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return;
+#if SDL_VERSION_ATLEAST(2, 0, 16)
+	SDL_SetWindowAlwaysOnTop(state->Sdl_Window, on_top ? SDL_TRUE : SDL_FALSE);
+#else
+	// Before 2.0.16 the flag can only be set at creation time. Raising the window is the part of
+	// HWND_TOPMOST that matters to the caller - being in front now - without the part that keeps
+	// it there.
+	if (on_top) SDL_RaiseWindow(state->Sdl_Window);
+#endif
+}
+
+int Window_Display_Count()
+{
+	const int count = SDL_GetNumVideoDisplays();
+	return (count > 0) ? count : 0;
+}
+
+int Window_Display_For_Window(void * window)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return 0;
+	const int display = SDL_GetWindowDisplayIndex(state->Sdl_Window);
+	// SDL returns a negative number when it cannot tell; the primary display is the same answer
+	// Win32's MONITOR_DEFAULTTOPRIMARY gives, which is what the call site asks for.
+	return (display >= 0) ? display : 0;
+}
+
+bool Window_Display_Bounds(int display, int & x, int & y, int & width, int & height)
+{
+	SDL_Rect bounds = { 0, 0, 0, 0 };
+	if (display < 0 || SDL_GetDisplayBounds(display, &bounds) != 0) {
+		TheLastError = std::string("SDL_GetDisplayBounds failed: ") + SDL_GetError();
+		return false;
+	}
+	x = bounds.x;
+	y = bounds.y;
+	width = bounds.w;
+	height = bounds.h;
+	return true;
+}
+
+bool Window_Display_Work_Area(int display, int & x, int & y, int & width, int & height)
+{
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+	SDL_Rect usable = { 0, 0, 0, 0 };
+	if (display >= 0 && SDL_GetDisplayUsableBounds(display, &usable) == 0) {
+		x = usable.x;
+		y = usable.y;
+		width = usable.w;
+		height = usable.h;
+		return true;
+	}
+#endif
+	// Without a usable-bounds query the whole display is the best answer, and it is the one Win32
+	// gives on a display with no taskbar on it. A window centred in it can end up under a panel,
+	// which is a placement annoyance rather than a wrong-geometry defect.
+	return Window_Display_Bounds(display, x, y, width, height);
+}
+
 void Window_Show(void * window, bool show)
 {
 	WindowState * state = State(window);
@@ -570,6 +691,53 @@ void Window_Show_System_Cursor(void * window, bool show)
 {
 	if (State(window) == nullptr) return;
 	SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE);
+}
+
+bool Window_Cursor_Position(void * window, int & x, int & y)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+
+	/*
+	**	SDL_GetGlobalMouseState() is the desktop position, which is what GetCursorPos() reports:
+	**	it keeps reading while the pointer is outside our window, which SDL_GetMouseState() does
+	**	not. Where it is unavailable, the window-relative position plus the window's origin is
+	**	the same value for the case that matters (the pointer inside our window) and clamps to
+	**	the window's edges outside it.
+	*/
+#if SDL_VERSION_ATLEAST(2, 0, 4)
+	SDL_GetGlobalMouseState(&x, &y);
+#else
+	int client_x = 0;
+	int client_y = 0;
+	SDL_GetMouseState(&client_x, &client_y);
+	int origin_x = 0;
+	int origin_y = 0;
+	if (!Window_Client_Origin(window, origin_x, origin_y)) return false;
+	x = origin_x + client_x;
+	y = origin_y + client_y;
+#endif
+	return true;
+}
+
+bool Window_Client_Origin(void * window, int & x, int & y)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return false;
+
+	/*
+	**	SDL_GetWindowPosition() reports the top-left of the client area, not of the frame, which
+	**	is the corner ScreenToClient() measures from. Both values are in points: SDL keeps
+	**	window coordinates in points and only SDL_GL_GetDrawableSize()/SDL_Vulkan_GetDrawableSize()
+	**	are in pixels.
+	*/
+	SDL_GetWindowPosition(state->Sdl_Window, &x, &y);
+	return true;
+}
+
+void * Window_Current()
+{
+	return TheWindow;
 }
 
 bool Window_Key_Is_Down(void * window, int scan_code)
