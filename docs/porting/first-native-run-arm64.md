@@ -34,12 +34,12 @@ The build, from `scripts/native-build.py --level 1..4 --with-shims --strict-link
 | | Linux x86-64 (#86) | this machine |
 |---|---|---|
 | translation units | 977 | 977 |
-| objects | 977 | **976** — `WWLib/regexpr.cpp` fails, §1 |
+| objects | 977 | **976** — `WWLib/regexpr.cpp` fails, §1 (since ported to POSIX regex; unverified here) |
 | strict link | clean | **clean** (`strict_link.clean` true, 0 unresolved) |
 | the file | 80.7 MiB ELF x86-64 PIE | **26.6 MiB Mach-O 64-bit executable arm64** |
 | entry point | `libgeneralsmd_code_main`, no stub `main` | same, after the Mach-O `_main` fix (§1) |
 | window backend | `platform_window_sdl2.cpp` | **`platform_window_cocoa.mm`** |
-| `strict_link.agrees_with_nm` | true | **false**, and that is a harness bug, §1 |
+| `strict_link.agrees_with_nm` | true | **false**, and that is a harness bug, §1 (since fixed; unverified here) |
 
 The size difference is the toolchain's, not the tree's: different compiler, different default debug
 level, `ld64` versus GNU `ld`. It is reported and not gated, for exactly that reason.
@@ -51,11 +51,19 @@ Each of these is a gap between what CI proves on Linux and what the target needs
 | Change | Why macOS needed it | Cost / risk |
 |---|---|---|
 | `ZLIB_CANDIDATES`, `OPENAL_CANDIDATES` in `scripts/native-build.py` gained Homebrew keg paths | macOS ships zlib only inside the dyld shared cache — there is no `/usr/lib/libz.dylib` to put on a link line — and no system OpenAL dylib the harness can find | harness only; the two libraries are the same upstream libraries CI links |
-| `MAIN_SYMBOL = "_main"` on Darwin, in the entry-point scan | Mach-O `nm` prefixes symbols with `_`, so the scan for `main` found none: the harness both generated an unnecessary stub `main` **and** kept the 5 standalone test-tool `main()`s, and `ld64` failed with `17 duplicate symbols` | harness only. On Linux the symbol is still `main`, so the Linux result is unchanged |
+| `MAIN_SYMBOL = "_main"` on Darwin, in the entry-point scan | Mach-O `nm` prefixes symbols with `_`, so the scan for `main` found none: the harness both generated an unnecessary stub `main` **and** kept the 5 standalone test-tool `main()`s, and `ld64` failed with `17 duplicate symbols` | harness only. On Linux the symbol is still `main`, so the Linux result is unchanged. **Superseded**: the prefix is measured rather than hardcoded per platform, and a build containing `GeneralsMD/Code/Main` that finds no entry point now fails instead of generating a stub — see the follow-up note below |
 | `StdLocalFileSystem.cpp`: `for (const auto& p : path)` | libc++'s `std::filesystem::path::iterator::reference` is `path` *by value*; libstdc++'s is `const path&`. A mutable reference binds on Linux and not on macOS | engine source, but a `const`-correctness fix with no behaviour change on any platform |
 | `scripts/native-port-shims/malloc.h` (new) | `<malloc.h>` is glibc's, not standard. The engine includes it for `malloc`/`free`/`alloca`, which BSD puts in `<stdlib.h>`/`<alloca.h>` | shim only, and it `#include_next`es a real `<malloc.h>` where one exists, so Linux is untouched |
 | `stringex.h`: `wcslcpy`/`wcslcat` declarations guarded on Apple/BSD | the platform declares both with C linkage; the tree declared inline C++ ones, so clang rejected the redeclaration (`different language linkage`) | engine header, guarded by platform macros. The Windows and Linux paths compile the same code as before |
 | `regexpr.cpp` is **not** worked around | it uses GNU `regex`'s `reg_syntax_t`/`re_syntax_options`, which BSD `<regex.h>` does not have | it is the one macOS-only compile failure, 976/977. Nothing on the path to the running game references it; it is not stubbed and not excluded from the count |
+
+> **Closed out since, on Linux.** The `regexpr.cpp` row is now a POSIX `<regex.h>` port with the
+> decision, the three accepted syntax differences and the `re_match` anchoring recorded in
+> [`regexpr-posix-port.md`](regexpr-posix-port.md), and the vendored `gnu_regex.h` shim is deleted. The
+> other five rows landed here; how to reproduce all of it on a Mac, including the `lipo -archs` and
+> `sysctl.proc_translated` checks below, is now `native-build.md` §"Building it on macOS (Apple
+> Silicon)" rather than only this document. **Nothing in that follow-up has been compiled on a Mac**;
+> it is measured on Linux and unit-tested.
 
 Two harness measurement defects surfaced and are recorded rather than silently tolerated:
 
@@ -64,6 +72,14 @@ Two harness measurement defects surfaced and are recorded rather than silently t
   `_malloc`, `___cxa_throw`, `__NSGetArgv` are counted as unresolved by the `nm` scan and not by the
   linker. Same class of bug as the one `check-openal-symbols.py` had. The linker's verdict is the
   authoritative one and it is 0.
+
+  **Fixed since, and not by relaxing it.** Both defects were one root cause: the harness compared
+  symbol names from four sources that do not spell them the same way. Names now enter a single
+  prefix-free namespace whose prefix is **measured** by compiling a one-line probe (not switched on
+  `sys.platform`), removing exactly one prefix so `__ZN...` and `___cxa_throw` survive; the discount
+  list is read from the SDK's `.tbd` stubs and `dyld_info -exports` on Darwin, and an empty discount
+  list now fails the run instead of reporting every libc symbol as port work. `native-build.md`
+  §"What the harness had to learn about Mach-O" is the detail. Unverified on a Mac.
 * `check-spike-render.py` cannot see `DYLD_LIBRARY_PATH`: it runs the spike through
   `subprocess.run`, and every `python3` on this machine is reached through a SIP-protected binary,
   which strips `DYLD_*` from the environment it passes on. Homebrew's validation-layer manifest names
