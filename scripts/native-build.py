@@ -814,7 +814,10 @@ RENDER_BACKEND_SHADERS = ("fixedfunc.vert", "fixedfunc.frag", "probe.vert", "pro
 # .agents/skills/renderer-spike-verify/SKILL.md). The same search order applies here, and the
 # portability macro -- not merely the presence of <vulkan/vulkan.h> -- is what makes a directory
 # usable, so a too-old system header is reported rather than silently failing to compile.
-VULKAN_HEADER_DIRS = ("$VULKAN_SDK/include", "$HOME/vk-headers/include",
+# build/docker/_deps/vulkan-headers-src/include comes first because scripts/ci/fetch-probe-deps.sh
+# provisions it at a pinned tag: a CI run must not depend on what happens to be installed.
+VULKAN_HEADER_DIRS = ("build/docker/_deps/vulkan-headers-src/include",
+                      "$VULKAN_SDK/include", "$HOME/vk-headers/include",
                       "$HOME/vulkan-headers/include", "/usr/local/include",
                       "/opt/homebrew/include", "/usr/include")
 VULKAN_PORTABILITY_MACRO = "VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME"
@@ -931,6 +934,8 @@ def vulkan_include_dir():
         expanded = pathlib.Path(os.path.expandvars(candidate))
         if "$" in str(expanded):
             continue
+        if not expanded.is_absolute():
+            expanded = REPO_ROOT / expanded
         core = expanded / "vulkan" / "vulkan_core.h"
         if not (expanded / "vulkan" / "vulkan.h").is_file() or not core.is_file():
             continue

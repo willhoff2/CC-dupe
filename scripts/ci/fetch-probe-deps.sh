@@ -47,6 +47,14 @@ clone_at "$(pin lzhl.cmake GIT_REPOSITORY)"    "$(pin lzhl.cmake GIT_TAG)"    "$
 # <stb_image_write.h> from the root of it.
 clone_at "$(pin stb.cmake GIT_REPOSITORY)"     "$(pin stb.cmake GIT_TAG)"     "$deps_dir/stb-src"
 
+# Vulkan headers for the render backend (Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.cpp
+# over spikes/renderer). Ubuntu jammy's are 1.3.204, which predates VK_KHR_portability_enumeration --
+# the extension the MoltenVK opt-in needs -- so scripts/native-build.py rejects them and would leave
+# the renderer out of the build entirely. The tag is the one
+# .agents/skills/renderer-spike-verify/SKILL.md tells a human to clone, so the harness and the
+# instructions cannot drift. No cmake/*.cmake pins this: nothing in the CMake build fetches Vulkan.
+clone_at https://github.com/KhronosGroup/Vulkan-Headers.git v1.3.280 "$deps_dir/vulkan-headers-src"
+
 # OpenAL: <AL/al.h> and <AL/alc.h> for Core/Libraries/Source/OpenALAudioDevice, the engine's own
 # Miles replacement (`milesstub` off 32-bit Windows). cmake/openal.cmake prefers a system OpenAL and
 # only falls back to fetching openal-soft, so these headers are what makes the native build's audio

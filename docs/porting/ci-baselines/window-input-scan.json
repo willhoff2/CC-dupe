@@ -2,12 +2,12 @@
   "_comment": "Produced by scripts/window-input-scan.py; gated in CI by the same script's --check mode. Update with --check --update.",
   "files": {
     "in_scope": {
-      "cursor": 11,
+      "cursor": 13,
       "message_pump": 7,
-      "mode_change": 8,
+      "mode_change": 11,
       "placement": 7,
       "polled_input": 12,
-      "window_handle": 32,
+      "window_handle": 34,
       "wndproc": 9
     },
     "out_of_scope": {
@@ -34,6 +34,8 @@
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
       "Core/Libraries/Source/WWVegas/WW3D2/render2dsentence.cpp",
       "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.h",
       "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_gdi_font.cpp",
       "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
       "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp",
@@ -273,7 +275,9 @@
       "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.cpp",
       "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.h",
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
-      "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h"
+      "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.h"
     ],
     "DefWindowProc": [
       "Core/Libraries/Source/debug/test2/test2.cpp",
@@ -359,6 +363,8 @@
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
       "Core/Libraries/Source/WWVegas/WW3D2/render2dsentence.cpp",
       "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.h",
       "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_gdi_font.cpp",
       "Core/Libraries/Source/WWVegas/WWLib/platform/platform_win32_user.cpp",
       "Core/Libraries/Source/WWVegas/WWLib/platform/tests/win32_user32_test.cpp",
@@ -470,6 +476,7 @@
     "Set_Render_Device": [
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/tests/native_render_run.cpp",
       "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp",
       "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
       "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.h"
@@ -478,7 +485,9 @@
       "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.cpp",
       "Core/Libraries/Source/WWVegas/WW3D2/d3d8renderbackend.h",
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
-      "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h"
+      "Core/Libraries/Source/WWVegas/WW3D2/renderbackend.h",
+      "Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.cpp",
+      "Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.h"
     ],
     "ShowWindow": [
       "Core/GameEngine/Source/Common/System/Debug.cpp",
@@ -561,12 +570,12 @@
       "wndproc": 217
     },
     "libraries": {
-      "cursor": 26,
+      "cursor": 28,
       "message_pump": 13,
-      "mode_change": 50,
+      "mode_change": 58,
       "placement": 18,
       "polled_input": 3,
-      "window_handle": 82,
+      "window_handle": 86,
       "wndproc": 74
     },
     "main": {
@@ -628,7 +637,7 @@
       "ClientToScreen": 4,
       "ClipCursor": 3,
       "CreateWindow": 2,
-      "D3DPRESENT_PARAMETERS": 12,
+      "D3DPRESENT_PARAMETERS": 19,
       "DefWindowProc": 3,
       "DestroyWindow": 1,
       "DirectInput8Create": 2,
@@ -645,7 +654,7 @@
       "GetWindowLong": 2,
       "GetWindowRect": 3,
       "HKL": 2,
-      "HWND": 72,
+      "HWND": 76,
       "IsIconic": 8,
       "LPARAM": 43,
       "LRESULT": 5,
@@ -665,8 +674,8 @@
       "SetForegroundWindow": 2,
       "SetWindowPos": 14,
       "Set_Device_Resolution": 9,
-      "Set_Render_Device": 19,
-      "ShowCursor": 5,
+      "Set_Render_Device": 20,
+      "ShowCursor": 7,
       "ShowWindow": 7,
       "Toggle_Windowed": 5,
       "TranslateMessage": 2,
@@ -740,12 +749,12 @@
   },
   "totals": {
     "in_scope": {
-      "cursor": 56,
+      "cursor": 58,
       "message_pump": 25,
-      "mode_change": 53,
+      "mode_change": 61,
       "placement": 31,
       "polled_input": 32,
-      "window_handle": 192,
+      "window_handle": 196,
       "wndproc": 342
     },
     "out_of_scope": {
