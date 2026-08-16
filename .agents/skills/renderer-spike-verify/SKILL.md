@@ -60,12 +60,21 @@ check that it was.
 
 ```sh
 python3 scripts/ci/check-d3d8-surface.py
+python3 scripts/ci/check-backend-coverage.py
 ```
 
-The direct-call budget is **0** and is enforced in both directions: a new direct
+Run **both**. One new D3D8 call site is recorded in three separate checked-in files, and each one
+fails on its own push if you only run the first gate: the direct-call allowlist
+(`spikes/renderer/tools/d3d8-direct-allowlist.json`), the classification map
+(`backend-coverage-map.json`, which requires every reached method to have a category) and the
+coverage baseline (`backend-coverage-baseline.json`, which counts sites per method). Adding
+`d3dx8texcreate.cpp` in #86 cost three CI round trips exactly this way.
+
+The direct-call budget is enforced in both directions: a new unbudgeted direct
 `D3DDevice->Method(...)` fails the gate, and so does a stale allowlist entry. D3D8 calls belong only
-in the `DX8CALL*` macros and inside `WW3D2/d3d8renderbackend.cpp`, which is the D3D8 side of the
-`RenderBackendClass` seam.
+in the `DX8CALL*` macros, inside `WW3D2/d3d8renderbackend.cpp` (the D3D8 side of the
+`RenderBackendClass` seam), and in `WW3D2/d3dx8texcreate.cpp`, which is d3dx8.lib's own creation
+entry points off Windows and is budgeted with that reason.
 
 ## macOS / MoltenVK
 

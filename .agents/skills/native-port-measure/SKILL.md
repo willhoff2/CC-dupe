@@ -52,6 +52,7 @@ reporting the ratio as progress.
 
 ```sh
 python3 scripts/ci/check-d3d8-surface.py
+python3 scripts/ci/check-backend-coverage.py   # always with the line above, never alone
 CLANGXX=clang++-14 python3 scripts/native-layout-test.py
 python3 scripts/xfer-blob-audit.py
 CLANGXX=clang++-14 python3 scripts/ci/check-crt-compat.py
