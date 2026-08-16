@@ -67,7 +67,9 @@ static std::filesystem::path fixFilenameFromWindowsPath(const Char *filename, In
 
 		std::filesystem::path pathFixed;
 		std::filesystem::path pathCurrent;
-		for (auto& p : path)
+		// const, because path::iterator::reference is `path` by value in libc++ and `const path&`
+		// only in libstdc++; a mutable reference binds on Linux and not on macOS.
+		for (const auto& p : path)
 		{
 			std::filesystem::path pathFixedPart;
 			if (pathCurrent.empty())
