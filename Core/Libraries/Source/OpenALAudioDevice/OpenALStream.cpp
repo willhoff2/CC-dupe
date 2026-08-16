@@ -30,9 +30,14 @@
  * 51 PCM, and the 2569 Zero Hour DialogEvents resolve onto 2429 of them, so a PCM-only stream path
  * plays almost none of the retail dialogue.
  *
- * Retail music is MP3 (7 tracks in MusicZH.big) and no MPEG decoder is linked, so those streams
- * FAIL to open with an explicit error instead of becoming zero-length silent streams.
- * See docs/porting/audio-retail-validation.md.
+ * MPEG streams are decoded too, which is what the music is: 56 retail tracks (7 in MusicZH.big, 49
+ * in the base game's Music.big), all layer III, 55 MPEG-1 stereo 44100 Hz and one MPEG-2 mono
+ * 22050 Hz. Every frame is indexed when the stream opens, so duration and seeking are exact rather
+ * than inferred from the bitrate. See docs/porting/audio-mpeg-decode.md and
+ * docs/porting/audio-retail-validation.md.
+ *
+ * A stream that cannot be decoded still FAILS to open with an explicit error rather than becoming a
+ * zero-length silent stream.
  */
 
 #include "OpenALAudioInternal.h"
@@ -57,6 +62,29 @@ unsigned int frameBytes(const StreamVoice& stream)
 	return stream.channels * (stream.bits / 8);
 }
 
+/// Index of the first indexed MPEG frame at or after `offset`, or the frame count when there is
+/// none. Frame offsets ascend, so this is a binary search.
+size_t mpegFrameAt(const StreamVoice& stream, unsigned int offset)
+{
+	const auto found = std::lower_bound(stream.mpegFrames.begin(), stream.mpegFrames.end(), offset,
+		[](const MpegFrame& frame, unsigned int value) { return frame.offset < value; });
+	return (size_t)(found - stream.mpegFrames.begin());
+}
+
+/// PCM frames the indexed MPEG frames before `offset` decode to. Exact for VBR: it sums the index
+/// rather than scaling a byte count.
+unsigned int mpegFramesBefore(const StreamVoice& stream, unsigned int offset)
+{
+	unsigned int frames = 0;
+	for (const MpegFrame& frame : stream.mpegFrames) {
+		if (frame.offset >= offset) {
+			break;
+		}
+		frames += frame.samples;
+	}
+	return frames;
+}
+
 /// Largest header a stream will read looking for the `data` chunk. Retail WAV headers are 44 to 58
 /// bytes; the bound exists only so a corrupt or non-WAV file cannot make this read the whole file.
 constexpr unsigned int MAX_HEADER_BYTES = 64u * 1024u;
@@ -74,6 +102,18 @@ unsigned int playbackEnd(const StreamVoice& stream)
 /// a whole block for ADPCM, whose predictor state lives in the block preamble.
 unsigned int alignToCodecBoundary(const StreamVoice& stream, unsigned int offset)
 {
+	if (stream.codec == StreamCodec::Mpeg) {
+		// An MPEG frame is the unit, and frames are not a fixed size, so the index decides.
+		if (offset > stream.dataLength) {
+			offset = stream.dataLength;
+		}
+		const size_t index = mpegFrameAt(stream, offset);
+		if (index < stream.mpegFrames.size() && stream.mpegFrames[index].offset == offset) {
+			return offset;
+		}
+		return (index == 0) ? 0u : stream.mpegFrames[index - 1].offset;
+	}
+
 	const unsigned int unit = (stream.codec == StreamCodec::ImaAdpcm)
 		? stream.blockSize
 		: stream.channels * (stream.bits / 8);
@@ -87,13 +127,110 @@ unsigned int alignToCodecBoundary(const StreamVoice& stream, unsigned int offset
 }
 
 /// True when the file's first bytes are an MPEG audio elementary stream (an ID3 tag or a frame
-/// sync). Used only to name the codec in the error message when a stream cannot be decoded.
+/// sync), which is what sends a stream down the MPEG branch: there is no RIFF header to parse.
 bool looksLikeMpeg(const unsigned char* front, size_t size)
 {
 	if (size >= 3 && std::memcmp(front, "ID3", 3) == 0) {
 		return true;
 	}
 	return size >= 2 && front[0] == 0xFF && (front[1] & 0xE0) == 0xE0;
+}
+
+/// Decodes the MPEG frames starting at the read cursor, up to about BUFFER_FRAMES of PCM.
+///
+/// The index gives the exact byte span of those frames, so the read never splits a frame and a
+/// truncated final frame -- which retail has: USA_09.mp3's last frame header claims 436 bytes more
+/// than the file holds -- is simply not in the index and cannot be half-decoded.
+unsigned int decodeMpegChunk(StreamVoice& stream, std::vector<unsigned char>& into,
+	unsigned int end)
+{
+	Library& l = lib();
+	if (stream.mpeg == nullptr || stream.mpegFrames.empty()) {
+		return 0;
+	}
+
+	const size_t first = mpegFrameAt(stream, stream.readCursor);
+
+	// After a seek or a loop rewind the decoder holds no reservoir and no filterbank overlap for
+	// the frame the cursor points at, so a few frames before it are decoded and thrown away first.
+	const size_t prime = (stream.mpegNeedsPriming && first > 0)
+		? ((first > MPEG_PRIME_FRAMES) ? first - MPEG_PRIME_FRAMES : 0)
+		: first;
+
+	size_t last = first;
+	unsigned int pcmFrames = 0;
+	while (last < stream.mpegFrames.size() && pcmFrames < StreamVoice::BUFFER_FRAMES) {
+		const MpegFrame& frame = stream.mpegFrames[last];
+		if (frame.offset + frame.bytes > end) {
+			break;
+		}
+		pcmFrames += frame.samples;
+		++last;
+	}
+	if (last == first) {
+		stream.readCursor = end;
+		return 0;
+	}
+
+	const unsigned int from = stream.mpegFrames[prime].offset;
+	const MpegFrame& lastFrame = stream.mpegFrames[last - 1];
+	const unsigned int span = lastFrame.offset + lastFrame.bytes - from;
+
+	std::vector<unsigned char> raw(span);
+	l.fileSeek(stream.file, (long)(stream.dataOffset + from), AIL_FILE_SEEK_BEGIN);
+	const unsigned long read = l.fileRead(stream.file, raw.data(), span);
+	if (read < span) {
+		setLastError("MPEG stream ended inside a frame the index said was whole");
+		stream.readCursor = end;
+		return 0;
+	}
+
+	// One frame of headroom past what the index promised, so a frame that decodes to more samples
+	// than its header described is caught by the check below instead of by a buffer overrun.
+	into.resize(((size_t)pcmFrames * stream.channels + MPEG_MAX_SAMPLES_PER_FRAME)
+		* sizeof(int16_t));
+	int16_t* out = (int16_t*)into.data();
+
+	// The priming frames decode into scratch and their samples are discarded: the first of them is
+	// expected to produce nothing, which is exactly why the wanted frame is not decoded cold.
+	std::vector<int16_t> scratch;
+	if (prime < first) {
+		scratch.resize(MPEG_MAX_SAMPLES_PER_FRAME);
+		for (size_t index = prime; index < first; ++index) {
+			const MpegFrame& frame = stream.mpegFrames[index];
+			MpegFrameHeader header;
+			decodeMpegFrame(*stream.mpeg, raw.data() + (frame.offset - from), frame.bytes,
+				scratch.data(), header);
+		}
+	}
+	stream.mpegNeedsPriming = false;
+
+	unsigned int decoded = 0;
+	for (size_t index = first; index < last; ++index) {
+		const MpegFrame& frame = stream.mpegFrames[index];
+		MpegFrameHeader header;
+		const unsigned int samples = decodeMpegFrame(*stream.mpeg,
+			raw.data() + (frame.offset - from), frame.bytes, out + (size_t)decoded * stream.channels,
+			header);
+		if (samples != frame.samples || header.channels != stream.channels
+			|| header.rate != stream.rate) {
+			// A frame the index accepted and the decoder disagrees with. The stream stops here with
+			// the error set rather than skipping the frame and playing on: queueing whatever
+			// happens to be in the buffer, or glossing over a gap, is the defect class this seam
+			// exists to prevent.
+			setLastError("MPEG frame did not decode as its header described");
+			stream.readCursor = end;
+			into.clear();
+			return 0;
+		}
+		decoded += samples;
+	}
+
+	stream.readCursor = (last < stream.mpegFrames.size())
+		? stream.mpegFrames[last].offset
+		: end;
+	into.resize((size_t)decoded * stream.channels * sizeof(int16_t));
+	return (unsigned int)into.size();
 }
 
 /// Reads the next chunk of the stream's file through the engine's file callbacks and decodes it to
@@ -109,12 +246,18 @@ unsigned int readChunk(StreamVoice& stream, std::vector<unsigned char>& into)
 	if (stream.readCursor >= end) {
 		if (stream.loopCount != 1) {
 			stream.readCursor = stream.loopStart;
+			resetMpegDecoder(stream.mpeg);
+			stream.mpegNeedsPriming = true;
 			if (stream.loopCount > 1) {
 				--stream.loopCount;
 			}
 		} else {
 			return 0;
 		}
+	}
+
+	if (stream.codec == StreamCodec::Mpeg) {
+		return decodeMpegChunk(stream, into, end);
 	}
 
 	const unsigned int remaining = end - stream.readCursor;
@@ -203,6 +346,118 @@ bool readWaveMetadata(StreamVoice& stream, AILSOUNDINFO& info, unsigned int& dat
 	}
 }
 
+/// Bytes read at a time while indexing MPEG frames. A 192 kbps 44.1 kHz frame is 627 bytes, so a
+/// window holds about a hundred of them and a five-megabyte track is indexed in ~80 reads.
+constexpr unsigned int MPEG_SCAN_WINDOW = 64u * 1024u;
+
+/// How many bytes the scan will walk past without finding a frame header before giving up. Retail
+/// files end with a 128-byte ID3v1 trailer, which is exactly this kind of non-frame tail; the bound
+/// stops a file that merely starts with a sync pattern from being walked byte by byte to its end.
+constexpr unsigned int MPEG_MAX_SCAN_JUNK = 256u * 1024u;
+
+/// Indexes every MPEG frame in the file, which is what makes duration exact.
+///
+/// There is no container and no seek table -- none of the 56 retail tracks carries a Xing or VBRI
+/// tag -- so the only way to know the length of an MPEG elementary stream is to walk its frame
+/// headers. That is also the only VBR-correct way: `bytes * 8 / bitrate` is right for the 56 retail
+/// tracks, which are all CBR, and wrong for any file that is not, in a way that shows up as drifting
+/// loop points and mistimed subtitles rather than as an error.
+///
+/// The scan reads headers only; it never decodes, so it costs one sequential pass and no audio work.
+bool readMpegMetadata(StreamVoice& stream, unsigned int fileSize,
+	const std::vector<unsigned char>& front)
+{
+	Library& l = lib();
+
+	unsigned int at = id3v2TagLength(front.data(), front.size());
+	if (at >= fileSize) {
+		setLastError("MPEG stream is nothing but an ID3v2 tag");
+		return false;
+	}
+
+	std::vector<unsigned char> window;
+	unsigned int windowAt = 0;			///< file offset of window[0]
+	unsigned int junk = 0;
+	MpegFrameHeader first;
+	bool haveFirst = false;
+
+	while (at + MPEG_FRAME_HEADER_BYTES <= fileSize) {
+		if (at < windowAt || at + MPEG_FRAME_HEADER_BYTES > windowAt + window.size()) {
+			window.assign(MPEG_SCAN_WINDOW, 0);
+			l.fileSeek(stream.file, (long)at, AIL_FILE_SEEK_BEGIN);
+			const unsigned long read = l.fileRead(stream.file, window.data(), MPEG_SCAN_WINDOW);
+			window.resize((size_t)read);
+			windowAt = at;
+			if (read < MPEG_FRAME_HEADER_BYTES) {
+				break;
+			}
+		}
+
+		MpegFrameHeader header;
+		if (!parseMpegFrameHeader(window.data() + (at - windowAt),
+				window.size() - (at - windowAt), header)) {
+			++at;
+			if (++junk > MPEG_MAX_SCAN_JUNK) {
+				break;
+			}
+			continue;
+		}
+
+		if (!haveFirst) {
+			first = header;
+			haveFirst = true;
+			stream.dataOffset = at;
+		} else if (header.rate != first.rate || header.channels != first.channels) {
+			// The queued OpenAL buffers all share one format, so a file that changes rate or
+			// channel count part way through cannot be played as one stream. No retail track does;
+			// saying so is better than playing the first half and silently stopping.
+			char message[160];
+			std::snprintf(message, sizeof(message),
+				"MPEG stream changes format at byte %u (%u Hz %u channel after %u Hz %u channel)",
+				at, header.rate, header.channels, first.rate, first.channels);
+			setLastError(message);
+			return false;
+		}
+
+		if (at + header.bytes > fileSize) {
+			// A truncated final frame: retail USA_09.mp3's last header claims 436 bytes more than
+			// the file holds. It is left out of the index, so nothing tries to decode it and the
+			// reported duration is of the audio that is actually there.
+			break;
+		}
+
+		MpegFrame frame;
+		frame.offset = at - stream.dataOffset;
+		frame.bytes = header.bytes;
+		frame.samples = header.samples;
+		stream.mpegFrames.push_back(frame);
+		at += header.bytes;
+	}
+
+	if (!haveFirst || stream.mpegFrames.empty()) {
+		setLastError("MPEG stream holds no decodable frame header");
+		return false;
+	}
+
+	const MpegFrame& last = stream.mpegFrames.back();
+	stream.codec = StreamCodec::Mpeg;
+	stream.rate = first.rate;
+	stream.channels = first.channels;
+	stream.bits = 16;					///< what the decoder produces, not what the file holds
+	stream.dataLength = last.offset + last.bytes;
+	stream.totalFrames = 0;
+	for (const MpegFrame& frame : stream.mpegFrames) {
+		stream.totalFrames += frame.samples;
+	}
+
+	stream.mpeg = createMpegDecoder();
+	if (stream.mpeg == nullptr) {
+		setLastError("could not create an MPEG decoder");
+		return false;
+	}
+	return true;
+}
+
 /// Opens the file and works out the payload's extent and codec. Fails, with a reportable error, for
 /// anything it cannot actually decode: a stream that opens and then plays silence is
 /// indistinguishable from a working one at every call site in MilesAudioManager.
@@ -227,15 +482,20 @@ bool openStreamFile(StreamVoice& stream, const char* filename)
 	std::vector<unsigned char> front;
 	if (!readWaveMetadata(stream, info, dataOffset, fileSize, front)) {
 		if (looksLikeMpeg(front.data(), front.size())) {
-			// UNIMPLEMENTED, and required rather than absent: the 7 retail Zero Hour music tracks in
-			// MusicZH.big are all MPEG-1 layer III, 44100 Hz stereo. Miles decoded MP3 internally;
-			// core OpenAL has no decoder and none is linked yet.
-			setLastError("MPEG audio streams (MP1/MP2/MP3) are not implemented: no MPEG decoder "
-				"is linked (retail Zero Hour music is MP3; "
-				"see docs/porting/audio-retail-validation.md)");
-		} else {
-			setLastError("stream is not a WAV file, or its header could not be parsed");
+			// The music: MPEG audio has no RIFF header at all, so it is indexed instead of parsed.
+			// A failure here leaves the error readMpegMetadata set, which names what was wrong with
+			// the file rather than reporting a missing feature.
+			if (!readMpegMetadata(stream, fileSize, front)) {
+				return false;
+			}
+			if (stream.channels == 0 || stream.rate == 0 || stream.totalFrames == 0) {
+				setLastError("MPEG stream describes no audio");
+				return false;
+			}
+			stream.format = alFormatFor(stream.channels, stream.bits);
+			return true;
 		}
+		setLastError("stream is not a WAV file, or its header could not be parsed");
 		return false;
 	}
 
@@ -288,6 +548,16 @@ bool openStreamFile(StreamVoice& stream, const char* filename)
 }
 
 } // namespace
+
+StreamVoice::~StreamVoice()
+{
+	destroyMpegDecoder(mpeg);
+}
+
+unsigned int decodeStreamChunk(StreamVoice& stream, std::vector<unsigned char>& into)
+{
+	return readChunk(stream, into);
+}
 
 void serviceStream(StreamVoice& stream, bool& finished)
 {
@@ -596,18 +866,32 @@ void AIL_set_stream_ms_position(HSTREAM stream_handle, int pos)
 
 	const unsigned long long frame = (unsigned long long)(pos > 0 ? pos : 0) * stream->rate / 1000ull;
 	unsigned int byteOffset = 0;
-	if (stream->codec == StreamCodec::ImaAdpcm) {
+	if (stream->codec == StreamCodec::Mpeg) {
+		// Walk the index rather than scaling by a bitrate, which is what makes this exact on VBR:
+		// stop at the last frame that begins at or before the requested time.
+		unsigned int played = 0;
+		for (const MpegFrame& indexed : stream->mpegFrames) {
+			if ((unsigned long long)played + indexed.samples > frame) {
+				break;
+			}
+			played += indexed.samples;
+			byteOffset = indexed.offset + indexed.bytes;
+		}
+		stream->readCursor = alignToCodecBoundary(*stream, byteOffset);
+		stream->framesPlayed = mpegFramesBefore(*stream, stream->readCursor);
+		// The decoder's reservoir and filterbank state belong to the old position, so it is rewound
+		// and the next decode primes it on the frames before the new one (MPEG_PRIME_FRAMES).
+		resetMpegDecoder(stream->mpeg);
+		stream->mpegNeedsPriming = true;
+	} else if (stream->codec == StreamCodec::ImaAdpcm) {
 		// Seeking is only exact to a block: a block's samples cannot be decoded without its
 		// predictor preamble.
 		byteOffset = (unsigned int)(frame / stream->samplesPerBlock) * stream->blockSize;
-	} else {
-		byteOffset = (unsigned int)frame * frameBytes(*stream);
-	}
-	stream->readCursor = alignToCodecBoundary(*stream, byteOffset);
-
-	if (stream->codec == StreamCodec::ImaAdpcm) {
+		stream->readCursor = alignToCodecBoundary(*stream, byteOffset);
 		stream->framesPlayed = (stream->readCursor / stream->blockSize) * stream->samplesPerBlock;
 	} else {
+		byteOffset = (unsigned int)frame * frameBytes(*stream);
+		stream->readCursor = alignToCodecBoundary(*stream, byteOffset);
 		const unsigned int fb = frameBytes(*stream);
 		stream->framesPlayed = fb ? stream->readCursor / fb : 0;
 	}

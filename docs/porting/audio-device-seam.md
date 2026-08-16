@@ -223,11 +223,10 @@ a symbol the engine references that `mss.h` never declares. Only a link can, and
    references — is compiled against the backend at all.~~ Done: it is one of `Core/GameEngineDevice`'s
    69 objects in the shimmed native build, and its `AIL_*` references resolve against the backend
    there (section 6a). Whether it *runs* is untouched by that.
-3. **MP3 decoding.** `AIL_open_stream` handles WAV, PCM and IMA ADPCM; Zero Hour's music is 7 MPEG-1
-   layer III tracks and there is no MP2 anywhere in the retail set
-   (`docs/porting/audio-retail-validation.md`). Such a stream now fails to open with an explicit
-   error instead of reporting zero length and playing silence. FFmpeg is already an optional
-   dependency for video and is the obvious route.
+3. ~~**MP3 decoding.**~~ Done: `AIL_open_stream` decodes MPEG layer I/II/III through a pinned
+   minimp3 linked into the backend, and the 56 retail music tracks (7 Zero Hour, 49 base game) decode
+   to measured PCM. FFmpeg was measured and rejected as the route — the pinned build is
+   `--disable-everything` and contains no MP3 decoder. See `docs/porting/audio-mpeg-decode.md`.
 4. **EFX**, to turn the 2 recorded filter entry points into audible reverb/mono-delay.
 5. **The Bink handoff.** `AIL_get_DirectSound_info` returns nulls by design: Bink asks Miles for the
    raw `IDirectSound`/`IDirectSoundBuffer` it should mix into. There is no portable equivalent —

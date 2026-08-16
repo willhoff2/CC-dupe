@@ -286,17 +286,22 @@ Negative x on the left, positive x on the right — the Miles convention. The pr
 the same magnitudes with the channels swapped (`x=-20 rms=[1.5e-05, 0.183314]`), which is the
 mirroring, measured on retail assets rather than inferred.
 
-### 4.6 Retail MP3 fails loudly
+### 4.6 Retail MP3 decodes (was: fails loudly)
+
+When this was written there was no MPEG decoder, so the assertion was that the open *failed loudly*
+(`handle=False`, `last_error='MPEG audio streams (MP1/MP2/MP3) are not implemented: no MPEG decoder
+is linked'`) rather than the pre-fix `handle=True last_error=None` — a valid handle, zero length and
+silence. A decoder is linked now, so the assertion has inverted, in this same probe:
 
 ```
-retail MP3 music fails to open, loudly: Data\Audio\Tracks\CHI_10.mp3
-  handle=False last_error='MPEG audio streams (MP1/MP2/MP3) are not implemented: no MPEG decoder
-  is linked (retail Zero Hour music is MP3; see docs/porting/audio-retail-validation.md)'
+retail MP3 music decodes, is the right length and is audible: music-mp3_2ch_44100hz
+  Data\Audio\Tracks\CHI_10.mp3 codec=mp3 rate=44100/44100 channels=2
+  length_ms=203911 expected_ms=203912 frames=7806 vbr=False rms=[0.018999, 0.026637]
 ```
 
-A real 4.9 MB retail track, not a synthetic file. The pre-fix backend answered `handle=True
-last_error=None` for the same file: a valid handle, zero length, silence, and nothing anywhere to
-notice.
+A real 4.9 MB retail track, not a synthetic file; `expected_ms` comes from an independent frame walk
+in `scripts/audio_retail_assets.py`, and the whole 56-track set is proved by
+`scripts/audio-music-probe.py`. See `docs/porting/audio-mpeg-decode.md`.
 
 ## 5. Where the audio path still stops
 
@@ -304,7 +309,7 @@ Classified, as the project requires:
 
 | # | Item | Class | Consequence |
 |---|---|---|---|
-| 1 | **No MPEG decoder** | **unimplemented, and REQUIRED** — the music the game plays is 56 MP3 tracks, so it cannot be cut | **all music is absent.** It now fails audibly-in-logs rather than silently. See §7 for where a decoder attaches and what is already known about the route |
+| 1 | ~~**No MPEG decoder**~~ | **resolved** by the MPEG slice — minimp3 is linked into the backend | all 56 retail tracks decode to measured PCM through `AIL_open_stream` (`docs/porting/audio-mpeg-decode.md`) |
 | 2 | Reverb (`AIL_set_3D_sample_effects_level`) recorded, not applied | unimplemented | no reverb; needs OpenAL Soft EFX |
 | 3 | Filters (`AIL_set_sample_processor`, `Delay`) recorded, not applied | unimplemented | no mono-delay effect |
 | 4 | Occlusion is gain, not low-pass; `LowPassCutoff` routed into occlusion | approximation | shrouded sounds get quieter where Windows makes them muffled |
@@ -380,6 +385,12 @@ is not obvious from the code.
   currently asserts that it fails loudly (§4.6). When a decoder lands, that assertion inverts into the
   same measurement the WAV paths get — non-silent RMS, expected duration, correct rate and channels —
   and `scripts/audio_retail_assets.py` already parses MPEG frame headers to supply the expected values.
+
+**What the MPEG slice did with the above**: it linked a pinned minimp3 rather than FFmpeg, because
+this repo's pinned FFmpeg is configured `--disable-everything` and, measured, has no MP3 decoder or
+demuxer at all — so the `RTS_HAS_FFMPEG` route above does not hold. Everything else here held. The
+retail-probe assertion inverted as described, and `docs/porting/audio-mpeg-decode.md` is that slice's
+report.
 
 The synthetic probe, `scripts/native-audio-probe.py`, still runs without retail data and now gates
 the fixed behaviour: the ADPCM handoff must produce RIFF/WAVE and be audible, a 500 ms stream must

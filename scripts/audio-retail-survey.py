@@ -61,7 +61,7 @@ def survey_archives(data, settings):
     entries = {}
     for archive in data.audio_archives():
         for entry in archive.audio_entries():
-            facts = ara.describe(entry, archive.read(entry, 8192))
+            facts = ara.describe(entry, archive.read(entry, 8192), complete=False)
             per_archive[(archive.path.name, pathlib.PurePosixPath(entry.lower()).suffix)] += 1
             if facts.get("codec") == "unparsed":
                 unparsed.append(f"{archive.path.name}:{entry}")

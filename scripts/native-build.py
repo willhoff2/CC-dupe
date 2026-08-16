@@ -786,6 +786,11 @@ AUDIO_BACKEND_SLUG = "support_openalaudiodevice"
 # the library it still cannot be *linked*, and then `al*`/`alc*` are reported as unresolved rather
 # than silently counted as the engine's problem.
 OPENAL_HEADER_SUBDIR = "openal-src/include"
+# minimp3, the MPEG decoder OpenALMpeg.cpp compiles for retail music (cmake/minimp3.cmake pins it,
+# fetch-probe-deps.sh provisions it at the same commit). Not optional: without the header the audio
+# backend does not compile, and check-audio-backend-linked.py then fails by name rather than the
+# music quietly going missing.
+MINIMP3_HEADER_SUBDIR = "minimp3-src"
 # openal-soft is keg-only in Homebrew, because macOS ships its own deprecated OpenAL.framework, so
 # it is never symlinked into <prefix>/lib and only the keg path finds it.
 OPENAL_CANDIDATES = (
@@ -924,9 +929,14 @@ def audio_backend_sources():
 
 
 def write_audio_backend_manifest(manifest_dir, deps_dir):
-    """CMake fragment for the OpenAL audio backend. Returns its slug, or None without AL headers."""
+    """CMake fragment for the OpenAL audio backend. Its slug, or None without its headers."""
     include_dir = openal_include_dir(deps_dir)
     if include_dir is None:
+        return None
+    minimp3_dir = deps_dir / MINIMP3_HEADER_SUBDIR
+    if not (minimp3_dir / "minimp3.h").is_file():
+        print(f"   warning: no minimp3.h under {minimp3_dir}; the audio backend cannot compile "
+              "its MPEG decoder. Run scripts/ci/fetch-probe-deps.sh.")
         return None
     root = REPO_ROOT / AUDIO_BACKEND_DIR
     sources = audio_backend_sources()
@@ -943,6 +953,7 @@ def write_audio_backend_manifest(manifest_dir, deps_dir):
         f'    "{root}"',
         f'    "{root / "mss"}"',
         f'    "{include_dir}"',
+        f'    "{minimp3_dir}"',
         # The project force-includes Utility/CppMacros.h into every target, this one included.
         f'    "{REPO_ROOT / "Dependencies" / "Utility"}"',
         ")",

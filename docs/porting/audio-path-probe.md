@@ -212,7 +212,7 @@ needs a documented handedness conversion, not new machinery.
 
 | Path | State | Measured |
 |---|---|---|
-| MP3 / MP2 streams | **unimplemented**, and *silently*: the handle opens, length is 0, no error is set, the mix is silence | `handle=True length_ms=0 last_error=None rms=[1.5e-05, …]` |
+| MP3 / MP2 streams | ~~**unimplemented**, and *silently*: the handle opens, length is 0, no error is set, the mix is silence~~ — implemented since, by a linked MPEG decoder (`docs/porting/audio-mpeg-decode.md`); the probe now asserts audible decode | was `handle=True length_ms=0 last_error=None rms=[1.5e-05, …]`; now `length_ms=574 rms=[0.054, 0.054]` |
 | MS ADPCM images | unimplemented, refused loudly | §2.1 |
 | `AIL_set_sample_processor` / `AIL_set_filter_sample_preference` (`Delay` in INI) | recorded, never applied; `AIL_enumerate_filters` advertises one filter so `initDelayFilter` succeeds | source |
 | `AIL_set_3D_sample_effects_level` (reverb) | recorded only, no EFX slot | source |

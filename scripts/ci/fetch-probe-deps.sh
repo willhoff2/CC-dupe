@@ -46,6 +46,10 @@ clone_at "$(pin lzhl.cmake GIT_REPOSITORY)"    "$(pin lzhl.cmake GIT_TAG)"    "$
 # stb is laid out as _deps/stb-src by cmake/stb.cmake; stb_image_write_impl.cpp includes
 # <stb_image_write.h> from the root of it.
 clone_at "$(pin stb.cmake GIT_REPOSITORY)"     "$(pin stb.cmake GIT_TAG)"     "$deps_dir/stb-src"
+# minimp3: <minimp3.h> for Core/Libraries/Source/OpenALAudioDevice/OpenALMpeg.cpp, the MPEG decoder
+# behind AIL_open_stream. Retail music is 56 MP3 files, so without this the audio backend does not
+# compile natively at all -- it is not an optional codec (docs/porting/audio-mpeg-decode.md).
+clone_at "$(pin minimp3.cmake GIT_REPOSITORY)" "$(pin minimp3.cmake GIT_TAG)" "$deps_dir/minimp3-src"
 
 # Vulkan headers for the render backend (Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.cpp
 # over spikes/renderer). Ubuntu jammy's are 1.3.204, which predates VK_KHR_portability_enumeration --
