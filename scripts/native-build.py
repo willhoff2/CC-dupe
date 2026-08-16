@@ -730,11 +730,18 @@ LZHL_SOURCES = ("Huff.cpp", "Lz.cpp", "Lzhl.cpp")
 LZHL_SLUG = "thirdparty_lzhl"
 
 # zlib is a system package (`zlib1g-dev`), so it is linked with -lz rather than built.
+#
+# macOS ships zlib in the dyld shared cache, so `/usr/lib/libz.dylib` is not a file on disk and the
+# SDK offers only a `.tbd` text stub, which `nm` refuses ("File format has no dynamic symbol
+# table"). The definitions this measurement needs therefore come from a real dylib -- Homebrew's
+# keg -- while the link itself uses the same library the SDK resolves `-lz` to.
 ZLIB_CANDIDATES = (
     "/lib/x86_64-linux-gnu/libz.so.1",
     "/usr/lib/x86_64-linux-gnu/libz.so.1",
     "/usr/lib/aarch64-linux-gnu/libz.so.1",
     "/usr/lib/libz.dylib",
+    "/opt/homebrew/opt/zlib/lib/libz.dylib",
+    "/usr/local/opt/zlib/lib/libz.dylib",
 )
 
 # The audio backend. `AIL_*` was never an unported surface: `cmake/openal.cmake` supplies
@@ -756,12 +763,16 @@ AUDIO_BACKEND_SLUG = "support_openalaudiodevice"
 # the library it still cannot be *linked*, and then `al*`/`alc*` are reported as unresolved rather
 # than silently counted as the engine's problem.
 OPENAL_HEADER_SUBDIR = "openal-src/include"
+# openal-soft is keg-only in Homebrew, because macOS ships its own deprecated OpenAL.framework, so
+# it is never symlinked into <prefix>/lib and only the keg path finds it.
 OPENAL_CANDIDATES = (
     "/lib/x86_64-linux-gnu/libopenal.so.1",
     "/usr/lib/x86_64-linux-gnu/libopenal.so.1",
     "/usr/lib/aarch64-linux-gnu/libopenal.so.1",
     "/usr/local/lib/libopenal.dylib",
     "/opt/homebrew/lib/libopenal.dylib",
+    "/opt/homebrew/opt/openal-soft/lib/libopenal.dylib",
+    "/usr/local/opt/openal-soft/lib/libopenal.dylib",
 )
 OPENAL_SYSTEM_HEADER_DIRS = ("/usr/include", "/usr/local/include", "/opt/homebrew/include")
 
@@ -1166,9 +1177,17 @@ def unresolved_symbols(archives, support_archives=(), extra_libraries=()):
     }
 
 
+# Mach-O prefixes every C symbol with an underscore, so the entry point is `_main` there and `main`
+# under ELF. Looking for the ELF spelling on macOS finds no entry point at all, which silently turns
+# a link of the real game target into a link of a stub main() *and* leaves every test tool's own
+# main() in the archives -- 17 duplicate symbols, and no executable.
+MAIN_SYMBOL = "_main" if sys.platform == "darwin" else "main"
+
+
 def archives_defining_main(archives):
     """Archives that define `main`, i.e. that carry the game's real entry point."""
-    return [a for a in archives if "main" in nm_symbols(a, "--defined-only", "--extern-only")]
+    return [a for a in archives
+            if MAIN_SYMBOL in nm_symbols(a, "--defined-only", "--extern-only")]
 
 
 # The one library whose `main()` is the game's: GeneralsMD/Code/Main. Everything else that defines
@@ -1183,7 +1202,7 @@ def objects_defining_main(archive):
     proc = subprocess.run([NM, "-A", "--defined-only", "--extern-only", str(archive)],
                           capture_output=True, text=True)
     # `libfoo.a:bar.cpp.o:0000000000000000 T main`
-    pattern = re.compile(r"^.*?:([^:]+\.o):\s*\S+\s+\S+\s+main$")
+    pattern = re.compile(r"^.*?:([^:]+\.o):\s*\S+\s+\S+\s+" + re.escape(MAIN_SYMBOL) + r"$")
     return [m.group(1) for m in (pattern.match(line) for line in proc.stdout.splitlines())
             if m is not None]
 
@@ -1785,10 +1804,17 @@ def main():
     strict_binary_info = None
     if args.strict_link:
         print("== linking strictly (no --warn-unresolved-symbols)")
-        strict_ok, strict_binary, strict_referenced_by, _ = strict_link(
+        strict_ok, strict_binary, strict_referenced_by, strict_log = strict_link(
             build_dir, archives, support_archives, link_zlib=zlib_path is not None,
             openal_path=openal_path, extra_libraries=link_extra,
             extra_link_args=platform_link_args)
+        # Kept, because a link can fail with zero *unresolved* symbols -- a duplicate definition, a
+        # missing framework, a linker crash -- and then the parsed symbol list says nothing at all
+        # about why there is no executable.
+        strict_log_path = build_dir / "native_strict_link.log"
+        strict_log_path.write_text(strict_log)
+        if not strict_ok:
+            print(f"   linker output: {strict_log_path}")
         strict_binary_info = describe_binary(build_dir / "native_strict_link") \
             if strict_binary else None
         print(f"   strict link {'succeeded' if strict_ok else 'failed'}: "

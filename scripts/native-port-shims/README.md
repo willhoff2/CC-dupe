@@ -20,9 +20,11 @@ Deliberate properties:
   Getting this wrong would hide the Phase 2 pointer-truncation errors that are the whole
   reason to compile at 64 bits.
 - **No `-fms-extensions` dependence beyond what the probe already passes.**
-- **Only MS-specific headers are shadowed, with two named exceptions.** `math.h`, `time.h`,
+- **Only MS-specific headers are shadowed, with named exceptions.** `math.h`, `time.h`,
   `sys/stat.h`, `assert.h` and other headers that exist on POSIX are left to libc. `sys/timeb.h`
-  is stubbed because glibc's copy is deprecated and absent on macOS. `stdlib.h` and `stdio.h`
+  is stubbed because glibc's copy is deprecated and absent on macOS, and `malloc.h` forwards to a
+  real `<malloc.h>` with `#include_next` where one exists and to `<stdlib.h>`/`<malloc/malloc.h>` on
+  Apple platforms, which have no `<malloc.h>` at all. `stdlib.h` and `stdio.h`
   `#include_next` the real header and add only the MSVC CRT spellings the engine still calls
   (`itoa`, `_itoa`, `_ultoa`, `_snprintf`, `_vsnprintf`). Those used to arrive through
   `PreRTS.h`'s Windows headers; nothing in the repository provides them off Windows yet, so they
