@@ -1,5 +1,19 @@
 # WideChar → char16_t: measured fallout
 
+> **Superseded, 2026-08.** The recommendation at the bottom of this document — convert `WideChar` to
+> `char16_t` across the tree — is **not** what the port does. The decision taken instead is that
+> `WideChar` stays `wchar_t`, so the in-memory type follows the platform (2 bytes on MSVC, 4 on
+> macOS/Linux) and libc++, `wcslen`, `std::wstring` and the wide OS APIs keep working; everything
+> that *leaves the process* is a fixed 16-bit UTF-16 code unit, and every crossing is an explicit
+> conversion through `Core/GameEngine/Include/Common/WideCharWire.h`. That is the `LANWireChar`
+> pattern of [`lanmessage-64bit.md`](lanmessage-64bit.md) generalised, and it is implemented:
+> see [`widechar-wire.md`](widechar-wire.md) for the crossing register and the evidence.
+>
+> What remains valid here is the **measurement**: the fallout table, the disk-and-wire table that
+> enumerated where the width escapes, and the three reasons a typedef flip is not mechanical — those
+> reasons are precisely why the flip was rejected. The 1302 wide literals and 219 wide libc call
+> sites are deliberately untouched. Read the "Recommendation" section as history.
+
 `Core/Libraries/Include/Lib/BaseType.h` declares:
 
 ```cpp
@@ -7,9 +21,10 @@ typedef wchar_t WideChar;
 ```
 
 `wchar_t` is 2 bytes with MSVC and 4 bytes on macOS/Linux, while the `.csf`/`.str` string data and
-every wide literal in the codebase are 16-bit units. The review's recommendation — `char16_t` — is
-correct. It was **not** applied in this change, because the fallout is far past the "hundreds of
-files, stop and measure" threshold the task set. The numbers below are why.
+every wide literal in the codebase are 16-bit units. The review's recommendation was `char16_t`,
+and it was **not** applied in this change, because the fallout is far past the "hundreds of files,
+stop and measure" threshold the task set. The numbers below are why — and are what the boundary
+conversion approach that superseded it was chosen against.
 
 ## Measurements
 
@@ -79,8 +94,14 @@ So the wire format did not silently change under LP64; it failed to build, which
 failure. That one has since been fixed on its own terms rather than as part of a `WideChar`
 conversion: the packet's text fields are 16-bit `LANWireChar` and the engine's `WideChar` is
 converted at the send/receive boundary, so the packet is 471 bytes on every target. See
-[`lanmessage-64bit.md`](lanmessage-64bit.md). The remaining rows are untouched, and the file formats
-have no such guard: `.csf`, `.map`, save games and the CRC would all silently mis-parse or mis-hash.
+[`lanmessage-64bit.md`](lanmessage-64bit.md).
+
+The other rows had no such guard — `.csf`, `.map`, save games and the CRC silently mis-parse or
+mis-hash rather than failing to build — and `GameText.cpp` proved it: the first native Apple Silicon
+run came up with every localized string missing because a 12-unit `.csf` label was read as 48 bytes.
+All of the rows above have since been converted on the `LANWireChar` pattern rather than by flipping
+the typedef; the register of crossings, including the ones this `sizeof` table could not see, is in
+[`widechar-wire.md`](widechar-wire.md).
 
 ## Why it is not a typedef change
 
@@ -96,7 +117,10 @@ have no such guard: `.csf`, `.map`, save games and the CRC would all silently mi
    *not* safe on LP64 — which is exactly the reason a half-conversion is worse than none: it would
    compile on Windows while silently truncating natively.
 
-## Recommendation
+## Recommendation (superseded — see the note at the top)
+
+This was the plan before the boundary-conversion decision. It is kept for the reasoning in it, not
+as an instruction: steps 1 and 3 are explicitly *not* being done.
 
 Do it as its own change, in this order, and not before the native build can actually link:
 

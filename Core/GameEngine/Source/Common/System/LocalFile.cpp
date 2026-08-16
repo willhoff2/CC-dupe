@@ -55,6 +55,7 @@
 
 #include "Common/LocalFile.h"
 #include "Common/RAMFile.h"
+#include "Common/WideCharWire.h"
 #include "Lib/BaseType.h"
 #include "Common/PerfTimer.h"
 
@@ -381,12 +382,16 @@ Int LocalFile::readChar()
 
 Int LocalFile::readWideChar()
 {
-	WideChar character = L'\0';
+	// TheSuperHackers @port One wide character in a file is one 16 bit code unit, not one WideChar,
+	// which is twice that natively. The value returned is that code unit: a surrogate pair is two
+	// calls, and recombining it is the caller's business, because only the caller knows where its
+	// string ends. See docs/porting/widechar-wire.md.
+	WideWireChar unit = 0;
 
-	Int ret = read( &character, sizeof(character) );
+	Int ret = read( &unit, wideCharWireBytes( 1 ) );
 
-	if (ret == sizeof(character))
-		return (Int)character;
+	if (ret == wideCharWireBytes( 1 ))
+		return (Int)unit;
 
 	return WEOF;
 }
@@ -440,7 +445,16 @@ Int LocalFile::writeFormat( const WideChar* format, ... )
 	Int length = vswprintf(buffer, sizeof(buffer) / sizeof(WideChar), format, args);
 	va_end(args);
 
-	return write( buffer, length * sizeof(WideChar) );
+	if (length <= 0)
+		return length;
+
+	// TheSuperHackers @port Formatting stays native - vswprintf wants WideChar - and the result is
+	// encoded to 16 bit code units on the way out, which is what the file holds. See
+	// docs/porting/widechar-wire.md.
+	WideWireChar wire[1024 * 2];
+	const Int units = wideCharToWire( wire, 1024 * 2, buffer, length );
+
+	return write( wire, wideCharWireBytes( units ) );
 }
 
 //=================================================================
@@ -462,8 +476,15 @@ Int LocalFile::writeChar( const Char* character )
 
 Int LocalFile::writeChar( const WideChar* character )
 {
-	if ( write( character, sizeof(WideChar) ) == sizeof(WideChar) ) {
-		return (Int)character;
+	// TheSuperHackers @port A wide character is written as the 16 bit code units it encodes to - one,
+	// or two for a code point above U+FFFF. `character` is not NUL terminated, so it is converted as a
+	// counted single character. See docs/porting/widechar-wire.md.
+	WideWireChar wire[2] = { 0, 0 };
+	const Int units = *character == 0 ? 1 : wideCharToWire( wire, 2, character, 1 );
+	const Int bytes = wideCharWireBytes( units );
+
+	if ( write( wire, bytes ) == bytes ) {
+		return (Int)wire[0];
 	}
 
 	return WEOF;

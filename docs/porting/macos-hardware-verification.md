@@ -397,7 +397,10 @@ Three distinct causes, none of which a Linux run can see:
    have different spellings there. Five of the nine collapse into one include in
    `WWLib/FastAllocator.h:42`;
 2. `reg_syntax_t` is a GNU `<regex.h>` extension. BSD/macOS `<regex.h>` has POSIX only, so
-   `regexpr.cpp` needs either a bundled GNU regex or a POSIX rewrite;
+   `regexpr.cpp` needs either a bundled GNU regex or a POSIX rewrite — **resolved since** as the POSIX
+   rewrite, with the three syntax differences it accepts recorded in
+   [`regexpr-posix-port.md`](regexpr-posix-port.md) (written and measured on Linux, not recompiled
+   here);
 3. `std::from_chars` on libc++ 16 rejects the argument type libstdc++ 14 accepted.
 
 **Inference, not measurement:** (1) looks like a one-line platform guard per site plus an allocator

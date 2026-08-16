@@ -1,17 +1,30 @@
-# What "startable" means, and the state of each condition now that a binary exists
+# What "startable" means, and the state of each condition now that a binary exists and runs
 
 This document was written for a world in which the strict link produced no file, and its whole content
-was a checklist of what would have to be true. **A file now exists.** So the checklist is a status
-table, and the interesting part of the document has moved from "what is missing" to "what a linked
-binary does and does not prove".
+was a checklist of what would have to be true. **A file now exists, and it has been run on the target.**
+So the checklist is a status table, and the interesting part has moved from "what is missing" to "how
+far the process gets and where exactly it stops".
 
-> **It has since been run.** An `arm64` Mach-O of the same tree has been built on an Apple Silicon Mac
-> and executed against a complete retail Zero Hour install. It reaches `GameEngine::init()`, opens 20
-> `.big` archives, builds 2104 thing templates from INI and creates a Cocoa window, then dies on a null
-> render backend; a quieter failure before that desyncs the `.csf` string table on `sizeof(WideChar)`.
-> `first-native-run-arm64.md` is that record, and §7 of it separates what is proven on hardware from
-> what is still only CI's word. Where this document and that one disagree about the platform, that one
-> was measured on the target and this one was not.
+## 0. Where it gets to, at a glance
+
+One row per claim, each with the platform it was measured on. "Apple Silicon" is
+[`first-native-run-arm64.md`](first-native-run-arm64.md) — M1 Pro, macOS 26.6.1, Apple clang 21,
+against a complete retail Zero Hour install; "Linux" is the clang-14 ratchet described from §1 down.
+Where the two disagree about the platform, the hardware run is the one measured on the target.
+
+| Claim | Status | Measured on | Named evidence |
+|---|---|---|---|
+| A binary exists | **yes** | Linux and Apple Silicon | `strict_link.binary_produced`; 80.7 MiB ELF x86-64 PIE here, 26.6 MiB thin Mach-O `arm64` there |
+| It is genuinely arm64, not x86-64 under Rosetta | **yes** | Apple Silicon | `lipo -archs` → `arm64`, `sysctl.proc_translated` → `0` (`first-native-run-arm64.md` §5) |
+| The process executes | **yes** | Linux and Apple Silicon | it loads, runs, and fails in the game's own code rather than the loader's |
+| It runs against retail data | **yes** | Apple Silicon | 20 `.big` archives opened, a 928 KB `.csf` member decompressed and read |
+| It reaches the engine's own initialisation | **yes**, `GameEngine::init()` | Apple Silicon | a Cocoa window is created and 2104 thing templates are built from INI inside it |
+| **It stops here** | `DX8Wrapper::Init` dereferences a null `DX8Wrapper::RenderBackend` | Apple Silicon | `first-native-run-arm64.md` §4. `RenderBackend` is `nullptr` off Windows: there is no device to create. Slice B's territory, deliberately not fixed here |
+| One defect passes quietly before that | `GameTextManager::init()` desyncs the `.csf` table on `sizeof(WideChar)` | Apple Silicon | `first-native-run-arm64.md` §3, `widechar-fallout.md`. Slice A's territory, deliberately not fixed here |
+| It stops earlier without retail data | `INI::loadFileDirectory("Data\INI\Default\GameData")` throws; `GameEngine::init()` calls `ReleaseCrash` | Linux — CI has no install | §4 |
+| The main menu renders | **no** | — | needs the renderer row above; no frame has been drawn |
+| Every measured translation unit compiles | **yes** on Linux, 977/977 | Linux; 976/977 on Apple Silicon | the one Darwin holdout, `WWLib/regexpr.cpp`, is ported off glibc's GNU regex to POSIX `<regex.h>` in the slice that wrote this row and has **not** been recompiled on a Mac: [`regexpr-posix-port.md`](regexpr-posix-port.md) |
+| The entry point is the game's own | **yes** | Linux; unverified on macOS | `link_entry_point_stub` false with `game_entry_target_built` true. A missing entry point now fails the run instead of being replaced by a generated stub, and the Mach-O spelling (`_main`) is measured rather than hardcoded — `native-build.md` §"What the harness had to learn about Mach-O" |
 
 Measured with `clang++-14` on Ubuntu 22.04, levels 1-4 shimmed:
 
@@ -38,7 +51,7 @@ as merged, whose baseline is the last one measured without a binary.
 | unresolved symbols | 68 | **0** |
 | `strict_link.binary_produced` | `false` | **`true`** |
 | the file | none | `build/native/native_strict_link`, **80.7 MiB, ELF 64-bit x86-64, `ET_DYN`** (PIE) |
-| `strict_link.agrees_with_nm` | true | true — the linker's verdict and the `nm` scan of the archives agree, at 0 |
+| `strict_link.agrees_with_nm` | true | true — the linker's verdict and the `nm` scan of the archives agree, at 0. It was **false** on Darwin, where Mach-O's underscore prefix made the two lists incomparable; the fix is one measured symbol namespace rather than a relaxed check, and is itself unverified on a Mac |
 
 The object count rose by one because the tree now compiles a file it did not have:
 `d3dx8texcreate.cpp` (§2). The selected window backend adds an object to `WWLib`'s archive without
@@ -121,17 +134,21 @@ and is caught by `GameEngine::init()`'s handler, which calls
 directories through `TheFileSystem` and instantiates every store from them; there is no fallback
 dataset, and this box has no Zero Hour install. The message is the game's own retail
 technical-difficulties path, reached through the game's own `main()` (`PlatformMain.cpp` anchors the
-link; the harness's stub `main()` is unused and the 5 test-tool entry points are dropped from the
-archives first).
+link, and the 5 test-tool entry points are dropped from the archives only *after* that real one is
+found). The harness generates no stub `main()` when `GeneralsMD/Code/Main` is in the build: if the
+entry point cannot be found there, the run fails and says so, because a link anchored by
+`int main() { return 0; }` would report a binary that starts nothing.
 
 So, precisely:
 
 * **Proved:** the whole tree compiles and links at 64-bit off Windows into a loadable native
   executable, the loader accepts it, it executes, and it gets as far as asking the filesystem for
   game data.
-* **Not proved:** that it is a *game*. It has not opened a window, created a rendering device, played
-  a sound, decoded a video, or loaded a single INI. A linked binary is not a running game and must
-  not be described as one anywhere in this repository.
+* **Not proved by this Linux run:** that it is a *game*. It has not opened a window, created a
+  rendering device, played a sound, decoded a video, or loaded a single INI. A linked binary is not a
+  running game and must not be described as one anywhere in this repository. The window and the INI
+  loading are proven on Apple Silicon against retail data (§0); the rendering device is not proven
+  anywhere.
 * **Also not proved *by this file*:** anything about Apple Silicon. This file is x86-64 ELF, built on
   Linux. The macOS runners compile the Cocoa backend; producing and running an `arm64` Mach-O against
   a retail install has since been done on real hardware, and
@@ -182,9 +199,12 @@ Everything on this list used to be preceded by "and a binary". That part is done
    decision, not a bug.
 3. ~~An `arm64` Mach-O produced by the same harness on macOS, with the Cocoa backend selected~~ —
    **done**, 976/977 objects and a clean strict link, 26.6 MiB, thin arm64, not Rosetta. The one
-   macOS-only compile failure (`WWLib/regexpr.cpp`, GNU-only `reg_syntax_t`) is not on the path to the
-   running game and was not worked around. The advisory macOS gate (decision 5) still measures this
-   without blocking.
+   macOS-only compile failure (`WWLib/regexpr.cpp`, GNU-only `reg_syntax_t`) has since been ported to
+   POSIX `<regex.h>` rather than excluded or `#ifdef`-ed away — `regexpr-posix-port.md` records the
+   decision, the three syntax differences it accepts, and the fact that the compile is expected to
+   reach 977/977 but has **not** been observed on a Mac. The advisory macOS gate (decision 5) still
+   measures this without blocking. Reproducing the macOS build is `native-build.md`
+   §"Building it on macOS (Apple Silicon)".
 4. ~~A run against an install~~ — **done**, and the prediction in this sentence held: the failures are
    now behavioural. The first one is a layout/width defect of exactly the kind
    `native-layout-test.py` and `xfer-blob-audit.py` were proxies for, caught this time by the retail

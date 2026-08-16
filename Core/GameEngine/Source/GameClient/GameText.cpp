@@ -51,10 +51,12 @@
 #include "GameClient/LanguageFilter.h"
 #include "Common/Debug.h"
 #include "Common/UnicodeString.h"
+#include "Common/WideCharWire.h"
 #include "Common/AsciiString.h"
 #include "Common/GlobalData.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
+#include "Common/InitFailure.h"
 #include "Common/version.h"
 
 
@@ -164,6 +166,7 @@ class GameTextManager : public GameTextInterface
 		Char						m_buffer2[MAX_UITEXT_LENGTH];
 		Char						m_buffer3[MAX_UITEXT_LENGTH];
 		WideChar				m_tbuffer[MAX_UITEXT_LENGTH*2];
+		WideWireChar			m_wirebuffer[MAX_UITEXT_LENGTH*2];
 
 		StringInfo			*m_stringInfo;
 		StringLookUp		*m_stringLUT;
@@ -316,12 +319,17 @@ void GameTextManager::init()
 	}
 	else
 	{
-		return;
+		// TheSuperHackers @port Report the failure instead of returning with no strings loaded.
+		// Returning here leaves every localized string missing, and the only symptom is m_failed
+		// being rendered as UI. See docs/porting/init-failure-reporting.md.
+		rts::throwInitFailure("TheGameText", "cannot read the string table from '%s' or '%s'",
+			g_strFile, csfFile.str());
 	}
 
 	if( m_textCount == 0 )
 	{
-		return;
+		rts::throwInitFailure("TheGameText", "the string table '%s' contains no strings",
+			format == STRING_FILE ? g_strFile : csfFile.str());
 	}
 
 	//Allocate StringInfo Array
@@ -331,7 +339,7 @@ void GameTextManager::init()
 	if( m_stringInfo == nullptr )
 	{
 		deinit();
-		return;
+		rts::throwInitFailure("TheGameText", "cannot allocate %d strings", m_textCount);
 	}
 
 	if ( format == STRING_FILE )
@@ -339,7 +347,7 @@ void GameTextManager::init()
 		if( parseStringFile( g_strFile ) == FALSE )
 		{
 			deinit();
-			return;
+			rts::throwInitFailure("TheGameText", "cannot parse the string file '%s'", g_strFile);
 		}
 	}
 	else
@@ -347,7 +355,8 @@ void GameTextManager::init()
 		if ( !parseCSF ( csfFile.str() ) )
 		{
 			deinit();
-			return;
+			rts::throwInitFailure("TheGameText", "cannot parse the compiled string file '%s'",
+				csfFile.str());
 		}
 	}
 
@@ -942,27 +951,28 @@ Bool GameTextManager::parseCSF( const Char *filename )
 
 		 	file->read ( &len, sizeof ( Int ) );
 
+			// TheSuperHackers @port A .csf record counts 16 bit code units, not WideChar: sizing this
+			// read with sizeof(WideChar) consumed twice the bytes that exist where WideChar is 4 bytes
+			// wide and left the next record id inside this record's text. See
+			// docs/porting/widechar-wire.md.
 			if ( len )
 			{
-				file->read ( m_tbuffer, len*sizeof(WideChar) );
+				file->read ( m_wirebuffer, wideCharWireBytes( len ) );
 			}
 
 			if ( num == 0 )
 			{
 				// only use the first string found
-				m_tbuffer[len] = 0;
 
+				// The text is stored one's complemented, and is complemented here as code units,
+				// before decoding, because that is what the stored units are.
+				for ( Int unit = 0; unit < len; unit++ )
 				{
-					WideChar *ptr;
-
-					ptr = m_tbuffer;
-
-					while ( *ptr )
-					{
-						*ptr = ~*ptr;
-						ptr++;
-					}
+					m_wirebuffer[unit] = (WideWireChar)~m_wirebuffer[unit];
 				}
+
+				const Int chars = wireToWideChar( m_tbuffer, MAX_UITEXT_LENGTH*2 - 1, m_wirebuffer, len );
+				m_tbuffer[chars] = 0;
 
 				stripSpaces ( m_tbuffer );
 				m_stringInfo[listCount].text = m_tbuffer;

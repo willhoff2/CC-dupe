@@ -28,6 +28,7 @@
 #include "GameClient/LanguageFilter.h"
 #include "Common/FileSystem.h"
 #include "Common/file.h"
+#include "Common/WideCharWire.h"
 
 
 
@@ -50,15 +51,24 @@ void LanguageFilter::init() {
 		return;
 	}
 
-	wchar_t word[128];
-	while (readWord(file1, word)) {
-		Int wordLen = wcslen(word);
+	// TheSuperHackers @port The list holds 16 bit code units, obfuscated one unit at a time, so it is
+	// read and unobfuscated as units and only then decoded into WideChar - a surrogate pair means
+	// nothing until the obfuscation is off. See docs/porting/widechar-wire.md.
+	WideWireChar wireWord[LANGUAGE_FILTER_MAX_WORD_UNITS];
+	while (readWord(file1, wireWord)) {
+		Int wordLen = 0;
+		while (wireWord[wordLen] != 0) {
+			++wordLen;
+		}
 		if (wordLen == 0) {
 			continue;
 		}
 		for (Int i = 0; i < wordLen; ++i) {
-			word[i] = word[i] ^ LANGUAGE_XOR_KEY;
+			wireWord[i] = (WideWireChar)(wireWord[i] ^ LANGUAGE_XOR_KEY);
 		}
+		wchar_t word[LANGUAGE_FILTER_MAX_WORD_UNITS];
+		const Int chars = wireToWideChar(word, LANGUAGE_FILTER_MAX_WORD_UNITS - 1, wireWord, wordLen);
+		word[chars] = 0;
 		UnicodeString uniword(word);
 		unHaxor(uniword);
 		//DEBUG_LOG(("Just read %ls from the bad word file.  Entered as %ls", word, uniword.str()));
@@ -151,36 +161,26 @@ void LanguageFilter::unHaxor(UnicodeString &word) {
 }
 
 // returning true means that there are more words in the file.
-Bool LanguageFilter::readWord(File *file1, WideChar *buf) {
+Bool LanguageFilter::readWord(File *file1, WideWireChar *buf) {
+	// TheSuperHackers @port The list is a sequence of 16 bit code units, so read one unit rather than
+	// one WideChar, which is twice that natively. See docs/porting/widechar-wire.md.
 	Int index = 0;
 	Bool retval = TRUE;
-	Int val = 0;
 
-	WideChar c;
-
-	val = file1->read(&c, sizeof(WideChar));
-	if ((val == -1) || (val == 0)) {
-		buf[index] = 0;
-		return FALSE;
-	}
-	buf[index] = c;
-
-	while (buf[index] != L' ') {
-		++index;
-		val = file1->read(&c, sizeof(WideChar));
+	while (index < LANGUAGE_FILTER_MAX_WORD_UNITS - 1) {
+		WideWireChar c;
+		const Int val = file1->read(&c, wideCharWireBytes(1));
 		if ((val == -1) || (val == 0)) {
-			c = WEOF;
-		}
-
-		if ((c == WEOF) || (c == L' ')) {
-			buf[index] = 0;
-			if (c == WEOF) {
-				retval = FALSE;
-			}
+			retval = FALSE;
 			break;
 		}
-		buf[index] = c;
+		if (c == L' ') {
+			break;
+		}
+		buf[index++] = c;
 	}
+
+	buf[index] = 0;
 	return retval;
 }
 

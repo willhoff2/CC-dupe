@@ -634,12 +634,109 @@ data it does not have (`INI::loadFileDirectory("Data\INI\Default\GameData")` thr
 calls `ReleaseCrash`). That failure message, in full, and the exact list of what linking does and does
 not prove, is [`startability.md`](startability.md) §4. **A linked binary is not a running game.**
 
+## Building it on macOS (Apple Silicon), and proving the result is arm64
+
+The first arm64 build and run is [`first-native-run-arm64.md`](first-native-run-arm64.md). What it
+needed was spread across that PR's description, so this section is the procedure, and the harness
+changes that made it stop lying about Mach-O are below it. Everything here is **measured on Linux and
+reasoned about for macOS unless `first-native-run-arm64.md` cites it**: the commands come from that
+run, the harness changes are new in the slice that wrote this section and have not been executed on a
+Mac.
+
+### 1. What has to be installed, and why the paths matter
+
+```sh
+xcode-select --install                       # or a full Xcode; `xcrun --show-sdk-path` must answer
+brew install zlib openal-soft cmake ninja pkg-config
+```
+
+`zlib` and `openal-soft` are **keg-only**, and that is not a detail: since Big Sur, macOS has kept its
+system libraries only inside the dyld shared cache, so there is no `/usr/lib/libz.dylib` file to put
+on a link line even though every process links zlib. The harness therefore probes the keg paths,
+
+```
+/opt/homebrew/opt/zlib/lib/libz.dylib          /usr/local/opt/zlib/lib/libz.dylib
+/opt/homebrew/opt/openal-soft/lib/libopenal.dylib   /usr/local/opt/openal-soft/lib/libopenal.dylib
+```
+
+Apple Silicon Homebrew is `/opt/homebrew`, Intel Homebrew is `/usr/local`; both are listed so one
+harness works on either. If neither is present the link is honestly short those libraries rather than
+quietly different — check `zlib: yes, openal: yes` in the harness's `== linking` line.
+
+### 2. Build it
+
+```sh
+./scripts/ci/fetch-probe-deps.sh
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims --strict-link \
+    --report /tmp/native-build-macos.md --json /tmp/native-build-macos.json
+```
+
+Do **not** write the macOS results over `docs/porting/ci-baselines/*.json`: those files are the
+clang-14 Linux ratchet, and a different compiler's figures are not comparable with them. macOS is to
+get an advisory baseline of its own, which does not exist yet (decision 5 of
+[`decisions-resolved.md`](decisions-resolved.md)), so until it does, a macOS run's numbers belong in a
+PR description or a doc that says whose compiler produced them.
+
+The harness selects `platform_window_cocoa.mm` on Apple and compiles `.mm` as Objective-C++, so an
+Objective-C++ compiler is required here and is not on Linux; it links `-framework AppKit`,
+`QuartzCore`, `Metal`, `CoreGraphics` and `Foundation` rather than SDL2. What macOS needed in the tree itself, each with
+its cost, is the table in `first-native-run-arm64.md` §1: a `<malloc.h>` shim (BSD has no such
+header), `wcslcpy`/`wcslcat` behind `HAVE_*` because the platform declares both with C linkage,
+`std::filesystem::path::iterator::reference` being `path` by value in libc++ where libstdc++ has
+`const path&`, and this file's own §"the one macOS compile failure", which is now
+[`regexpr-posix-port.md`](regexpr-posix-port.md).
+
+### 3. Prove it is arm64 and not x86-64 under Rosetta
+
+A build that silently comes out x86-64 invalidates every conclusion drawn from it, and nothing about
+a successful build says which it is. Two independent answers, both recorded in the JSON:
+
+```sh
+lipo -archs build/native/native_strict_link     # arm64 -- the platform's own tool, not this repo's header reader
+file build/native/native_strict_link            # Mach-O 64-bit executable arm64
+sysctl -n sysctl.proc_translated                # 0 -- 1 means this shell, and the toolchain, are translated
+```
+
+| JSON field | Means |
+|---|---|
+| `strict_link.binary.machine` | read out of the Mach-O header by `native-build.py` itself |
+| `strict_link.binary.lipo_archs` | what `lipo -archs` says, independently; a disagreement fails the gate |
+| `strict_link.binary.format` | `Mach-O universal` is a **failure**, not a pass: a fat file is not the thin native binary this port measures, and its header says nothing about what is inside |
+| `host_translated` | `sysctl.proc_translated`; `true` fails the gate, because an arm64 Mac running an x86-64 Python produces x86-64 objects while every other field still says "Apple Silicon" |
+
+`scripts/ci/check-native-build-baseline.py` enforces all four. `null` for `host_translated` means the
+question does not exist (not macOS), which is not the same as `false`.
+
+### 4. What the harness had to learn about Mach-O
+
+Two of #87's findings were defects in the *measurement*, which matters more than a build fix because
+this project's status is its baselines:
+
+- **One symbol namespace, with the prefix measured.** Mach-O prefixes C symbols with an underscore
+  (`main` is `_main`, the mangled `_ZN...` is `__ZN...`, `__cxa_throw` is `___cxa_throw`); ELF does
+  not. The harness compared names from four sources that did not agree on macOS, so
+  `strict_link.agrees_with_nm` was false against a link the linker called clean. Every name now
+  enters one prefix-free namespace at the boundary, `symbol_prefix()` **measures** the prefix by
+  compiling a one-line probe rather than switching on `sys.platform`, and exactly one prefix is
+  removed — `lstrip("_")` would corrupt `__ZN...` and `___cxa_throw` into names that match nothing.
+  The prefix and the platform's spelling of the entry point are recorded as `symbol_prefix` and
+  `entry_point_symbol`.
+- **The discount list has to exist.** "Symbols the platform supplies" was a list of ELF paths, which
+  matched no file on macOS, so `memcpy` and every libc++ symbol counted as port work. On macOS the
+  exports are read from the SDK's text-based stubs (`usr/lib/libSystem.tbd`, `libc++`, `libc++abi`,
+  `libobjc`, `usr/lib/system/*.tbd`), falling back to `dyld_info -exports` against the shared cache,
+  plus the `-framework` libraries on the link line. An **empty** discount list now stops the run:
+  it is a measurement bug, not a result. `system_symbol_sources` records what was read.
+
+`scripts/native-build-categorise-test.py` pins both in the cheap CI tier, driving the Mach-O prefix
+directly so the cases run on Linux.
+
 ## What this does not show
 
-- **This is Linux x86-64, not macOS arm64.** Nothing here has been run on Apple Silicon. The
-  categorisation of "which symbols the system supplies" is Linux-specific (`nm` output and the
-  system library set differ on Mach-O), and the `--whole-archive`/`--warn-unresolved-symbols` flags
-  are GNU ld spellings. Treat every count as a Linux measurement until a Mac session reproduces it.
+- **These counts are Linux x86-64, not macOS arm64.** An arm64 Mach-O has since been built and run on
+  Apple Silicon (`first-native-run-arm64.md`), but its figures are AppleClang's and are not
+  comparable with the clang-14 ratchet; the macOS gate stays advisory (decision 5). The Mach-O
+  handling described above is written and unit-tested on Linux and **not yet executed on a Mac**.
 - **The link is not clean, and is not meant to be.** A binary is produced because unresolved symbols
   are warnings, not errors; the report records `link_binary_produced` and `link_clean` separately so
   the difference cannot be glossed over. `--strict-link` is the measurement that cannot be glossed:

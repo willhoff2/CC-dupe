@@ -32,6 +32,7 @@
 #include "Common/XferSave.h"
 #include "Common/Snapshot.h"
 #include "Common/GameMemory.h"
+#include "Common/WideCharWire.h"
 
 // PRIVATE TYPES //////////////////////////////////////////////////////////////////////////////////
 class XferBlockData : public MemoryPoolObject
@@ -317,8 +318,14 @@ void XferSave::xferAsciiString( AsciiString *asciiStringData )
 void XferSave::xferUnicodeString( UnicodeString *unicodeStringData )
 {
 
+	// TheSuperHackers @port The length header counts the 16 bit code units that follow it, which is
+	// what it always counted: MSVC's WideChar is a code unit, so on Windows this is byte for byte the
+	// save file the game always wrote. Natively a code point above U+FFFF is a surrogate pair and so
+	// counts as two units. See docs/porting/widechar-wire.md.
+	const Int units = wideCharWireUnitCount( unicodeStringData->str(), unicodeStringData->getLength() );
+
 	// sanity
-	if( unicodeStringData->getLength() > 255 )
+	if( units > 255 )
 	{
 
 		DEBUG_CRASH(( "XferSave cannot save this unicode string because it's too long.  Change the size of the length header (but be sure to preserve save file compatability" ));
@@ -327,12 +334,17 @@ void XferSave::xferUnicodeString( UnicodeString *unicodeStringData )
 	}
 
 	// save length of string to follow
-	UnsignedByte len = unicodeStringData->getLength();
+	UnsignedByte len = (UnsignedByte)units;
 	xferUnsignedByte( &len );
 
 	// save string data
 	if( len > 0 )
-		xferUser( (void *)unicodeStringData->str(), sizeof( WideChar ) * len );
+	{
+		WideWireChar wire[ WIDECHAR_WIRE_MAX_UNITS ];
+		wideCharToWire( wire, WIDECHAR_WIRE_MAX_UNITS, unicodeStringData->str(),
+			unicodeStringData->getLength() );
+		xferUser( (void *)wire, wideCharWireBytes( len ) );
+	}
 
 }
 

@@ -1,0 +1,897 @@
+{
+  "counts": {
+    "debug-only": 5,
+    "no-failure-path": 39,
+    "not-found": 0,
+    "release-fatal": 0,
+    "silent-return": 1,
+    "throws": 1
+  },
+  "engine_init": "GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp",
+  "entries": [
+    {
+      "entry": "TheNameKeyGenerator",
+      "expression": "TheNameKeyGenerator",
+      "how": "direct init() call",
+      "implementations": [
+        {
+          "class": "NameKeyGenerator",
+          "classification": "debug-only",
+          "defines_init": "NameKeyGenerator",
+          "evidence": [
+            "DEBUG_CRASH"
+          ],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/NameKeyGenerator.cpp",
+          "line": 41,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheCommandList",
+      "expression": "TheCommandList",
+      "how": "direct init() call",
+      "implementations": [
+        {
+          "class": "CommandList",
+          "classification": "no-failure-path",
+          "defines_init": "CommandList",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/MessageStream.cpp",
+          "line": 1110,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheLocalFileSystem",
+      "expression": "createLocalFileSystem()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "Win32LocalFileSystem",
+          "classification": "no-failure-path",
+          "defines_init": "Win32LocalFileSystem",
+          "evidence": [],
+          "file": "Core/GameEngineDevice/Source/Win32Device/Common/Win32LocalFileSystem.cpp",
+          "line": 91,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheArchiveFileSystem",
+      "expression": "createArchiveFileSystem()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "Win32BIGFileSystem",
+          "classification": "debug-only",
+          "defines_init": "Win32BIGFileSystem",
+          "evidence": [
+            "DEBUG_CRASH",
+            "1 guarded return"
+          ],
+          "file": "Core/GameEngineDevice/Source/Win32Device/Common/Win32BIGFileSystem.cpp",
+          "line": 38,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheWritableGlobalData",
+      "expression": "TheWritableGlobalData",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "GlobalData",
+          "classification": "no-failure-path",
+          "defines_init": "GlobalData",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp",
+          "line": 1111,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\GameData",
+        "Data\\\\INI\\\\GameData"
+      ]
+    },
+    {
+      "entry": "TheGameLODManager",
+      "expression": "TheGameLODManager",
+      "how": "direct init() call",
+      "implementations": [
+        {
+          "class": "GameLODManager",
+          "classification": "no-failure-path",
+          "defines_init": "GameLODManager",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/GameLOD.cpp",
+          "line": 286,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheDeepCRCSanityCheck",
+      "expression": "MSGNEW(\"GameEngineSubystem\") DeepCRCSanityCheck",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "DeepCRCSanityCheck",
+          "classification": "no-failure-path",
+          "defines_init": "DeepCRCSanityCheck",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/GameEngine.cpp",
+          "line": 105,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheGameText",
+      "expression": "CreateGameTextInterface()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "GameTextManager",
+          "classification": "throws",
+          "defines_init": "GameTextManager",
+          "evidence": [
+            "throwInitFailure",
+            "1 guarded return"
+          ],
+          "file": "Core/GameEngine/Source/GameClient/GameText.cpp",
+          "line": 272,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheScienceStore",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") ScienceStore()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "ScienceStore",
+          "classification": "debug-only",
+          "defines_init": "ScienceStore",
+          "evidence": [
+            "DEBUG_CRASH"
+          ],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/RTS/Science.cpp",
+          "line": 24,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\Science",
+        "Data\\\\INI\\\\Science"
+      ]
+    },
+    {
+      "entry": "TheMultiplayerSettings",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") MultiplayerSettings()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "MultiplayerSettings",
+          "classification": "no-failure-path",
+          "defines_init": "MultiplayerSettings",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Include/Common/MultiplayerSettings.h",
+          "line": 60,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\Multiplayer",
+        "Data\\\\INI\\\\Multiplayer"
+      ]
+    },
+    {
+      "entry": "TheTerrainTypes",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") TerrainTypeCollection()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "TerrainTypeCollection",
+          "classification": "no-failure-path",
+          "defines_init": "TerrainTypeCollection",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Include/Common/TerrainTypes.h",
+          "line": 194,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\Terrain",
+        "Data\\\\INI\\\\Terrain"
+      ]
+    },
+    {
+      "entry": "TheTerrainRoads",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") TerrainRoadCollection()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "TerrainRoadCollection",
+          "classification": "no-failure-path",
+          "defines_init": "TerrainRoadCollection",
+          "evidence": [],
+          "file": "Core/GameEngine/Include/GameClient/TerrainRoads.h",
+          "line": 180,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\Roads",
+        "Data\\\\INI\\\\Roads"
+      ]
+    },
+    {
+      "entry": "TheGlobalLanguageData",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") GlobalLanguage",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "GlobalLanguage",
+          "classification": "debug-only",
+          "defines_init": "GlobalLanguage",
+          "evidence": [
+            "DEBUG_CRASH"
+          ],
+          "file": "Core/GameEngine/Source/GameClient/GlobalLanguage.cpp",
+          "line": 140,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheAudio",
+      "expression": "createAudioManager(TheGlobalData->m_headless), nullptr",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "MilesAudioManagerDummy",
+          "classification": "silent-return",
+          "defines_init": "MilesAudioManager",
+          "evidence": [
+            "1 guarded return"
+          ],
+          "file": "Core/GameEngineDevice/Source/MilesAudioDevice/MilesAudioManager.cpp",
+          "line": 406,
+          "returns": "void"
+        },
+        {
+          "class": "MilesAudioManager",
+          "classification": "silent-return",
+          "defines_init": "MilesAudioManager",
+          "evidence": [
+            "1 guarded return"
+          ],
+          "file": "Core/GameEngineDevice/Source/MilesAudioDevice/MilesAudioManager.cpp",
+          "line": 406,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheFunctionLexicon",
+      "expression": "createFunctionLexicon()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "W3DFunctionLexicon",
+          "classification": "no-failure-path",
+          "defines_init": "W3DFunctionLexicon",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/Common/System/W3DFunctionLexicon.cpp",
+          "line": 117,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheModuleFactory",
+      "expression": "createModuleFactory()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "W3DModuleFactory",
+          "classification": "no-failure-path",
+          "defines_init": "W3DModuleFactory",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/Common/Thing/W3DModuleFactory.cpp",
+          "line": 39,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheMessageStream",
+      "expression": "createMessageStream()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "MessageStream",
+          "classification": "no-failure-path",
+          "defines_init": "MessageStream",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/MessageStream.cpp",
+          "line": 774,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheSidesList",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") SidesList()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "SidesList",
+          "classification": "no-failure-path",
+          "defines_init": "SidesList",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Include/GameLogic/SidesList.h",
+          "line": 104,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheCaveSystem",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") CaveSystem()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "CaveSystem",
+          "classification": "no-failure-path",
+          "defines_init": "CaveSystem",
+          "evidence": [],
+          "file": "Core/GameEngine/Source/GameLogic/System/CaveSystem.cpp",
+          "line": 31,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheRankInfoStore",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") RankInfoStore()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "RankInfoStore",
+          "classification": "debug-only",
+          "defines_init": "RankInfoStore",
+          "evidence": [
+            "DEBUG_CRASH"
+          ],
+          "file": "Core/GameEngine/Source/GameLogic/System/RankInfo.cpp",
+          "line": 43,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Rank"
+      ]
+    },
+    {
+      "entry": "ThePlayerTemplateStore",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") PlayerTemplateStore()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "PlayerTemplateStore",
+          "classification": "no-failure-path",
+          "defines_init": "PlayerTemplateStore",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/RTS/PlayerTemplate.cpp",
+          "line": 255,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\PlayerTemplate",
+        "Data\\\\INI\\\\PlayerTemplate"
+      ]
+    },
+    {
+      "entry": "TheParticleSystemManager",
+      "expression": "createParticleSystemManager(TheGlobalData->m_headless), nullptr",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "ParticleSystemManagerDummy",
+          "classification": "no-failure-path",
+          "defines_init": "ParticleSystemManagerDummy",
+          "evidence": [],
+          "file": "Core/GameEngine/Include/GameClient/ParticleSys.h",
+          "line": 811,
+          "returns": "void"
+        },
+        {
+          "class": "W3DParticleSystemManager",
+          "classification": "debug-only",
+          "defines_init": "ParticleSystemManager",
+          "evidence": [
+            "DEBUG_CRASH"
+          ],
+          "file": "Core/GameEngine/Source/GameClient/System/ParticleSys.cpp",
+          "line": 2880,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheFXListStore",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") FXListStore()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "FXListStore",
+          "classification": "no-failure-path",
+          "defines_init": "FXListStore",
+          "evidence": [],
+          "file": "Core/GameEngine/Include/GameClient/FXList.h",
+          "line": 109,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\FXList",
+        "Data\\\\INI\\\\FXList"
+      ]
+    },
+    {
+      "entry": "TheWeaponStore",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") WeaponStore()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "WeaponStore",
+          "classification": "no-failure-path",
+          "defines_init": "WeaponStore",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Include/GameLogic/Weapon.h",
+          "line": 774,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Weapon"
+      ]
+    },
+    {
+      "entry": "TheObjectCreationListStore",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") ObjectCreationListStore()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "ObjectCreationListStore",
+          "classification": "no-failure-path",
+          "defines_init": "ObjectCreationListStore",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Include/GameLogic/ObjectCreationList.h",
+          "line": 110,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\ObjectCreationList",
+        "Data\\\\INI\\\\ObjectCreationList"
+      ]
+    },
+    {
+      "entry": "TheLocomotorStore",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") LocomotorStore()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "LocomotorStore",
+          "classification": "no-failure-path",
+          "defines_init": "LocomotorStore",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Include/GameLogic/Locomotor.h",
+          "line": 413,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Locomotor"
+      ]
+    },
+    {
+      "entry": "TheSpecialPowerStore",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") SpecialPowerStore()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "SpecialPowerStore",
+          "classification": "no-failure-path",
+          "defines_init": "SpecialPowerStore",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Include/Common/SpecialPower.h",
+          "line": 138,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\SpecialPower",
+        "Data\\\\INI\\\\SpecialPower"
+      ]
+    },
+    {
+      "entry": "TheDamageFXStore",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") DamageFXStore()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "DamageFXStore",
+          "classification": "no-failure-path",
+          "defines_init": "DamageFXStore",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/DamageFX.cpp",
+          "line": 281,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\DamageFX"
+      ]
+    },
+    {
+      "entry": "TheArmorStore",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") ArmorStore()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "ArmorStore",
+          "classification": "no-failure-path",
+          "defines_init": "ArmorStore",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Include/GameLogic/Armor.h",
+          "line": 72,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Armor"
+      ]
+    },
+    {
+      "entry": "TheBuildAssistant",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") BuildAssistant",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "BuildAssistant",
+          "classification": "no-failure-path",
+          "defines_init": "BuildAssistant",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/System/BuildAssistant.cpp",
+          "line": 112,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheThingFactory",
+      "expression": "createThingFactory()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "W3DThingFactory",
+          "classification": "no-failure-path",
+          "defines_init": "ThingFactory",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/Thing/ThingFactory.cpp",
+          "line": 181,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\Object",
+        "Data\\\\INI\\\\Object"
+      ]
+    },
+    {
+      "entry": "TheUpgradeCenter",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") UpgradeCenter",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "UpgradeCenter",
+          "classification": "no-failure-path",
+          "defines_init": "UpgradeCenter",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/System/Upgrade.cpp",
+          "line": 240,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\Upgrade",
+        "Data\\\\INI\\\\Upgrade"
+      ]
+    },
+    {
+      "entry": "TheGameClient",
+      "expression": "createGameClient()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "W3DGameClient",
+          "classification": "no-failure-path",
+          "defines_init": "W3DGameClient",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DGameClient.cpp",
+          "line": 63,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheAI",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") AI()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "AI",
+          "classification": "no-failure-path",
+          "defines_init": "AI",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AI.cpp",
+          "line": 292,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\AIData",
+        "Data\\\\INI\\\\AIData"
+      ]
+    },
+    {
+      "entry": "TheGameLogic",
+      "expression": "createGameLogic()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "W3DGameLogic",
+          "classification": "no-failure-path",
+          "defines_init": "GameLogic",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/GameLogic/System/GameLogic.cpp",
+          "line": 367,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheTeamFactory",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") TeamFactory()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "TeamFactory",
+          "classification": "no-failure-path",
+          "defines_init": "TeamFactory",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/RTS/Team.cpp",
+          "line": 167,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheCrateSystem",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") CrateSystem()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "CrateSystem",
+          "classification": "no-failure-path",
+          "defines_init": "CrateSystem",
+          "evidence": [],
+          "file": "Core/GameEngine/Source/GameLogic/System/CrateSystem.cpp",
+          "line": 39,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "Data\\\\INI\\\\Default\\\\Crate",
+        "Data\\\\INI\\\\Crate"
+      ]
+    },
+    {
+      "entry": "ThePlayerList",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") PlayerList()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "PlayerList",
+          "classification": "no-failure-path",
+          "defines_init": "PlayerList",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/RTS/PlayerList.cpp",
+          "line": 220,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheRecorder",
+      "expression": "createRecorder()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "RecorderClass",
+          "classification": "no-failure-path",
+          "defines_init": "RecorderClass",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/Recorder.cpp",
+          "line": 341,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheRadar",
+      "expression": "createRadar(TheGlobalData->m_headless), nullptr",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "RadarDummy",
+          "classification": "no-failure-path",
+          "defines_init": "Radar",
+          "evidence": [],
+          "file": "Core/GameEngine/Include/Common/Radar.h",
+          "line": 136,
+          "returns": "void"
+        },
+        {
+          "class": "W3DRadar",
+          "classification": "debug-only",
+          "defines_init": "W3DRadar",
+          "evidence": [
+            "DEBUG_CRASH"
+          ],
+          "file": "Core/GameEngineDevice/Source/W3DDevice/Common/System/W3DRadar.cpp",
+          "line": 875,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheVictoryConditions",
+      "expression": "createVictoryConditions()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "VictoryConditions",
+          "classification": "no-failure-path",
+          "defines_init": "VictoryConditions",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/GameLogic/ScriptEngine/VictoryConditions.cpp",
+          "line": 108,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheMetaMap",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") MetaMap()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "MetaMap",
+          "classification": "no-failure-path",
+          "defines_init": "MetaMap",
+          "evidence": [],
+          "file": "Core/GameEngine/Include/GameClient/MetaEvent.h",
+          "line": 441,
+          "returns": "void"
+        }
+      ],
+      "ini": [
+        "fname.str()",
+        "Data\\\\INI\\\\CommandMap"
+      ]
+    },
+    {
+      "entry": "TheActionManager",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") ActionManager()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "ActionManager",
+          "classification": "no-failure-path",
+          "defines_init": "ActionManager",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Include/Common/ActionManager.h",
+          "line": 42,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheGameStateMap",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") GameStateMap",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "GameStateMap",
+          "classification": "no-failure-path",
+          "defines_init": "GameStateMap",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Include/Common/GameStateMap.h",
+          "line": 25,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheGameState",
+      "expression": "MSGNEW(\"GameEngineSubsystem\") GameState",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "GameState",
+          "classification": "no-failure-path",
+          "defines_init": "GameState",
+          "evidence": [],
+          "file": "GeneralsMD/Code/GameEngine/Source/Common/System/SaveGame/GameState.cpp",
+          "line": 314,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    },
+    {
+      "entry": "TheGameResultsQueue",
+      "expression": "GameResultsInterface::createNewGameResultsInterface()",
+      "how": "initSubsystem",
+      "implementations": [
+        {
+          "class": "GameResultsQueue",
+          "classification": "no-failure-path",
+          "defines_init": "GameResultsQueue",
+          "evidence": [],
+          "file": "Core/GameEngine/Source/GameNetwork/GameSpy/Thread/GameResultsThread.cpp",
+          "line": 33,
+          "returns": "void"
+        }
+      ],
+      "ini": []
+    }
+  ],
+  "entry_count": 46
+}

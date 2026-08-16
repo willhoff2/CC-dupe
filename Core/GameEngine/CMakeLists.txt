@@ -137,6 +137,7 @@ set(GAMEENGINE_SRC
     Include/Common/UserPreferences.h
 #    Include/Common/version.h
 #    Include/Common/WellKnownKeys.h
+    Include/Common/WideCharWire.h
     Include/Common/WorkerProcess.h
     Include/Common/Xfer.h
     Include/Common/XferCRC.h

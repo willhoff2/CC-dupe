@@ -244,7 +244,12 @@ RENDERER_TARGETS = [
         includes=tuple(DEVICE_INCLUDES),
         cmake_lists="Core/GameEngineDevice/CMakeLists.txt",
         cmake_root="Core/GameEngineDevice",
-        defines=("RTS_ZEROHOUR=1",),
+        # `RTS_HAS_FFMPEG` is what Core/GameEngineDevice/CMakeLists.txt puts on
+        # `corei_gameenginedevice_public` when RTS_BUILD_OPTION_FFMPEG is on, which is the video
+        # route this port takes. Without it the FFmpeg translation units still compile and
+        # libavcodec still links, but `W3DGameClient::createVideoPlayer()` returns
+        # `NullVideoPlayer` -- so the linked binary could not open a movie at all.
+        defines=("RTS_ZEROHOUR=1", "RTS_HAS_FFMPEG"),
     ),
     Target(
         name="GeneralsMD/Code/GameEngineDevice",
@@ -255,7 +260,8 @@ RENDERER_TARGETS = [
         includes=tuple(DEVICE_INCLUDES) + ("GeneralsMD/Code/Main",),
         cmake_lists="GeneralsMD/Code/GameEngineDevice/CMakeLists.txt",
         cmake_root="GeneralsMD/Code/GameEngineDevice",
-        defines=("RTS_ZEROHOUR=1",),
+        # Ditto: this is the target holding W3DGameClient.cpp, which picks the video player.
+        defines=("RTS_ZEROHOUR=1", "RTS_HAS_FFMPEG"),
     ),
     Target(
         name="GeneralsMD/Code/Main",

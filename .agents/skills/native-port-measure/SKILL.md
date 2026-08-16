@@ -105,7 +105,28 @@ Ubuntu 22.04 ships CMake 3.22, which the top-level `cmake_minimum_required(3.25)
 not. `pip install --user 'cmake==4.1.2'` provides a new enough `~/.local/bin/cmake` without touching
 the system one; that is the version the audio CI job pins, so it configures the same way.
 
-## 6. Regenerate the status document
+## 6. On a Mac, and only on a Mac
+
+The procedure, the Homebrew keg paths macOS needs and what each shim is for live in
+`docs/porting/native-build.md` §"Building it on macOS (Apple Silicon), and proving the result is
+arm64". Two things belong here because they invalidate a whole session's conclusions if skipped:
+
+```sh
+lipo -archs build/native/native_strict_link   # must say arm64, on its own line, and nothing else
+sysctl -n sysctl.proc_translated              # must say 0
+```
+
+An x86-64 build under Rosetta reports "Apple Silicon" in every other field, and a universal binary is
+not the thin native artefact these numbers describe. `native-build.py` records both (`lipo_archs`,
+`host_translated`) and `check-native-build-baseline.py` fails on either, so the check is not something
+you have to remember — but reading it in the output is.
+
+Do **not** overwrite `docs/porting/ci-baselines/*.json` from a Mac: they are the clang-14 Linux
+ratchet and AppleClang's figures are not comparable (decision 5 of `decisions-resolved.md`; macOS
+gets an advisory baseline of its own, which does not exist yet). Put the macOS numbers in the PR
+description or a doc that names the compiler.
+
+## 7. Regenerate the status document
 
 ```sh
 python3 scripts/porting-status.py          # rewrite docs/porting/STATUS.md

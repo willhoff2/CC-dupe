@@ -248,6 +248,20 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # An init() that cannot report a failure is how the .csf desync in #87 reached the window
+      # title instead of a crash log, so the enumeration in docs/porting/init-failure-reporting.md
+      # is ratcheted: no startup subsystem may report less loudly than the baseline, and a new one
+      # has to be able to report at all. Text scan, no build.
+      - name: Check startup init failure reporting against the baseline
+        run: |
+          set -o pipefail
+          {
+            echo '## Startup init failure reporting'
+            echo '```'
+            python3 scripts/init-reporting-scan.py --check --quiet
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   # 1. The native 64-bit clang readiness probe, gated against a checked-in baseline so a
   #    portability regression fails the build instead of printing a smaller number.
   native-probe:
@@ -547,6 +561,21 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The negative control for init-failure reporting: a subsystem whose init() is made to fail
+      # must be diagnosable, and the shape it replaces -- detect the failure and return -- must
+      # provably not be. Needs no game data. See docs/porting/init-failure-reporting.md.
+      - name: Run the init-failure reporting negative control
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Init failure reporting'
+            echo '```'
+            python3 scripts/native-init-failure-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The GDI font seam draws the text the WND GUI measures its layout against, so "text appears"
       # is not the acceptance criterion: the advance widths and the line height are. This compares
       # the port's CreateFont/GetTextMetrics/GetTextExtentPoint32W against recorded GDI metrics --
@@ -834,6 +863,20 @@ jobs:
             echo '## LAN packet layout'
             echo '```'
             python3 scripts/ci/check-lanmessage-layout.py --clangxx clang++-14
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The same width question one layer down: every external wide-text format (.csf, .map, save
+      # game, replay, CRC, network packet) stores 16-bit code units, so this runs the real
+      # WideCharWire.h at both wchar_t widths and requires the external bytes to be identical --
+      # and requires the pre-port sizeof(WideChar) sizing to still desynchronise the .csf reader.
+      - name: Convert wide text at the process boundary at both wchar_t widths
+        run: |
+          set -o pipefail
+          {
+            echo '## Wide character wire conversion'
+            echo '```'
+            python3 scripts/ci/check-widechar-wire.py --clangxx clang++-14
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
