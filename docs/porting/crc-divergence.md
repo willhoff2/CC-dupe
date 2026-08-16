@@ -2,8 +2,9 @@
 
 The headless native build ticks a retail replay to the end and is deterministic against itself, but
 **none** of its 134 checkpoint CRCs equal the recorded ones. This report says *where* that starts, *what
-state* differs, and *which mechanism* produces each difference. It fixes one cause and leaves the rest
-as measured findings.
+state* differs, and *which mechanism* produces each difference. It fixes none of them: the one cause
+whose fix looked cheap turned out to change the Windows oracle, which is measured in §3.1 and is why
+that change is not in this PR.
 
 Cross-platform CRC equality is **not a shipping requirement** — retail replay/save compatibility is out
 of scope. Its value is as an **oracle**: it is the only mechanism that can say the native simulation
@@ -19,7 +20,7 @@ oracle is needed (13,500 "successful" frames of an empty map).
 | Native binary | `build/native/native_strict_link`, ELF 64-bit x86-64, 979/979 objects, 0 unresolved |
 | Windows binary | `./scripts/docker-build.sh` VC6 build, `RTS_BUILD_OPTION_DEBUG=OFF`, run under Wine |
 | Data | `zerohour104_gamedata_full.7z` + `generals108_gamedata_trimmed.7z`, extracted outside the repo |
-| Replay | `GeneralsReplays/GeneralsZH/1.04/Replays/366648.rep`, `[RANK] Arctic Arena ZH v1`, 7:30 |
+| Replay | `GeneralsReplays/GeneralsZH/1.04/Replays/366648.rep`, `[RANK] Arctic Arena ZH v1`, 7:30, plus all 10 gate replays for §3.1 |
 | Instrument | `CRCDiag` (this PR): opt-in, env-gated, does not touch the production CRC |
 
 `CRCDiag` is off unless `CNC_CRC_DIAG` names a log file. When on it records, per frame: every
@@ -34,7 +35,7 @@ baseline was changed; the markers were already in the production stream as `MARK
 **Checkpoint 1 already differs.** The first comparison the replay makes is at frame 110, and it differs:
 
 ```
-C 110 LOCAL C6FA1978 REPLAY 659E2F68 MISMATCH      <- native
+C 110 LOCAL 1D39673E REPLAY 659E2F68 MISMATCH      <- native
 C 110 LOCAL 659E2F68 REPLAY 659E2F68 MATCH         <- Windows, same replay
 ```
 
@@ -44,34 +45,39 @@ straight out of map load, before any logic runs:
 
 | Frame | Native total | Windows total |
 |---|---|---|
-| 0 | `91C82211` | `75994115` |
-| 100 | `C6FA1978` | `659E2F68` |
+| 0 | `E68C5D1A` | `75994115` |
+| 100 | `1D39673E` | `659E2F68` |
 
-## 2. Where in *state*: 13 of 440,035 raw-byte records at frame 0
+## 2. Where in *state*: 132 of 440,035 raw-byte records at frame 0
 
-Frame 0 checksums 440,035 `xferUser` blobs. Comparing them record-by-record between the two runs:
+Frame 0 checksums 440,035 `xferUser` blobs. Comparing them record-by-record between the two runs,
+**132 differ**. Every one of them is a 48-byte `Matrix3D` from `Object::crc()`, and the differences are
+only ever in a handful of elements:
 
-| Run | Differing frame-0 records |
-|---|---|
-| native, before the fix in §3.1 | **132** of 440,035 |
-| native, after it | **13** of 440,035 |
-| Windows, before vs after the fix | **0** — byte-identical, 440,035/440,035 |
+| Differing element (`Matrix3D` as 12 floats) | Records | Difference |
+|---|---|---|
+| `[1]` alone | 73 | `+0.0` native vs `-0.0` Windows |
+| `[9]` alone | 24 | `-0.0` native vs `+0.0` Windows |
+| `[8]` alone | 22 | `-0.0` native vs `+0.0` Windows |
+| `[2]`,`[6]`,`[8]`/`[9]` and `[10]` together | 13 | signed zeroes **and** `1.0f` vs `0.99999994f`, 1 ULP |
+
+So 119 of the 132 are a **signed zero and nothing else**, in exactly one matrix element (§3.1), and the
+remaining 13 carry a real value difference (§3.2, §3.3).
 
 Structure is not the problem, and this is worth stating precisely because it eliminates several
 candidates at once: at frames 0 and 100 the two runs emit the **same number of objects (221, then 222),
 in the same order, with the same object IDs and the same template names**, and the same subsystem
 marker sequence (`Objects`, `ThePartitionManager`, `TheModuleFactory`, `ThePlayerList`, `TheAI`,
-`TAiData`, `AIGroup`, `GameSave`). Every differing record is a 48-byte `Matrix3D` inside `Object::crc()`,
-and every difference is one of: a differently signed zero, a 1-ULP float, or `1.0f` against
-`0.99999994f`.
+`TAiData`, `AIGroup`, `GameSave`).
 
-The divergence also does **not** amplify over the measured window — it stays at a handful of ULPs:
+The divergence also does **not** amplify much over the measured window — it stays at a handful of
+records, all of the same shape:
 
 | Frame | Differing raw-byte records |
 |---|---|
-| 0 | 13 of 440,035 |
-| 100 | 14 of 12,731 |
-| 1000 | 16 of 12,890 |
+| 0 | 132 of 440,035 |
+| 100 | 133 of 12,731 |
+| 1000 | 141 of 12,890 |
 
 That is the shape of the whole problem. The native build is playing the same game to within a few ULPs,
 but a whole-world CRC is all-or-nothing: one differing byte anywhere makes every checkpoint mismatch.
@@ -83,23 +89,53 @@ plus, where a mechanism is not visible at frame 0, a direct A/B of the same expr
 compilers. That metric is honest about what it is: a count of differing serialised records at one
 instant, not a claim about long-run influence.
 
-### 3.1 CONFIRMED — MSVC folds the constant multiplies out of `setOrientation`'s cross products (119/132 records; **fixed here**)
+### 3.1 CONFIRMED — VC6 folds the constant multiplies out of `setOrientation`'s cross products, inconsistently (119/132 records; **candidate fix rejected by the oracle, not in this PR**)
 
-`Thing::setOrientation()` built the rotation by crossing the heading with the constant Z axis. Those
-cross products only ever multiply by `0.0f` and `1.0f`. VC6 folds them; clang, which may not assume
-`0.0f * x` is `+0.0f`, keeps them — so the two builds wrote **differently signed zeroes** into a matrix
-that `Object::crc()` checksums raw (`xfer->xferUser((Matrix3D *)getTransformMatrix(), sizeof(Matrix3D))`).
+`Thing::setOrientation()` builds the rotation by crossing the heading with the constant Z axis:
 
-Tested: compiled the exact expression under both compilers over 20,001 angles (`-3.15..3.15`) and
-diffed all nine matrix elements as bit patterns; the zero elements disagree, and disagree only at
-axis-aligned angles — which is where most map objects sit. Then measured in the engine: writing the
-rotation out directly took frame 0 from 132 differing records to 13, and left the Windows run
-byte-identical (§2), including all 31 of its matching checkpoints.
+```cpp
+z = (0,0,1);  u = (Cos(angle), Sin(angle), 0);
+y.crossProduct(z, u, y);      // (0*0 - 1*s,  1*c - 0*0,  0*s - 0*c)
+x.crossProduct(y, z, x);      // (c*1 - 0*0,  0*0 - y.x*1,  y.x*0 - c*0)
+m_transform.Set(x.x, y.x, z.x, ...);
+```
 
-This is the fix in this PR. It is a spelling change in the existing style, not a behaviour change:
-Windows output is unchanged, measured, not argued.
+Every product in those cross products is by `0.0f` or `1.0f`, and the three elements that come out of
+them are exactly the three the dumps disagree on. Element by element, native vs Windows:
 
-### 3.2 CONFIRMED — excess intermediate precision on the Windows side (10 of the remaining 13 records; the dominant cause for the rest of the run)
+| Element | Expression | VC6 | clang |
+|---|---|---|---|
+| `[1]` = `y.x` | `0*0 - 1*s`, with `s == +0.0` | `-0.0` — folded to `-s` | `+0.0` — computed, `0 - 0` |
+| `[8]` = `x.z` | `y.x*0 - c*0`, with `y.x == -0.0` | `+0.0` — folded to a constant | `-0.0` — computed |
+| `[9]` = `y.z` | `0*s - 0*c`, with `s < 0` | `+0.0` — folded | `-0.0` — computed, `-0.0 - 0.0` |
+
+So VC6 does fold, clang does not, and the sign of a checksummed zero differs. Confirmed by the
+element-level dump comparison above (119 records, each differing in exactly one of `[1]`, `[8]`, `[9]`)
+and by compiling the same expression under both compilers over 20,001 angles.
+
+**The obvious fix does not survive the oracle.** Writing the rotation out directly —
+`Set(c, -s, 0.0f, ..., s, c, 0.0f, ..., 0.0f, 0.0f, 1.0f, ...)` — takes frame 0 from 132 differing
+records to 13, and it leaves this replay's Windows run byte-identical over all 440,035 frame-0 records.
+But across all 10 gate replays it **changes the Windows build**: `12-11-35_2v2_babai_ILnur_HardAI_HardAI`
+diverges from its recording at frame 110 instead of frame 3410. Reproduced twice, and rebuilding with
+that one file reverted restores unmodified `main`'s exact pattern on all 10:
+
+| Windows build | First divergence, 10 replays |
+|---|---|
+| unmodified `main` | 1724, 110, 110, 1810, 3210, 110, **3410**, 2310, 2210, 3211 |
+| this PR (no `Thing.cpp` change) | 1724, 110, 110, 1810, 3210, 110, **3410**, 2310, 2210, 3211 |
+| this PR **+ the direct spelling** | 1724, 110, 110, 1810, 3210, 110, **110**, 2310, 2210, 3211 |
+
+The reason is in the table above: VC6's folding is *value dependent*, so for some objects it produces
+`-0.0` at `[8]`/`[9]` — agreeing with clang, which is why those records are not in the 119 — and a
+literal `0.0f` changes them. Matching VC6 by spelling means reproducing its per-element folding
+decisions, which is reverse engineering an optimiser, not a seam.
+
+What this measurement cost: an earlier draft of this PR carried that change and claimed it was
+behaviour preserving on the strength of the pre/post frame-0 comparison on **one** map. One map was not
+enough; the 10-replay bisect is what caught it. That is recorded here rather than quietly dropped.
+
+### 3.2 CONFIRMED — excess intermediate precision on the Windows side (10 of the 13 value-differing records; the dominant cause for the rest of the run)
 
 MSVC/VC6 evaluates `float` expressions on the x87 stack with the CRT's 53-bit precision control, i.e.
 at **double** precision, and only rounds to `float` on store. clang on x86-64 (SSE) and on arm64 (NEON)
@@ -108,7 +144,7 @@ allowed to differ.
 
 Tested two ways.
 
-1. In the engine: the 10 remaining terrain-aligned objects differ exactly as this predicts — Windows
+1. In the engine: the 10 terrain-aligned objects differ exactly as this predicts — Windows
    stores a normalised axis of `0.99999994f` (`FF FF 7F 3F`) where native stores `1.0f`, from
    `Coord3D::normalize()`/`makeAlignToNormalMatrix()` off `TerrainLogic::alignOnTerrain()`.
 2. Standalone A/B of `GetGameLogicRandomValueReal()`'s arithmetic — `((Real)v * theMultFactor) * delta
@@ -124,11 +160,11 @@ Tested two ways.
    natively. Nothing in the replay's first 110 frames drew one — but over a 7:30 game this dwarfs
    everything else in §3.
 
-Not fixed here, and it is not a one-line fix: it needs either the checksummed float expressions
+Not fixed, and it is not a one-line fix: it needs either the checksummed float expressions
 deliberately spelled with `double` intermediates, or a decision to stop requiring cross-platform
 bit-exactness. See §5.
 
-### 3.3 CONFIRMED — transcendental functions differ between VC6's CRT and libm (1 of the remaining 13 records)
+### 3.3 CONFIRMED — transcendental functions differ between VC6's CRT and libm (1 of the 13 value-differing records)
 
 `Sin`/`Cos`/`Tan`/`ACos`/`ASin` are `sinf`/`cosf`/... and the two libraries are not bit-identical.
 
@@ -175,8 +211,8 @@ here — that is excluded by call-site inspection only, so treat it as unmeasure
 Tested: `scripts/native-layout-test.py` (`CLANGXX=clang++-14`) and `scripts/xfer-blob-audit.py` both
 pass, and the engine-level evidence is stronger than either — a layout or padding difference in a
 48-byte `Matrix3D` or in any other checksummed blob would change the *record lengths* or shift bytes
-wholesale. All 440,035 frame-0 records have identical lengths and identical bytes but for 13 records
-differing in one to three float elements.
+wholesale. All 440,035 frame-0 records have identical lengths, and the 132 that differ differ in one to
+four float elements of a `Matrix3D`, never in a length or an offset.
 
 ### 3.7 EXCLUDED — container iteration order and allocator-address dependence
 
@@ -193,8 +229,8 @@ and zlib. So this remains a genuine possibility, and it is *consistent* with per
 self-consistency. What it would take: a Valgrind run against a binary built with `-gline-tables-only`,
 or an MSan build of the simulation-only subset (no audio/video deps) — a slice of its own.
 
-Weak counter-evidence, not a measurement: an uninitialised read would have to land in one of the 13
-differing records and nowhere else, and those 13 are all explained by §3.1–3.3.
+Weak counter-evidence, not a measurement: an uninitialised read would have to land in one of the 132
+differing records and nowhere else, and those 132 are all explained, element by element, by §3.1–3.3.
 
 ### 3.9 UNMEASURED — locale-dependent parsing
 
@@ -224,12 +260,14 @@ Consequences, stated plainly:
   recording" says nothing, because Windows differs from it too.
 - Comparing native against a **Windows run** (as §1–§3 do) is the sound comparison, and it does not
   inherit this limit.
-- **The retail replay gate could not be run as a verdict in this environment.** Under Wine, with the
-  CI's own trimmed archives, registry key and layout, unmodified `main` fails all 10 replays. So the
-  gate's local exit code measures the environment, not the change. What was done instead: the same
-  Windows build pre- and post-change, on the same data, is byte-identical at frames 0, 100 and 1000
-  (440,035 records at frame 0), produces identical CRCs at all 134 checkpoints, and diverges from the
-  recording at the identical frame. CI's `check-replays.yml` on real Windows remains the verdict.
+- **The retail replay gate cannot produce a green verdict in this environment**, with either archive:
+  under Wine, with CI's registry key and layout, unmodified `main` fails all 10 replays on the trimmed
+  data *and* on the full data (only the frames move). So the gate's local exit code measures the
+  environment, not the change, and CI's `check-replays.yml` on real Windows remains the verdict.
+- It is still usable as a **differential** oracle, which is how §3.1's rejected fix was caught: run the
+  same 10 replays with the same data on two builds and compare the per-replay first-divergence frames.
+  On that comparison this PR is **identical to unmodified `main`, replay for replay** (table in §3.1),
+  which is the strongest Windows-behaviour statement available here.
 
 ## 5. Is cross-platform lock-step reachable? A recommendation, not a decision
 
@@ -245,7 +283,8 @@ invasive, touches Windows code paths, and each step must keep the Windows build 
 The recommendation is to **stop at oracle-grade agreement, not bit-exactness**: keep the
 `CRCDiag`-based native-vs-Windows comparison as the wave's acceptance instrument, require that the
 divergence stays within a bounded handful of ULP-level records and that structure (object count, IDs,
-order, templates) matches exactly, and fix the cheap bit-exact causes as they are found (§3.1 is one).
+order, templates) matches exactly. §3.1 is the cautionary case: even the cheapest-looking bit-exact fix
+turned out to move Windows behaviour, so each one has to be paid for with a 10-replay differential run.
 Pursuing full lock-step is only worth it if cross-platform multiplayer or shared replays ever come back
 into scope — at which point §3.2 is the thing to schedule first.
 
@@ -254,6 +293,8 @@ into scope — at which point §3.2 is the thing to schedule first.
 - **Apple Silicon.** Everything above is x86-64 Linux. arm64 has FMA by default (§3.4) and a different
   libm, so its divergence set is a superset of this one and its measurement is still outstanding.
 - **Uninitialised reads** (§3.8) and **non-C locales** (§3.9).
+- **A safe fix for §3.1.** Whether some spelling reproduces VC6's per-element folding on both
+  compilers was not established; what is established is that the direct one does not.
 - **The native shutdown crash.** The headless run reaches the end of the replay, emits all 134
   checkpoints, and then exits 139 in `ObjectPoolClass<MultiListNodeClass,256>::~ObjectPoolClass`
   (`mempool.h:208`) during teardown. It is after the last checkpoint and does not affect any number
