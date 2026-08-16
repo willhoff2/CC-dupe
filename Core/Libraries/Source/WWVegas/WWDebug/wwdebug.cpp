@@ -51,11 +51,20 @@
 #include <signal.h>
 #include "WWLib/Except.h"
 
-#ifdef _WIN32
+// TheSuperHackers @port Off Windows the header is needed only by the assert handler below, which
+// is inside #ifdef WWDEBUG and calls MessageBoxA(), ExitProcess() and the MB_*/ID* constants; off
+// Windows those spellings come from the port's own header and the platform seam behind it. It stays
+// behind WWDEBUG so the release configuration still compiles with no Windows header available at
+// all, which is what scripts/native-port-probe.py measures in its unshimmed mode. Nothing in this
+// file changes on Windows.
+#if defined(_WIN32) || defined(WWDEBUG)
 #include <windows.h>
-#else
+#endif
+#ifndef _WIN32
 #include <errno.h>
+#include <execinfo.h>
 #include <string.h>
+#include <unistd.h>
 #endif
 
 static PrintFunc			_CurMessageHandler = nullptr;
@@ -63,6 +72,37 @@ static AssertPrintFunc	_CurAssertHandler = nullptr;
 static TriggerFunc		_CurTriggerHandler = nullptr;
 static ProfileFunc		_CurProfileStartHandler = nullptr;
 static ProfileFunc		_CurProfileStopHandler = nullptr;
+
+#if defined(WWDEBUG) && !defined(_WIN32)
+/*
+** TheSuperHackers @port What an assert does when there is no dialog to put it in and nobody to
+** answer it: the expression, where it is, and the frames that reached it, on stderr, and then a
+** non-zero exit. The frames are return addresses and mangled names -- no line numbers -- because
+** that is all backtrace_symbols_fd() has; StackDump.cpp says the same about its side.
+**
+** The Windows path, which asks the user, is unchanged, and the exit code matches the one its
+** Abort answer uses.
+*/
+static void Assert_Fail_Loudly(const char * expr, const char * file, int line, const char * extra)
+{
+	fflush(stdout);
+	fprintf(stderr, "\nWWASSERT FAILED: %s\n  at %s:%d\n", expr != nullptr ? expr : "",
+		file != nullptr ? file : "", line);
+	if (extra != nullptr && *extra != '\0') {
+		fprintf(stderr, "  %s\n", extra);
+	}
+	fprintf(stderr, "Stack Dump:\n");
+	fflush(stderr);
+
+	void * frames[32];
+	const int got = backtrace(frames, 32);
+	backtrace_symbols_fd(frames, got, STDERR_FILENO);
+	fflush(stderr);
+
+	raise(SIGABRT);
+	_exit(3);
+}
+#endif
 
 // Convert the latest system error into a string and return a pointer to
 // a static buffer containing the error string.
@@ -325,6 +365,9 @@ void WWDebug_Assert_Fail(const char * expr,const char * file, int line)
 			ExitProcess(0);
 		}
 
+#ifndef _WIN32
+		Assert_Fail_Loudly(expr, file, line, nullptr);
+#endif
       char assertbuf[4096];
 		sprintf(assertbuf, "Assert failed\n\n. File %s Line %d", file, line);
 
@@ -398,6 +441,9 @@ void WWDebug_Assert_Fail_Print(const char * expr,const char * file, int line,con
 
 	} else {
 
+#ifndef _WIN32
+		Assert_Fail_Loudly(expr, file, line, string);
+#endif
 		assert(0);
 
 	}
@@ -483,7 +529,18 @@ void WWDebug_Profile_Stop( const char * title)
  *=============================================================================================*/
 void WWDebug_DBWin32_Message_Handler( const char * str )
 {
-
+#ifndef _WIN32
+    /*
+    ** TheSuperHackers @port UNIMPLEMENTED PATH, deliberately. DBWIN32 is a Windows debug monitor
+    ** that this handler talks to over a named event pair plus a named shared-memory section --
+    ** an IPC protocol with a specific reader on the other end, not a generic logging channel, so
+    ** there is nothing to be portable to. Nothing in the tree installs this handler; it exists
+    ** for a developer to install by hand. Off Windows the message therefore goes to stderr,
+    ** which is where a developer running from a terminal would look for it.
+    */
+    fprintf(stderr, "%s\n", str != nullptr ? str : "");
+    fflush(stderr);
+#else
     HANDLE heventDBWIN;  /* DBWIN32 synchronization object */
     HANDLE heventData;   /* data passing synch object */
     HANDLE hSharedFile;  /* memory mapped file shared data */
@@ -538,5 +595,6 @@ void WWDebug_DBWin32_Message_Handler( const char * str )
     CloseHandle(hSharedFile);
     CloseHandle(heventData);
     CloseHandle(heventDBWIN);
+#endif // !_WIN32
 }
 #endif // WWDEBUG

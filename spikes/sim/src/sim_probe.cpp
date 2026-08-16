@@ -65,6 +65,8 @@ static CriticalSection critSec1, critSec2, critSec3, critSec4, critSec5;
 // not linked here, so the harness repeats the spellings PlatformMain.cpp uses.
 const Char *g_strFile = "data\\Generals.str";
 const Char *g_csfFile = "data\\%s\\Generals.csf";
+// Only referenced in the debug configuration, where DebugInit() names the log file with it.
+const char *gAppPrefix = "sim_";
 
 // The engine's own file system, in the order GameEngine::init brings it up. The archive file system
 // finds whatever `.big` archives are in the working directory and is content with none, so a missing

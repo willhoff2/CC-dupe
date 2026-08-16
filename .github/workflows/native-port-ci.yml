@@ -751,6 +751,95 @@ jobs:
             native-build-level4-report.md
             native-build-level4.json
 
+  # 2a-debug. The same levels 1-4 build in the DEBUG configuration (`-DRTS_DEBUG -DWWDEBUG -DDEBUG`,
+  #     which is what cmake/config-build.cmake defines for RTS_BUILD_OPTION_DEBUG=ON), plus the
+  #     negative control that the configuration is worth having.
+  #
+  #     Why this is a measured configuration of its own: until this job existed, `-DRTS_DEBUG` did
+  #     not compile off Windows at all (11 translation units failed, 114 symbols unresolved, no
+  #     executable), so every assertion the original developers wrote was absent from every native
+  #     run. The cost is documented: the headless simulation probe ticked 13,500 frames of a retail
+  #     map that had loaded zero objects, and the assert for that condition could not fire.
+  #
+  #     Its own baseline file, for the same reason level 4 has one and levels 1-3 have another: the
+  #     two configurations compile different code, so their numbers are not comparable and
+  #     check-native-build-baseline.py refuses to compare them. The ratchet is the release build's:
+  #     failures may not grow, objects and the executable may not disappear.
+  native-build-debug:
+    name: Native build, debug configuration + assert negative control (Linux, clang 14)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
+    timeout-minutes: 60
+    steps:
+      - name: Install toolchain
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          # The same set as the levels 1-4 release job: this build compiles the same translation
+          # units and links the same archives, only with the debug defines added.
+          apt-get install -y --no-install-recommends \
+            clang-14 cmake ninja-build python3 git ca-certificates binutils zlib1g-dev \
+            libopenal-dev make gcc nasm libsdl2-dev file libvulkan-dev glslang-tools
+          clang++-14 --version
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Provision the third-party headers
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ./scripts/ci/fetch-probe-deps.sh
+
+      - name: Compile objects and link (shimmed, levels 1-4, debug configuration)
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims \
+            --config debug --strict-link --build-dir build/native-debug \
+            --report native-build-debug-report.md --json native-build-debug.json
+          test -f native-build-debug.json
+
+      - name: Gate against the checked-in debug baseline
+        run: |
+          set -o pipefail
+          {
+            echo '## Native 64-bit build, levels 1-4, debug configuration'
+            echo '```'
+            python3 scripts/ci/check-native-build-baseline.py --results native-build-debug.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The negative control, and the reason the job exists: a debug build whose asserts are
+      # compiled out or swallowed by the portable dialog stub would pass every check above. The
+      # harness is the headless simulation probe, built from this build directory so it inherits the
+      # debug defines; the bad input is generated, so no retail data is needed.
+      - name: Prove a known-bad input trips a real engine assertion
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          python3 scripts/native-sim-probe.py --build-dir build/native-debug --build
+          {
+            echo '## Assertion negative control (debug configuration)'
+            echo '```'
+            python3 scripts/ci/check-assert-fires.py --build-dir build/native-debug
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the debug build report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: native-build-debug-report
+          path: |
+            native-build-debug-report.md
+            native-build-debug.json
+
   # 2b. The debug and profile libraries, which are the crash-reporting and profiling layer. The
   #     probe above only asks whether they parse; this compiles every translation unit CMake puts
   #     in core_debug and core_profile_legacy, links the debug library, and RUNS a test that

@@ -92,7 +92,10 @@ static void writeAtOffset(File* file, Int offset, const void* data, Int dataSize
 #if defined(RTS_DEBUG)
 static FILE* openStatsLogFile()
 {
-	unsigned long bufSize = MAX_COMPUTERNAME_LENGTH + 1;
+	// TheSuperHackers @port DWORD, the type GetComputerName() documents, rather than the
+	// `unsigned long` it happens to be on 32-bit Windows. Identical there; off Windows DWORD is
+	// 32 bits wide while `unsigned long` is 64.
+	DWORD bufSize = MAX_COMPUTERNAME_LENGTH + 1;
 	char computerName[MAX_COMPUTERNAME_LENGTH + 1];
 	if (!GetComputerName(computerName, &bufSize))
 	{

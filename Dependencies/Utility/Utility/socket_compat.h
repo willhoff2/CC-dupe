@@ -103,6 +103,155 @@ typedef struct sockaddr_in *LPSOCKADDR_IN;
 #define WSAENOTCONN ENOTCONN
 #endif
 
+// The rest of the Winsock error names, needed by the debug-only getWSAErrorString() switches
+// that turn an error number back into its name for the log. They are all in one `switch`, so
+// every name has to be a distinct constant or the translation unit will not compile -- which is
+// why the ones that do have a BSD counterpart are that counterpart (distinct by definition) and
+// the ones that do not keep their real Win32 numbers rather than being folded onto an errno
+// value that already appears above. The Win32-numbered ones can therefore never match a value
+// this platform actually reports; the name is still printed if a Windows-produced number is
+// logged, and nothing else in the engine compares against them.
+#ifndef WSABASEERR
+#define WSABASEERR 10000
+#endif
+#ifndef WSAEINTR
+#define WSAEINTR EINTR
+#endif
+#ifndef WSAEBADF
+#define WSAEBADF EBADF
+#endif
+#ifndef WSAEACCES
+#define WSAEACCES EACCES
+#endif
+#ifndef WSAEFAULT
+#define WSAEFAULT EFAULT
+#endif
+#ifndef WSAEMFILE
+#define WSAEMFILE EMFILE
+#endif
+#ifndef WSAEINPROGRESS
+#define WSAEINPROGRESS EINPROGRESS
+#endif
+#ifndef WSAENOTSOCK
+#define WSAENOTSOCK ENOTSOCK
+#endif
+#ifndef WSAEDESTADDRREQ
+#define WSAEDESTADDRREQ EDESTADDRREQ
+#endif
+#ifndef WSAEMSGSIZE
+#define WSAEMSGSIZE EMSGSIZE
+#endif
+#ifndef WSAEPROTOTYPE
+#define WSAEPROTOTYPE EPROTOTYPE
+#endif
+#ifndef WSAENOPROTOOPT
+#define WSAENOPROTOOPT ENOPROTOOPT
+#endif
+#ifndef WSAEPROTONOSUPPORT
+#define WSAEPROTONOSUPPORT EPROTONOSUPPORT
+#endif
+#ifndef WSAESOCKTNOSUPPORT
+#define WSAESOCKTNOSUPPORT ESOCKTNOSUPPORT
+#endif
+#ifndef WSAEOPNOTSUPP
+#define WSAEOPNOTSUPP EOPNOTSUPP
+#endif
+#ifndef WSAEPFNOSUPPORT
+#define WSAEPFNOSUPPORT EPFNOSUPPORT
+#endif
+#ifndef WSAEAFNOSUPPORT
+#define WSAEAFNOSUPPORT EAFNOSUPPORT
+#endif
+#ifndef WSAEADDRINUSE
+#define WSAEADDRINUSE EADDRINUSE
+#endif
+#ifndef WSAEADDRNOTAVAIL
+#define WSAEADDRNOTAVAIL EADDRNOTAVAIL
+#endif
+#ifndef WSAENETDOWN
+#define WSAENETDOWN ENETDOWN
+#endif
+#ifndef WSAENETUNREACH
+#define WSAENETUNREACH ENETUNREACH
+#endif
+#ifndef WSAENETRESET
+#define WSAENETRESET ENETRESET
+#endif
+#ifndef WSAECONNABORTED
+#define WSAECONNABORTED ECONNABORTED
+#endif
+#ifndef WSAENOBUFS
+#define WSAENOBUFS ENOBUFS
+#endif
+#ifndef WSAESHUTDOWN
+#define WSAESHUTDOWN ESHUTDOWN
+#endif
+#ifndef WSAETOOMANYREFS
+#define WSAETOOMANYREFS ETOOMANYREFS
+#endif
+#ifndef WSAETIMEDOUT
+#define WSAETIMEDOUT ETIMEDOUT
+#endif
+#ifndef WSAECONNREFUSED
+#define WSAECONNREFUSED ECONNREFUSED
+#endif
+#ifndef WSAELOOP
+#define WSAELOOP ELOOP
+#endif
+#ifndef WSAENAMETOOLONG
+#define WSAENAMETOOLONG ENAMETOOLONG
+#endif
+#ifndef WSAEHOSTDOWN
+#define WSAEHOSTDOWN EHOSTDOWN
+#endif
+#ifndef WSAEHOSTUNREACH
+#define WSAEHOSTUNREACH EHOSTUNREACH
+#endif
+#ifndef WSAENOTEMPTY
+#define WSAENOTEMPTY ENOTEMPTY
+#endif
+#ifndef WSAEUSERS
+#define WSAEUSERS EUSERS
+#endif
+#ifndef WSAEDQUOT
+#define WSAEDQUOT EDQUOT
+#endif
+#ifndef WSAESTALE
+#define WSAESTALE ESTALE
+#endif
+#ifndef WSAEREMOTE
+#define WSAEREMOTE EREMOTE
+#endif
+// No BSD counterpart: these describe the state of the Winsock library itself, or come out of
+// Winsock's own name resolver rather than out of errno.
+#ifndef WSAEPROCLIM
+#define WSAEPROCLIM 10067
+#endif
+#ifndef WSAEDISCON
+#define WSAEDISCON 10101
+#endif
+#ifndef WSASYSNOTREADY
+#define WSASYSNOTREADY 10091
+#endif
+#ifndef WSAVERNOTSUPPORTED
+#define WSAVERNOTSUPPORTED 10092
+#endif
+#ifndef WSANOTINITIALISED
+#define WSANOTINITIALISED 10093
+#endif
+#ifndef WSAHOST_NOT_FOUND
+#define WSAHOST_NOT_FOUND 11001
+#endif
+#ifndef WSATRY_AGAIN
+#define WSATRY_AGAIN 11002
+#endif
+#ifndef WSANO_RECOVERY
+#define WSANO_RECOVERY 11003
+#endif
+#ifndef WSANO_DATA
+#define WSANO_DATA 11004
+#endif
+
 // Word building, normally from <windef.h>. Only used to spell the Winsock version number.
 #ifndef MAKEWORD
 #define MAKEWORD(low, high) \

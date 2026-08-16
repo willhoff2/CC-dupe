@@ -110,8 +110,11 @@ Requirements, each of which makes the result meaningless if got wrong:
 ## Why this cannot run on a Mac
 
 `generalszh.exe` is a 32-bit x86 Windows binary produced by the VC6 build, and the CI job runs it on
-`windows-2022`. There is no native macOS binary to substitute: `docs/porting/native-build.md`
-records 522 unresolved symbols at levels 1+2+3, so nothing links yet.
+`windows-2022`. There is no native macOS binary to substitute — and note that the "522 unresolved
+symbols at levels 1+2+3" this section used to cite is long superseded (the tree now links strictly
+with 0 unresolved; see `docs/porting/ci-baselines/`). What is still true is that the native binary is
+not a *replay* substitute: retail replay compatibility is explicitly out of the port's scope, so its
+frame CRCs are not expected to match the 1.04 stream.
 
 Measured on the project's Apple Silicon machine (M1 Pro, macOS 26.6.1), read-only:
 
@@ -126,6 +129,47 @@ CrossOver's commercial `wine32on64` under Rosetta, which is unproven for this ga
 project of its own. The repository's own Wine/VC6 image
 (`resources/dockerbuild/Dockerfile`) is amd64 Debian, so using it on arm64 means nested emulation of
 32-bit x86. **Run the replay check on a Windows machine or VM.**
+
+## Wine is not a replay oracle — only a differential check (measured 2026-08-16)
+
+The section above says to run the check on Windows, and that is still the rule, but it left the
+impression that the check simply cannot be run elsewhere. It can be *executed* on x86_64 Linux inside
+the repository's own `zerohour-build` image (wine 11.0): the VC6 build runs, `generalszh.exe -jobs N
+-headless -replay …` reaches the engine's replay driver, and all ten Zero Hour replays simulate to
+completion. **Its verdict there is worthless in absolute terms, and this is measured, not inferred:**
+
+- Branch `devin/1786906471-native-debug-build` under wine: `CRC Mismatch` on **all ten** replays,
+  `Errors occurred: 10`, exit 1.
+- Unmodified `main` (`8c6dfaab0`), built with the identical toolchain in a `git worktree` and run by
+  the same harness: `CRC Mismatch` on all ten, at the **identical frames** —
+  9724, 3810, 8310, 3310, 6210, 110, 4810, 4210, 4510, 3611. A `grep` of `Simulating`,
+  `CRC Mismatch` and `Errors occurred` over the two stdout logs is byte-identical; the whole logs
+  differ only in two wall-clock `Elapsed Time` lines.
+- `-jobs 1` on the earliest-diverging replay reproduces `CRC Mismatch in Frame 110` exactly, so
+  parallelism is not the cause.
+- The data is exonerated: the trimmed archives hash to the values pinned for the green CI run
+  (`15332b5d…600f3c`, `2d137f6c…6b1b13`), and the golden replay matches bit-exactly for 9724 frames
+  — 5:24 of simulation — before diverging. Neither archive was repacked; both were mounted read-only.
+
+So a green wine run does not exist to be had, and a red one proves nothing about the tree. What the
+wine run *does* give, cheaply and without a Windows machine, is a **differential** answer: build the
+base commit and the branch with the same toolchain and compare the mismatch frames. Identical frames
+mean the change moved no simulation behaviour these ten replays observe. Diverging frames mean it
+did, and then the authoritative Windows run is mandatory before landing.
+
+Corollary, since a previous session assumed otherwise: **never quote a wine replay result as the
+retail replay gate**, in a PR, a doc or a status line. The gate is `check-replays.yml` on
+`windows-2022`, or `run-replays-local.ps1` on a Windows machine, and nothing else. Because the
+frames above are reproducible on unmodified `main`, they are the baseline the differential check
+compares against; if a future session sees a *different* set on `main`, the harness or the image
+changed and the comparison must be re-baselined before it means anything.
+
+A second, independent differential oracle costs less than either and is worth running first for a
+change that only claims to add off-Windows code: compare the two Windows builds' object files. Of
+1322 common objects, 1316 differed only in bytes 4–5 (the COFF `TimeDateStamp`) and the other six
+are the TUs that embed the `git describe` string (`gitinfo.cpp`, `WinMain.cpp`, `Shell.cpp`,
+`ClientInstance.cpp`, `ReplaySimulation.cpp`, `INIMultiplayer.cpp`). Comparing the linked `.exe`s is
+useless — those version strings shift the sections and the two differ by 233 KB with no code change.
 
 ## The retail data on hand (measured 2026-08-14)
 

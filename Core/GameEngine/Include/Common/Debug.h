@@ -183,19 +183,53 @@ class AsciiString;
 	*/
 	DEBUG_EXTERN_C char* TheCurrentIgnoreCrashPtr;
 
-	#define DEBUG_CRASH(m)	\
+#ifndef _WIN32
+
+	/*
+		TheSuperHackers @port Where the assertion is, in the same sleazy-global style and for the
+		same reason: off Windows there is no assert dialog, so the one report an assertion gets is a
+		line on stderr, and the message alone says what went wrong but not where.
+		TheCurrentCrashCondition is null for a DEBUG_CRASH(), which has no condition.
+
+		Off Windows only, and not merely because Windows does not need it: the Windows debug
+		configuration also builds the MFC tools, which satisfy this header from
+		WWStub/wwdebugstub.cpp rather than from Debug.cpp, so a new global here is an unresolved
+		external there.
+	*/
+	DEBUG_EXTERN_C const char* TheCurrentCrashFile;
+	DEBUG_EXTERN_C int TheCurrentCrashLine;
+	DEBUG_EXTERN_C const char* TheCurrentCrashCondition;
+
+	#define DEBUG_CRASH_ENTER_SITE(c)	\
+		TheCurrentCrashFile = __FILE__; \
+		TheCurrentCrashLine = __LINE__; \
+		TheCurrentCrashCondition = c;
+	#define DEBUG_CRASH_LEAVE_SITE()	TheCurrentCrashCondition = nullptr;
+
+#else
+
+	#define DEBUG_CRASH_ENTER_SITE(c)
+	#define DEBUG_CRASH_LEAVE_SITE()
+
+#endif
+
+	#define DEBUG_CRASH_AT(c, m)	\
 		do { \
 			{ \
 				static char ignoreCrash = 0; \
 				if (!ignoreCrash) { \
 					TheCurrentIgnoreCrashPtr = &ignoreCrash; \
+					DEBUG_CRASH_ENTER_SITE(c) \
 					DebugCrash m ; \
+					DEBUG_CRASH_LEAVE_SITE() \
 					TheCurrentIgnoreCrashPtr = nullptr; \
 				} \
 			} \
 		} while (0)
 
-	#define DEBUG_ASSERTCRASH(c, m)		do { { if (!(c)) DEBUG_CRASH(m); } } while (0)
+	#define DEBUG_CRASH(m)	DEBUG_CRASH_AT(nullptr, m)
+
+	#define DEBUG_ASSERTCRASH(c, m)		do { { if (!(c)) DEBUG_CRASH_AT(#c, m); } } while (0)
 
 	//Note: RELEASE_CRASH(m) is now always defined.
 	//#define RELEASE_CRASH(m)					DEBUG_CRASH((m))

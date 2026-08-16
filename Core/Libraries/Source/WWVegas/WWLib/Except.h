@@ -36,6 +36,15 @@
 
 #pragma once
 
+/*
+** TheSuperHackers @port Declared for every platform, unlike the rest of this header, because
+** WWDebug_Assert_Fail() asks it whether a crash is already unwinding before it raises an assert
+** dialog, and that assert path only compiles in a debug configuration -- which off Windows did
+** not build at all until now. Everything below needs Win32 exception types and stays
+** Windows-only.
+*/
+bool Is_Trying_To_Exit();
+
 #if defined(_WIN32)
 
 #include "win.h"
@@ -54,7 +63,6 @@ void Unregister_Thread_ID(unsigned long thread_id, char *thread_name);
 void Register_Application_Exception_Callback(void (*app_callback)());
 void Register_Application_Version_Callback(char *(*app_version_callback)());
 void Set_Exit_On_Exception(bool set);
-bool Is_Trying_To_Exit();
 unsigned long Get_Main_Thread_ID();
 #if (0)
 bool Register_Thread_Handle(unsigned long thread_id, HANDLE thread_handle);

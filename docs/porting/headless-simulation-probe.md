@@ -279,6 +279,13 @@ stops the replay at the first mismatch. That suppression is a measurement device
 
 ## 6. Why it was silent: no assertion-enabled native build exists
 
+**Closed.** `native-debug-build.md` builds and links the debug configuration (978/978 objects, 0
+unresolved, executable produced), makes an assertion report file, line, condition and a demangled
+backtrace on stderr and exit non-zero, and gates both in CI with their own baseline and a known-bad
+input. The figures below are the pre-fix measurement, and were 11 translation units and 114 symbols
+when re-measured on `main` after #96/#98/#99/#100. Re-running this harness under that build made
+blocker 5 audible and turned up one further port defect; both are in that document's §5.
+
 `DEBUG_ASSERTCRASH` compiles to `((void)0)` unless `DEBUG_CRASHING` is defined, which `Debug.h` derives
 from `RTS_DEBUG`. Every native figure this project has ever published, this one included, comes from a
 build without it. Asking for one:
@@ -328,8 +335,8 @@ instead of requiring a debugger session like this one.
 | 2 | `readUnicodeString` reads `len*sizeof(WideChar)`; map `SidesList` desyncs and swallows `ObjectsList` | port defect | **closed on `main` by #88**, re-measured §3 |
 | 3 | `.rep` header unreadable off Windows (`LocalFile::readWideChar`, `ARGUMENTDATATYPE_WIDECHAR`) | port defect | **closed on `main` by #88**, re-measured §3 |
 | 4 | Chunk parse reports success at EOF instead of failing (`SidesList.cpp:300`, nested `parse()`) | port defect, exposed by 2 | simulation slice |
-| 5 | `MapCache` requires `'\'` in enumerated paths → 0 maps; lowercased map path with backslashes | unimplemented path | filesystem seam |
-| 6 | No `RTS_DEBUG` native build: 10 TUs, 113 unresolved | unimplemented path | new slice, §6 |
+| 5 | `MapCache` requires `'\'` in enumerated paths → 0 maps; lowercased map path with backslashes | unimplemented path | filesystem seam; **no longer silent** — asserts at `MapUtil.cpp:536` under the debug build |
+| 6 | No `RTS_DEBUG` native build: 10 TUs, 113 unresolved (11 and 114 re-measured on `main`) | unimplemented path | **closed**, `native-debug-build.md` |
 | 7 | Frame CRC disagrees with the Windows recording from the first checkpoint | port defect (serialisation width) | `xfer-64bit-audit.md` slice |
 | 8 | SIGSEGV at exit in `ObjectPoolClass<MultiListNodeClass,256>::~ObjectPoolClass` (`mempool.h:208`), *after* the replay completes | port defect | simulation slice |
 | 9 | Inline hash fallbacks in `check-replays.yml` are upstream's, not this fork's, and read as authoritative | documentation defect (data is authentic, §0) | comment clarified here |

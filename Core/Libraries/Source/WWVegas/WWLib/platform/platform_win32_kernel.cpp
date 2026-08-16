@@ -66,9 +66,12 @@
 #include "WWLib/platform/platform_mutex.h"
 #include "WWLib/platform/platform_thread.h"
 
+#include <pwd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include <map>
 #include <mutex>
@@ -424,6 +427,99 @@ BOOL HeapFree(HANDLE, DWORD, LPVOID block)
 SIZE_T HeapSize(HANDLE, DWORD, LPCVOID)
 {
 	return static_cast<SIZE_T>(-1);
+}
+
+
+/***********************************************************************************************
+ *                                                                                             *
+ *  Process exit.                                                                               *
+ *                                                                                              *
+ *  _exit() rather than exit(): ExitProcess() does not run atexit handlers or static             *
+ *  destructors, and the callers -- WWDebug_Assert_Fail() when a crash is already unwinding,     *
+ *  and Except.cpp's handler -- pick it precisely because running more engine code would be     *
+ *  unsafe. Debug.cpp's own release-crash path already spells that _exit(1).                     *
+ *                                                                                             *
+ * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+void ExitProcess(UINT code)
+{
+	::_exit((int)code);
+}
+
+
+/***********************************************************************************************
+ *                                                                                             *
+ *  Machine and user identity.                                                                  *
+ *                                                                                             *
+ *  The two size conventions are Win32's own and are not the same, which is why they are        *
+ *  spelled out separately here: GetComputerName() writes back the length WITHOUT the           *
+ *  terminator, GetUserName() writes back the length WITH it. LANAPI.cpp takes                  *
+ *  `*size - 1` characters from both, so getting this wrong would truncate one of the two       *
+ *  names by a character off Windows only. Both fail the way Win32 does when the buffer is too  *
+ *  small -- FALSE with the required size written back -- rather than truncating silently.      *
+ *                                                                                             *
+ * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+BOOL GetComputerNameA(LPSTR buffer, LPDWORD size)
+{
+	if (buffer == nullptr || size == nullptr || *size == 0) {
+		WWPlatform::Win32::Set_Last_Error(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	char host[256];
+	if (gethostname(host, sizeof(host)) != 0) {
+		strcpy(host, "localhost");
+	}
+	host[sizeof(host) - 1] = '\0';
+
+	// Win32 reports the NetBIOS name, which carries no domain part.
+	if (char * dot = strchr(host, '.')) {
+		*dot = '\0';
+	}
+
+	DWORD length = (DWORD)strlen(host);
+	if (length + 1 > *size) {
+		*size = length + 1;
+		WWPlatform::Win32::Set_Last_Error(ERROR_BUFFER_OVERFLOW);
+		return FALSE;
+	}
+
+	strcpy(buffer, host);
+	*size = length;
+	return TRUE;
+}
+
+
+BOOL GetUserNameA(LPSTR buffer, LPDWORD size)
+{
+	if (buffer == nullptr || size == nullptr || *size == 0) {
+		WWPlatform::Win32::Set_Last_Error(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	const char * name = getenv("USER");
+	if (name == nullptr || *name == '\0') {
+		name = getenv("LOGNAME");
+	}
+	if (name == nullptr || *name == '\0') {
+		struct passwd * entry = getpwuid(getuid());
+		name = (entry != nullptr) ? entry->pw_name : nullptr;
+	}
+	if (name == nullptr || *name == '\0') {
+		name = "unknown";
+	}
+
+	DWORD length = (DWORD)strlen(name);
+	if (length + 1 > *size) {
+		*size = length + 1;
+		WWPlatform::Win32::Set_Last_Error(ERROR_INSUFFICIENT_BUFFER);
+		return FALSE;
+	}
+
+	strcpy(buffer, name);
+	*size = length + 1;
+	return TRUE;
 }
 
 

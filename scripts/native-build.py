@@ -103,6 +103,25 @@ LEVELS = {
 # Every target the probe knows about, in the probe's own definitions. Levels index into this.
 ALL_TARGETS = npt.TARGETS + npt.RENDERER_TARGETS
 
+# The build configurations, spelled the way the real build spells them.
+#
+# `debug` is `RTS_BUILD_OPTION_DEBUG=ON` in cmake/config-build.cmake, which is the only
+# configuration in which the engine's own `DEBUG_ASSERTCRASH`/`DEBUG_LOG` guards expand to
+# anything: Debug.h derives `DEBUG_CRASHING` and `DEBUG_LOGGING` from `RTS_DEBUG` unless
+# cmake/config-debug.cmake's DEFAULT is overridden, and WWDebug's `WWASSERT` derives from
+# `WWDEBUG`. Measuring it is the point: every native figure published before it came from a build
+# in which no assertion could fire, so no assertion had ever been compiled either.
+#
+# `release` deliberately adds nothing rather than adding the `RTS_RELEASE NDEBUG` the real build's
+# else-branch adds. That is what every checked-in baseline was measured with, and changing it would
+# move the release ratchet's numbers for a reason unrelated to any source change. It is recorded
+# here as a known difference from the real build rather than silently fixed: see
+# docs/porting/native-debug-build.md.
+CONFIG_DEFINES = {
+    "release": (),
+    "debug": ("RTS_DEBUG", "WWDEBUG", "DEBUG"),
+}
+
 
 def slug(target_name):
     return re.sub(r"[^A-Za-z0-9]+", "_", target_name).strip("_").lower()
@@ -692,7 +711,7 @@ def includes_for(target, deps_dir, with_shims, generated_dirs=None):
 
 
 def write_manifests(targets, manifest_dir, deps_dir, skip=None, with_shims=False,
-                    generated_dirs=None):
+                    generated_dirs=None, extra_defines=()):
     """One CMake fragment per library. `skip` maps target name -> set of source paths to omit."""
     skip = skip or {}
     manifest_dir.mkdir(parents=True, exist_ok=True)
@@ -709,8 +728,9 @@ def write_manifests(targets, manifest_dir, deps_dir, skip=None, with_shims=False
             *[f'    "{i}"' for i in includes],
             ")",
         ]
-        if target.defines:
-            lines += ["set(NATIVE_DEFINES", *[f'    "{d}"' for d in target.defines], ")"]
+        defines = list(target.defines) + list(extra_defines)
+        if defines:
+            lines += ["set(NATIVE_DEFINES", *[f'    "{d}"' for d in defines], ")"]
         (manifest_dir / f"{slug(target.name)}.cmake").write_text("\n".join(lines) + "\n")
         written[target.name] = sources
     return written
@@ -1212,7 +1232,7 @@ def build(build_dir, jobs):
 
 
 def probe_sources(sources, target_by_source, deps_dir, jobs, with_shims=False,
-                  generated_dirs=None):
+                  generated_dirs=None, extra_defines=()):
     """Run the probe's -fsyntax-only check over the same translation units, for comparison."""
     flags = [f for f in npt.probe.CLANG_FLAGS]
 
@@ -1220,7 +1240,7 @@ def probe_sources(sources, target_by_source, deps_dir, jobs, with_shims=False,
         target = target_by_source[source]
         includes = includes_for(target, deps_dir, with_shims, generated_dirs)
         cmd = [CXX, *flags]
-        cmd += [f"-D{d}" for d in target.defines]
+        cmd += [f"-D{d}" for d in list(target.defines) + list(extra_defines)]
         cmd += [f"-I{i}" for i in includes]
         cmd.append(str(source))
         proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -1862,6 +1882,17 @@ def render_report(data, examples):
          "Mode: **native** — nothing stands in for the Windows SDK, so anything that includes a "
          "Win32 header fails to compile and never reaches the linker."),
         "",
+        ("Configuration: **debug** — `-D"
+         + " -D".join(data.get("config_defines") or [])
+         + "`, the defines `cmake/config-build.cmake` adds for "
+         "`RTS_BUILD_OPTION_DEBUG=ON`. The engine's own `DEBUG_ASSERTCRASH`, `DEBUG_LOG` and "
+         "`WWASSERT` guards are compiled in this configuration and compiled out of the release "
+         "one, so its figures are not comparable with the release build's and it has a baseline "
+         "of its own."
+         if data.get("config") == "debug" else
+         "Configuration: **release** — the engine's assertions and debug logging are compiled "
+         "out, as in every figure published before `--config debug` existed."),
+        "",
         "## 1. Compilation",
         "",
         "| Library | Objects produced | Translation units | Probe-clean |",
@@ -2032,6 +2063,7 @@ def render_report(data, examples):
         "bash scripts/ci/fetch-probe-deps.sh",
         f"python3 scripts/native-build.py {' '.join(f'--level {n}' for n in data['levels'])}"
         + (" --with-shims" if data["with_shims"] else "")
+        + (f" --config {data['config']}" if data.get("config", "release") != "release" else "")
         + (" --strict-link" if strict.get("attempted") else "")
         + " --report docs/porting/native-build-report.md --json native-build.json",
         "```",
@@ -2051,6 +2083,10 @@ def main():
     parser.add_argument("--with-shims", action="store_true",
                         help="put scripts/native-port-shims/ on the include path, as the probe's "
                              "shimmed mode does")
+    parser.add_argument("--config", choices=sorted(CONFIG_DEFINES), default="release",
+                        help="build configuration, spelled as cmake/config-build.cmake spells it: "
+                             "`debug` adds RTS_DEBUG/WWDEBUG/DEBUG, so the engine's own assertions "
+                             "and debug logging are compiled (default: release)")
     parser.add_argument("--strict-link", action="store_true",
                         help="also attempt a link with no tolerance for unresolved symbols, i.e. "
                              "an actual executable, and exit non-zero when it fails")
@@ -2060,6 +2096,7 @@ def main():
     args = parser.parse_args()
 
     levels = sorted(set(args.level or [1]))
+    config_defines = CONFIG_DEFINES[args.config]
     wanted = [name for level in levels for name in LEVELS[level]]
     # ALL_TARGETS, not npt.TARGETS: level 3's device and entry-point libraries live in the probe's
     # RENDERER_TARGETS list, which is where the probe keeps everything never compiled off Windows.
@@ -2079,11 +2116,13 @@ def main():
     build_dir = pathlib.Path(args.build_dir).resolve()
     manifest_dir = build_dir / "manifests"
 
-    print("== generating manifests")
+    print(f"== generating manifests ({args.config} configuration"
+          + (f": -D{' -D'.join(config_defines)}" if config_defines else "") + ")")
     generated_dirs = write_generated_headers(build_dir)
     sources_by_target = write_manifests(targets, manifest_dir, deps_dir,
                                         with_shims=args.with_shims,
-                                        generated_dirs=generated_dirs)
+                                        generated_dirs=generated_dirs,
+                                        extra_defines=config_defines)
     target_by_source = {s: t for t in targets for s in sources_by_target[t.name]}
     all_sources = list(target_by_source)
 
@@ -2146,7 +2185,8 @@ def main():
 
     print("== re-running the probe over the same translation units")
     probe_results = probe_sources(all_sources, target_by_source, deps_dir, args.jobs,
-                                  with_shims=args.with_shims, generated_dirs=generated_dirs)
+                                  with_shims=args.with_shims, generated_dirs=generated_dirs,
+                                  extra_defines=config_defines)
 
     probe_clean_compile_failed = sorted(
         str(s.relative_to(REPO_ROOT)) for s in failed if probe_results.get(s))
@@ -2174,7 +2214,7 @@ def main():
     for stale in build_dir.rglob("*.a"):
         stale.unlink()
     write_manifests(link_targets, manifest_dir, deps_dir, skip=skip, with_shims=args.with_shims,
-                    generated_dirs=generated_dirs)
+                    generated_dirs=generated_dirs, extra_defines=config_defines)
     configure(build_dir, manifest_dir, link_targets, extra_slugs)
     second_failed, _ = build(build_dir, args.jobs)
     second_failed = {s for s in second_failed if s in target_by_source}
@@ -2341,6 +2381,12 @@ def main():
         "host_translated": host_translated(),
         "levels": levels,
         "with_shims": args.with_shims,
+        # Which configuration this is, and the defines that make it one. Recorded because the two
+        # configurations' figures are not comparable with each other and each has its own baseline:
+        # the debug build compiles code -- assertions, debug logging, profiling hooks -- that the
+        # release build never sees, so it has a larger surface and its own failure list.
+        "config": args.config,
+        "config_defines": list(config_defines),
         "compiled": compiled,
         "translation_units": len(all_sources),
         "objects": len(all_sources) - len(failed),

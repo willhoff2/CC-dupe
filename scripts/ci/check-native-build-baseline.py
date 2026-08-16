@@ -6,9 +6,12 @@ symbols are unresolved once they are linked. These are ratchets: objects must no
 unresolved symbols, compile failures and probe-clean-but-uncompilable units must not go up, or a
 future upstream merge quietly undoes the port work with nothing in CI to notice.
 
-One baseline per (mode, level set), named after both, so `--level 1 --level 2 --level 3` with
-`--with-shims` ratchets against `native-build-shimmed-level1-2-3.json` and adding a level cannot be
-mistaken for progress against the smaller build's figures. Facts a bare objects/unresolved pair
+One baseline per (mode, configuration, level set), named after all three, so `--level 1 --level 2
+--level 3` with `--with-shims` ratchets against `native-build-shimmed-level1-2-3.json` and adding a
+level cannot be mistaken for progress against the smaller build's figures. `--config debug` gets
+`native-build-shimmed-debug-level1-2-3-4.json`: it compiles the assertions, debug logging and
+profiling hooks the release build compiles out, so it has a larger surface and its figures are not
+comparable with the release build's in either direction. Facts a bare objects/unresolved pair
 would hide are checked too: a changed denominator, a library that produced no archive at all, and a
 shrinking archive count -- unresolved symbols also fall when a whole library drops out of the link.
 
@@ -145,22 +148,36 @@ def main():
 
     results = load(args.results)
     mode = "shimmed" if results["with_shims"] else "native"
+    # Absent in every baseline measured before --config existed, which is exactly the release
+    # configuration, so the default keeps those baselines addressable under their existing names.
+    config = results.get("config", "release")
+    mode_key = mode if config == "release" else f"{mode}-{config}"
     levels = "-".join(str(x) for x in results["levels"])
     baseline_path = pathlib.Path(args.baseline) if args.baseline else \
-        BASELINE_DIR / f"native-build-{mode}-level{levels}.json"
+        BASELINE_DIR / f"native-build-{mode_key}-level{levels}.json"
 
     if args.update:
         baseline_path.parent.mkdir(parents=True, exist_ok=True)
         baseline_path.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
         print(f"wrote baseline {baseline_path.relative_to(REPO_ROOT)}: "
               f"{results['objects']}/{results['translation_units']} objects, "
-              f"{results['undefined_total']} unresolved symbols ({mode}, levels {levels})")
+              f"{results['undefined_total']} unresolved symbols ({mode_key}, levels {levels})")
         return 0
 
     if not baseline_path.is_file():
         print(f"FAIL: no baseline at {baseline_path}; create one with --update", file=sys.stderr)
         return 2
     baseline = load(baseline_path)
+
+    # A debug result compared against a release baseline would read as hundreds of new compile
+    # failures, and a release result against a debug baseline as an improvement. Neither is a
+    # measurement, so the mismatch is refused rather than reported.
+    if baseline.get("config", "release") != config:
+        print(f"FAIL: {baseline_path.name} was measured in the "
+              f"{baseline.get('config', 'release')} configuration, these results in the {config} "
+              "configuration; the two compile different code and are not comparable",
+              file=sys.stderr)
+        return 2
 
     if baseline.get("clang_major") != results.get("clang_major"):
         print(f"FAIL: baseline was measured with clang {baseline.get('clang_major')}, these "
@@ -171,7 +188,8 @@ def main():
     failures = []
     improvements = []
 
-    print(f"mode: {mode}   levels: {levels}   toolchain: {results['compiler']}")
+    print(f"mode: {mode}   config: {config}   levels: {levels}   "
+          f"toolchain: {results['compiler']}")
     print(f"{'library':45s} {'objects':>14s} {'baseline':>10s}")
     for name, base in baseline["compiled"].items():
         got = results["compiled"].get(name)

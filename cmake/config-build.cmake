@@ -69,6 +69,12 @@ endif()
 
 if(RTS_BUILD_OPTION_DEBUG)
     target_compile_definitions(core_config INTERFACE RTS_DEBUG WWDEBUG DEBUG)
+    # Off Windows an assertion's stack dump comes from backtrace_symbols(), which can only name a
+    # frame whose symbol is in the dynamic symbol table; without this the dump is bare addresses.
+    # There is no Windows equivalent to disturb: the Win32 dump reads the PDB through dbghelp.
+    if(UNIX)
+        target_link_options(core_config INTERFACE -rdynamic)
+    endif()
 else()
     target_compile_definitions(core_config INTERFACE RTS_RELEASE NDEBUG)
 endif()

@@ -36,6 +36,15 @@
 
 #ifdef DEBUG_CRC
 
+// TheSuperHackers @port For CreateDirectory() and DeleteFile(), which used to arrive through
+// PreRTS.h. Only the code below calls them, which is why this include was not needed until a debug
+// configuration could be built off Windows -- and why it is inside DEBUG_CRC: the release
+// configuration must keep compiling with no Windows header available at all, which is what
+// scripts/native-port-probe.py measures in its unshimmed mode.
+#ifndef _WIN32
+#include <windows.h>
+#endif
+
 static const Int MaxStrings = 64000;
 static const Int MaxStringLen = 1024;
 
