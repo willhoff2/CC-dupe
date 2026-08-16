@@ -50,6 +50,7 @@
 #include "GameLogic/GameLogic.h"
 #include "Common/RandomValue.h"
 #include "Common/CRCDebug.h"
+#include "Common/CRCDiag.h"
 #include "Common/OptionPreferences.h"
 #include "Common/version.h"
 
@@ -1014,6 +1015,14 @@ void RecorderClass::handleCRCMessage(UnsignedInt newCRC, Int playerIndex, Bool f
 		UnsignedInt playbackCRC = m_crcInfo.readCRC();
 		//DEBUG_LOG(("RecorderClass::handleCRCMessage() - Comparing CRCs of InGame:%8.8X Replay:%8.8X Frame:%d from Player %d",
 		//	playbackCRC, newCRC, TheGameLogic->getFrame()-m_crcInfo.GetQueueSize()-1, playerIndex));
+
+		// TheSuperHackers @port Records every comparison, not only the first failing one, when the CRC
+		// diagnostics are switched on, so a native run can be bisected in time against a Windows run of
+		// the same replay. See docs/porting/crc-divergence.md.
+		// The queue holds the CRCs this build computed (they arrive flagged as playback), while newCRC is
+		// the one the recording carries, which is why the arguments read the way they do.
+		CRCDiag::logCompare( TheGameLogic->getFrame() - m_crcInfo.GetQueueSize() - 1, playbackCRC, newCRC );
+
 		if (TheGameLogic->getFrame() > 0 && newCRC != playbackCRC && !m_crcInfo.sawCRCMismatch())
 		{
 			//Kris: Patch 1.01 November 10, 2003 (integrated changes from Matt Campbell)
@@ -1043,7 +1052,16 @@ void RecorderClass::handleCRCMessage(UnsignedInt newCRC, Int playerIndex, Bool f
 
 			// TheSuperHackers @tweak Pause the game on mismatch.
 			// But not when a window with focus is opened, because that can make resuming difficult.
-			if (TheWindowManager->winGetFocus() == nullptr)
+			// The CRC diagnostics keep the playback going instead, so that the whole run can be compared
+			// rather than only its first differing checkpoint. That mode is opt-in and off in every normal
+			// run, including every Windows run.
+			if (CRCDiag::continuesPastMismatch())
+			{
+				// Mark this mismatch as seen without pausing, so that the run reports having gone out of
+				// sync while the playback carries on to the next checkpoint.
+				m_crcInfo.setSawCRCMismatch();
+			}
+			else if (TheWindowManager->winGetFocus() == nullptr)
 			{
 				Bool pause = TRUE;
 				Bool pauseMusic = FALSE;

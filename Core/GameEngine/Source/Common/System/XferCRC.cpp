@@ -30,6 +30,7 @@
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+#include "Common/CRCDiag.h"
 #include "Common/XferCRC.h"
 #include "Common/XferDeepCRC.h"
 #include "Common/crc.h"
@@ -44,6 +45,7 @@ XferCRC::XferCRC()
 
 	m_xferMode = XFER_CRC;
 	m_crc = 0;
+	m_diagDepth = 0;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -113,8 +115,35 @@ void XferCRC::xferSnapshot( Snapshot *snapshot )
 
 	}
 
+	// the nesting depth is only tracked for the diagnostics, which label a "MARKER:" string with it
+	++m_diagDepth;
+
 	// run the crc function of the snapshot
 	snapshot->crc( this );
+
+	--m_diagDepth;
+
+}
+
+// ------------------------------------------------------------------------------------------------
+/** CRC an ascii string. GameLogic::getCRC() labels each subsystem with a "MARKER:" string, so the
+	* running CRC at those labels decomposes the frame CRC by subsystem at no cost to its value. */
+// ------------------------------------------------------------------------------------------------
+void XferCRC::xferAsciiString( AsciiString *asciiStringData )
+{
+
+	static const char markerPrefix[] = "MARKER:";
+	static const Int markerPrefixLength = sizeof( markerPrefix ) - 1;
+
+	if( CRCDiag::isEnabled() && asciiStringData != nullptr &&
+			strncmp( asciiStringData->str(), markerPrefix, markerPrefixLength ) == 0 )
+	{
+
+		CRCDiag::logMarker( asciiStringData->str() + markerPrefixLength, m_diagDepth, getCRC() );
+
+	}
+
+	Xfer::xferAsciiString( asciiStringData );
 
 }
 
@@ -150,6 +179,13 @@ void XferCRC::xferImplementation( void *data, Int dataSize )
 		FALLTHROUGH;
 	default:
 		break;
+	}
+
+	if( CRCDiag::dumpsBytes() )
+	{
+
+		CRCDiag::logBytes( data, dataSize, getCRC() );
+
 	}
 
 }

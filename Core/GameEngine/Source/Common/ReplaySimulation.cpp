@@ -24,6 +24,7 @@
 
 #include "Common/ReplaySimulation.h"
 
+#include "Common/CRCDiag.h"
 #include "Common/GameEngine.h"
 #include "Common/LocalFileSystem.h"
 #include "Common/Recorder.h"
@@ -88,6 +89,7 @@ int ReplaySimulation::simulateReplaysInThisProcess(const std::vector<AsciiString
 		if (TheRecorder->simulateReplay(filename))
 		{
 			UnsignedInt totalTimeSec = TheRecorder->getPlaybackFrameCount() / LOGICFRAMES_PER_SECOND;
+			Bool countedMismatch = FALSE;
 			while (TheRecorder->isPlaybackInProgress())
 			{
 				const int progressFrameInterval = 10*60*LOGICFRAMES_PER_SECOND;
@@ -101,10 +103,16 @@ int ReplaySimulation::simulateReplaysInThisProcess(const std::vector<AsciiString
 					fflush(stdout);
 				}
 				TheGameLogic->UPDATE();
-				if (TheRecorder->sawCRCMismatch())
+				if (TheRecorder->sawCRCMismatch() && !countedMismatch)
 				{
+					countedMismatch = TRUE;
 					numErrors++;
-					break;
+
+					// TheSuperHackers @port The CRC diagnostics need every checkpoint of the run, not only
+					// the first differing one, so that a native run can be bisected in time against a
+					// Windows run of the same replay. That mode is opt-in and off in every normal run.
+					if (!CRCDiag::continuesPastMismatch())
+						break;
 				}
 			}
 			UnsignedInt gameTimeSec = TheGameLogic->getFrame() / LOGICFRAMES_PER_SECOND;

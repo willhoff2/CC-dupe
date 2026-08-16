@@ -204,7 +204,7 @@ void Thing::setPosition( const Coord3D *pos )
 void Thing::setOrientation( Real angle )
 {
 	//USE_PERF_TIMER(ThingMatrixStuff)
-	Coord3D u, x, y, z, pos;
+	Coord3D pos;
 
 	// setOrientation always forces us straight up in the Z axis,
 	// or aligned with the terrain if we have the magic flag set.
@@ -225,20 +225,15 @@ void Thing::setOrientation( Real angle )
 	}
 	else
 	{
-		z.x = 0.0f;
-		z.y = 0.0f;
-		z.z = 1.0f;
+		// TheSuperHackers @port Written out instead of crossing the heading with the constant Z axis:
+		// the cross products only multiply by 0.0f and 1.0f, and MSVC folds those away where clang
+		// keeps them, so the two builds produced differently signed zeroes in the checksummed matrix.
+		const Real c = Cos(angle);
+		const Real s = Sin(angle);
 
-		u.x = Cos(angle);
-		u.y = Sin(angle);
-		u.z = 0.0f;
-
-		y.crossProduct( z, u, y );
-		x.crossProduct( y, z, x );
-
-		m_transform.Set(  x.x, y.x, z.x, pos.x,
-											x.y, y.y, z.y, pos.y,
-											x.z, y.z, z.z, pos.z );
+		m_transform.Set(    c,   -s, 0.0f, pos.x,
+												s,    c, 0.0f, pos.y,
+												0.0f, 0.0f, 1.0f, pos.z );
 	}
 
 	//DEBUG_ASSERTCRASH(-PI <= angle && angle <= PI, ("Please pass only normalized (-PI..PI) angles to setOrientation (%f).", angle));
