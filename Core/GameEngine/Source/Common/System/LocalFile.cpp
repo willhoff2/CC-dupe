@@ -59,6 +59,10 @@
 #include "Lib/BaseType.h"
 #include "Common/PerfTimer.h"
 
+#ifndef _WIN32
+#include "WWLib/platform/platform_path.h"
+#endif
+
 
 
 //----------------------------------------------------------------------------
@@ -147,6 +151,17 @@ Bool LocalFile::open( const Char *filename, Int access, size_t bufferSize )
 	{
 		return FALSE;
 	}
+
+#ifndef _WIN32
+	// TheSuperHackers @port The filename arrives spelled the Windows way -- backslash separated, and
+	// lowercased by callers such as MapCache -- so it goes through the same path seam the Win32 file
+	// API compatibility layer already uses. Without it only a path that happens to match the
+	// filesystem byte for byte opens, which the user Maps and Replays paths do not.
+	StringClass resolvedPath;
+	const Bool openingForWrite = (m_access & (WRITE | APPEND | CREATE | TRUNCATE)) != 0;
+	WWPlatform::Path::Resolve( filename, resolvedPath, openingForWrite );
+	filename = resolvedPath.Peek_Buffer();
+#endif
 
 	/* here we translate WSYS file access to the std C equivalent */
 #if USE_BUFFERED_IO

@@ -23,6 +23,7 @@ set(GAMEENGINE_SRC
 #    Include/Common/CommandLine.h
     Include/Common/crc.h
     Include/Common/CRCDebug.h
+    Include/Common/CRCDiag.h
 #    Include/Common/CriticalSection.h
 #    Include/Common/CustomMatchPreferences.h
 #    Include/Common/DamageFX.h
@@ -685,6 +686,7 @@ set(GAMEENGINE_SRC
     Source/Common/System/UnicodeString.cpp
 #    Source/Common/System/Upgrade.cpp
     Source/Common/System/Xfer.cpp
+    Source/Common/System/CRCDiag.cpp
     Source/Common/System/XferCRC.cpp
     Source/Common/System/XferLoad.cpp
     Source/Common/System/XferSave.cpp

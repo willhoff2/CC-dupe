@@ -45,6 +45,11 @@ add_compile_options(
 )
 add_compile_definitions(WIN32_LEAN_AND_MEAN _REENTRANT)
 
+# The simulation checksums raw floats. clang contracts `a*b+c` into one fused multiply-add wherever
+# the target has one - arm64 always, x86-64 without -mfma never - so without this the two native
+# hosts would disagree with each other and with the Windows oracle. See docs/porting/crc-divergence.md.
+add_compile_options(-ffp-contract=off)
+
 # 64-bit is the point of the exercise: Apple Silicon has no 32-bit mode. On x86-64 hosts say so
 # explicitly so a stray -m32 in the environment cannot quietly change what is being measured;
 # arm64 has no such flag.

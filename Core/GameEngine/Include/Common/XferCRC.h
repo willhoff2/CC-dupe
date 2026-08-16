@@ -53,6 +53,7 @@ public:
 	virtual void skip( Int dataSize ) override;							///< skip xfer event
 
 	virtual void xferSnapshot( Snapshot *snapshot ) override;		///< entry point for xfering a snapshot
+	virtual void xferAsciiString( AsciiString *asciiStringData ) override;	///< CRC an ascii string, noting subsystem markers for CRCDiag
 
 	// Xfer CRC methods
 	virtual UnsignedInt getCRC();										///< get computed CRC in network byte order
@@ -64,5 +65,7 @@ protected:
 	inline void addCRC( UnsignedInt val );								///< CRC a 4-byte block
 
 	UnsignedInt m_crc;
+
+	Int m_diagDepth;													///< snapshot nesting depth, for CRCDiag only
 
 };

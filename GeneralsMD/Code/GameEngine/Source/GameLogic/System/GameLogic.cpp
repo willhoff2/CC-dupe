@@ -37,6 +37,7 @@
 #include "Common/AudioHandleSpecialValues.h"
 #include "Common/BuildAssistant.h"
 #include "Common/CRCDebug.h"
+#include "Common/CRCDiag.h"
 #include "Common/FramePacer.h"
 #include "Common/GameAudio.h"
 #include "Common/GameEngine.h"
@@ -3776,6 +3777,7 @@ void GameLogic::update()
 	if (generateForSolo || generateForMP)
 	{
 		m_CRC = getCRC( CRC_RECALC );
+		CRCDiag::logFrameTotal( m_CRC );
 		bool isPlayback = (TheRecorder && TheRecorder->isPlaybackMode());
 
 		GameMessage *msg = newInstance(GameMessage)(GameMessage::MSG_LOGIC_CRC);
@@ -4200,6 +4202,16 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 	for( obj = m_objList; obj; obj=obj->getNextObject() )
 	{
 		xferCRC->xferSnapshot( obj );
+
+		// TheSuperHackers @port Names each object's contribution when the CRC diagnostics are on, so
+		// that a differing frame CRC can be narrowed to the objects it differs in. See
+		// docs/porting/crc-divergence.md.
+		if( CRCDiag::isEnabled() )
+		{
+			const ThingTemplate *tmpl = obj->getTemplate();
+			CRCDiag::logObject( obj->getID(), ( tmpl != nullptr ) ? tmpl->getName().str() : nullptr,
+				xferCRC->getCRC() );
+		}
 	}
 	UnsignedInt seed = GetGameLogicRandomSeedCRC();
 	if (isInGameLogicUpdate())

@@ -33,6 +33,7 @@
 #include "Win32Device/Common/Win32LocalFileSystem.h"
 #include "Win32Device/Common/Win32LocalFile.h"
 #include <io.h>
+#include "WWLib/platform/platform_path.h"
 
 Win32LocalFileSystem::Win32LocalFileSystem() : LocalFileSystem()
 {
@@ -116,7 +117,10 @@ void Win32LocalFileSystem::reset()
 Bool Win32LocalFileSystem::doesFileExist(const Char *filename) const
 {
 	//USE_PERF_TIMER(Win32LocalFileSystem_doesFileExist)
-	if (_access(filename, 0) == 0) {
+	// TheSuperHackers @port WWPlatform::Path::Exists() is _access(filename, 0) on Windows and the same
+	// test after path resolution elsewhere, so a Windows spelled path is answered for the way
+	// LocalFile::open() answers it.
+	if (WWPlatform::Path::Exists(filename)) {
 		return TRUE;
 	}
 	return FALSE;
