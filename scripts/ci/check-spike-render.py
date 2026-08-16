@@ -15,11 +15,18 @@ library. Only the 8-bit non-interlaced RGB/RGBA subset both the spike and optipn
 supported, which is checked explicitly rather than assumed.
 """
 import argparse
+import os
 import pathlib
 import struct
 import subprocess
 import sys
 import zlib
+
+# Homebrew's validation manifest names its dylib by leaf name, so the loader only finds it with
+# these on DYLD_LIBRARY_PATH. Passing them in from the shell does not survive: this script is
+# usually reached through an interpreter shim that /bin/bash runs, and /bin/bash is SIP-protected,
+# so dyld drops every DYLD_* variable before python starts. The child's environment is built here.
+MACOS_LOADER_DIRS = ("/opt/homebrew/lib", "/usr/local/lib")
 
 
 def decode_png(path):
@@ -133,7 +140,16 @@ def main():
                     help="permitted fraction of differing pixels, 0..1")
     args = ap.parse_args()
 
-    proc = subprocess.run([args.binary, "--out", args.out], capture_output=True, text=True)
+    environment = dict(os.environ)
+    if sys.platform == "darwin":
+        for directory in MACOS_LOADER_DIRS:
+            if pathlib.Path(directory).is_dir():
+                existing = environment.get("DYLD_LIBRARY_PATH", "")
+                environment["DYLD_LIBRARY_PATH"] = \
+                    f"{directory}:{existing}" if existing else directory
+
+    proc = subprocess.run([args.binary, "--out", args.out], capture_output=True, text=True,
+                          env=environment)
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     combined = proc.stdout + proc.stderr
