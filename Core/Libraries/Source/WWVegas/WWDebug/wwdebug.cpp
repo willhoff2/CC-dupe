@@ -51,11 +51,15 @@
 #include <signal.h>
 #include "WWLib/Except.h"
 
-// TheSuperHackers @port <windows.h> is now included everywhere, not only on Windows: the assert
-// handler below is inside #ifdef WWDEBUG and needs MessageBoxA(), ExitProcess() and the MB_*/ID*
-// constants, and off Windows those spellings come from the port's own header and the platform
-// seam behind it. Nothing in this file changes on Windows.
+// TheSuperHackers @port Off Windows the header is needed only by the assert handler below, which
+// is inside #ifdef WWDEBUG and calls MessageBoxA(), ExitProcess() and the MB_*/ID* constants; off
+// Windows those spellings come from the port's own header and the platform seam behind it. It stays
+// behind WWDEBUG so the release configuration still compiles with no Windows header available at
+// all, which is what scripts/native-port-probe.py measures in its unshimmed mode. Nothing in this
+// file changes on Windows.
+#if defined(_WIN32) || defined(WWDEBUG)
 #include <windows.h>
+#endif
 #ifndef _WIN32
 #include <errno.h>
 #include <execinfo.h>
