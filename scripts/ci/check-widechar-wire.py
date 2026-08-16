@@ -10,16 +10,20 @@ the next record id out of the middle of the next label's text.
 `Common/WideCharWire.h` is the one conversion. This check COMPILES AND RUNS it twice, once with a 4
 byte `wchar_t` (the native width) and once with `-fshort-wchar` (the MSVC width), and requires that
 
-1. both runs pass every case: `.csf` round trip, save/load round trip, astral code points, malformed
-   surrogates, truncation that never splits a pair;
+1. both runs pass every case: `.csf` round trip, `.map` Dict round trip, save/load round trip,
+   astral code points, malformed surrogates, truncation that never splits a pair;
 2. the two runs produce byte-identical external data - the same `.csf` bytes, the same save blob,
    the same CRC input, the same wire bytes - which is what "the Windows build stays the oracle"
    means here;
 3. with a 2 byte `wchar_t` the conversion is a plain copy of the source units, so nothing about the
    Windows bytes can change;
-4. the NEGATIVE CONTROL fails: the same `.csf` reader sized the old way, with `sizeof(WideChar)`,
-   must desynchronise at a 4 byte `wchar_t` and must agree at 2 bytes. A test that passes on the
-   broken code is not a test.
+4. the NEGATIVE CONTROLS fail: the same `.csf` reader and the same `.map` Dict reader sized the old
+   way, with `sizeof(WideChar)`, must desynchronise at a 4 byte `wchar_t` and must agree at 2 bytes.
+   A test that passes on the broken code is not a test. The `.map` control matters because the
+   headless simulation probe (PR #93) found that this exact over-read made a retail skirmish map
+   load ZERO objects while reporting success: the `SidesList`
+   dict desynchronised on `playerDisplayName`, `readDict` ran the stream to EOF, and `ObjectsList`
+   was never parsed. 13,500 frames then simulated an empty map with a constant CRC and no error.
 
 `-fshort-wchar` is how the MSVC width is reproduced on Linux. It is not how the game is built; it is
 here so the two widths can be compared.
@@ -117,6 +121,92 @@ static int csfReadRecordOldWay(const Csf &csf, int &at, WideChar *dest, int dest
     return chars;
 }
 
+// ---------------------------------------------------------------------------------------------
+// A miniature .map chunk holding a Dict, the shape DataChunk.cpp reads: a pair count, then per
+// pair a key/type Int and the value, where a DICT_UNICODESTRING value is a unit count followed by
+// that many 16 bit units. This is the shape that made a retail SidesList load ZERO objects while
+// reporting success - the headless simulation probe (docs/porting/headless-simulation-probe.md)
+// traced it to readUnicodeString over-reading `playerDisplayName` by a factor of two, after which
+// readDict ran the stream to EOF and the ObjectsList chunk was never parsed at all. Nothing else
+// in the tree noticed, so the negative control below is the only thing that would have.
+// ---------------------------------------------------------------------------------------------
+
+const unsigned int DICT_UNICODESTRING = 4;      // Dict::DICT_UNICODESTRING
+const unsigned int OBJECTSLIST_SENTINEL = 0x4F424A53;   // stands in for the next chunk's id
+
+struct MapChunk
+{
+    unsigned char bytes[512];
+    int size;
+    int dataLeft;       // DataChunkInput::decrementDataLeft's counter
+
+    MapChunk() : size(0), dataLeft(0) { memset(bytes, 0, sizeof(bytes)); }
+
+    void putUnit(unsigned short unit)
+    {
+        bytes[size++] = (unsigned char)(unit & 0xFF);
+        bytes[size++] = (unsigned char)(unit >> 8);
+    }
+    void putInt(unsigned int value)
+    {
+        putUnit((unsigned short)(value & 0xFFFF));
+        putUnit((unsigned short)(value >> 16));
+    }
+    /// One DICT_UNICODESTRING pair: key/type, then a UTF-16 unit count and those units.
+    void putUnicodePair(unsigned int key, const WideWireChar *units, int count)
+    {
+        putInt((key << 8) | DICT_UNICODESTRING);
+        putUnit((unsigned short)count);
+        for (int i = 0; i < count; ++i)
+            putUnit((unsigned short)units[i]);
+    }
+    unsigned short getUnit(int at) const
+    {
+        return (unsigned short)(bytes[at] | (bytes[at + 1] << 8));
+    }
+    unsigned int getInt(int at) const
+    {
+        return (unsigned int)getUnit(at) | ((unsigned int)getUnit(at + 2) << 16);
+    }
+};
+
+/// readUnicodeString as DataChunk.cpp does it now: len counts units, and the chunk bookkeeping is
+/// decremented by the bytes those units occupy.
+static int mapReadUnicodeString(MapChunk &map, int &at, WideChar *dest, int destCount)
+{
+    const int len = map.getUnit(at);
+    at += 2;
+    map.dataLeft -= 2;
+
+    WideWireChar wire[256];
+    for (int i = 0; i < len; ++i)
+        wire[i] = (WideWireChar)map.getUnit(at + i * 2);
+    at += wideCharWireBytes(len);
+    map.dataLeft -= wideCharWireBytes(len);
+
+    const int chars = wireToWideChar(dest, destCount - 1, wire, len);
+    dest[chars] = 0;
+    return chars;
+}
+
+/// The pre-port reader: both the read and decrementDataLeft were sized with sizeof(WideChar).
+/// THE NEGATIVE CONTROL for the .map crossing.
+static int mapReadUnicodeStringOldWay(MapChunk &map, int &at, WideChar *dest, int destCount)
+{
+    const int len = map.getUnit(at);
+    at += 2;
+    map.dataLeft -= 2;
+
+    int chars = 0;
+    for (int i = 0; i < len && chars < destCount - 1; ++i)
+        dest[chars++] = (WideChar)map.getUnit(at + i * 2);
+    at += len * (int)sizeof(WideChar);              // the bug
+    map.dataLeft -= len * (int)sizeof(WideChar);    // and the same bug in the bookkeeping
+
+    dest[chars] = 0;
+    return chars;
+}
+
 static void printBytes(const char *label, const unsigned char *bytes, int size)
 {
     printf("    %s %d bytes:", label, size);
@@ -178,6 +268,67 @@ int main(void)
         if (desynced)
             printf("    (negative control desynchronised by %d bytes, as expected)\n",
                    at - secondRecordAt);
+    }
+
+    // ---- the .map Dict crossing, and its negative control ------------------------------------
+    // A SidesList-shaped dict: one DICT_UNICODESTRING pair (playerDisplayName) followed by the id
+    // of the chunk that has to be reached next. Over-reading the string loses that id, which is
+    // how ObjectsList stopped being parsed while the load still reported success.
+    {
+        const WideWireChar displayName[] = { 'P','l','a','y','e','r',' ','1', 0 };
+
+        MapChunk map;
+        map.putUnit(1);                                     // one dict pair
+        const int pairAt = map.size;
+        map.putUnicodePair(0x2A, displayName, wireLen(displayName));
+        const int sentinelAt = map.size;
+        map.putInt(OBJECTSLIST_SENTINEL);                   // what readDict must leave intact
+        // The bytes the string value owns: its unit count and its units, nothing else.
+        const int valueBytes = sentinelAt - (pairAt + 4);
+
+        printBytes("map dict bytes", map.bytes, map.size);
+
+        {
+            int at = pairAt;
+            const unsigned int keyAndType = map.getInt(at);
+            at += 4;
+            check((keyAndType & 0xFF) == DICT_UNICODESTRING,
+                  ".map dict: the pair is a unicode string");
+
+            WideChar text[256];
+            map.dataLeft = valueBytes;
+            const int chars = mapReadUnicodeString(map, at, text, 256);
+            check(chars == wireLen(displayName), ".map dict: playerDisplayName length");
+            for (int i = 0; i < chars; ++i)
+                check(text[i] == (WideChar)displayName[i], ".map dict: playerDisplayName text");
+            check(at == sentinelAt, ".map dict: the reader stops exactly at the next chunk id");
+            check(map.getInt(at) == OBJECTSLIST_SENTINEL,
+                  ".map dict: ObjectsList is still reachable");
+            check(map.dataLeft == 0, ".map dict: the chunk's dataLeft bookkeeping balances");
+        }
+
+        // The old sizing. At 4 bytes it must both walk past the next chunk id and drive dataLeft
+        // negative - the two symptoms the probe saw. At the MSVC width it must be correct.
+        {
+            int at = pairAt + 4;
+            map.dataLeft = valueBytes;
+            WideChar text[256];
+            mapReadUnicodeStringOldWay(map, at, text, 256);
+            const bool overran = (at != sentinelAt);
+            if (sizeof(WideChar) == 2) {
+                check(!overran, "negative control (.map): the old sizing is correct at 2 bytes");
+                check(map.dataLeft == 0,
+                      "negative control (.map): dataLeft balances at 2 bytes");
+            } else {
+                check(overran, "negative control (.map): the old sizing must over-read at 4 bytes");
+                check(map.getInt(at) != OBJECTSLIST_SENTINEL,
+                      "negative control (.map): the next chunk id must be lost");
+                check(map.dataLeft < 0,
+                      "negative control (.map): dataLeft must go negative");
+                printf("    (negative control over-read the .map dict by %d bytes, dataLeft %d)\n",
+                       at - sentinelAt, map.dataLeft);
+            }
+        }
     }
 
     // ---- a save game / CRC blob: a unit count, then the units --------------------------------
@@ -319,9 +470,10 @@ def compile_and_run(clangxx, tu, out, extra_flags, verbose=False):
 
 
 def external_bytes(output):
-    """The `wire bytes`/`csf bytes`/`save blob` lines, i.e. everything that leaves the process."""
+    """The printed external byte lines, i.e. everything that leaves the process."""
     return [line.strip() for line in output.splitlines()
-            if line.strip().startswith(("wire bytes", "csf bytes", "save blob"))]
+            if line.strip().startswith(("wire bytes", "csf bytes", "save blob",
+                                        "map dict bytes"))]
 
 
 def main():
