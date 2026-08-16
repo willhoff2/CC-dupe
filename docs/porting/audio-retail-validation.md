@@ -50,11 +50,12 @@ By the code path the engine uses for each (`AudioRoot = Data\Audio`, `SoundsFold
 |---|---|
 | one-shot / sample (`AIL_set_sample_file`) | 900 PCM + **181 IMA ADPCM** = 1081 |
 | stream (`AIL_open_stream`) | **2391 IMA ADPCM** + 51 PCM = 2442 |
-| music (stream) | **7 MP3** |
+| music (stream) | **7 MP3** in `MusicZH.big` (56 once the base game's `Music.big` is mounted too — see below) |
 
 And what the INI asks for, resolved onto those entries: 2569 `DialogEvent` definitions → 2429
 distinct files (2392 ADPCM + 43 PCM references); 1410 `AudioEvent` definitions in the parsed INI set
-→ 899 distinct files (820 PCM + 206 ADPCM references); 69 `MusicTrack` definitions → the 7 MP3s.
+→ 899 distinct files (820 PCM + 206 ADPCM references); 69 `MusicTrack` definitions, of which 8
+references resolve onto the 7 Zero Hour MP3s and 60 onto base-game tracks.
 
 Two notes on those counts, since the probe report quotes different ones:
 
@@ -66,12 +67,45 @@ Two notes on those counts, since the probe report quotes different ones:
   Zero Hour INI inherits Generals events, and the survey was pointed at `GeneralsMD` only. They are
   reported rather than hidden, and none of them changes a codec count.
 
+### The music set is bigger than `MusicZH.big`, and a next slice must not miss that
+
+Everything above is scoped to the **`GeneralsMD` archive directory**, which is the port's scope. A
+real retail Zero Hour installation also mounts the base game's directory, and the music the game
+plays comes from both. Measured by re-running the same survey with both roots:
+
+```
+$ python3 scripts/audio-retail-survey.py --data ~/gamedata/full/GeneralsMD --data ~/gamedata/full/Generals
+Music.big.mp3   : 49
+MusicZH.big.mp3 :  7
+music path      : 56 mp3
+MusicTrack unresolved references: 60 -> 3
+```
+
+So the **56 MP3 files** are the music set, not 7: Zero Hour's own `MusicTrack` definitions reference
+base-game tracks, which is exactly what the 60 unresolved references in the `GeneralsMD`-only run
+were. Two traps in that, both cheap to fall into:
+
+- `GeneralsMD/Music.big` exists, is 786 KB, and contains **one entry, `generalsa.sec`** — no tracks.
+  A reader who assumes the Zero Hour folder holds the music finds an archive with zero audio in it
+  and concludes the music is missing.
+- 55 of the 56 tracks are MPEG-1 layer III, stereo, 44100 Hz, 192 kbps. The 56th,
+  `Data\Audio\Tracks\Silence60.mp3`, is **MPEG-2 layer III, mono, 22050 Hz, 64 kbps**, so an MPEG
+  decoder for this game cannot assume MPEG-1, stereo or 44.1 kHz, and the resampling/channel path has
+  to be real. Every track also carries an **ID3v2 tag**, so the first frame header is not at offset 0.
+
+The same scoping applies to the sample and stream counts: a real installation additionally mounts
+`Audio.big` (1720 WAV), `AudioEnglish.big` (1771), `SpeechEnglish.big` (1551) and `Speech.big` (17)
+from the base game. Those are base-game assets and out of the port's scope, but they are *loaded* at
+runtime, and among them are two layouts absent from the Zero Hour archives — IMA ADPCM stereo
+22050 Hz block 1024 (6 files) and further 44100 Hz PCM — both of which the fixed code paths handle by
+construction, since neither the block decoder nor the stream parser has a hard-coded layout.
+
 ### Formats the retail set does **not** contain
 
 - **No MS ADPCM.** 3523 WAV files, 0 with `WAVE_FORMAT_ADPCM` (0x02). The probe's §2.1 "MS ADPCM is
   refused loudly, whether retail uses it is unknown" is now answered: retail does not use it, so the
   refusal is correct and MS ADPCM support is **cut, with evidence**.
-- **No MP2.** All 7 music tracks are MPEG-1 **layer III**. MP2 is likewise cut.
+- **No MP2.** All 56 music tracks are **layer III** (55 MPEG-1, one MPEG-2). MP2 is likewise cut.
 - **No 8-bit PCM**, and no sample rate other than 22050 and 44100.
 
 ## 2. What each defect actually broke — measured, not inferred
@@ -270,7 +304,7 @@ Classified, as the project requires:
 
 | # | Item | Class | Consequence |
 |---|---|---|---|
-| 1 | **No MPEG decoder** | **unimplemented, and REQUIRED** — retail music is 7 MP3 tracks, so it cannot be cut | **all music is absent.** It now fails audibly-in-logs rather than silently. `RTS_BUILD_OPTION_FFMPEG` already exists for video, so this is a wiring and licensing decision, not research |
+| 1 | **No MPEG decoder** | **unimplemented, and REQUIRED** — the music the game plays is 56 MP3 tracks, so it cannot be cut | **all music is absent.** It now fails audibly-in-logs rather than silently. See §7 for where a decoder attaches and what is already known about the route |
 | 2 | Reverb (`AIL_set_3D_sample_effects_level`) recorded, not applied | unimplemented | no reverb; needs OpenAL Soft EFX |
 | 3 | Filters (`AIL_set_sample_processor`, `Delay`) recorded, not applied | unimplemented | no mono-delay effect |
 | 4 | Occlusion is gain, not low-pass; `LowPassCutoff` routed into occlusion | approximation | shrouded sounds get quieter where Windows makes them muffled |
@@ -307,6 +341,45 @@ python3 scripts/audio-retail-survey.py --data ~/gamedata/full/GeneralsMD --json 
 CLANGXX=clang++-14 python3 scripts/audio-retail-probe.py \
     --data ~/gamedata/full/GeneralsMD --json /tmp/probe.json
 ```
+
+## 7. What an MPEG slice needs to know before it starts
+
+Written down here because it was measured while doing this work, and because the shape of the answer
+is not obvious from the code.
+
+- **It is one branch in the funnel this slice repaired, plus a decoder link — not a new handler.**
+  Music reaches the backend through `AIL_open_stream` only (`MilesAudioManager.cpp`, the `PAT_Stream`
+  case, and again in `getFileLengthMS`), never through the sample/`AIL_decompress_ADPCM` path. The
+  `StreamCodec` enum, the block-aligned `readChunk`, the metadata/payload split and the visible-failure
+  seam added here are precisely the extension points: an `Mpeg` codec member, a decoder that turns
+  bytes into interleaved 16-bit PCM, and the `setLastError` call in `readWaveMetadata` becomes a
+  branch instead of a refusal. Nothing this slice changed needs changing again for it.
+- **`RTS_USE_OPENAL` is not the route, and enabling it blind will not compile.**
+  `FFmpegVideoPlayer.cpp` guards its audio on `RTS_USE_OPENAL` (and its includes on the differently
+  spelled `RTS_HAS_OPENAL`), neither of which anything defines — see
+  `docs/porting/video-path-findings.md`. Those branches include
+  `OpenALAudioDevice/OpenALAudioManager.h` and `OpenALAudioDevice/OpenALAudioStream.h`, and **neither
+  header exists anywhere in this tree**: they belong to an upstream OpenAL *audio manager* this fork
+  does not have, because this fork implements the Miles API over OpenAL instead
+  (`Core/Libraries/Source/OpenALAudioDevice/` is `OpenALDriver/Sample/3DSample/Stream/WaveFile` and
+  `mss/`). So `RTS_USE_OPENAL` is *movie* audio for a class that does not exist here, and is a
+  separate question from music decoding. Music needs no new engine-facing class at all.
+- **`RTS_HAS_FFMPEG` is the plausible decoder route, and is a build-configuration question, not a
+  code one.** It is defined by `Core/GameEngineDevice/CMakeLists.txt` when
+  `RTS_BUILD_OPTION_FFMPEG` is on, defaults `OFF`, and `scripts/ci/fetch-probe-deps.sh` provisions
+  only the pinned FFmpeg *headers* — the native build report records FFmpeg as `library-not-linked`
+  with 0 objects linked against it, so no session has ever linked libavcodec here. A music decoder
+  reusing it therefore has to answer: does the OpenAL audio device gain a dependency on
+  `RTS_BUILD_OPTION_FFMPEG` (today it has none, and `check-audio-backend-linked.py` gates that the
+  backend links standalone), or does it link a small MP3-only decoder instead? That is a decision to
+  raise, not to make silently, and licensing sits on the same fork.
+- **The format facts a decoder must satisfy** are in §1: 56 files, 55 MPEG-1 layer III stereo
+  44100 Hz 192 kbps and one MPEG-2 layer III mono 22050 Hz 64 kbps, all with ID3v2 tags, and 49 of
+  them living in the **base game's** `Music.big`, not in `MusicZH.big`.
+- **The gate to reuse**: `scripts/audio-retail-probe.py` already selects a real retail MP3 and
+  currently asserts that it fails loudly (§4.6). When a decoder lands, that assertion inverts into the
+  same measurement the WAV paths get — non-silent RMS, expected duration, correct rate and channels —
+  and `scripts/audio_retail_assets.py` already parses MPEG frame headers to supply the expected values.
 
 The synthetic probe, `scripts/native-audio-probe.py`, still runs without retail data and now gates
 the fixed behaviour: the ADPCM handoff must produce RIFF/WAVE and be audible, a 500 ms stream must

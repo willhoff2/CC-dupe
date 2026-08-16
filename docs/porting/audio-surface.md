@@ -222,8 +222,10 @@ Stated plainly, because none of this can be verified without retail game data:
   ADPCM alike. For compressed music a decoder must be plugged in (the repo already has an optional
   FFmpeg dependency for video — that is the obvious place to route it). Until then such a stream
   **fails to open and sets an explicit error**; it used to open, report zero length and play silence,
-  which is the failure mode this project exists to stop. Retail music is 7 MP3 tracks, so this is a
-  required gap, not a cuttable one.
+  which is the failure mode this project exists to stop. The music a retail install plays is 56 MP3
+  tracks (7 in `MusicZH.big`, 49 in the base game's `Music.big`), so this is a required gap, not a
+  cuttable one; `docs/porting/audio-retail-validation.md` §7 records where a decoder attaches and
+  why `RTS_USE_OPENAL` is *not* that route.
 - **Filters are accepted but not applied.** `AIL_set_filter_sample_preference` and
   `AIL_set_sample_processor` record their arguments and return success. Reverb and mono-delay are
   not audible. OpenAL Soft EFX is the intended route.

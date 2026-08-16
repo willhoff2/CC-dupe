@@ -46,6 +46,15 @@ MPEG1_BITRATES = {
     1: (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320),       # layer III
 }
 
+# MPEG-2 and MPEG-2.5 use a different table, and the retail music set does contain one such track
+# (`Data\Audio\Tracks\Silence60.mp3`, MPEG-2 layer III mono), so leaving this out reported it at
+# 0 kbps.
+MPEG2_BITRATES = {
+    3: (0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256),      # layer I
+    2: (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),           # layer II
+    1: (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),           # layer III
+}
+
 
 class BigArchive:
     """One .big archive, opened lazily: entries are read on demand, never all at once."""
@@ -197,7 +206,8 @@ def parse_mpeg(data):
             mode = (data[at + 3] >> 6) & 0x03
             if version != 1 and layer != 0 and rate_index != 3 and bitrate_index not in (0, 15):
                 rates = MPEG_RATES.get(version)
-                bitrates = MPEG1_BITRATES.get(layer) if version == 3 else None
+                table = MPEG1_BITRATES if version == 3 else MPEG2_BITRATES
+                bitrates = table.get(layer)
                 return {
                     "codec": {3: "mp1", 2: "mp2", 1: "mp3"}[layer],
                     "mpeg_version": {3: 1, 2: 2, 0: 2.5}[version],
