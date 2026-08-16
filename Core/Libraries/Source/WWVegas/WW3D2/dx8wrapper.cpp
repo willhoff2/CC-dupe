@@ -51,7 +51,11 @@
 #endif
 
 #include "dx8wrapper.h"
+#ifdef _WIN32
 #include "d3d8renderbackend.h"
+#else
+#include "vulkanrenderbackend.h"
+#endif
 #include "dx8webbrowser.h"
 #include "dx8fvf.h"
 #include "dx8vertexbuffer.h"
@@ -153,14 +157,14 @@ D3DCOLOR							DX8Wrapper::FogColor										= 0;
 // than in Init() because callers ask DX8Wrapper whether a device exists before (and after)
 // the wrapper is initialised; acquiring D3D8 and creating a device are what Init() and
 // Create_Device() do to it.
-// TheSuperHackers @port The one installed backend. D3D8 is the only implementation, and it only
-// exists on Windows; off Windows there is no backend yet, which is what a null pointer says.
-// _Get_D3D_Device8() / _Get_D3D8() handle that; the DX8CALL macros do not, and do not have to,
-// because WW3D2 is not in the native build's target set until a second backend exists.
+// TheSuperHackers @port The one installed backend, chosen at static-initialisation time so it is
+// never null: D3D8 on Windows, which is the oracle and is unchanged, and the Vulkan translation
+// over spikes/renderer everywhere else. _Get_D3D_Device8() / _Get_D3D8() still answer null off
+// Windows, because there is no IDirect3DDevice8 there at all.
 #ifdef _WIN32
 RenderBackendClass *			DX8Wrapper::RenderBackend							= &TheD3D8RenderBackend;
 #else
-RenderBackendClass *			DX8Wrapper::RenderBackend							= nullptr;
+RenderBackendClass *			DX8Wrapper::RenderBackend							= &TheVulkanRenderBackend;
 #endif
 IDirect3DSurface8 *			DX8Wrapper::CurrentRenderTarget						= nullptr;
 IDirect3DSurface8 *			DX8Wrapper::CurrentDepthBuffer						= nullptr;
