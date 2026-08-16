@@ -36,6 +36,8 @@ set(WW3D2_SRC
     d3d8renderbackend.h
     d3dx8fvf.cpp
     d3dx8shader.cpp
+    d3dx8texcreate.cpp
+    d3dx8texcreate.h
     d3dx8texture.cpp
     d3dx8texture.h
     #dazzle.cpp

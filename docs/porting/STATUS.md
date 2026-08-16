@@ -17,19 +17,22 @@ Measured with clang 14. Vendor headers present: dx8-src, ffmpeg-src, gamespy-src
 |---|---:|---:|
 | `Core/Libraries/Source/Compression` | 11 / 11 | 11 / 11 |
 | `Core/Libraries/Source/WWVegas/WWMath` | 33 / 37 | 37 / 37 |
-| `Core/Libraries/Source/WWVegas/WWLib` | 69 / 78 | 78 / 78 |
+| `Core/Libraries/Source/WWVegas/WWLib` | 69 / 79 | 79 / 79 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 / 3 | 3 / 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 11 / 12 | 12 / 12 |
 | `Core/Libraries/Source/debug` | 12 / 22 | 13 / 22 |
 | `Core/Libraries/Source/profile` | 5 / 6 | 5 / 6 |
-| `Core/GameEngine` | 182 / 210 | 195 / 210 |
+| `Core/GameEngine` | 183 / 210 | 196 / 210 |
 | `GeneralsMD/Code/GameEngine` | 344 / 380 | 360 / 380 |
-| **total** | **670 / 759** | **714 / 759** |
+| **total** | **671 / 760** | **716 / 760** |
 
 ## D3D8 call surface
 
-Direct (non-wrapper, non-backend) call sites permitted: **0**.
-No file holds a direct-call budget: every D3D8 call goes through the `DX8CALL*` macros or lives inside the render backend implementation.
+Direct (non-wrapper, non-backend) call sites permitted: **3**.
+
+| File | Budget | Why |
+|---|---:|---|
+| `Core/Libraries/Source/WWVegas/WW3D2/d3dx8texcreate.cpp` | 3 | d3dx8.lib's three creation entry points off Windows, not engine call sites: D3DXCreateTexture/CubeTexture/VolumeTexture each end in the matching IDirect3DDevice8::Create* call on the device their CALLER passes in, and that caller is DX8Wrapper -- routing them back through DX8CALL would be circular. PR #8's documented exception 4 covers the calls INTO this library; these are the three it makes back out. The count is exact, so a fourth fails. |
 
 ## What the numbers mean
 

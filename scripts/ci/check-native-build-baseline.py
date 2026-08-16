@@ -19,6 +19,13 @@ were added to the link in the same change. And when the results come from `--str
 number of symbols the linker itself refuses is ratcheted too, since that is the only figure here
 that answers "is there an executable"; the tolerant link produces a file and exits 0 regardless.
 
+Once a baseline records a produced executable, the strict link stops being a ratchet and becomes a
+BINARY GATE: the link must not break. A count that grew from 0 to 4 and a count that grew from 73
+to 77 are not the same kind of event -- the first means there is no longer an executable at all --
+so from the first binary onwards the assertion is that the strict link is still clean, still
+produces a file, and that the file is still a 64-bit executable of this host's machine, rather than
+that some number did not increase. A regression is a broken build, not a bigger number.
+
 Improvements are reported, not failed, and the baseline should be refreshed in the same PR that
 earns them:
 
@@ -37,6 +44,49 @@ BASELINE_DIR = REPO_ROOT / "docs" / "porting" / "ci-baselines"
 
 def load(path):
     return json.loads(pathlib.Path(path).read_text())
+
+
+def check_binary_gate(base_strict, got_strict):
+    """Once an executable has been linked, assert it still is -- the inverted ratchet.
+
+    Returns the failure lines. Nothing here compares counts: a link that stops completing is the
+    failure, whether it is short by one symbol or by seventy. The file's own header is checked too,
+    because a 32-bit or foreign-machine file at that path would satisfy `binary_produced` while
+    being useless, and the whole point of the figure is that it means a loadable 64-bit binary.
+    """
+    if not base_strict.get("binary_produced"):
+        return []
+    failures = []
+    if not got_strict.get("binary_produced"):
+        failures.append("the strict link produced an executable in the baseline and produces none "
+                        f"now: {got_strict.get('unresolved_total', '?')} unresolved symbol(s). "
+                        "This is a broken build, not a bigger number")
+    if not got_strict.get("clean"):
+        failures.append("the strict link exited non-zero; the baseline's link was clean")
+    if got_strict.get("unresolved_total"):
+        failures.append(f"the strict link reports {got_strict['unresolved_total']} unresolved "
+                        "symbol(s); the baseline's link had none")
+    binary = got_strict.get("binary")
+    base_binary = base_strict.get("binary") or {}
+    if got_strict.get("binary_produced") and not binary:
+        failures.append("the strict link reports an executable but describes no file, so this run "
+                        "cannot say what was produced; re-run with a harness that records it")
+    elif binary:
+        print(f"executable: {binary['path']} {binary['bytes'] / (1024 * 1024):.1f} MiB "
+              f"{binary['format']} {binary['word_size']}-bit {binary['machine']} "
+              f"(baseline {base_binary.get('word_size', '-')}-bit "
+              f"{base_binary.get('machine', '-')})")
+        if binary.get("word_size") != 64:
+            failures.append(f"the executable is {binary.get('word_size')}-bit; this port targets "
+                            "64-bit and the baseline's file was 64-bit")
+        if base_binary.get("format") and binary.get("format") != base_binary["format"]:
+            failures.append(f"the executable is a {binary['format']} file, the baseline's was "
+                            f"{base_binary['format']}; the baselines are per-platform, so this is "
+                            "a baseline measured on another OS rather than a comparison")
+        if base_binary.get("machine") and binary.get("machine") != base_binary["machine"]:
+            failures.append(f"the executable is for {binary['machine']}, the baseline's was for "
+                            f"{base_binary['machine']}")
+    return failures
 
 
 def main():
@@ -186,7 +236,7 @@ def main():
                                 f"{got_piles[port_pile]}")
 
     # The strict link is the only figure here that answers "is there an executable", so it is
-    # ratcheted whenever both runs attempted it, and a disagreement with the `nm` scan is a failure
+    # gated whenever both runs attempted it, and a disagreement with the `nm` scan is a failure
     # in its own right: it would mean the categorised list is not the list the linker fails on.
     base_strict = baseline.get("strict_link") or {}
     got_strict = results.get("strict_link") or {}
@@ -200,17 +250,24 @@ def main():
                 f"the strict link's unresolved list and the nm scan disagree: "
                 f"{len(got_strict['only_in_linker_report'])} symbol(s) only the linker reports, "
                 f"{len(got_strict['only_in_nm_scan'])} only the scan does")
+        failures += check_binary_gate(base_strict, got_strict)
         if base_strict.get("attempted"):
-            if got_strict["unresolved_total"] > base_strict["unresolved_total"]:
+            # Below the gate, and only while a baseline predates the first binary, the count is
+            # still worth ratcheting: it is the measure of distance to a link that completes.
+            if got_strict["unresolved_total"] > base_strict["unresolved_total"] \
+                    and not base_strict.get("binary_produced"):
                 failures.append(
                     f"strict link: {base_strict['unresolved_total']} unresolved symbols in the "
                     f"baseline, {got_strict['unresolved_total']} now")
             elif got_strict["unresolved_total"] < base_strict["unresolved_total"]:
                 improvements.append(f"strict link: {base_strict['unresolved_total']} -> "
                                     f"{got_strict['unresolved_total']} unresolved symbols")
+            if got_strict.get("binary_produced") and not base_strict.get("binary_produced"):
+                improvements.append("strict link: no executable in the baseline, one now -- "
+                                    "refresh the baseline and the gate becomes 'must not break'")
     elif base_strict.get("attempted"):
         failures.append("the baseline was measured with --strict-link and these results were not, "
-                        "so the executable figure it ratchets went unmeasured")
+                        "so the executable it gates on went unmeasured")
 
     if improvements:
         print()

@@ -1,14 +1,11 @@
-# What "startable" means, and what stands between 250 symbols and a running process
+# What "startable" means, and the state of each condition now that a binary exists
 
-> **Superseded in part.** Every total below predates the slice that made `dx8wrapper.cpp` compile.
-> The current figures are 969/972 objects, 3 compile failures, 173 strict-link unresolved symbols,
-> `compile-blocked` 18 and `no-definition-anywhere` 22; see
-> `docs/porting/dx8wrapper-native-compile.md` and the level 1-4 baseline JSON. The definitions of
-> "startable" and of the five piles below are unaffected.
+This document was written for a world in which the strict link produced no file, and its whole content
+was a checklist of what would have to be true. **A file now exists.** So the checklist is a status
+table, and the interesting part of the document has moved from "what is missing" to "what a linked
+binary does and does not prove".
 
-Measured at `219d9130b` with `clang++-14` on Ubuntu 22.04, levels 1-4 shimmed — i.e. after #64 put
-the OpenAL backend on the link line, which is why every total here is 89 lower than this slice's
-first measurement without a line of port work being done.
+Measured with `clang++-14` on Ubuntu 22.04, levels 1-4 shimmed:
 
 ```sh
 ./scripts/ci/fetch-probe-deps.sh
@@ -17,177 +14,159 @@ CLANGXX=clang++-14 python3 scripts/native-build.py \
   --json native-build-level4.json
 ```
 
-Every number below comes from that run and from
+Every figure below comes from that run and from
 `docs/porting/ci-baselines/native-build-shimmed-level1-2-3-4.json`, which the command regenerates.
 None of it is quoted from prose.
 
-## 1. The claim this document exists to kill
+## 1. The headline, and its exact limits
 
-Levels 1-4 produce **968/972 object files**, and the link is anchored by
-`GeneralsMD/Code/Main`'s own `main()` (`PlatformMain.cpp`) rather than by a stub the harness writes.
-That link also **produces a file**, and the file means nothing: it is linked with
-`-Wl,--warn-unresolved-symbols`, so 250 unresolved symbols are warnings and the linker exits 0. The
-loader would reject the result immediately.
+"Before" is the branch point, main at `51322470b` — the window/GDI and D3DX entry-point slice (#85)
+as merged, whose baseline is the last one measured without a binary.
 
-`--strict-link` drops the tolerance and asks the linker for a verdict:
-
-| | tolerant link (`link_probe`) | strict link (`--strict-link`) |
+| | before this slice | now |
 |---|---|---|
-| flags | `-Wl,--warn-unresolved-symbols` | none |
-| unresolved symbols | 250, reported as warnings | 250, reported as errors |
-| exit status | 0 | non-zero |
-| file produced | yes | **no** |
+| objects | 976/976 | **977/977**, 0 compile failures |
+| strict link (`--strict-link`, no `--warn-unresolved-symbols`) | fails | **succeeds** |
+| unresolved symbols | 68 | **0** |
+| `strict_link.binary_produced` | `false` | **`true`** |
+| the file | none | `build/native/native_strict_link`, **80.7 MiB, ELF 64-bit x86-64, `ET_DYN`** (PIE) |
+| `strict_link.agrees_with_nm` | true | true — the linker's verdict and the `nm` scan of the archives agree, at 0 |
 
-The two lists are identical, which is the useful part: the strict link's 250 and the `nm` scan's 250
-agree symbol for symbol (`strict_link.agrees_with_nm`), so the categorised list is exactly the list
-standing between this build and an executable. Nothing is stubbed to obtain that, and nothing may
-be — a green strict link bought with stubs would hide precisely the work these numbers count.
+The object count rose by one because the tree now compiles a file it did not have:
+`d3dx8texcreate.cpp` (§2). The selected window backend adds an object to `WWLib`'s archive without
+changing the measured denominator, since the harness counts the sources it is given. The piles
+`library-not-linked` (was 54), `harness-artefact` (was 9), `no-definition-anywhere` (was 5),
+`cut-scope-not-linked` and `compile-blocked` are all **0**.
 
-## 2. The 250, by what would resolve each one
+**Nothing was stubbed to get there.** That is a checkable claim, not a promise: every symbol was
+resolved either by putting a real library on the link line, by building an in-tree file that already
+had the definition, by running the build step the harness was skipping, or by writing an
+implementation with a behaviour test. The one thing that is *deliberately unimplemented* —
+`D3DXCreateTextureFromFileExA` — prints a line naming itself and returns `E_NOTIMPL` rather than
+pretending to succeed; it is a refusal, not a stub, and §4 says what it costs.
 
-The existing categories say what a symbol *is* (`Win32 API`, `FFmpeg`, `Miles Sound System`). They do
-not say what makes it go away, and conflating the two is what made the pre-level-4 figure
-misleading: 272 of the symbols levels 1-3 could not resolve were only "this build does not compile
-the renderer", and building the layer removed them without a line of port work. Each symbol is
-therefore also assigned to exactly one **pile**:
+## 2. How each of the 68 was resolved
 
-| Pile | Symbols | What resolves it | Owner |
+| Was | Symbols | Resolved by | Not a stub because |
 |---|---:|---|---|
-| `library-not-linked` | 42 | Adding a library to the link line. | see §3 |
-| `cut-scope-not-linked` | 82 | Excising the call sites of a cut feature. | `online/absent-menu-seam` |
-| `compile-blocked` | 108 | Making an in-tree translation unit compile; the definition already exists. | the slice that owns the file |
-| `harness-artefact` | 9 | A build step this harness does not run, or an `#if` this configuration does not take. | this slice |
-| `no-definition-anywhere` | **9** | Writing code. **This is the remaining port work.** | see §5 |
+| SDL2/Cocoa window seam | 24 | `scripts/native-build.py` selects a backend: `platform_window_sdl2.cpp` off Apple, `platform_window_cocoa.mm` on macOS, matching `CORE_WWLIB_WINDOW_BACKEND` in the real build. `libSDL2` is linked by path. | the definitions were already in the tree; the harness built neither. Decision 6 of `decisions-resolved.md`. |
+| FFmpeg `av_*`/`sws_*`/`swr_*` | 29 | `fetch-probe-deps.sh` builds the shared libraries at the tag `vcpkg-lock.json` pins (n7.1.1) and the link uses them. | it is the upstream library, at the version the headers came from. Decision 7. |
+| `gitinfo` | 6 | the harness runs `resources/gitinfo/git_watcher.cmake`, the real generator, into `build/native/generated/support_gitinfo/gitinfo.cpp`. | the values are this checkout's, produced by the same code the CMake build uses — not hand-written. |
+| `FillStackAddresses`, `StackDumpFromAddresses`, `g_LastErrorDump` | 3 | the probe defines `IG_DEBUG_STACKTRACE`, which selects the `backtrace()`/`backtrace_symbols()` implementation #47 landed. | the implementation walks a real stack; the symbols were behind an `#if` this configuration was not taking. |
+| `MSS_auto_cleanup` | 1 | an include-order fix: the fetched Miles SDK `mss.h` was shadowing the OpenAL backend's own header, so the backend's definition was never compiled. | it was a **measurement bug**. The definition existed the whole time. |
+| D3DX texture creation | 5 | `d3dx8texcreate.cpp`: `D3DXCreateTexture`, `D3DXCreateCubeTexture`, `D3DXCreateVolumeTexture` fit the request to `D3DCAPS8` and call the device; `D3DXGetErrorStringA` returns the D3D8 error names; `D3DXCreateTextureFromFileExA` loudly refuses. | 74 assertions in `d3dx8texcreate_test.cpp` over the fitting rules, and the refusal is explicit and audible. `d3dx8-texture-seam.md` §4. |
+| `ff_aom_uninit_film_grain_params` | (appeared, then gone) | the reduced FFmpeg configuration was pulling H.264/AAC code whose own dependency was disabled; the configuration now enables Bink/`.binka`/PCM and the demuxers the game needs. | it was FFmpeg's internal symbol, not the game's. Not resolvable by any port work — a configuration error, found by `nm -D` on the built library. |
 
-Of the 108 `compile-blocked`, roughly 90 are `dx8wrapper.cpp`'s (`DX8Wrapper::*`, matched by scanning
-the four failed files for each name) and the remaining ~18 are the three GameSpy units, which are cut
-scope anyway. `dx8wrapper.cpp` is therefore the only non-cut compile failure left in the level 1-4
-build, and it is the largest single lever on this list after the audio link.
+## 3. Definition: startable, with real answers
 
-Only the last row is port work. It is the number to ratchet, and
-`scripts/ci/check-native-build-baseline.py` now fails if it grows, independently of the total —
-otherwise adding FFmpeg to the link would let real port work grow behind a falling headline.
+**Startable** = the strict link produces an executable, and running it against an installed Zero Hour
+reaches the main menu's first rendered frame without an assert or a fatal error.
 
-The pile assignment is evidence-based, not a keyword list: for each provider the script scans the
-sources or headers `scripts/ci/fetch-probe-deps.sh` provisions and matches the symbols they define.
-It deliberately does **not** decide the pile from libraries installed on the measuring machine (this
-box has FFmpeg, OpenAL and SDL2; the CI container has none), because a split that changed with the
-box would not be a measurement. Where a real library is present it is used as a cross-check and
-reported in `providers.*.system_libraries`: all 29 FFmpeg symbols are exported by this box's
-`libavcodec.so.58` and friends.
+The first half is now true. The second is not, and this table is the point of the document:
 
-## 3. `library-not-linked`: 42 symbols, and why each library is absent
-
-| Library | Symbols | Why it is not linked here | Slice that will remove them |
-|---|---:|---|---|
-| Miles `AIL_*` API | 1 | Was 90. #64 builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links `libopenal`, so 89 of the 90 resolved with no `AIL_*` written or stubbed. What remains is `MSS_auto_cleanup`, which that backend does not implement. | `platform/audio-device` |
-| FFmpeg | 29 | The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route (`cmake/config-build.cmake`, default `OFF`). This harness compiles source lists rather than honouring that option, so `VideoDevice/FFmpeg/*.cpp` is built with the pinned headers `fetch-probe-deps.sh` provisions, while nothing installs an FFmpeg runtime to link against. | `video/bink-excision-and-harness-headers` |
-| SDL2 / Cocoa window backend | 12 | `probe.OPTIONAL_BACKENDS` keeps `platform_window_sdl2.cpp` opt-in, and `platform_window_cocoa.mm` is Objective-C++ so no target lists it. Both definitions are in the tree. | `platform/macos-window-compile`, `platform/window-seam-wiring` |
-| zlib, LZHL | 0 | Already linked: `libz` from the system and the provisioned LZHL sources as a support archive. Listed because their absence used to be counted. | — |
-
-These 42 are the same class of artefact level 4 removed for the renderer, and the drop from 131
-demonstrates it: the strict link must be given the same libraries as the tolerant one (`libopenal`
-included) or it would report 90 symbols as unresolved that the engine can already resolve, which
-would read as port work. They are not a smaller
-number of "real" problems; they are a link line and a decision. The decision matters, which is §4.
-
-`cut-scope-not-linked` is 82 GameSpy SDK symbols. The SDK's own sources define all of them, so this
-is a link *refused*, not one that is missing: online matchmaking is cut scope, and the symbols
-disappear when `online/absent-menu-seam` removes the call sites. Linking the SDK to make a binary
-appear would be the worst available outcome.
-
-## 4. What an executable needs beyond symbol resolution
-
-Symbol resolution is necessary and nowhere near sufficient. In order:
-
-1. **An entry point — done.** `GeneralsMD/Code/Main`'s `main()` anchors the link; the harness's stub
-   `main()` is unused, and the three standalone test-tool `main()` objects inside the measured
-   directories are removed from the archives first so the game's entry point is unique
-   (`link_dropped_entry_points`).
-2. **A window/input backend, and a renderer device — chosen, not merely excluded.** The 12 backend
-   symbols are unresolved because this configuration picks *no* backend. A real executable must pick
-   one: SDL2 on Linux, Cocoa on macOS. That is a decision with consequences (event loop, input
-   mapping, HiDPI), not a link flag, which is why the pile is "not linked" rather than "missing".
-   The same is true of the renderer: `dx8wrapper.cpp` is one of the 4 translation units that do not
-   compile (its first diagnostic here is `_D3DADAPTER_IDENTIFIER8::DriverVersion`), so even with
-   every symbol resolved this build contains no display device. (#65's browser
-   excision made `W3DDisplay.cpp` itself compile, which is why its `IsIconic` call now shows up as an
-   unresolved symbol rather than hiding behind a compile failure — the shape of the list changes as
-   files start compiling, which is the point of splitting the piles.)
-3. **Generated `gitinfo` — 6 symbols, build-time.** `resources/CMakeLists.txt` configures
-   `gitinfo/gitinfo.cpp.in` into the build tree via `git_watcher.cmake`, defining `GitRevision`,
-   `GitShortSHA1`, `GitTag`, `GitCommitTimeStamp`, `GitCommitAuthorName` and
-   `GitUncommittedChanges`. This harness compiles source lists rather than running the real CMake
-   project, so it does not generate the file. A real build has these; measuring their absence
-   measures the harness.
-4. **The `#if`-disabled definitions — 3 of the 4.** `FillStackAddresses`,
-   `StackDumpFromAddresses` and `g_LastErrorDump` are defined in translation units that *did* build,
-   inside `#if` blocks this configuration does not take (the Win32 debug/crash path). The fourth,
-   `getQR2HostingStatus`, is defined by the GameSpy SDK and therefore counted as cut scope. Each is
-   a build-configuration fact: either the platform equivalent is written (crash dumps are
-   `platform/process-and-crash-seam`) or the call sites go.
-5. **Retail data.** Even a fully linked binary cannot start without the retail install.
-   `GameEngine::init()` loads `Data\INI\Default\GameData` and ~25 further `Data\INI\...`
-   directories through `TheFileSystem`, CRCs them, and instantiates every store
-   (`TheThingFactory`, `TheWeaponStore`, `TheArmorStore`, `TheMetaMap`, …) from them. There is no
-   built-in fallback dataset: without `Data/` and the `.big` archives from an installed Zero Hour,
-   startup fails in `initSubsystem` long before a window appears. The port cannot ship data and does
-   not try to; the launch test is "point it at an install". How the data is *located* off Windows is
-   an open decision, not a solved one — `review-and-decisions.md` §2.6 has the three sub-decisions
-   (discovery, path separators and case, packaging) and the measured Windows-shaped path handling
-   they have to survive.
-6. **Runtime behaviour, which no link proves.** Structure layouts, `Xfer` blob sizes, wide-character
-   handling and endianness are measured separately (`native-layout-test.py`, `xfer-blob-audit.py`)
-   because a 64-bit build that links can still read its own save files wrongly.
-
-## 5. Definition: startable
-
-**Startable** = the strict link produces an executable, and running it against an installed Zero
-Hour reaches the main menu's first rendered frame without an assert or a fatal error.
-
-That decomposes into checkable conditions, none of which is met today:
-
-| Condition | Status |
-|---|---|
-| Strict link produces a binary | **no** — 250 unresolved symbols |
-| `no-definition-anywhere` is empty | **no** — 9 symbols |
-| Every measured translation unit compiles | **no** — 4 failures, 3 of them cut-scope GameSpy units |
-| A window backend is selected | **no** — the configuration picks none |
-| A renderer device exists | **no** — `dx8wrapper.cpp` does not compile (`DriverVersion`) |
-| An audio device exists | **partly** — the OpenAL `AIL_*` implementation is linked (#64), but nothing has opened a device or played a sound |
-| `gitinfo` is generated | **no** — the harness does not run the CMake step |
-| Retail `Data/` available to the process | out of scope for CI; required for any launch |
-
-The 9 `no-definition-anywhere` symbols, with the object file that needs each:
-
-| Symbol | Needed by | Note |
+| Condition | Status | Evidence |
 |---|---|---|
-| `D3DXFilterTexture`, `D3DXLoadSurfaceFromSurface`, `D3DXGetFVFVertexSize`, `D3DXAssembleShader` | `W3DTreeBuffer.cpp.o`, `missingtexture.cpp.o`, `dx8fvf.cpp.o`, `W3DWater.cpp.o` | what is left of the D3DX surface after #66 landed the matrix family: texture/surface helpers and the shader assembler, none of which is matrix maths |
-| `GetCursorPos`, `ScreenToClient`, `SetCursor` | `W3DMouse.cpp.o` | the mouse-cursor Win32 path; pinned by name in `win32-undefined-budget.json` |
-| `IsIconic` | `W3DDisplay.cpp.o` | the window-minimised query, unresolved only since #65 made that unit compile; the window seam owns it |
-| `ListenerHandleClass::Initialize(SoundBufferClass*)` | `listenerhandle.cpp.o` | declared in WWAudio and defined nowhere in the tree, upstream included |
+| Strict link produces a binary | **yes** | `strict_link.binary_produced` true; 80.7 MiB ELF 64-bit x86-64 PIE |
+| Zero unresolved symbols, agreed by two methods | **yes** | linker exit 0 with no tolerance flag; `agrees_with_nm` true |
+| Every measured translation unit compiles | **yes** | 977/977, 0 failures |
+| Nothing stubbed to achieve it | **yes**, and auditable | §2, per-symbol |
+| A window backend is selected | **yes** | SDL2 here, Cocoa on macOS (decision 6) |
+| `gitinfo` generated by the real generator | **yes** | `git_watcher.cmake` runs in the harness |
+| The process starts | **yes** — it runs, initialises, and fails in the game's own code | §4 |
+| A renderer device exists | **no** | `dx8wrapper.cpp` compiles and links; nothing has created a D3D8 device. The Vulkan/MoltenVK backend is the renderer slices' work and is not in this binary's path. |
+| An audio device exists | **partly** | the OpenAL `AIL_*` implementation is linked (#64); no device has been opened and no sound played |
+| Video decodes | **no** | FFmpeg is linked; no `.bik` has been decoded by this binary |
+| Retail `Data/` available to the process | **no**, and out of scope for CI | §4: this is exactly where it stops |
+| The main menu renders | **no** | requires the two rows above plus data; slice 5, on Apple Silicon hardware |
+| Runtime behaviour (layouts, `Xfer` blobs, wide chars, endianness) | measured separately, and **not** by linking | `native-layout-test.py`, `xfer-blob-audit.py` |
 
-So the honest headline is: **9 symbols of real port work — 4 D3DX texture/shader helpers, 4
-cursor/window calls the window seam owns, and one WWAudio member function** — on top of
-`dx8wrapper.cpp`, a backend that must be chosen, and a data dependency CI will never satisfy. The 241
-others are a link line, a cut feature, or this harness.
+## 4. What the binary does when you run it
 
-## 6. What the first launch attempt would actually require
+This is the part worth more than the symbol count it replaces. Run on the measuring box, with the
+pinned FFmpeg on the loader path and no retail data present:
 
-1. `platform/audio-device` has landed (#64): the Miles category is 0, the total 339 → 250, and the
-   prediction it made — that this was a link line and not unported code — held exactly.
-   `online/absent-menu-seam` removes the GameSpy call sites, which is 82 symbols plus ~18 of the 108
-   `compile-blocked` ones; finishing `dx8wrapper.cpp` removes the other ~90. Those plus the 9 harness
-   symbols account for 200 of the 250, leaving FFmpeg's 29, the backend's 12 and the 9 that are port
-   work.
-2. The harness gains a real link configuration rather than a measurement one: an SDL2 backend
-   selected, `gitinfo.cpp` generated, `libavcodec` either linked or the video path compiled out.
-3. `--strict-link` goes green, at which point the ratchet flips from "the count must not grow" to
-   "the link must not break".
-4. Only then is a launch meaningful: run the binary with `Data/` and the `.big` files from a Zero
-   Hour install, and the first failure will be a runtime assert, not a symbol. That is the point at
-   which `native-layout-test.py` and `xfer-blob-audit.py` stop being proxies.
+```sh
+LD_LIBRARY_PATH=build/docker/_deps/ffmpeg-lib/lib ./build/native/native_strict_link
+```
 
-Steps 1-3 are measurable today and gated in CI. Step 4 needs a machine with retail data, which is
-why "startable" is defined above in terms a CI job can check plus one condition it explicitly
-cannot.
+It loads, runs, and reaches the engine's own initialisation. It then prints:
+
+```text
+!!! MESSAGE BOX (no native dialog; answering "OK")
+!!! Technical Difficulties...
+!!! You have encountered a serious error.  Serious errors can be caused by many things including
+!!! viruses, overheated hardware and hardware that does not meet the minimum specifications for the
+!!! game. ...
+```
+
+Under `gdb`, with a catchpoint on `throw`, the first exception is thrown in:
+
+```text
+INI::loadFileDirectory(fileDirName="Data\INI\Default\GameData", loadType=INI_LOAD_OVERWRITE,
+                       subdirs=true)
+```
+
+and is caught by `GameEngine::init()`'s handler, which calls
+`ReleaseCrash("Uncaught Exception during initialization.")`.
+
+**That is the expected and correct failure.** `GameEngine::init()` loads and CRCs ~25 `Data/INI/...`
+directories through `TheFileSystem` and instantiates every store from them; there is no fallback
+dataset, and this box has no Zero Hour install. The message is the game's own retail
+technical-difficulties path, reached through the game's own `main()` (`PlatformMain.cpp` anchors the
+link; the harness's stub `main()` is unused and the 5 test-tool entry points are dropped from the
+archives first).
+
+So, precisely:
+
+* **Proved:** the whole tree compiles and links at 64-bit off Windows into a loadable native
+  executable, the loader accepts it, it executes, and it gets as far as asking the filesystem for
+  game data.
+* **Not proved:** that it is a *game*. It has not opened a window, created a rendering device, played
+  a sound, decoded a video, or loaded a single INI. A linked binary is not a running game and must
+  not be described as one anywhere in this repository.
+* **Also not proved:** anything about Apple Silicon. This file is x86-64 ELF, built on Linux. The
+  macOS runners compile the Cocoa backend; producing and running an `arm64` Mach-O against retail
+  data at `~/devin-work/zh-data` is slice 5's job on real hardware.
+
+## 5. What CI now asserts, and why it inverted
+
+Until this slice, `scripts/ci/check-native-build-baseline.py` ratcheted a *count*: the number of
+unresolved symbols, and each pile, must not grow. That is the right gate while no binary exists and
+the wrong one afterwards — once a file is produced, "73 became 74" is not the regression anyone cares
+about; "there is no file" is.
+
+So the gate inverts, and the inversion is data-driven rather than a flag day: when the **baseline**
+records `strict_link.binary_produced` true, `check_binary_gate()` activates and requires
+
+1. the strict link is clean, with **0** unresolved symbols (a "clean" flag with a non-empty list
+   fails, because the two came from different places),
+2. an executable is produced **and described** — `binary_produced` true with no description of the
+   file is a failure, not a pass,
+3. the file is **64-bit**, and its format and machine match the baseline's,
+
+and it says so as a broken build rather than as a bigger number. Before a baseline has a binary, the
+old count ratchet still applies unchanged, so levels 1-3 (which do not link an entry point) keep
+being measured the way they always were. Binary *size* is reported and deliberately not gated: it
+moves with the compiler and the debug level, and gating it would produce failures with no defect
+behind them.
+
+Both halves of that logic — the pile attribution and the binary gate — are pinned by
+`scripts/native-build-categorise-test.py` in the cheap CI tier, because both were wrong in ways no
+compile and no link could reveal. The level 1-4 job additionally runs `ls -l` and `file` on the
+produced executable into the step summary, so the artefact's identity is visible in the run rather
+than asserted in a document.
+
+## 6. What the first *launch* now requires
+
+Everything on this list used to be preceded by "and a binary". That part is done.
+
+1. A rendering device: the D3D8-shaped Vulkan/MoltenVK backend the renderer slices are building,
+   wired to `dx8wrapper.cpp`'s device creation instead of the D3DX file loader's refusal.
+2. Retail data reachable off Windows: `review-and-decisions.md` §2.6's three sub-decisions
+   (discovery, path separators and case, packaging) — the failure in §4 is *this* item, and it is a
+   decision, not a bug.
+3. An `arm64` Mach-O produced by the same harness on macOS, with the Cocoa backend selected, which
+   the advisory macOS gate (decision 5) measures today without blocking.
+4. A run against an install: at that point `native-layout-test.py` and `xfer-blob-audit.py` stop
+   being proxies and the failures start being behavioural. Windows remains the oracle for every one
+   of them.

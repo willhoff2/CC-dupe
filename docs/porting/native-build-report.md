@@ -19,96 +19,25 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
 | `Core/GameEngine` | 210 | 210 | 210 |
 | `GeneralsMD/Code/GameEngine` | 380 | 380 | 380 |
-| `Core/Libraries/Source/WWVegas/WW3D2` | 76 | 76 | 76 |
+| `Core/Libraries/Source/WWVegas/WW3D2` | 77 | 77 | 77 |
 | `Core/Libraries/Source/WWVegas/WWAudio` | 19 | 19 | 19 |
 | `Core/Libraries/Source/WWVegas/WWDownload` | 4 | 4 | 4 |
 | `GeneralsMD/Code/Libraries/Source/WWVegas` | 35 | 35 | 35 |
 | `Core/GameEngineDevice` | 70 | 70 | 70 |
 | `GeneralsMD/Code/GameEngineDevice` | 39 | 39 | 39 |
 | `GeneralsMD/Code/Main` | 1 | 1 | 1 |
-| **Total** | **976** | **976** | **976** |
+| **Total** | **977** | **977** | **977** |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 976 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 977 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 14 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_openalaudiodevice`, `libthirdparty_lzhl`, `openal (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 5 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_user32_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **68 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 14 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_gitinfo`, `libsupport_openalaudiodevice`, `libsupport_windowbackend`, `libthirdparty_lzhl`, `openal (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point: `libgeneralsmd_code_main`; 5 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_user32_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **0 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| FFmpeg (not linked here) | 29 |
-| Defined only in a backend this configuration excludes (SDL2 / Cocoa) | 24 |
-| Generated gitinfo (build-time, not a blocker) | 6 |
-| Direct3D 8 / DirectX | 5 |
-| Defined in a built translation unit behind a disabled #if (build option / platform) | 3 |
-| Other / unclassified | 1 |
-
-### FFmpeg (not linked here)
-
-- `av_frame_alloc`
-- `av_frame_clone`
-- `av_frame_free`
-- `av_freep`
-- `av_get_bytes_per_sample`
-- `av_malloc`
-- `av_packet_alloc`
-- `av_packet_free`
-- `av_packet_unref`
-- `av_read_frame`
-- `av_samples_get_buffer_size`
-- `av_seek_frame`
-- `av_strerror`
-- `avcodec_alloc_context3`
-- `avcodec_find_decoder`
-- …and 14 more
-
-### Defined only in a backend this configuration excludes (SDL2 / Cocoa)
-
-- `WWPlatform::Window_Show(void*, bool)`
-- `WWPlatform::Window_Create(WWPlatform::WindowConfig const&)`
-- `WWPlatform::Window_Current()`
-- `WWPlatform::Window_Destroy(void*)`
-- `WWPlatform::Window_Set_Mode(void*, int, int, bool)`
-- `WWPlatform::Window_Is_Active(void*)`
-- `WWPlatform::Window_Set_Title(void*, char const*)`
-- `WWPlatform::Window_Poll_Event(void*, WWPlatform::WindowEvent&)`
-- `WWPlatform::Window_Client_Size(void*, int&, int&)`
-- `WWPlatform::Window_Warp_Cursor(void*, int, int)`
-- `WWPlatform::Window_Frame_Insets(void*, int&, int&, int&, int&)`
-- `WWPlatform::Window_Is_Minimised(void*)`
-- `WWPlatform::Window_Set_Position(void*, int, int)`
-- `WWPlatform::Window_Client_Origin(void*, int&, int&)`
-- `WWPlatform::Window_Is_Fullscreen(void*)`
-- …and 9 more
-
-### Generated gitinfo (build-time, not a blocker)
-
-- `GitCommitAuthorName`
-- `GitCommitTimeStamp`
-- `GitRevision`
-- `GitShortSHA1`
-- `GitTag`
-- `GitUncommittedChanges`
-
-### Direct3D 8 / DirectX
-
-- `D3DXCreateCubeTexture`
-- `D3DXCreateTexture`
-- `D3DXCreateTextureFromFileExA`
-- `D3DXCreateVolumeTexture`
-- `D3DXGetErrorStringA`
-
-### Defined in a built translation unit behind a disabled #if (build option / platform)
-
-- `FillStackAddresses(void**, unsigned int, unsigned int)`
-- `StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))`
-- `g_LastErrorDump`
-
-### Other / unclassified
-
-- `MSS_auto_cleanup`
 
 ## 4. What would resolve them
 
@@ -116,30 +45,32 @@ The causes above say what each symbol *is*. They do not say what makes it go awa
 
 | Pile | Symbols | Meaning |
 |---|---:|---|
-| `library-not-linked` | 54 | A library defines it and this configuration links no such library. A link line, not port work. |
+| `library-not-linked` | 0 | A library defines it and this configuration links no such library. A link line, not port work. |
 | `cut-scope-not-linked` | 0 | A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it. |
 | `compile-blocked` | 0 | An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker. |
-| `harness-artefact` | 9 | An artefact of how this harness is configured: a build-time generated definition it does not generate, one a disabled `#if` removed, or one in a layer this level selection does not build. |
-| `no-definition-anywhere` | 5 | Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work. |
+| `harness-artefact` | 0 | An artefact of how this harness is configured: a build-time generated definition it does not generate, one a disabled `#if` removed, or one in a layer this level selection does not build. |
+| `no-definition-anywhere` | 0 | Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work. |
 
 The libraries in the `library-not-linked` and `cut-scope-not-linked` piles, the evidence each attribution rests on, and the slice that owns it:
 
 | Library | Pile | Symbols | Evidence files | Why it is not linked | Owner |
 |---|---|---:|---:|---|---|
-| Miles AIL_* API — the `milesstub`/OpenAL backend | `library-not-linked` | 1 | 7 | `cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, and the 32-bit Windows build links the fetched miles-sdk-stub. This harness now builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links libopenal, so what is left here is the part of the Miles surface that backend does not implement rather than the whole API. | platform/audio-device (the Miles/OpenAL link) |
-| FFmpeg (libavcodec / libavformat / libavutil / libswscale) | `library-not-linked` | 29 | 823 | The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route. `fetch-probe-deps.sh` provisions the pinned headers so the code compiles, and nothing installs an FFmpeg runtime for the link. | video/bink-excision-and-harness-headers |
-| The window/input backend this configuration does not choose (SDL2, Cocoa) | `library-not-linked` | 24 | 2 | `probe.OPTIONAL_BACKENDS` keeps the SDL2 backend opt-in and the Cocoa backend is Objective-C++, so no target lists either. The definitions are in the tree; a configuration that picks one resolves all of them. | platform/macos-window-compile and platform/window-seam-wiring |
+| Miles AIL_* API — the `milesstub`/OpenAL backend | `library-not-linked` | 0 | 7 | `cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, and the 32-bit Windows build links the fetched miles-sdk-stub. This harness now builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links libopenal, so what is left here is the part of the Miles surface that backend does not implement rather than the whole API. | platform/audio-device (the Miles/OpenAL link) |
+| FFmpeg (libavcodec / libavformat / libavutil / libswscale) | `library-not-linked` | 0 | 823 | The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route. `fetch-probe-deps.sh` provisions the pinned headers so the code compiles, and nothing installs an FFmpeg runtime for the link. | video/bink-excision-and-harness-headers |
+| The window/input backend this configuration does not choose (SDL2, Cocoa) | `library-not-linked` | 0 | 2 | `probe.OPTIONAL_BACKENDS` keeps the SDL2 backend opt-in and the Cocoa backend is Objective-C++, so no target lists either. The definitions are in the tree; a configuration that picks one resolves all of them. | platform/macos-window-compile and platform/window-seam-wiring |
 | GameSpy SDK | `cut-scope-not-linked` | 0 | 279 | Online matchmaking is permanently cut scope (docs/porting/native-port-plan.md). The SDK's own sources are provisioned and define these symbols, so this is a link refused rather than one that is missing: they disappear when the call sites go, which is `online/absent-menu-seam`'s work, and must not be stubbed to make a link pass. | online/absent-menu-seam |
 
 Evidence is the provisioned sources or headers that define the symbols, not a library found on the measuring machine: the CI container has no FFmpeg or SDL2 runtime, and a pile split that changed with the box would not be a measurement.
 
 ## 5. Strict link: is there an executable?
 
-`--strict-link` linked the same archives with no tolerance for unresolved symbols: **failed**, 68 unresolved symbol(s), executable produced: no. Nothing is stubbed to make this pass, and nothing may be — a green strict link bought with stubs would hide exactly the work this number exists to count.
+`--strict-link` linked the same archives with no tolerance for unresolved symbols: **succeeded**, 0 unresolved symbol(s), executable produced: yes. Nothing is stubbed to make this pass, and nothing may be — a green strict link bought with stubs would hide exactly the work this number exists to count.
 
 The linker's list and §3's `nm` scan agree, so the categorised list above is the list standing between this build and an executable.
 
 Symbol resolution is necessary and not sufficient; `docs/porting/startability.md` defines what else a first launch needs.
+
+The file is `build/native/native_strict_link`, 80.7 MiB, ELF 64-bit x86-64. That it loads and runs is a separate question from whether it links, and one this run does not answer: see `docs/porting/startability.md`.
 
 ## Reproducing
 

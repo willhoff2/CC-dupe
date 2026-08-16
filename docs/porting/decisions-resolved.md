@@ -129,6 +129,59 @@ Consequences:
 * The baselines must record the compiler and SDK, because the existing refusal-to-compare behaviour is
   the feature that caught this in the first place.
 
+## 6. The window/input backend the build selects — **SDL2 off Apple, Cocoa on macOS**
+
+**Question** (forced by the slice that made `--strict-link` produce an executable): both backends
+were in the tree and the native harness built **neither**, so 24 window-seam entry points were
+unresolved as a matter of configuration. A link line cannot stay undecided once it has to produce a
+file: something has to define `WWPlatform::Window_Create`.
+
+**Answer: the harness chooses the backend the real build chooses — `platform_window_sdl2.cpp`
+everywhere except Apple, `platform_window_cocoa.mm` on macOS.** This is not a new arrangement; it is
+`CORE_WWLIB_WINDOW_BACKEND` in `Core/Libraries/Source/WWVegas/WWLib/CMakeLists.txt`, which the
+measurement harness was the only build not honouring.
+
+Consequences:
+
+* The measured platforms differ in *which* backend is exercised, so a seam function that compiles
+  only under SDL2 is not proven by the Linux gate. That asymmetry is real and is the reason both
+  backends keep their own scan-code and seam-wiring gates (`check-window-scancodes.py`,
+  `check-window-seam-wiring.py`), which compare them against each other rather than against a build.
+* The Linux gate now needs `libsdl2-dev` present, and the harness links `libSDL2-2.0.so.0` **by
+  path**: a box without SDL2 gets the honest unresolved list instead of a silently different link.
+* Cocoa is Objective-C++, so the harness compiles `.mm` and CMake's `OBJCXX` language is enabled
+  only when a `.mm` source is actually selected — a Linux configuration must not require an
+  Objective-C++ compiler to exist.
+* macOS keeps a second, advisory backend gate (decision 5): the SDL2 path is what the blocking
+  Linux gate measures, and the Cocoa path is measured on the macOS runners.
+* SDL2 is a dependency of an executable on Linux, not a shipping decision for macOS: the intended
+  Apple Silicon artefact is the Cocoa one, and nothing here makes SDL2 a runtime requirement of it.
+
+## 7. FFmpeg: link it, or compile the video path out — **link it, at the version the headers come from**
+
+**Question**: the video path (`RTS_BUILD_OPTION_FFMPEG`, default `OFF` in
+`cmake/config-build.cmake`) compiles in the harness and left 29 `av_*`/`sws_*`/`swr_*` symbols
+unresolved, because nothing provided the libraries. Link them, or exclude the video path?
+
+**Answer: link them.** The video path is the engine's own route and the reason the Bink SDK was not
+needed; excluding it would make the executable a different program from the one the port is aiming
+at, and would move the 29 symbols out of the measurement without answering anything.
+
+Consequences:
+
+* `fetch-probe-deps.sh` builds the shared libraries **from the tag `vcpkg-lock.json` pins** (n7.1.1),
+  not from the distribution's packages. Ubuntu 22.04 ships libavcodec 58 against headers the engine
+  compiled at 61: that link resolves every symbol and then disagrees on struct layouts, which is a
+  measurement lie of exactly the kind this slice must not produce.
+* The harness's configuration is deliberately narrow — Bink and `.binka` decoders, the demuxers the
+  game's media needs, `swscale`/`swresample` — and this is a property of the *harness*, not of the
+  port: the real build gets vcpkg's full-featured FFmpeg. `--disable-x86asm` (used when no assembler
+  is installed) costs decode speed and changes no API.
+* Decoding a real `.bik` is not proven by linking, and no figure in `docs/porting/` should be read as
+  claiming it. `startability.md` says what the executable does and does not demonstrate.
+* `SKIP_FFMPEG_LIBS=1` skips the build for the CI jobs that compile without linking; the link then
+  reports the 29 symbols honestly rather than pretending they are resolved.
+
 ## Consequence for the font seam (not itself a listed decision)
 
 The 18 `HFONT` compile failures have no Windows behaviour to "match" in the sense of decision 2 —

@@ -119,6 +119,75 @@ if [ ! -f "$ffmpeg_dir/libavutil/ffversion.h" ]; then
 EOF
 fi
 
+# The FFmpeg *libraries*, so the native build can link the video path instead of reporting its 29
+# symbols as unresolved forever. Built from the same tag the headers above are checked out at,
+# because a link against a different major (Ubuntu 22.04 ships libavcodec 58; the pin is 7.1.1,
+# libavcodec 61) resolves every symbol and then disagrees with the headers the engine compiled
+# against on every struct layout -- an executable produced that way would be a measurement lie.
+#
+# The configuration is deliberately narrow and named here rather than "whatever configure
+# defaults to": the shared libraries only have to export the API `FFmpegFile.cpp` calls and decode
+# what the game ships, which is Bink (`Data/Movies/*.bik`, plus `.binka` audio) -- the format
+# upstream FFmpeg decodes natively and the reason the FFmpeg route replaced the Bink SDK here at
+# all. Two consequences worth stating rather than discovering: the real build gets vcpkg's
+# full-featured FFmpeg, so this subset is a property of the harness and not of the port; and
+# `--disable-x86asm` (used when no assembler is installed) costs decode speed and changes no API.
+# h264/aac were in this list briefly and are not, because `--disable-everything --enable-decoder=h264`
+# leaves libavcodec itself with an undefined `ff_aom_uninit_film_grain_params` -- an upstream
+# configure dependency gap that would have surfaced as an unresolved symbol attributed to the engine.
+#
+# Set SKIP_FFMPEG_LIBS=1 to skip it (the link then reports the 29 symbols as unresolved again).
+ffmpeg_lib_dir="$deps_dir/ffmpeg-lib"
+ffmpeg_build_dir="$deps_dir/ffmpeg-build"
+if [ "${SKIP_FFMPEG_LIBS:-0}" = "1" ]; then
+    echo "== skipping the FFmpeg library build (SKIP_FFMPEG_LIBS=1)"
+elif [ -f "$ffmpeg_lib_dir/.built-n$ffmpeg_version" ]; then
+    echo "== $ffmpeg_lib_dir already built (n$ffmpeg_version)"
+else
+    echo "== building FFmpeg n$ffmpeg_version -> $ffmpeg_lib_dir"
+    clone_at https://github.com/FFmpeg/FFmpeg.git "n$ffmpeg_version" "$ffmpeg_build_dir"
+    asm_flag=
+    if ! command -v nasm >/dev/null 2>&1 && ! command -v yasm >/dev/null 2>&1; then
+        echo "   no nasm/yasm: configuring --disable-x86asm (slower decode, same API)"
+        asm_flag=--disable-x86asm
+    fi
+    # FFmpeg's configure defaults to `gcc`, and the CI container installs clang only -- the whole
+    # point of measuring with clang 14 -- so a missing gcc fails the C compiler test five seconds
+    # in. Name a compiler that exists instead of assuming one, and if configure still fails, print
+    # the tail of its own log: the failure was invisible once and cost a CI round trip.
+    ffmpeg_cc=
+    for candidate in "${CC:-}" cc gcc clang clang-14; do
+        if [ -n "$candidate" ] && command -v "$candidate" >/dev/null 2>&1; then
+            ffmpeg_cc="$candidate"
+            break
+        fi
+    done
+    if [ -z "$ffmpeg_cc" ]; then
+        echo "   no C compiler found for FFmpeg's configure: skipping the library build" >&2
+        echo "   (the link will report the FFmpeg symbols as unresolved)" >&2
+        exit 1
+    fi
+    echo "   configuring with --cc=$ffmpeg_cc"
+    rm -rf "$ffmpeg_lib_dir"
+    (
+        cd "$ffmpeg_build_dir"
+        # shellcheck disable=SC2086  # asm_flag is one optional word, deliberately unquoted.
+        if ! ./configure --prefix="$ffmpeg_lib_dir" --cc="$ffmpeg_cc" $asm_flag \
+            --disable-programs --disable-doc --disable-network --disable-autodetect \
+            --disable-everything --enable-shared --disable-static \
+            --enable-decoder=bink,binkaudio_dct,binkaudio_rdft,pcm_s16le \
+            --enable-demuxer=bink,binka,avi,wav \
+            --enable-protocol=file --enable-swscale --enable-swresample >/dev/null; then
+            echo "   FFmpeg configure failed; the tail of ffbuild/config.log:" >&2
+            tail -n 40 ffbuild/config.log >&2 || true
+            exit 1
+        fi
+        make -j"$(getconf _NPROCESSORS_ONLN)" >/dev/null
+        make install >/dev/null
+    )
+    touch "$ffmpeg_lib_dir/.built-n$ffmpeg_version"
+fi
+
 echo
 echo "provisioned into $deps_dir:"
 ls -1 "$deps_dir"

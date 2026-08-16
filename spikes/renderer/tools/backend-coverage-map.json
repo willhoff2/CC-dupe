@@ -33,6 +33,10 @@
    "note": "system-memory surface, the staging half of CopyRects/UpdateTexture"
   },
   "CreateIndexBuffer": {"category": "backend", "entry": ["Create_Index_Buffer"]},
+  "CreateCubeTexture": {
+   "category": "backend", "entry": ["Create_Cube_Texture"],
+   "note": "reached only through D3DXCreateCubeTexture() off Windows; no backend entry point exists yet, so this reads as absent"
+  },
   "CreatePixelShader": {
    "category": "backend", "entry": ["Create_Pixel_Shader"],
    "note": "the 16 in-repo ps.1.1/vs.1.1 shaders; not started"
@@ -42,6 +46,10 @@
   "CreateVertexShader": {
    "category": "backend", "entry": ["Create_Vertex_Shader"],
    "note": "declaration-only FVF handles are served by Set_Vertex_Buffer's fvf; real vs.1.1 not started"
+  },
+  "CreateVolumeTexture": {
+   "category": "backend", "entry": ["Create_Volume_Texture"],
+   "note": "reached only through D3DXCreateVolumeTexture() off Windows; no backend entry point exists yet, so this reads as absent"
   },
   "DeletePixelShader": {"category": "backend", "entry": ["Delete_Pixel_Shader"]},
   "DeleteVertexShader": {"category": "backend", "entry": ["Delete_Vertex_Shader"]},

@@ -7,9 +7,11 @@
     "Regenerate with: python3 scripts/ci/check-d3d8-surface.py --update"
   ],
   "_state": [
-    "0 sites across 0 files. PR #8 ('Consolidate all Direct3D 8 access behind DX8Wrapper') has",
+    "3 sites across 1 file. PR #8 ('Consolidate all Direct3D 8 access behind DX8Wrapper') has",
     "merged, taking the surface from 376 direct sites across 19 files to none, so the budget is",
-    "now an absolute gate rather than a ratchet: any direct call site anywhere fails the build.",
+    "an exact gate rather than a ratchet: any unbudgeted call site anywhere fails the build.",
+    "The 3 are all in d3dx8texcreate.cpp, the off-Windows replacement for d3dx8.lib rather than",
+    "engine code (see its reason below).",
     "Every D3D8 call in the engine goes through the DX8Wrapper chokepoint, which is what makes",
     "swapping the backend tractable; this file is what keeps it that way."
   ],
@@ -24,6 +26,11 @@
     "   hand-off, not a method call.",
     "4. D3DX* entry points - a separate library, not IDirect3DDevice8; out of the scanner's scope."
   ],
-  "total": 0,
-  "files": {}
+  "total": 3,
+  "files": {
+    "Core/Libraries/Source/WWVegas/WW3D2/d3dx8texcreate.cpp": {
+      "allowed": 3,
+      "reason": "d3dx8.lib's three creation entry points off Windows, not engine call sites: D3DXCreateTexture/CubeTexture/VolumeTexture each end in the matching IDirect3DDevice8::Create* call on the device their CALLER passes in, and that caller is DX8Wrapper -- routing them back through DX8CALL would be circular. PR #8's documented exception 4 covers the calls INTO this library; these are the three it makes back out. The count is exact, so a fourth fails."
+    }
+  }
 }
