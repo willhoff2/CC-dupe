@@ -42,6 +42,11 @@ if(NOT OpenAL_FOUND AND NOT TARGET OpenAL::OpenAL)
     endif()
 endif()
 
+# Retail music is MP3 and Miles decoded it inside mss32.dll, so the backend needs its own decoder.
+# Fetched here rather than at the top level because this file is only included where Miles is absent:
+# the 32-bit Windows build keeps decoding MP3 with real Miles and gains no dependency.
+include(cmake/minimp3.cmake)
+
 add_subdirectory(Core/Libraries/Source/OpenALAudioDevice)
 
 # Every consumer links an abstract `milesstub` target; substituting the implementation here means

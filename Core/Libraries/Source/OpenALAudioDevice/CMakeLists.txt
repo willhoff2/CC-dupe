@@ -3,6 +3,7 @@ set(OPENALAUDIODEVICE_SRC
     OpenAL3DSample.cpp
     OpenALAudioInternal.h
     OpenALDriver.cpp
+    OpenALMpeg.cpp
     OpenALSample.cpp
     OpenALStream.cpp
     OpenALWaveFile.cpp
@@ -20,6 +21,13 @@ target_include_directories(core_openalaudiodevice PUBLIC
 
 target_link_libraries(core_openalaudiodevice PUBLIC
     OpenAL::OpenAL
+)
+
+# The MPEG decoder for retail music, compiled into OpenALMpeg.cpp alone. PRIVATE: minimp3 is an
+# implementation detail of this backend, so no consumer of `milesstub` gains a dependency on it, and
+# the backend still links standalone as check-audio-backend-linked.py requires.
+target_link_libraries(core_openalaudiodevice PRIVATE
+    minimp3
 )
 
 set_target_properties(core_openalaudiodevice PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)

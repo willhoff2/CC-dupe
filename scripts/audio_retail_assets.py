@@ -221,8 +221,114 @@ def parse_mpeg(data):
     return None
 
 
-def describe(name, data):
-    """Codec facts for one audio entry, from its own bytes."""
+def id3v2_length(data):
+    """Length of an ID3v2 tag at the front of `data`, including footer; 0 when there is none.
+
+    54 of the 56 retail music tracks carry a 1024-byte one, so a parser that assumes the first frame
+    is at offset 0 finds nothing.
+    """
+    if len(data) < 10 or data[0:3] != b"ID3":
+        return 0
+    size = 0
+    for byte in data[6:10]:
+        size = (size << 7) | (byte & 0x7F)
+    footer = 10 if (data[5] & 0x10) else 0
+    return 10 + size + footer
+
+
+def mpeg_frame_header(data, at):
+    """One MPEG audio frame header at `at`, with its byte length, or None.
+
+    Written from the MPEG-1/2/2.5 audio specification rather than from OpenALMpeg.cpp, so agreement
+    between the two is evidence rather than a decoder checking itself.
+    """
+    if at + 4 > len(data) or data[at] != 0xFF or (data[at + 1] & 0xE0) != 0xE0:
+        return None
+    version = (data[at + 1] >> 3) & 0x03
+    layer = (data[at + 1] >> 1) & 0x03
+    bitrate_index = (data[at + 2] >> 4) & 0x0F
+    rate_index = (data[at + 2] >> 2) & 0x03
+    padding = (data[at + 2] >> 1) & 0x01
+    mode = (data[at + 3] >> 6) & 0x03
+    if version == 1 or layer == 0 or rate_index == 3 or bitrate_index in (0, 15):
+        return None
+    rate = MPEG_RATES[version][rate_index]
+    table = MPEG1_BITRATES if version == 3 else MPEG2_BITRATES
+    bitrate = table[layer][bitrate_index]
+    # Samples per frame: layer I is 384; layer II is 1152; layer III is 1152 on MPEG-1 but 576 on
+    # MPEG-2/2.5, which is the halving that makes a naive duration twice too long for the one
+    # MPEG-2 retail track.
+    if layer == 3:
+        samples = 384
+    elif layer == 2:
+        samples = 1152
+    else:
+        samples = 1152 if version == 3 else 576
+    if layer == 3:
+        length = (12 * bitrate * 1000 // rate + padding) * 4
+    else:
+        length = samples // 8 * bitrate * 1000 // rate + padding
+    return {"offset": at, "bytes": length, "samples": samples, "rate": rate,
+            "channels": 1 if mode == 3 else 2, "bitrate_kbps": bitrate,
+            "layer": {3: 1, 2: 2, 1: 3}[layer], "version": {3: 1, 2: 2, 0: 2.5}[version]}
+
+
+def mpeg_facts(data):
+    """Every frame of an MPEG elementary stream, and the duration they add up to.
+
+    This is the expected-duration reference the decode probe asserts against, and it is a frame walk
+    for the same reason the C++ index is one: an MPEG elementary stream has no container, none of
+    the retail tracks carries a Xing/VBRI tag, and `bytes * 8 / bitrate` is only right while the
+    bitrate never changes.
+
+    `truncated_tail` is the frame that claims more bytes than the file holds -- retail `USA_09.mp3`
+    has one -- as opposed to `trailing_bytes`, which is the non-frame tail (an ID3v1 trailer, 128
+    bytes, on 54 of the tracks).
+    """
+    at = id3v2_length(data)
+    facts = {"id3v2_bytes": at, "frames": [], "junk_bytes": 0, "truncated_tail": None}
+    first = None
+    while at + 4 <= len(data):
+        header = mpeg_frame_header(data, at)
+        if header is None:
+            at += 1
+            facts["junk_bytes"] += 1
+            continue
+        if first is None:
+            first = header
+            facts["first_frame_offset"] = at
+        if at + header["bytes"] > len(data):
+            facts["truncated_tail"] = {"offset": at, "claimed_bytes": header["bytes"],
+                                       "available_bytes": len(data) - at}
+            break
+        facts["frames"].append(header)
+        at += header["bytes"]
+    if first is None:
+        return None
+    facts["trailing_bytes"] = len(data) - at
+    facts["rate"] = first["rate"]
+    facts["channels"] = first["channels"]
+    facts["layer"] = first["layer"]
+    facts["mpeg_version"] = first["version"]
+    facts["frame_count"] = len(facts["frames"])
+    facts["samples"] = sum(frame["samples"] for frame in facts["frames"])
+    facts["duration_ms"] = 1000.0 * facts["samples"] / facts["rate"] if facts["rate"] else 0.0
+    bitrates = sorted({frame["bitrate_kbps"] for frame in facts["frames"]})
+    facts["bitrates_kbps"] = bitrates
+    facts["vbr"] = len(bitrates) > 1
+    facts["format_changes"] = sum(
+        1 for frame in facts["frames"]
+        if frame["rate"] != first["rate"] or frame["channels"] != first["channels"])
+    return facts
+
+
+def describe(name, data, complete=True):
+    """Codec facts for one audio entry, from its own bytes.
+
+    `complete` says whether `data` is the whole entry. Callers that sniff a prefix must pass False:
+    a WAV declares its length in its header, but an MPEG elementary stream does not, so a frame walk
+    over a prefix would report a fraction of the frames as if it were the file.
+    """
     if name.lower().endswith(".wav"):
         info = parse_wave(data)
         if info is None:
@@ -248,7 +354,7 @@ def describe(name, data):
     info = parse_mpeg(data)
     if info is None:
         return {"container": "mpeg", "codec": "unparsed"}
-    return {
+    described = {
         "container": "mpeg",
         "codec": info["codec"],
         "channels": info["channels"],
@@ -256,6 +362,19 @@ def describe(name, data):
         "bitrate_kbps": info["bitrate_kbps"],
         "class": f"{info['codec']}_{info['channels']}ch_{info['rate']}hz",
     }
+    # The frame walk, so `frames` means the same thing for MPEG as for WAV: the decoded PCM frames
+    # the file's own headers imply. Without it a probe can only assert on a duration guessed from
+    # the bitrate, which is exactly the maths this port must not rely on.
+    facts = mpeg_facts(data) if complete else None
+    if facts is not None:
+        described.update({
+            "frames": facts["samples"],
+            "frame_count": facts["frame_count"],
+            "duration_ms": facts["duration_ms"],
+            "vbr": facts["vbr"],
+            "truncated_tail": facts["truncated_tail"],
+        })
+    return described
 
 
 # ------------------------------------------------------------------------ independent decoding
@@ -424,7 +543,7 @@ def select_probe_assets(data, settings, min_bytes=4096, max_bytes=600000,
             limit = max_music_bytes if is_music(entry, settings) else max_bytes
             if size < min_bytes or size > limit:
                 continue
-            facts = describe(entry, archive.read(entry, 8192))
+            facts = describe(entry, archive.read(entry, 8192), complete=False)
             if facts.get("codec") == "unparsed":
                 continue
             path = "stream" if is_streamed(entry, settings) else (

@@ -27,7 +27,11 @@
  * substitute for a missing decoder, and it fails loudly rather than reporting silence as success.
  *
  * It is deliberately built out of the *public* Miles surface (mss/mss.h) plus a couple of ALC
- * queries for the device name, because that is exactly what the engine can see.
+ * queries for the device name, because that is exactly what the engine can see. The one exception is
+ * the `stream-drain` stage, which reaches for OpenALAudioInternal.h and says so: draining a
+ * four-minute music track through the public API alone would take four minutes of real time per
+ * track, and there are 56 of them, so that stage opens the stream through AIL_open_stream like
+ * everything else and then pulls the same decode the service thread pulls, at full speed.
  *
  * Driven by scripts/native-audio-probe.py, which supplies the assets and captures the mixer output
  * through OpenAL Soft's wave writer. Each invocation runs one stage and prints one JSON object, so
@@ -35,6 +39,8 @@
  */
 
 #include "mss/mss.h"
+
+#include "OpenALAudioInternal.h"
 
 #include <AL/al.h>
 #include <AL/alc.h>
@@ -616,6 +622,107 @@ int stageStream(const char* path, bool installCallbacks)
 	return 0;
 }
 
+/// 2/3. Decodes a whole stream to PCM as fast as the decoder will go, and writes the PCM out.
+///
+/// Everything up to the decode is the engine's own path: the file callbacks are installed, the
+/// stream is opened with AIL_open_stream, and the length is the number AIL_stream_ms_position
+/// reports -- which is what MilesAudioManager::getFileLengthMS returns. Only the pump differs: the
+/// service thread queues one chunk per buffer as OpenAL drains them, in real time, and this calls
+/// the same decodeStreamChunk in a loop instead. The stream is never started, so the service thread
+/// does not touch it and there is no race.
+///
+/// Draining rather than playing is what makes measuring all 56 retail tracks possible at all: they
+/// are 2h 18m of audio, so a realtime capture of the set would take that long. The realtime path is
+/// covered by the `stream` stage, whose mix is captured and measured.
+int stageStreamDrain(const char* path, const char* outRaw, long seekMs)
+{
+	HDIGDRIVER dig = engineStartup();
+	emit("asset", path);
+	AIL_set_file_callbacks(streamOpen, streamClose, streamSeek, streamRead);
+
+	HSTREAM stream = AIL_open_stream(dig, path, 0);
+	emit("open_stream_handle", stream != nullptr);
+	emitLastError("open_stream_last_error");
+	if (stream == nullptr) {
+		AIL_shutdown();
+		return 0;
+	}
+
+	S32 total = -1;
+	S32 current = -1;
+	AIL_stream_ms_position(stream, &total, &current);
+	emit("stream_length_ms", (long)total);
+	emit("stream_playback_rate", (long)AIL_stream_playback_rate(stream));
+
+	OpenALAudio::StreamVoice* voice = (OpenALAudio::StreamVoice*)stream;
+	emit("stream_channels", (long)voice->channels);
+	emit("stream_bits", (long)voice->bits);
+	emit("stream_codec_is_mpeg", voice->codec == OpenALAudio::StreamCodec::Mpeg);
+	emit("stream_mpeg_frames_indexed", (long)voice->mpegFrames.size());
+	emit("stream_total_frames", (long)voice->totalFrames);
+	emit("stream_payload_bytes", (long)voice->dataLength);
+	emit("stream_payload_offset", (long)voice->dataOffset);
+
+	std::FILE* out = (outRaw != nullptr) ? std::fopen(outRaw, "wb") : nullptr;
+	if (outRaw != nullptr && out == nullptr) {
+		die("could not open the PCM output path");
+	}
+
+	std::vector<unsigned char> chunk;
+	unsigned long long bytes = 0;
+	long chunks = 0;
+	for (;;) {
+		chunk.clear();
+		const unsigned int produced = OpenALAudio::decodeStreamChunk(*voice, chunk);
+		if (produced == 0) {
+			break;
+		}
+		++chunks;
+		bytes += produced;
+		if (out != nullptr) {
+			std::fwrite(chunk.data(), 1, produced, out);
+		}
+	}
+	emit("decoded_chunks", chunks);
+	emit("decoded_pcm_bytes", (long)bytes);
+	emit("decoded_pcm_path", outRaw);
+	// The read cursor having reached the end of the payload is what says the whole stream was
+	// decoded rather than abandoned part way: a decode that stops early stops here too.
+	emit("drained_to_end", voice->readCursor >= voice->dataLength);
+	emit("read_cursor", (long)voice->readCursor);
+	emitLastError("drain_last_error");
+
+	if (seekMs > 0) {
+		// Seeking is the other thing the index is for. Ask for a position, then decode from there
+		// and report what came back, so a seek that lands in the wrong place is visible as PCM.
+		AIL_set_stream_ms_position(stream, (S32)seekMs);
+		AIL_stream_ms_position(stream, &total, &current);
+		emit("seek_requested_ms", seekMs);
+		emit("seek_reported_ms", (long)current);
+		// The exact PCM frame the seek landed on, which is what the reported milliseconds are
+		// computed from. The driving script compares the samples after the seek against the oracle's
+		// samples at this offset, and a millisecond is 44 samples of slack too many for that.
+		emit("seek_frames_played", (long)voice->framesPlayed);
+		chunk.clear();
+		const unsigned int produced = OpenALAudio::decodeStreamChunk(*voice, chunk);
+		emit("seek_decoded_bytes", (long)produced);
+		if (out != nullptr && produced != 0) {
+			// Written after the full decode, and reported separately, so the driving script can
+			// measure it without mistaking it for part of the stream.
+			std::fwrite(chunk.data(), 1, produced, out);
+			emit("seek_pcm_offset_bytes", (long)bytes);
+		}
+		emitLastError("seek_last_error");
+	}
+
+	if (out != nullptr) {
+		std::fclose(out);
+	}
+	AIL_close_stream(stream);
+	AIL_shutdown();
+	return 0;
+}
+
 /// 4. A 3D voice at a position, the way MilesAudioManager plays a world sound. The capture is the
 /// assertion: a sound to the listener's left must come out louder on the left.
 int stage3D(const char* path, float x, float occlusion)
@@ -709,6 +816,9 @@ int main(int argc, char** argv)
 		result = stageEngineAdpcm(argv[2]);
 	} else if (stage == "stream" && argc >= 3) {
 		result = stageStream(argv[2], (argc < 4) || std::strcmp(argv[3], "no-callbacks") != 0);
+	} else if (stage == "stream-drain" && argc >= 3) {
+		result = stageStreamDrain(argv[2], (argc >= 4) ? argv[3] : nullptr,
+			(argc >= 5) ? std::atol(argv[4]) : 0);
 	} else if (stage == "sample3d" && argc >= 4) {
 		result = stage3D(argv[2], (float)std::atof(argv[3]),
 			(argc >= 5) ? (float)std::atof(argv[4]) : 0.0f);

@@ -149,8 +149,8 @@
       "system_library_symbols_matched": []
     },
     "miles": {
-      "evidence_files": 8,
-      "evidence_names": 160,
+      "evidence_files": 9,
+      "evidence_names": 184,
       "label": "Miles AIL_* API \u2014 the `milesstub`/OpenAL backend",
       "owner": "platform/audio-device (the Miles/OpenAL link)",
       "pile": "library-not-linked",
@@ -187,7 +187,7 @@
     "agrees_with_nm": true,
     "attempted": true,
     "binary": {
-      "bytes": 86729904,
+      "bytes": 86988488,
       "elf_type": "DYN",
       "format": "ELF",
       "machine": "x86-64",

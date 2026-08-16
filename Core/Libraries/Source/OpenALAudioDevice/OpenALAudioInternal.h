@@ -96,15 +96,64 @@ struct Object3D
 };
 
 /// What a stream's file holds. Retail dialogue is overwhelmingly IMA ADPCM (2391 of the 2442 files
-/// under the streaming folder), so the stream path decodes it as well as PCM.
+/// under the streaming folder), so the stream path decodes it as well as PCM; all 56 retail music
+/// tracks are MPEG audio (layer III), which is the third.
 enum class StreamCodec
 {
 	Pcm,
 	ImaAdpcm,
+	Mpeg,
 };
+
+/// Bytes of an MPEG audio frame header, which is all the parser needs to describe a whole frame.
+constexpr unsigned int MPEG_FRAME_HEADER_BYTES = 4;
+
+/// Largest PCM a single MPEG frame can decode to: 1152 samples of stereo.
+constexpr unsigned int MPEG_MAX_SAMPLES_PER_FRAME = 1152 * 2;
+
+/// Frames decoded and thrown away before the first frame wanted after a seek or a loop rewind.
+///
+/// Layer III frames are not independent: the bit reservoir lets a frame's main data live up to 511
+/// bytes back in the frames before it, and the synthesis filterbank carries overlap across frames.
+/// A decoder started cold on a mid-stream frame therefore produces no samples at all for it --
+/// minimp3 returns zero, which this stream reports as a frame that did not decode as its header
+/// described -- and only approximate ones for the next. Four frames is past the largest reservoir at
+/// every retail bitrate and past the filterbank overlap.
+constexpr unsigned int MPEG_PRIME_FRAMES = 4;
+
+/// What an MPEG audio frame header describes. `bytes` includes the header and the padding byte, so
+/// consecutive frames are `offset + bytes` apart.
+struct MpegFrameHeader
+{
+	unsigned int bytes = 0;
+	unsigned int samples = 0;		///< PCM frames this MPEG frame decodes to, per channel
+	unsigned int rate = 0;
+	unsigned int channels = 0;
+	unsigned int bitrateKbps = 0;
+	unsigned int layer = 0;			///< 1, 2 or 3
+	unsigned int version = 0;		///< 1, 2, or 25 for MPEG-2.5
+};
+
+/// One indexed MPEG frame within a stream's payload.
+///
+/// An MPEG elementary stream has no seek table -- 0 of the 56 retail tracks carry a Xing/VBRI tag --
+/// so the stream indexes every frame when it opens. That index is what makes duration and seeking
+/// exact for variable-bitrate files as well as constant-bitrate ones: no byte count is ever divided
+/// by a bitrate, which is the maths that goes silently wrong on VBR.
+struct MpegFrame
+{
+	unsigned int offset = 0;		///< byte offset of the frame header within the payload
+	unsigned int bytes = 0;			///< frame length in file bytes
+	unsigned int samples = 0;		///< PCM frames it decodes to, per channel
+};
+
+/// The MPEG decoder's state. Opaque: minimp3 is compiled in OpenALMpeg.cpp alone.
+struct MpegDecoder;
 
 struct StreamVoice
 {
+	~StreamVoice();
+
 	static constexpr unsigned int BUFFER_COUNT = 4;
 	static constexpr unsigned int BUFFER_FRAMES = 8192;
 
@@ -140,6 +189,14 @@ struct StreamVoice
 	StreamCodec codec = StreamCodec::Pcm;
 	unsigned int blockSize = 0;			///< ADPCM block alignment, in file bytes
 	unsigned int samplesPerBlock = 0;	///< decoded samples per ADPCM block, per channel
+
+	/// MPEG only: the decoder, and every frame of the payload in file order.
+	MpegDecoder* mpeg = nullptr;
+	std::vector<MpegFrame> mpegFrames;
+
+	/// Set when the decoder was rewound away from the frame the read cursor points at, so that the
+	/// next decode primes it on the frames before that one instead of starting cold.
+	bool mpegNeedsPriming = false;
 
 	unsigned int dataOffset = 0;	///< byte offset of the payload within the file
 	unsigned int dataLength = 0;	///< byte length of the payload, as it is stored in the file
@@ -262,6 +319,33 @@ inline float milesToAlZ(float z)
 {
 	return -z;
 }
+
+/// Parses one MPEG audio frame header. False for anything that is not a frame header, including a
+/// sync pattern that happens to occur inside tag or payload bytes, which is what the index scan
+/// walks past. `available` must be at least MPEG_FRAME_HEADER_BYTES.
+bool parseMpegFrameHeader(const unsigned char* at, size_t available, MpegFrameHeader& out);
+
+/// Total length of an ID3v2 tag at the front of a file, including its header and any footer; 0 when
+/// there is none. 54 of the 56 retail tracks have one, so the first frame is not at offset 0.
+unsigned int id3v2TagLength(const unsigned char* front, size_t size);
+
+/// Creates/destroys/rewinds an MPEG decoder. `destroyMpegDecoder(nullptr)` is a no-op.
+MpegDecoder* createMpegDecoder();
+void destroyMpegDecoder(MpegDecoder* decoder);
+void resetMpegDecoder(MpegDecoder* decoder);
+
+/// Decodes one MPEG frame at `data` into interleaved 16-bit PCM, returning the PCM frames written
+/// per channel, or 0 when the frame could not be decoded. `out` needs room for
+/// MPEG_MAX_SAMPLES_PER_FRAME samples. `header` reports what the decoder saw, which the stream
+/// checks against what it indexed.
+unsigned int decodeMpegFrame(MpegDecoder& decoder, const unsigned char* data, unsigned int size,
+	int16_t* out, MpegFrameHeader& header);
+
+/// Reads the next chunk of a stream's file through the engine's file callbacks and decodes it to
+/// interleaved 16-bit PCM, returning the PCM bytes produced and rewinding at the end of a looping
+/// stream. This is what the service thread queues into OpenAL, and what the audio probe drains at
+/// full speed to measure a decode without waiting for real time to pass.
+unsigned int decodeStreamChunk(StreamVoice& stream, std::vector<unsigned char>& into);
 
 /// Refills a playing stream's buffer queue. Sets `finished` when the stream has run out of data
 /// and OpenAL has drained the queue. Called from the service thread with the library lock held.

@@ -15,8 +15,9 @@ What it asserts, and how:
   decoder cannot pass by agreeing with itself;
 * playback is captured with OpenAL Soft's wave writer (ALSOFT_CONF drivers=wave) and measured,
   so a silent success fails;
-* compressed music (MP3/MP2, what retail Zero Hour ships) is *expected* to be undecodable here and
-  is reported as such rather than being worked around.
+* compressed music (MP3/MP2, what retail Zero Hour ships) decodes and is audible, since the MPEG
+  decoder is linked -- the retail proof of that path is `scripts/audio-music-probe.py`, which needs
+  the non-redistributable music archives; this one gates that the path exists at all.
 
 The test assets are synthetic (ffmpeg-generated) and that is a limitation, not a result: retail
 audio lives in .big archives that are not redistributable and are not on CI boxes. Formats and
@@ -47,6 +48,7 @@ BACKEND_DIR = "Core/Libraries/Source/OpenALAudioDevice"
 
 SOURCES = [
     f"{BACKEND_DIR}/OpenALDriver.cpp",
+    f"{BACKEND_DIR}/OpenALMpeg.cpp",
     f"{BACKEND_DIR}/OpenALSample.cpp",
     f"{BACKEND_DIR}/OpenAL3DSample.cpp",
     f"{BACKEND_DIR}/OpenALStream.cpp",
@@ -56,7 +58,14 @@ SOURCES = [
 
 INCLUDES = [BACKEND_DIR]
 
-COMPILE_FLAGS = ["-std=c++17", "-m64", "-g", "-O0", "-Wall", "-Wextra"]
+# -O1 rather than -O0: the MPEG decoder is real signal processing, and the retail music probe
+# decodes 2h 13m of audio, which is minutes rather than seconds of work unoptimised. Still with -g,
+# and no fast-math or other flag that could change the samples the assertions are made about.
+COMPILE_FLAGS = ["-std=c++17", "-m64", "-g", "-O1", "-Wall", "-Wextra"]
+
+# minimp3, provisioned by scripts/ci/fetch-probe-deps.sh at the commit cmake/minimp3.cmake pins.
+# OpenALMpeg.cpp includes <minimp3.h>, so the probe does not build without it.
+MINIMP3_DIRS = ("build/docker/_deps/minimp3-src",)
 
 
 def run(command, **kwargs):
@@ -101,9 +110,29 @@ def find_openal_lib():
     return None
 
 
+def find_minimp3_include():
+    """Where <minimp3.h> is. Env override first, then what fetch-probe-deps.sh provisions."""
+    candidates = [*MINIMP3_DIRS]
+    env = os.environ.get("MINIMP3_INCLUDE_DIR")
+    if env:
+        candidates.insert(0, env)
+    for candidate in candidates:
+        directory = pathlib.Path(candidate)
+        if not directory.is_absolute():
+            directory = REPO_ROOT / directory
+        if (directory / "minimp3.h").is_file():
+            return str(directory)
+    return None
+
+
 def build(work, verbose):
     include_dir = find_openal_include()
     lib_dir = find_openal_lib()
+    minimp3_dir = find_minimp3_include()
+    if minimp3_dir is None:
+        print("error: <minimp3.h> not found; run scripts/ci/fetch-probe-deps.sh or set "
+              "MINIMP3_INCLUDE_DIR", file=sys.stderr)
+        return None
     if include_dir is None or lib_dir is None:
         print("error: OpenAL headers or library not found; install libopenal-dev "
               "(or openal-soft) or set OPENAL_INCLUDE_DIR / OPENAL_LIB_DIR", file=sys.stderr)
@@ -113,7 +142,7 @@ def build(work, verbose):
     command = [CLANGXX, *COMPILE_FLAGS]
     for include in INCLUDES:
         command += ["-I", str(REPO_ROOT / include)]
-    command += ["-I", include_dir]
+    command += ["-I", include_dir, "-I", minimp3_dir]
     command += [str(REPO_ROOT / source) for source in SOURCES]
     command += ["-L", lib_dir, "-lopenal", "-lpthread", "-o", str(binary)]
 
@@ -585,17 +614,18 @@ def summarise(report):
         stage = stages.get(f"stream:{name}")
         if stage is None:
             continue
-        # The wall is still there -- there is no MPEG decoder -- but it is no longer silent: the
-        # open fails and names the reason. Retail Zero Hour music is MP3, so this is an
-        # UNIMPLEMENTED path that is REQUIRED, not a format that can be cut.
-        add(f"compressed music fails to open, loudly, rather than playing silence: {name}",
-            not stage.get("open_stream_handle") and stage.get("open_stream_last_error"),
-            f"handle={stage.get('open_stream_handle')} "
+        # This was the wall: with no MPEG decoder the open failed, loudly, and retail music could
+        # not play at all. minimp3 is linked now, so the assertion inverts -- the stream must open,
+        # report about the encoded length, and put samples in the mix. The bytes here are synthetic
+        # (an ffmpeg-encoded tone); the retail 56 are proved by scripts/audio-music-probe.py.
+        capture = stage.get("capture", {})
+        length = stage.get("stream_length_ms") or 0
+        add(f"compressed music decodes and is audible: {name}",
+            stage.get("open_stream_handle") and not stage.get("open_stream_last_error")
+            and 450 <= length <= 600 and max(capture.get("rms") or [0.0]) > 0.001,
+            f"handle={stage.get('open_stream_handle')} length_ms={length} "
+            f"rate={stage.get('stream_playback_rate')} rms={capture.get('rms')} "
             f"last_error={stage.get('open_stream_last_error')!r}")
-        observe("UNIMPLEMENTED (required): no MPEG decoder is linked, so music cannot play: "
-                f"{name}",
-                f"last_error={stage.get('open_stream_last_error')!r}; retail MusicZH.big holds 7 "
-                "MP3 tracks, so this blocks music entirely rather than being cuttable")
 
     mono_left = stages.get("pan:mono-hard-left", {}).get("capture", {})
     mono_right = stages.get("pan:mono-hard-right", {}).get("capture", {})

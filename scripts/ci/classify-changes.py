@@ -82,6 +82,8 @@ AREAS = {
         "*/WWAudio/*",
         "*/GameAudio/*",
         "cmake/openal.cmake",
+        # The MPEG decoder the backend links for retail music, pinned like the other vendor deps.
+        "cmake/minimp3.cmake",
         "CMakeLists.txt",
         "scripts/audio-surface-scan.py",
     ),
@@ -170,6 +172,11 @@ SELF_CHECK = (
     # Docs plus one source file is a source change: the prose does not dilute it.
     (
         ["docs/porting/audio-device-seam.md", "cmake/openal.cmake"],
+        {"code": True, "renderer": False, "window": False, "audio": True},
+    ),
+    # Repinning the MPEG decoder changes what the audio backend links, so the audio gate must run.
+    (
+        ["cmake/minimp3.cmake"],
         {"code": True, "renderer": False, "window": False, "audio": True},
     ),
     # A file in no area still builds and still moves the probe and build counts.

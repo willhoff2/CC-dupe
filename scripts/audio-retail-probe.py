@@ -151,7 +151,15 @@ def main():
 
         assets = ara.extract(data, selection, work / "retail")
         for label, path in sorted(assets.items()):
-            facts_of_file = selection[label]
+            # Re-describe from the whole extracted entry, not the 8 KB the selection sniffed: an
+            # MPEG elementary stream carries no length, so its frame count and duration are only
+            # right once every frame is in hand.
+            facts_of_file = dict(selection[label],
+                                 **ara.describe(selection[label]["entry"], path.read_bytes()))
+            facts_of_file.update(entry=selection[label]["entry"],
+                                 engine_path=selection[label]["engine_path"])
+            report["selection"][label] = {key: value for key, value in facts_of_file.items()
+                                          if key != "archive"}
             engine_path = facts_of_file["engine_path"]
             codec = facts_of_file["codec"]
 
@@ -287,16 +295,23 @@ def summarise(report):
             expected_ms = round(1000.0 * expected_frames(retail) / max(1, retail.get("rate", 1)))
             reported_ms = stage.get("stream_length_ms") or 0
             if retail.get("container") == "mpeg":
-                # UNIMPLEMENTED and REQUIRED: retail music is MP3 and there is no MPEG decoder.
-                # What is gated is that it says so instead of playing silence.
-                add(f"retail MP3 music fails to open, loudly: {label}",
-                    not stage.get("open_stream_handle") and stage.get("open_stream_last_error"),
-                    f"{retail.get('entry')} handle={stage.get('open_stream_handle')} "
-                    f"last_error={stage.get('open_stream_last_error')!r}")
-                observe("UNIMPLEMENTED (required, not cuttable): retail music is MPEG and no "
-                        f"decoder is linked: {label}",
-                        f"{retail.get('entry')} codec={retail.get('codec')} "
-                        f"rate={retail.get('rate')} channels={retail.get('channels')}")
+                # This was the wall until the MPEG decoder was linked: retail music is MP3, and the
+                # open failed loudly. Now it must open, report the duration the frame walk implies
+                # (to the millisecond -- both sides sum whole frames) and be audible. The whole
+                # 56-track set is proved by scripts/audio-music-probe.py; this is one of them,
+                # inside the same probe that measures the rest of the retail audio path.
+                add(f"retail MP3 music decodes, is the right length and is audible: {label}",
+                    stage.get("open_stream_handle")
+                    and not stage.get("open_stream_last_error")
+                    and abs(reported_ms - expected_ms) <= 1
+                    and stage.get("stream_playback_rate") == retail.get("rate")
+                    and audible,
+                    f"{retail.get('entry')} codec={retail.get('codec')} "
+                    f"rate={stage.get('stream_playback_rate')}/{retail.get('rate')} "
+                    f"channels={retail.get('channels')} "
+                    f"length_ms={reported_ms} expected_ms={expected_ms} "
+                    f"frames={retail.get('frame_count')} vbr={retail.get('vbr')} "
+                    f"high_water_ms={stage.get('stream_high_water_position_ms')} rms={rms}")
                 continue
             add(f"retail stream decodes, is the right length and is audible: {label}",
                 stage.get("open_stream_handle")
