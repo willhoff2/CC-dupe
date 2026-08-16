@@ -1,5 +1,13 @@
 # The audio path, executed off Windows
 
+> **Superseded in part.** The three defects in §3 are fixed and the unknowns in §5 that needed retail
+> audio are measured, against the full game-data object, in
+> `docs/porting/audio-retail-validation.md`. Read that for current behaviour and for the corrected
+> account of §3.2 — the 1024-byte window was never too small for a *header* (the largest retail
+> stream header is 60 bytes); it required the whole payload in the same read, which broke all 2442
+> retail streams. The numbers in §2 and §5 below are what the *trimmed* object could see and are kept
+> as the record of what was known then.
+
 `docs/porting/audio-device-seam.md` and `docs/porting/audio-surface.md` describe an OpenAL-backed
 `AIL_*` layer that compiles and links. Neither describes it *running*. This document does: it records
 what the layer answered when the same `AIL_*` sequences `MilesAudioManager.cpp` issues were driven at
