@@ -128,8 +128,8 @@
       "system_library_symbols_matched": []
     },
     "miles": {
-      "evidence_files": 7,
-      "evidence_names": 134,
+      "evidence_files": 8,
+      "evidence_names": 160,
       "label": "Miles AIL_* API \u2014 the `milesstub`/OpenAL backend",
       "owner": "platform/audio-device (the Miles/OpenAL link)",
       "pile": "library-not-linked",
@@ -579,9 +579,11 @@
   "third_party_linked": [
     "libsupport_gitinfo",
     "libsupport_openalaudiodevice",
+    "libsupport_renderbackend",
     "libsupport_windowbackend",
     "libthirdparty_lzhl",
     "openal (system)",
+    "vulkan (system)",
     "z (system)"
   ],
   "translation_units": 842,
