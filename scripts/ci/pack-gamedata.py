@@ -10,13 +10,17 @@ which is why the workflow fetches it from a private bucket and checks its hash.
 The retail installs are only ever read. Nothing is written outside --output-dir and a temporary
 staging directory.
 
+`--archives full` instead packs zerohour104_gamedata_full.7z: every .big from both install
+roots, for the native-port probes, which read GUI, audio and texture data the replay gate never
+touches. It is a separate object; the trimmed pair keeps the hashes the gate pins.
+
 Usage:
     python3 scripts/ci/pack-gamedata.py \\
         --generals   ~/zh-data/ZH_Generals \\
         --generalsmd ~/zh-data \\
         --output-dir gamedata-out
 
-Then upload both archives and set the two hash variables it prints. See
+Then upload the archives and set the hash variables it prints. See
 docs/porting/replay-check-gamedata.md.
 """
 
@@ -59,6 +63,14 @@ GENERALSMD_FILES = [
 # A Zero Hour install carries its own copies of these, and a Generals *data* tree (one without
 # the executable) does not. See the note in resolve_file() before relaxing this list.
 SHAREABLE_DLLS = {"binkw32.dll", "mss32.dll"}
+
+TRIMMED_GENERALS_ARCHIVE = "generals108_gamedata_trimmed.7z"
+TRIMMED_GENERALSMD_ARCHIVE = "zerohour104_gamedata_trimmed.7z"
+
+# The GUI, audio and texture data the trimmed archives deliberately omit. The replay gate does
+# not read any of it; the native-port probes do, and stall without it. Packed as one object
+# separate from the trimmed pair, whose pinned hashes must keep matching.
+FULL_ARCHIVE = "zerohour104_gamedata_full.7z"
 
 
 def find_seven_zip() -> str:
@@ -140,31 +152,82 @@ def sha256(path: Path) -> str:
     return digest.hexdigest().upper()
 
 
+def pack_stage_dir(label: str, stage: Path, archive: Path, seven_zip: str) -> None:
+    if archive.exists():
+        archive.unlink()
+
+    # Archive the staged tree's *contents*, so paths inside are relative exactly as the
+    # workflow's `7z x -o<install path>` expects. Timestamps are not stored, which makes
+    # the archive - and therefore the SHA256 the workflow pins - reproducible: repacking
+    # the same install twice would otherwise produce two different hashes, because the
+    # staging directory entries carry the time they were created.
+    result = subprocess.run(
+        [seven_zip, "a", "-t7z", "-mx=9", "-mtm=off", "-mtc=off", "-mta=off",
+         str(archive), "."],
+        cwd=stage, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    if result.returncode != 0:
+        sys.stdout.write(result.stdout)
+        raise SystemExit(f"7z failed packing {label} (exit {result.returncode})")
+
+
 def build_archive(label: str, root: Path, files: list[str], archive: Path, seven_zip: str,
                   dll_source: Path | None) -> str:
     print(f"Packing {label} data from {root}", flush=True)
     with tempfile.TemporaryDirectory(prefix="packgamedata-") as temp:
         stage = Path(temp)
         stage_files(label, root, files, stage, dll_source)
-
-        if archive.exists():
-            archive.unlink()
-
-        # Archive the staged tree's *contents*, so paths inside are relative exactly as the
-        # workflow's `7z x -o<install path>` expects. Timestamps are not stored, which makes
-        # the archive - and therefore the SHA256 the workflow pins - reproducible: repacking
-        # the same install twice would otherwise produce two different hashes, because the
-        # staging directory entries carry the time they were created.
-        result = subprocess.run(
-            [seven_zip, "a", "-t7z", "-mx=9", "-mtm=off", "-mtc=off", "-mta=off",
-             str(archive), "."],
-            cwd=stage, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        )
-        if result.returncode != 0:
-            sys.stdout.write(result.stdout)
-            raise SystemExit(f"7z failed packing {label} (exit {result.returncode})")
+        pack_stage_dir(label, stage, archive, seven_zip)
 
     return sha256(archive)
+
+
+def collect_big_archives(label: str, root: Path) -> list[Path]:
+    """Every .big directly in an install root, sorted, so the manifest is stable."""
+    if not root.is_dir():
+        raise SystemExit(f"{label} path is not a directory: {root}")
+    archives = sorted((entry for entry in root.iterdir()
+                       if entry.is_file() and entry.suffix.lower() == ".big"),
+                      key=lambda entry: entry.name.lower())
+    if not archives:
+        raise SystemExit(f"{label} install has no .big files in {root}")
+    return archives
+
+
+def build_full_archive(generals: Path, generalsmd: Path, archive: Path,
+                       seven_zip: str) -> tuple[str, list[tuple[str, Path, int]]]:
+    """Pack every .big from both install roots, keeping the two trees apart.
+
+    The roots are *not* flattened together: both ship a `Music.big`, and they are different
+    files (Zero Hour's is a ~787 KB security stub, Generals' is ~159 MB of streamed music).
+    Merging them would silently drop one, so each root gets its own top-level directory and
+    the consumer extracts each to the install path it belongs to.
+    """
+    trees = [("Generals", generals), ("GeneralsMD", generalsmd)]
+    manifest: list[tuple[str, Path, int]] = []
+
+    with tempfile.TemporaryDirectory(prefix="packgamedata-full-") as temp:
+        stage = Path(temp)
+        for tree_name, root in trees:
+            staged_tree = stage / tree_name
+            staged_tree.mkdir()
+            for source in collect_big_archives(tree_name, root):
+                manifest.append((tree_name, source, source.stat().st_size))
+                target = staged_tree / source.name
+                # Hardlink rather than copy: this stages several GB, and both the installs and
+                # the temporary directory are normally on the same volume. A copy is the
+                # fallback when they are not.
+                try:
+                    os.link(source, target)
+                except OSError:
+                    shutil.copy2(source, target)
+
+        staged_bytes = sum(size for _, _, size in manifest)
+        print(f"Packing {len(manifest)} .big files ({staged_bytes / 1024**3:.2f} GiB) from "
+              f"{generals} and {generalsmd}", flush=True)
+        pack_stage_dir("full game data", stage, archive, seven_zip)
+
+    return sha256(archive), manifest
 
 
 def main() -> int:
@@ -176,10 +239,14 @@ def main() -> int:
     parser.add_argument("--generalsmd", required=True, type=Path,
                         help="Zero Hour 1.04 install (read only).")
     parser.add_argument("--output-dir", default=Path("gamedata-out"), type=Path,
-                        help="Where to write the two archives (default: gamedata-out).")
+                        help="Where to write the archives (default: gamedata-out).")
     parser.add_argument("--no-dll-fallback", action="store_true",
                         help="Fail instead of taking a missing BINKW32.DLL or mss32.dll for the "
                              "Generals archive from the Zero Hour install.")
+    parser.add_argument("--archives", choices=("trimmed", "full", "both"), default="trimmed",
+                        help="Which objects to pack: the replay gate's trimmed pair (default), "
+                             f"the {FULL_ARCHIVE} object holding every .big from both installs, "
+                             "or both.")
     args = parser.parse_args()
 
     seven_zip = find_seven_zip()
@@ -190,29 +257,45 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_dir = output_dir.resolve()
 
-    generals_archive = output_dir / "generals108_gamedata_trimmed.7z"
-    generalsmd_archive = output_dir / "zerohour104_gamedata_trimmed.7z"
+    bucket = os.environ.get("GAMEDATA_S3_BASE_URI", "s3://your-bucket")
+    uploads: list[Path] = []
+    variables: list[tuple[str, str]] = []
 
-    generals_hash = build_archive(
-        "Generals", generals, GENERALS_FILES, generals_archive, seven_zip,
-        None if args.no_dll_fallback else generalsmd,
-    )
-    generalsmd_hash = build_archive(
-        "Zero Hour", generalsmd, GENERALSMD_FILES, generalsmd_archive, seven_zip, None,
-    )
+    if args.archives in ("trimmed", "both"):
+        generals_archive = output_dir / TRIMMED_GENERALS_ARCHIVE
+        generalsmd_archive = output_dir / TRIMMED_GENERALSMD_ARCHIVE
+        generals_hash = build_archive(
+            "Generals", generals, GENERALS_FILES, generals_archive, seven_zip,
+            None if args.no_dll_fallback else generalsmd,
+        )
+        generalsmd_hash = build_archive(
+            "Zero Hour", generalsmd, GENERALSMD_FILES, generalsmd_archive, seven_zip, None,
+        )
+        uploads += [generals_archive, generalsmd_archive]
+        variables += [("GAMEDATA_GENERALS_SHA256", generals_hash),
+                      ("GAMEDATA_GENERALSMD_SHA256", generalsmd_hash)]
+
+    if args.archives in ("full", "both"):
+        full_archive = output_dir / FULL_ARCHIVE
+        full_hash, manifest = build_full_archive(generals, generalsmd, full_archive, seven_zip)
+        uploads.append(full_archive)
+        variables.append(("GAMEDATA_FULL_SHA256", full_hash))
+
+        print(f"\n{FULL_ARCHIVE} holds:")
+        for tree_name, source, size in manifest:
+            print(f"  {tree_name}/{source.name:<24} {size:>12,} bytes")
 
     print(f"\nArchives written to {output_dir}")
-    print(f"  {generals_archive.name}  {generals_hash}")
-    print(f"  {generalsmd_archive.name}  {generalsmd_hash}")
-    print("\nUpload both to your bucket, for example:")
-    bucket = os.environ.get("GAMEDATA_S3_BASE_URI", "s3://your-bucket")
-    print(f"  aws s3 cp {generals_archive} {bucket}/")
-    print(f"  aws s3 cp {generalsmd_archive} {bucket}/")
+    for archive in uploads:
+        print(f"  {archive.name:<32} {archive.stat().st_size:>13,} bytes")
+    print("\nUpload to your bucket, for example:")
+    for archive in uploads:
+        print(f"  aws s3 cp {archive} {bucket}/")
     print("\nthen set these repository variables "
           "(Settings -> Secrets and variables -> Actions):")
-    print(f"  GAMEDATA_S3_BASE_URI        = {bucket}")
-    print(f"  GAMEDATA_GENERALS_SHA256    = {generals_hash}")
-    print(f"  GAMEDATA_GENERALSMD_SHA256  = {generalsmd_hash}")
+    print(f"  {'GAMEDATA_S3_BASE_URI':<27} = {bucket}")
+    for name, value in variables:
+        print(f"  {name:<27} = {value}")
     print("\nand the bucket secrets described in docs/porting/replay-check-gamedata.md. The "
           "replay gate re-enables itself once R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY exist.")
     return 0
