@@ -70,8 +70,14 @@ jobs:
       GENERALS_PATH: C:\GameData\Generals
       GENERALSMD_PATH: C:\GameData\GeneralsMD
       # Where the trimmed game data lives and what it should hash to. Override per repository
-      # (Settings -> Secrets and variables -> Actions -> Variables) to use your own bucket; the
-      # defaults are the upstream bucket and the hashes of the archives in it.
+      # (Settings -> Secrets and variables -> Actions -> Variables) to use your own bucket.
+      #
+      # The three fallbacks below are one set: they are the *upstream* bucket and the hashes of the
+      # archives in *that* bucket, so they are only meaningful together. A repository that sets
+      # GAMEDATA_S3_BASE_URI to its own bucket must set both hash variables too, or the download
+      # will be checked against hashes belonging to somebody else's archives. Do not read these
+      # constants as "the expected hashes" for a fork; read the job log, which prints the pair it
+      # actually compared. This fork sets all three -- see docs/porting/replay-check-gamedata.md.
       GAMEDATA_S3_BASE_URI: ${{ vars.GAMEDATA_S3_BASE_URI || 's3://github-ci' }}
       EXPECTED_HASH_GENERALS: ${{ vars.GAMEDATA_GENERALS_SHA256 || '37A351AA430199D1F05DEB9E404857DCE7B461A6AC272C5D4A0B5652CDB06372' }}
       EXPECTED_HASH_GENERALSMD: ${{ vars.GAMEDATA_GENERALSMD_SHA256 || '6837FE1E3009A4C239406C39B1598216C0943EE8ED46BB10626767029AC05E21' }}
