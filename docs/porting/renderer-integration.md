@@ -27,7 +27,7 @@ Everything below is measured on this Linux x86-64 box against Mesa **lavapipe** 
 | `Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.h` | 218 | the non-Windows `RenderBackendClass` declaration, `#ifndef _WIN32` |
 | `Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.cpp` | 2156 | its implementation: a translation layer over `spike::RenderBackend` |
 | `Core/Libraries/Source/WWVegas/WW3D2/tests/native_render_run.cpp` | 210 | the runtime harness: window → `DX8Wrapper::Init` → device → frames → ledger |
-| `scripts/native-render-backend-run.py` | 285 | compiles, links and runs that harness against the native build's own archives |
+| `scripts/native-render-backend-run.py` | 327 | compiles, links and runs that harness against the native build's own archives |
 
 **Nothing was copied.** `spikes/renderer/CMakeLists.txt` now builds its two backend sources
 (`src/state_translate.cpp`, `src/vulkan_backend.cpp`) as a static library, `zh-render-backend`, and
@@ -259,7 +259,7 @@ Renderer ladder, on lavapipe with the validation layer loaded and silent:
 | `check-backend-coverage.py` | matches the committed baseline exactly (44/47 backend methods, 48 render states, 23 stage states, 17 cascade ops) |
 
 Native build and probes, `clang++-14`, levels 1-4 shimmed with `--strict-link`: **978/978** objects,
-0 compile failures, 0 unresolved symbols, executable produced. Probe unchanged at 671/760 native and
+0 compile failures, 0 unresolved symbols, executable produced. Probe unchanged at 672/760 native and
 716/760 shimmed, both gated. `flake8 --max-line-length=100 scripts/` and `actionlint` clean.
 
 No new resource lock was introduced in the spike by this slice, so the C1-C9 classification of
@@ -269,12 +269,9 @@ class stays where #85 put it — the D3DX creation entry points do not reach the
 
 ## 7. What only a Mac can decide
 
-The outpost has since run this harness on an M1 Pro under MoltenVK 1.4.2. Its measurement is a
-separate slice (`docs/porting/renderer-integration-arm64.md`, PR #97) and the questions below are
-answered there, not here; the one finding of it that belongs in this slice is the missing
-`SPIKE_WITH_PLATFORM_WINDOW` of §1, which is fixed above. The wall did not move: MoltenVK stops at
-the same `MissingTexture::_Init()`, and the allocator crash of §5 is lavapipe's JIT rather than the
-engine's.
+The outpost's measurement is a separate slice (`docs/porting/renderer-integration-arm64.md`, PR #97);
+the one finding of it that belongs in this slice, and is fixed here, is the missing
+`SPIKE_WITH_PLATFORM_WINDOW` of §1.
 
 - Whether the engine reaches the same wall on MoltenVK, or an earlier one. The adapter is
   platform-neutral, but `VK_KHR_portability_enumeration`, the `CAMetalLayer` surface and the

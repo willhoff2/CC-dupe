@@ -4,7 +4,7 @@ Produced by `scripts/native-build.py`. Unlike every other number in `docs/portin
 these come from real object files and a real linker invocation, not from
 `clang++ -fsyntax-only`.
 
-Toolchain: `Ubuntu clang version 14.0.0-1ubuntu1.1`, target `x86_64-pc-linux-gnu`, levels built: 1, 2, 3.
+Toolchain: `Ubuntu clang version 14.0.0-1ubuntu1.1`, target `x86_64-pc-linux-gnu`, levels built: 1, 2, 3, 4.
 
 Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only stand-ins for the Win32 headers, so a missing platform layer shows up as an undefined symbol rather than as a failed compile. That is the point: it moves the blockers from §1 to §3, where they can be counted individually.
 
@@ -19,51 +19,25 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
 | `Core/GameEngine` | 210 | 210 | 210 |
 | `GeneralsMD/Code/GameEngine` | 380 | 380 | 380 |
+| `Core/Libraries/Source/WWVegas/WW3D2` | 78 | 78 | 78 |
+| `Core/Libraries/Source/WWVegas/WWAudio` | 19 | 19 | 19 |
+| `Core/Libraries/Source/WWVegas/WWDownload` | 4 | 4 | 4 |
+| `GeneralsMD/Code/Libraries/Source/WWVegas` | 35 | 35 | 35 |
 | `Core/GameEngineDevice` | 70 | 70 | 70 |
 | `GeneralsMD/Code/GameEngineDevice` | 39 | 39 | 39 |
 | `GeneralsMD/Code/Main` | 1 | 1 | 1 |
-| **Total** | **842** | **842** | **842** |
+| **Total** | **978** | **978** | **978** |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 842 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 978 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 10 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_gitinfo`, `libsupport_openalaudiodevice`, `libsupport_renderbackend`, `libsupport_windowbackend`, `libthirdparty_lzhl`, `openal (system)`, `vulkan (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point `main` from: `libgeneralsmd_code_main`; 5 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_user32_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **393 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 14 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_gitinfo`, `libsupport_openalaudiodevice`, `libsupport_renderbackend`, `libsupport_windowbackend`, `libthirdparty_lzhl`, `openal (system)`, `vulkan (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point `main` from: `libgeneralsmd_code_main`; 5 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_user32_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **0 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
-| Defined in a layer not built here (renderer / audio) | 387 |
-| Defined in a built translation unit behind a disabled #if (build option / platform) | 6 |
-
-### Defined in a layer not built here (renderer / audio)
-
-- `D3DXAssembleShader`
-- `D3DXFilterTexture`
-- `TheDX8MeshRenderer`
-- `_AggregateLoader`
-- `_ParticleEmitterLoader`
-- `Log_DX8_ErrorCode(unsigned int)`
-- `Get_Bytes_Per_Pixel(WW3DFormat)`
-- `ARGB_Color_To_WW3D_Color(WW3DFormat, unsigned int)`
-- `SetUnsignedIntInRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int)`
-- `DX8Wrapper::Draw_Strip(unsigned short, unsigned short, unsigned short, unsigned short)`
-- `DX8Wrapper::CurrentCaps`
-- `DX8Wrapper::Has_Stencil()`
-- `DX8Wrapper::Pixel_Shader`
-- `DX8Wrapper::RenderStates`
-- `DX8Wrapper::render_state`
-- …and 372 more
-
-### Defined in a built translation unit behind a disabled #if (build option / platform)
-
-- `DX8Wrapper_IsWindowed`
-- `DX8Wrapper_PreserveFPU`
-- `Convert_Pixel(unsigned char*, SurfaceClass::SurfaceDescription const&, Vector3 const&)`
-- `GetUnsignedIntFromRegistry(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned int&)`
-- `DX8Wrapper::Set_Vertex_Buffer(VertexBufferClass const*, unsigned int)`
-- `DX8Wrapper::Set_Vertex_Buffer(DynamicVBAccessClass const&)`
 
 ## 4. What would resolve them
 
@@ -74,7 +48,7 @@ The causes above say what each symbol *is*. They do not say what makes it go awa
 | `library-not-linked` | 0 | A library defines it and this configuration links no such library. A link line, not port work. |
 | `cut-scope-not-linked` | 0 | A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it. |
 | `compile-blocked` | 0 | An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker. |
-| `harness-artefact` | 393 | An artefact of how this harness is configured: a build-time generated definition it does not generate, one a disabled `#if` removed, or one in a layer this level selection does not build. |
+| `harness-artefact` | 0 | An artefact of how this harness is configured: a build-time generated definition it does not generate, one a disabled `#if` removed, or one in a layer this level selection does not build. |
 | `no-definition-anywhere` | 0 | Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work. |
 
 The libraries in the `library-not-linked` and `cut-scope-not-linked` piles, the evidence each attribution rests on, and the slice that owns it:
@@ -90,15 +64,17 @@ Evidence is the provisioned sources or headers that define the symbols, not a li
 
 ## 5. Strict link: is there an executable?
 
-`--strict-link` linked the same archives with no tolerance for unresolved symbols: **failed**, 389 unresolved symbol(s), executable produced: no. Nothing is stubbed to make this pass, and nothing may be — a green strict link bought with stubs would hide exactly the work this number exists to count.
+`--strict-link` linked the same archives with no tolerance for unresolved symbols: **succeeded**, 0 unresolved symbol(s), executable produced: yes. Nothing is stubbed to make this pass, and nothing may be — a green strict link bought with stubs would hide exactly the work this number exists to count.
 
 The linker's list and §3's `nm` scan agree, so the categorised list above is the list standing between this build and an executable.
 
 Symbol resolution is necessary and not sufficient; `docs/porting/startability.md` defines what else a first launch needs.
 
+The file is `build/native/native_strict_link`, 82.7 MiB, ELF 64-bit x86-64. That it loads and runs is a separate question from whether it links, and one this run does not answer: see `docs/porting/startability.md`.
+
 ## Reproducing
 
 ```sh
 bash scripts/ci/fetch-probe-deps.sh
-python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims --strict-link --report docs/porting/native-build-report.md --json native-build.json
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims --strict-link --report docs/porting/native-build-report.md --json native-build.json
 ```
