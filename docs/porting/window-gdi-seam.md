@@ -181,11 +181,34 @@ As written, any symbol that shares a vendor prefix (`D3DX`, `AIL_`, `av*`, …) 
 library will be counted as port work at lower levels. `scripts/native-build.py` is slice 4's file
 (the harness), so this is reported for slice 4 to act on rather than fixed here.
 
+**`window-input-scan.json`: the in-scope Win32 window/input surface goes 665 → 731 references, and
+51 of those 66 are the test file.** That gate measures how much Win32 window/input surface is still
+*referenced* in scope, and this slice is supposed to shrink what is *undefined* without growing what
+is referenced, so the delta was measured by re-running the scan with pieces removed rather than
+baselined on sight:
+
+| tree | in-scope references | in-scope HWND files |
+|---|---:|---:|
+| `main` `210bc9857` | 665 | 26 |
+| + the eight implementations in `platform_win32_user.cpp` | 680 | 26 |
+| + `platform/tests/win32_user32_test.cpp` | **731** | **27** |
+
+So **+15 is the seam implementation and +51 (77%) is the test**, and the one new HWND file in scope is
+the test. No engine or consumer call site was added: the +15 are the *definitions* of the eight names
+under their Win32 spelling — the file where `GetClientRect` and friends stop being undefined is
+necessarily a file that mentions `GetClientRect` — and the +51 are the 151 behaviour checks that call
+them. The scanner counts mentions, not consumers, so the number it reports is now inflated by the
+tests that make the surface trustworthy; the count of *consumer* files is unchanged. If that
+distinction matters to the ratchet later, the scanner would have to exclude `platform/tests/**` (or
+count it separately), which is `platform/macos-window-compile`'s file, not this slice's.
+
 Nothing in this seam changes what Windows compiles: `platform_win32_user.cpp` is `#if`-ed out there,
 the shim header is native-only, and the rest is new files. The one change this slice makes to live
 Windows code is `WWAudio/listenerhandle.h` — see §6 — so the Wine/VC6 Windows build was run for that
-locally (green), and `check-replays.yml`'s retail replay gate runs on this pull request because the
-diff touches `Core/**`.
+locally (green), and `check-replays.yml`'s retail replay gate ran on this pull request (the diff
+touches `Core/**`) and **passed** — `Replay Check GeneralsMD / vc6+t+e` and
+`vc6-releaselog+t+e` both green — so the deleted declaration is behaviour-checked against retail
+replays rather than only argued.
 
 ## 6. `ListenerHandleClass::Initialize(SoundBufferClass*)`
 

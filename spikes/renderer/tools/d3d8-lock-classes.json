@@ -55,6 +55,12 @@
       "name": "opaque hand-out",
       "contract": "SurfaceClass::Lock/Unlock returns the raw pointer and pitch to arbitrary engine code, which may read, write, or both; the class cannot tell which. Callers outside the scanner's scope (GUI, map preview, water, terrain) use it.",
       "vulkan": "read-write mapping: read-back on Lock (C3 cost) and upload on Unlock (C1 cost), unless each caller is audited and split into C1/C2/C3"
+    },
+    {
+      "id": "C9",
+      "name": "surface-to-surface convert, two locks held at once",
+      "contract": "the off-Windows D3DX substitute (D3DXLoadSurfaceFromSurface, and D3DXFilterTexture through it) locks two surfaces at the same time: the source with D3DLOCK_READONLY and reads every texel of it on the CPU, the destination with no flags and writes every texel inside the destination rect, converting format between the two. Both pointers have to be valid simultaneously, the source data must be what the GPU last wrote, and when the destination rect is a sub-rect the texels outside it must survive. In the D3DXFilterTexture case the two surfaces are consecutive mip levels of the SAME texture.",
+      "vulkan": "the source costs a read-back (C3: vkCmdCopyImageToBuffer + fence wait before Lock returns) and the destination a contents-preserving staging upload at unlock (C2), both inside one call; because the mip case locks two levels of one image, the per-resource staging allocation must be addressable per level so that reading level n-1 and writing level n do not alias"
     }
   ],
   "assignments": {
@@ -108,12 +114,14 @@
     "GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DShroud.cpp::W3DShroud::init": "C7",
 
     "Core/Libraries/Source/WWVegas/WW3D2/surfaceclass.cpp::SurfaceClass::Lock": "C8",
-    "Core/Libraries/Source/WWVegas/WW3D2/surfaceclass.cpp::SurfaceClass::Unlock": "C8"
+    "Core/Libraries/Source/WWVegas/WW3D2/surfaceclass.cpp::SurfaceClass::Unlock": "C8",
+
+    "Core/Libraries/Source/WWVegas/WW3D2/d3dx8texture.cpp::D3DXLoadSurfaceFromSurface": "C9"
   },
   "expected": {
-    "total": 226,
-    "refcount": 72,
-    "lock_unlock": 95,
-    "files": 19
+    "total": 239,
+    "refcount": 74,
+    "lock_unlock": 100,
+    "files": 20
   }
 }

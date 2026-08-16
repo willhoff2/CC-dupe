@@ -62,6 +62,38 @@ output byte-for-byte: no such comparison harness exists in this repository. What
 instead is the list above — exact expected pixels for each named case — so any future comparison has
 something specific to contradict.
 
+### The two lock sites these add, and why they are their own usage class
+
+`D3DXLoadSurfaceFromSurface` locks both surfaces at once — the source `D3DLOCK_READONLY`, the
+destination with no flags — so `spikes/renderer/tools/d3d8-lock-scan.py` sees two new
+`IDirect3DSurface8::LockRect` sites (five sites counting the unlocks) that no existing usage class
+in `d3d8-lock-classes.json` describes. They are classified as a new **C9, surface-to-surface convert,
+two locks held at once**, and the classification is a statement about hazard semantics, not
+bookkeeping:
+
+- The **source** lock is a full read of texels the GPU may have written, i.e. C3's cost: the Vulkan
+  backend has to `vkCmdCopyImageToBuffer`, submit and wait on a fence before `Lock` returns.
+- The **destination** lock is the case where the preserve-by-default rule in `decisions-resolved.md`
+  may be relaxed, and it is relaxed only because the code makes it true rather than assumed:
+  `Blit()` writes *every* pixel of the destination view with `Write_Pixel` — the destination loop is
+  `for (y) for (x) Write_Pixel(...)` over the whole view with no early-out and no read of the
+  destination's prior contents. So when the destination rect is the whole surface, nothing outside
+  the written set exists and the staging allocation may be discarded rather than pre-filled. The
+  moment `pDestRect` is a sub-rect that stops being true: the texels outside the rect must survive,
+  which is C2, so the class is written to require the preserving behaviour in general and to permit
+  discard only for the whole-surface case. Both of the sites the engine actually has today are
+  whole-surface (`pDestRect == nullptr` from `D3DXFilterTexture`, and from `missingtexture.cpp`).
+- `D3DXFilterTexture` reaches these locks with two mip levels of the **same** texture locked
+  simultaneously (level *n-1* read, level *n* written), which is why the class also requires the
+  per-resource staging allocation to be addressable per level. This is the shape of the two worst
+  bugs in this port so far (#52 reading released staging, #63 a surface view whose layout diverged
+  from its image), so it is stated in the table rather than left for the backend to infer.
+
+The lock scanner's totals move with those sites: 226 → 239 references, 72 → 74 refcount, 95 → 100
+lock/unlock, 19 → 20 files. `spikes/renderer/tools/surface-lock-audit.py --check` is unchanged
+(it counts `SurfaceClass::Lock` callers, and this code locks `IDirect3DSurface8` directly), and
+the renderer spike still runs with 0 validation messages and a 0/480000-pixel diff.
+
 ## 3. `D3DXAssembleShader` — refused, loudly, and what that costs
 
 It assembles DirectX shader *assembly* into bytecode. This port is fixed-function-first, so there is
