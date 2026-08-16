@@ -163,6 +163,15 @@ public:
 	** slice.
 	*/
 	virtual HRESULT CreateTexture(UINT width, UINT height, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DTexture8** texture) = 0;
+	/*
+	** The two shapes that reach the backend only through the D3DX creation helpers, which
+	** off Windows are this tree's own (d3dx8texcreate.cpp) and now create through this seam
+	** rather than through an IDirect3DDevice8 that a non-D3D8 backend does not have.  On
+	** Windows d3dx8.lib calls the device itself and these are what a D3DX-free path would
+	** use; the D3D8 backend therefore forwards them exactly as D3DX does.
+	*/
+	virtual HRESULT CreateCubeTexture(UINT edge_length, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DCubeTexture8** cube_texture) = 0;
+	virtual HRESULT CreateVolumeTexture(UINT width, UINT height, UINT depth, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DVolumeTexture8** volume_texture) = 0;
 	virtual HRESULT CreateVertexBuffer(UINT length, DWORD usage, DWORD fvf, D3DPOOL pool, IDirect3DVertexBuffer8** vertex_buffer) = 0;
 	virtual HRESULT CreateIndexBuffer(UINT length, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DIndexBuffer8** index_buffer) = 0;
 	virtual HRESULT CreateImageSurface(UINT width, UINT height, D3DFORMAT format, IDirect3DSurface8** surface) = 0;

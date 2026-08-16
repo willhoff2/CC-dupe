@@ -28,8 +28,24 @@
 #include <d3d8.h>
 #include <d3dx8tex.h>
 
+class RenderBackendClass;
+
 namespace D3DX8TexCreate
 {
+
+//
+//	Where these helpers create when their device argument is null, which off Windows is every
+//	call the engine makes: their device argument is DX8Wrapper::_Get_D3D_Device8(), and a backend
+//	that is not D3D8 has no IDirect3DDevice8 to hand out (renderbackend.h documents that hole).
+//	The device the engine actually has lives behind RenderBackendClass, so that is what is asked
+//	for the caps and for the creation itself.
+//
+//	Defined in dx8wrapper.cpp, which owns the installed backend. It is a free function rather
+//	than a direct DX8Wrapper::Get_Render_Backend() call so that the entry-point tests
+//	(scripts/native-d3dx8-entrypoints-test.py) can link this file without the whole wrapper, and
+//	so that they can say what backend, if any, is installed.
+//
+RenderBackendClass * Peek_Render_Backend();
 
 //
 //	Which of the three texture shapes is being created. The fitting rules differ: the POW2 and

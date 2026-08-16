@@ -82,14 +82,29 @@ add_custom_target(spike-shaders DEPENDS ${SPIRV_OUTPUTS})
 # same two files into the native binary as the `support_renderbackend` archive.  Nothing moved
 # and nothing was copied; the file list simply has one home now, so the engine's copy of the
 # renderer cannot drift from the one the spike ladder verifies.
-add_library(zh-render-backend STATIC
-    src/state_translate.cpp
-    src/vulkan_backend.cpp)
-add_dependencies(zh-render-backend spike-shaders)
-target_include_directories(zh-render-backend PUBLIC src)
-target_link_libraries(zh-render-backend PUBLIC Vulkan::Vulkan)
-target_compile_definitions(zh-render-backend PUBLIC
-    SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+#
+# Presentation is a COMPILE-TIME choice in this file: with neither SPIKE_WITH_PLATFORM_WINDOW nor
+# SPIKE_WITH_SDL defined the surface and swapchain code is not compiled at all.  Defining it on the
+# executable, as the window spike used to, defines it for that executable's own sources only -- so
+# the window targets linked a swapchain-less backend, drew 240 frames, showed none, and passed.
+# Hence one library per presentation path, all from the same two sources: a target picks the variant
+# whose window handle it actually passes to Init(), and Init() now refuses a window it cannot
+# present to instead of running blind.
+function(zh_add_render_backend name)
+    add_library(${name} STATIC
+        src/state_translate.cpp
+        src/vulkan_backend.cpp)
+    add_dependencies(${name} spike-shaders)
+    target_include_directories(${name} PUBLIC src)
+    target_link_libraries(${name} PUBLIC Vulkan::Vulkan)
+    target_compile_definitions(${name} PUBLIC
+        SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+endfunction()
+
+# Headless: renders and reads back, never presents. What the pixel, fixed-function, lock,
+# staging and throughput rungs use, and what scripts/native-build.py's engine archive is NOT
+# (it defines SPIKE_WITH_PLATFORM_WINDOW, and CI gates that it did).
+zh_add_render_backend(zh-render-backend)
 
 # --- executable ---------------------------------------------------------------
 add_executable(zh-renderer-spike
@@ -137,10 +152,18 @@ add_dependencies(zh-throughput spike-shaders)
 target_link_libraries(zh-throughput PRIVATE zh-render-backend)
 
 if(SPIKE_HAVE_SDL2)
+    # --window hands an SDL_Window to Init(), so the backend it links has to be the SDL variant:
+    # the headless one has no SDL surface code and would present nothing.
+    zh_add_render_backend(zh-render-backend-sdl)
+    target_compile_definitions(zh-render-backend-sdl PUBLIC SPIKE_WITH_SDL)
     target_compile_definitions(zh-renderer-spike PRIVATE SPIKE_WITH_SDL)
+    target_link_libraries(zh-renderer-spike PRIVATE zh-render-backend-sdl)
     if(TARGET SDL2::SDL2)
+        target_link_libraries(zh-render-backend-sdl PUBLIC SDL2::SDL2)
         target_link_libraries(zh-renderer-spike PRIVATE SDL2::SDL2)
     else()
+        target_include_directories(zh-render-backend-sdl PUBLIC ${SDL2_INCLUDE_DIRS})
+        target_link_libraries(zh-render-backend-sdl PUBLIC ${SDL2_LIBRARIES})
         target_include_directories(zh-renderer-spike PRIVATE ${SDL2_INCLUDE_DIRS})
         target_link_libraries(zh-renderer-spike PRIVATE ${SDL2_LIBRARIES})
     endif()
@@ -150,6 +173,14 @@ endif()
 # The seam under test lives in the engine tree, not here, because it is engine code; the
 # spike just builds it standalone, exactly as it does with the D3D8-shaped backend.
 set(WWLIB_PLATFORM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Libraries/Source/WWVegas/WWLib")
+
+# The presentation variant the window spikes link, and the same configuration the engine's own
+# archive is built with by scripts/native-build.py: the surface comes from the seam
+# (Window_Create_Vulkan_Surface), which is how a CAMetalLayer reaches MoltenVK. The WWPlatform
+# symbols it references are provided by whichever platform_window_*.cpp/.mm the executable links.
+zh_add_render_backend(zh-render-backend-window)
+target_compile_definitions(zh-render-backend-window PUBLIC SPIKE_WITH_PLATFORM_WINDOW)
+target_include_directories(zh-render-backend-window PUBLIC "${WWLIB_PLATFORM_DIR}")
 
 # zh-window-spike: the same two draws as zh-renderer-spike, but presented to a real window
 # through platform_window.h. One target per backend, because the backend is a link-time
@@ -161,7 +192,7 @@ if(SPIKE_HAVE_SDL2)
         "${WWLIB_PLATFORM_DIR}/platform/platform_window_sdl2.cpp")
     add_dependencies(zh-window-spike spike-shaders)
     target_include_directories(zh-window-spike PRIVATE "${WWLIB_PLATFORM_DIR}")
-    target_link_libraries(zh-window-spike PRIVATE zh-render-backend)
+    target_link_libraries(zh-window-spike PRIVATE zh-render-backend-window)
     target_compile_definitions(zh-window-spike PRIVATE SPIKE_WITH_PLATFORM_WINDOW)
     if(TARGET SDL2::SDL2)
         target_link_libraries(zh-window-spike PRIVATE SDL2::SDL2)
@@ -194,7 +225,7 @@ if(APPLE)
             "${WWLIB_PLATFORM_DIR}/platform/platform_window_cocoa.mm")
         add_dependencies(zh-window-spike-cocoa spike-shaders)
         target_include_directories(zh-window-spike-cocoa PRIVATE "${WWLIB_PLATFORM_DIR}")
-        target_link_libraries(zh-window-spike-cocoa PRIVATE zh-render-backend
+        target_link_libraries(zh-window-spike-cocoa PRIVATE zh-render-backend-window
             "-framework AppKit" "-framework QuartzCore" "-framework Metal"
             "-framework CoreGraphics" "-framework Foundation" "-framework Carbon")
         target_compile_definitions(zh-window-spike-cocoa PRIVATE

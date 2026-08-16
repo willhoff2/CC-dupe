@@ -805,7 +805,10 @@ WINDOW_BACKEND_COCOA = "platform_window_cocoa.mm"
 # libraries, not one of them, so it stays out of the objects/translation-unit denominators.
 RENDER_BACKEND_DIR = "spikes/renderer/src"
 RENDER_BACKEND_SLUG = "support_renderbackend"
-RENDER_BACKEND_SOURCES = ("state_translate.cpp", "vulkan_backend.cpp")
+# png_write.cpp is here for the frame proof: VulkanRenderBackendClass::Measure_Frame reads the
+# colour target back and writes it out, so a run can show what was IN the frame rather than quoting
+# Present's HRESULT. It is the spike's own writer (no external dependency), not a copy.
+RENDER_BACKEND_SOURCES = ("state_translate.cpp", "vulkan_backend.cpp", "png_write.cpp")
 # The backend loads its SPIR-V from SPIKE_SHADER_DIR at device-creation time, so the shaders are
 # compiled here with the same compiler and the same flags spikes/renderer/CMakeLists.txt uses.
 RENDER_BACKEND_SHADERS = ("fixedfunc.vert", "fixedfunc.frag", "probe.vert", "probe.frag")

@@ -198,12 +198,44 @@ def scratch_archives(scratch, stdlib_new=False):
     return copies
 
 
-def link_libraries():
-    """The by-path libraries native-build.py puts on the link line, found the same way."""
+RENDER_BACKEND_ARCHIVE = "libsupport_renderbackend.a"
+
+
+def load_script(name):
+    """Import one of this repo's hyphenated scripts as a module."""
     spec = importlib.util.spec_from_file_location(
-        "native_build", REPO_ROOT / "scripts" / "native-build.py")
+        name.replace("-", "_").removesuffix(".py"), REPO_ROOT / "scripts" / name)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def check_swapchain_compiled_in(archives):
+    """Refuse to measure a present with a backend that has no swapchain.
+
+    Built without SPIKE_WITH_PLATFORM_WINDOW the backend's presentation paths compile away and
+    Present() reported success having presented nothing. The same gate runs in CI on the build
+    output; here it runs on the copy this harness is about to link, so the run cannot claim a flip
+    a swapchain-less archive could not have done.
+    """
+    archive = next((a for a in archives if a.name == RENDER_BACKEND_ARCHIVE), None)
+    if archive is None:
+        sys.exit(f"no {RENDER_BACKEND_ARCHIVE}: run scripts/native-build.py first")
+    gate = load_script("ci/check-swapchain-compiled.py")
+    try:
+        missing = gate.missing_symbols(archive)
+    except RuntimeError as why:
+        sys.exit(str(why))
+    if missing:
+        sys.exit(f"{RENDER_BACKEND_ARCHIVE} does not reference {', '.join(missing)}: it was built "
+                 "without SPIKE_WITH_PLATFORM_WINDOW, so it has no swapchain and could only "
+                 "report a present it did not perform")
+    print("   swapchain compiled in: " + ", ".join(gate.SWAPCHAIN_SYMBOLS))
+
+
+def link_libraries():
+    """The by-path libraries native-build.py puts on the link line, found the same way."""
+    module = load_script("native-build.py")
     deps = REPO_ROOT / "build" / "docker" / "_deps"
     found = [module.openal_library(), module.vulkan_library(), module.sdl2_library()]
     return [p for p in found if p is not None] + list(module.ffmpeg_libraries(deps))
@@ -220,6 +252,10 @@ def main():
     parser.add_argument("--stop-after-init", action="store_true",
                         help="stop after DX8Wrapper::Init and the device enumeration, before the "
                              "D3DX texture wall, so the unimplemented-call ledger is printed")
+    parser.add_argument("--frame-png", metavar="FILE",
+                        help="write the frame the engine drew to FILE as a PNG. The harness reads "
+                             "the colour target back and measures it either way; this is for "
+                             "looking at the picture")
     parser.add_argument("--stdlib-new", action="store_true",
                         help="link the standard library's operator new instead of GameMemory's "
                              "4-byte-aligned pool allocator, which lavapipe's LLVM JIT cannot "
@@ -241,6 +277,7 @@ def main():
 
     print("== copying the archives")
     archives = scratch_archives(scratch, stdlib_new=args.stdlib_new)
+    check_swapchain_compiled_in(archives)
     support = [a for a in archives if a.name.startswith("libsupport_")
                or a.name == "libthirdparty_lzhl.a"]
     engine = [a for a in archives if a not in support]
@@ -297,6 +334,8 @@ def main():
         run.append("--no-present")
     if args.stop_after_init:
         run.append("--stop-after-init")
+    if args.frame_png:
+        run += ["--frame-png", str(pathlib.Path(args.frame_png).resolve())]
     if args.lldb:
         # Every DYLD_* variable is stripped when a SIP-protected binary is executed, so lldb cannot
         # inherit the loader path the layer needs; target.env-vars is set inside the session, which

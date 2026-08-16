@@ -33,6 +33,7 @@
 // only cost is that this file must not name spike::D3DTS_* / spike::D3DTSS_TCI_* after the D3D8
 // headers arrive - it names the raw values it is handed instead, which is what the seam passes.
 #include "render_backend.h"
+#include "png_write.h"
 
 #include "vulkanrenderbackend.h"
 
@@ -203,16 +204,30 @@ class VulkanD3DTextureClass;
 ** the depth/stencil buffer) or a system-memory image surface (CreateImageSurface).  D3D8 hands
 ** the engine one interface for all of those and CopyRects/SetRenderTarget take them
 ** interchangeably, which is why this class does too.
+**
+** Two kinds of surface live here, and the difference is visible to callers:
+**
+**   * a spike::SurfaceHandle surface (level 0 of a texture, the default targets, an image
+**     surface).  It has an image view and a layout, so it can be a render target and a CopyRects
+**     endpoint, and it locks through Surface_Bits.
+**   * a mip-level surface (GetSurfaceLevel(n) for n > 0), which has no handle.  The spike serves a
+**     level of a mip chain through Lock_Texture/Unlock_Texture (usage class C4), not through a
+**     per-level image view, so this surface locks that way and is NOT usable as a render target or
+**     a CopyRects endpoint: both refuse it rather than silently substituting the default target or
+**     level 0, which is what its null handle would otherwise have meant.
 */
 class VulkanD3DSurfaceClass : public IDirect3DSurface8
 {
 public:
 	VulkanD3DSurfaceClass(spike::RenderBackend * backend, spike::SurfaceHandle * handle,
 		VulkanD3DTextureClass * container, unsigned width, unsigned height,
-		spike::TextureFormat format, D3DPOOL pool, DWORD usage);
+		spike::TextureFormat format, D3DPOOL pool, DWORD usage, unsigned level = 0);
 	virtual ~VulkanD3DSurfaceClass();
 
 	spike::SurfaceHandle * Peek_Handle() const { return Handle; }
+	// True for a GetSurfaceLevel(n > 0) surface: it locks through its texture's mip level rather
+	// than through a surface handle, and it is not a target.
+	bool Is_Mip_Level_Surface() const { return Handle == NULL && Container != NULL; }
 
 	STDMETHOD(QueryInterface)(REFIID riid, void ** object);
 	STDMETHOD_(ULONG, AddRef)();
@@ -227,6 +242,9 @@ public:
 	STDMETHOD(UnlockRect)();
 
 private:
+	HRESULT Lock_Mip_Level(D3DLOCKED_RECT * locked_rect, CONST RECT * rect, DWORD flags);
+	HRESULT Unlock_Mip_Level();
+
 	spike::RenderBackend * Backend;
 	spike::SurfaceHandle * Handle;
 	VulkanD3DTextureClass * Container;
@@ -235,6 +253,8 @@ private:
 	spike::TextureFormat Format;
 	D3DPOOL Pool;
 	DWORD Usage;
+	// The mip level this surface names, for a surface that has no handle of its own.
+	unsigned Level;
 	int RefCount;
 };
 
@@ -371,7 +391,7 @@ private:
 
 VulkanD3DSurfaceClass::VulkanD3DSurfaceClass(spike::RenderBackend * backend,
 	spike::SurfaceHandle * handle, VulkanD3DTextureClass * container, unsigned width,
-	unsigned height, spike::TextureFormat format, D3DPOOL pool, DWORD usage) :
+	unsigned height, spike::TextureFormat format, D3DPOOL pool, DWORD usage, unsigned level) :
 	Backend(backend),
 	Handle(handle),
 	Container(container),
@@ -380,6 +400,7 @@ VulkanD3DSurfaceClass::VulkanD3DSurfaceClass(spike::RenderBackend * backend,
 	Format(format),
 	Pool(pool),
 	Usage(usage),
+	Level(level),
 	RefCount(1)
 {
 }
@@ -491,8 +512,11 @@ HRESULT VulkanD3DSurfaceClass::GetDesc(D3DSURFACE_DESC * desc)
 HRESULT VulkanD3DSurfaceClass::LockRect(D3DLOCKED_RECT * locked_rect, CONST RECT * rect,
 	DWORD flags)
 {
-	if (locked_rect == NULL) return D3DERR_INVALIDCALL;
-	if (Backend == NULL || Handle == NULL) return D3DERR_INVALIDCALL;
+	if (locked_rect == NULL || Backend == NULL) return D3DERR_INVALIDCALL;
+	// A mip-level surface locks the level of its texture, which is the spike's own per-level lock
+	// (usage class C4) and therefore serves a sub-rect honestly, unlike Surface_Bits below.
+	if (Is_Mip_Level_Surface()) return Lock_Mip_Level(locked_rect, rect, flags);
+	if (Handle == NULL) return D3DERR_INVALIDCALL;
 	if (rect != NULL) {
 		// Usage class C9 (the D3DX surface locks) and SurfaceClass::Lock both lock whole
 		// surfaces; the spike's Surface_Bits has no sub-rect form, so a partial surface lock is
@@ -510,10 +534,25 @@ HRESULT VulkanD3DSurfaceClass::LockRect(D3DLOCKED_RECT * locked_rect, CONST RECT
 
 HRESULT VulkanD3DSurfaceClass::UnlockRect()
 {
+	// A mip-level surface's unlock is its texture's, which is what uploads the level the caller
+	// just wrote: skipping it would leave the mip chain holding whatever the image was created
+	// with while every HRESULT said the write had landed.
+	if (Is_Mip_Level_Surface()) return Unlock_Mip_Level();
 	// Surface_Bits hands out a persistent host mapping (usage class C7: the engine keeps the
 	// pointer past the unlock), so there is nothing to undo.  Saying so is not the same as
 	// pretending: the mapping is still valid, which is exactly what the callers rely on.
 	return D3D_OK;
+}
+
+HRESULT VulkanD3DSurfaceClass::Lock_Mip_Level(D3DLOCKED_RECT * locked_rect, CONST RECT * rect,
+	DWORD flags)
+{
+	return Container->LockRect(Level, locked_rect, rect, flags);
+}
+
+HRESULT VulkanD3DSurfaceClass::Unlock_Mip_Level()
+{
+	return Container->UnlockRect(Level);
 }
 
 // --- texture ------------------------------------------------------------------------------
@@ -648,14 +687,22 @@ HRESULT VulkanD3DTextureClass::GetSurfaceLevel(UINT level, IDirect3DSurface8 ** 
 	*surface = NULL;
 	if (level >= Levels) return D3DERR_INVALIDCALL;
 	if (Surfaces[level] == NULL) {
-		spike::SurfaceHandle * handle = Backend->Get_Surface_Level(Handle, level);
-		if (handle == NULL) return D3DERR_INVALIDCALL;
+		// Level 0 is asked of the backend because that surface has to BE the texture's image as
+		// far as the render target and CopyRects paths are concerned.  Above level 0 the spike
+		// serves no per-level view, so the surface is a named level of this texture instead: it
+		// locks through Lock_Texture and refuses to be a target.  MissingTexture::_Init() and
+		// SurfaceClass's mip walk need exactly the lock, not a view.
+		spike::SurfaceHandle * handle = NULL;
+		if (level == 0) {
+			handle = Backend->Get_Surface_Level(Handle, level);
+			if (handle == NULL) return D3DERR_INVALIDCALL;
+		}
 		unsigned width = Width >> level;
 		unsigned height = Height >> level;
 		if (width == 0) width = 1;
 		if (height == 0) height = 1;
 		Surfaces[level] = new VulkanD3DSurfaceClass(Backend, handle, this, width, height, Format,
-			Pool, Usage);
+			Pool, Usage, level);
 	}
 	Surfaces[level]->AddRef();
 	*surface = Surfaces[level];
@@ -1461,6 +1508,30 @@ HRESULT VulkanRenderBackendClass::CreateTexture(UINT width, UINT height, UINT le
 	return D3D_OK;
 }
 
+HRESULT VulkanRenderBackendClass::CreateCubeTexture(UINT edge_length, UINT levels, DWORD usage,
+	D3DFORMAT format, D3DPOOL pool, IDirect3DCubeTexture8** cube_texture)
+{
+	(void)edge_length; (void)levels; (void)usage; (void)format; (void)pool;
+	if (cube_texture != NULL) *cube_texture = NULL;
+	// The spike has no cube image and no cube sampler, so there is nothing to hand back.  This
+	// is reached only through D3DXCreateCubeTexture, whose engine callers ask DX8Caps first
+	// (D3DPTEXTURECAPS_CUBEMAP is not set in the caps this backend reports), so an entry here
+	// means something created a cube texture without asking - which is what makes it a finding.
+	return Record_Unimplemented("IDirect3DDevice8::CreateCubeTexture",
+		"the backend has no cube texture image or sampler", D3DERR_INVALIDCALL);
+}
+
+HRESULT VulkanRenderBackendClass::CreateVolumeTexture(UINT width, UINT height, UINT depth,
+	UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool,
+	IDirect3DVolumeTexture8** volume_texture)
+{
+	(void)width; (void)height; (void)depth; (void)levels; (void)usage; (void)format; (void)pool;
+	if (volume_texture != NULL) *volume_texture = NULL;
+	// As above for 3D images: D3DPTEXTURECAPS_VOLUMEMAP is absent from the reported caps.
+	return Record_Unimplemented("IDirect3DDevice8::CreateVolumeTexture",
+		"the backend has no 3D texture image or sampler", D3DERR_INVALIDCALL);
+}
+
 HRESULT VulkanRenderBackendClass::CreateVertexBuffer(UINT length, DWORD usage, DWORD fvf,
 	D3DPOOL pool, IDirect3DVertexBuffer8** vertex_buffer)
 {
@@ -1558,6 +1629,14 @@ HRESULT VulkanRenderBackendClass::CopyRects(IDirect3DSurface8* source_surface,
 			point.y = (unsigned)dest_points[index].y;
 		}
 		points.push_back(point);
+	}
+	if (((VulkanD3DSurfaceClass *)source_surface)->Is_Mip_Level_Surface() ||
+			((VulkanD3DSurfaceClass *)destination_surface)->Is_Mip_Level_Surface()) {
+		// A mip level above 0 has no image view of its own here, and Copy_Rects works between
+		// surfaces.  Refusing says so; passing its null handle would have copied to or from the
+		// wrong image.
+		return Record_Unimplemented("IDirect3DDevice8::CopyRects(mip level above 0)",
+			"a mip level surface has no image view, only a lockable level", D3DERR_INVALIDCALL);
 	}
 	spike::SurfaceHandle * from = ((VulkanD3DSurfaceClass *)source_surface)->Peek_Handle();
 	spike::SurfaceHandle * to = ((VulkanD3DSurfaceClass *)destination_surface)->Peek_Handle();
@@ -1684,6 +1763,16 @@ HRESULT VulkanRenderBackendClass::SetRenderTarget(IDirect3DSurface8* render_targ
 	if (Internals->Backend == NULL) return D3DERR_INVALIDCALL;
 	spike::SurfaceHandle * color = NULL;
 	spike::SurfaceHandle * depth = NULL;
+	if ((render_target != NULL &&
+				((VulkanD3DSurfaceClass *)render_target)->Is_Mip_Level_Surface()) ||
+			(new_z_stencil != NULL &&
+				((VulkanD3DSurfaceClass *)new_z_stencil)->Is_Mip_Level_Surface())) {
+		// A null handle here means "the default target", so a mip level surface has to be refused
+		// explicitly: rendering to the default target while the caller asked for a mip level is
+		// precisely the silent wrong-image class this port keeps out.
+		return Record_Unimplemented("IDirect3DDevice8::SetRenderTarget(mip level above 0)",
+			"a mip level surface has no image view to render into", D3DERR_INVALIDCALL);
+	}
 	if (render_target != NULL) color = ((VulkanD3DSurfaceClass *)render_target)->Peek_Handle();
 	if (new_z_stencil != NULL) depth = ((VulkanD3DSurfaceClass *)new_z_stencil)->Peek_Handle();
 	return Internals->Backend->Set_Render_Target(color, depth) ? D3D_OK : D3DERR_INVALIDCALL;
@@ -2151,6 +2240,54 @@ void VulkanRenderBackendClass::Log_Unimplemented_Calls()
 		WWDEBUG_SAY(("  %s x%u (%s)\n", UnimplementedCalls[index].Name,
 			UnimplementedCalls[index].Count, UnimplementedCalls[index].Why));
 	}
+}
+
+long VulkanRenderBackendClass::Validation_Message_Count() const
+{
+	if (Internals->Backend == NULL) return -1;
+	return (long)Internals->Backend->Validation_Message_Count();
+}
+
+bool VulkanRenderBackendClass::Measure_Frame(unsigned char expect_r, unsigned char expect_g,
+	unsigned char expect_b, unsigned char tolerance, const char * png_path,
+	FrameProofClass & proof)
+{
+	memset(&proof, 0, sizeof(proof));
+	if (Internals->Backend == NULL) return false;
+
+	std::string rgba;
+	spike::SurfaceFormat format;
+	if (!Internals->Backend->Read_Back_Color_Target(rgba, format)) return false;
+	const unsigned long pixels = (unsigned long)format.width * (unsigned long)format.height;
+	if (pixels == 0 || rgba.size() < pixels * 4) return false;
+
+	proof.Width = format.width;
+	proof.Height = format.height;
+	proof.Pixels = pixels;
+	const unsigned char * bits = (const unsigned char *)rgba.data();
+	proof.MinRGB[0] = proof.MinRGB[1] = proof.MinRGB[2] = 255;
+	for (unsigned long index = 0; index < pixels; index++) {
+		const unsigned char * texel = bits + index * 4;
+		bool matches = true;
+		const unsigned char expected[3] = { expect_r, expect_g, expect_b };
+		for (unsigned channel = 0; channel < 3; channel++) {
+			const unsigned char value = texel[channel];
+			if (value < proof.MinRGB[channel]) proof.MinRGB[channel] = value;
+			if (value > proof.MaxRGB[channel]) proof.MaxRGB[channel] = value;
+			const int delta = int(value) - int(expected[channel]);
+			if (delta > int(tolerance) || -delta > int(tolerance)) matches = false;
+		}
+		if (matches) proof.Matching++;
+	}
+	const unsigned long centre = ((unsigned long)(format.height / 2) * format.width +
+		format.width / 2) * 4;
+	memcpy(proof.CentreRGBA, bits + centre, 4);
+
+	if (png_path != NULL && !spike::Write_Png(std::string(png_path), rgba, format.width,
+			format.height)) {
+		return false;
+	}
+	return true;
 }
 
 #endif // !_WIN32

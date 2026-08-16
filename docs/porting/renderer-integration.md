@@ -110,23 +110,38 @@ one asked for — a wrong-pixels bug with no failing call to blame is worse than
 | `IDirect3DDevice8::SetGammaRamp` | Vulkan exposes no display gamma ramp |
 | `IDirect3DDevice8::ShowCursor`, `SetCursorProperties`, `SetCursorPosition` | the cursor belongs to the window seam, not the renderer |
 | `IDirect3DSurface8::LockRect(sub-rect)` | `spike::RenderBackend::Surface_Bits` locks whole surfaces |
+| `IDirect3DDevice8::CreateCubeTexture` | the backend has no cube texture image or sampler (added with the D3DX route) |
+| `IDirect3DDevice8::CreateVolumeTexture` | the backend has no 3D image (added with the D3DX route) |
+| `IDirect3DDevice8::CopyRects(mip level above 0)` | a mip level surface has no image view, only a lockable level |
+| `IDirect3DDevice8::SetRenderTarget(mip level above 0)` | a mip level surface has no image view to render into |
 | `IDirect3D*8::GetDevice` (4 interfaces) | there is no `IDirect3DDevice8` object off Windows — §5 |
 | `IDirect3D*8::{Set,Get}PrivateData` (4 interfaces) | no private-data store |
 
 Two of these are load-bearing refusals rather than gaps:
 
 - `CheckDeviceFormat` answers **no** for cube maps, which is how the engine is told not to call
-  `CreateCubeTexture` — the seam has no cube or volume texture method at all, so a "yes" would be a
-  lie the engine could not act on.
+  `CreateCubeTexture` — and since the D3DX route the seam *has* a `CreateCubeTexture` method, which
+  refuses (see the table): a "yes" would be a lie the engine could not act on, and a method that
+  returned something would be worse.
 - `LockRect` with a sub-rect **fails** instead of quietly locking the whole surface. A partial lock
   that silently widens is exactly the class of bug that made #63 (a surface view whose layout
   diverged from its image) invisible to the compiler.
+
+> **Superseded in part by `docs/porting/renderer-first-frame.md`.** That slice routes the D3DX
+> creation helpers through `RenderBackendClass`, so the wall of §4 is gone and the engine now
+> presents a measured frame; it also adds two ledger entries (`CopyRects` and `SetRenderTarget` on a
+> mip level above 0) and keeps the sub-rect `LockRect` refusal below. No figure in this document is
+> rewritten — read it as the measurement it was.
 
 At the runtime wall of §4 the ledger is **empty**: every D3D8 entry point the engine actually
 reached before stopping is implemented. That is a measurement of how far the engine got, not a claim
 that the list above is unreachable.
 
 ## 4. How far the engine gets, and exactly where it stops
+
+> This wall was reproduced unchanged on current `main` and then **fixed**: see
+> `docs/porting/renderer-first-frame.md` §1-2 for the reproduction and the route to the backend,
+> §4 for the wall that appeared behind it, and §5 for the frame and its pixel proof.
 
 ```sh
 CLANGXX=clang++-14 python3 scripts/native-render-backend-run.py                     # the wall

@@ -200,7 +200,10 @@ int main(int argc, char** argv) {
 		gfx->Set_Index_Buffer(quad_ib, 0);
 		gfx->Draw_Triangles(0, 2, 0, 4);
 
-		gfx->End_Scene(true);
+		// Flip only when there is a window to flip to: headless there is no swapchain, and the
+		// proof is the framebuffer readback below. Present() reports failure rather than success
+		// for a presentation that did not happen, so asking for one here would be a false claim.
+		gfx->End_Scene(!headless);
 	}
 
 	// --- proof --------------------------------------------------------------

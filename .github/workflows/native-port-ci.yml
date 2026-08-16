@@ -690,6 +690,20 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The render backend's surface and presentation paths are behind SPIKE_WITH_PLATFORM_WINDOW.
+      # Compiled without it the engine's copy had no swapchain and Present() returned success
+      # having presented nothing -- found by hand on an M1 Pro, by no check. This reads the archive
+      # this job just produced, so it cannot come back silently.
+      - name: Gate that the linked backend has a swapchain
+        run: |
+          set -o pipefail
+          {
+            echo '## The render backend the engine links can present'
+            echo '```'
+            python3 scripts/ci/check-swapchain-compiled.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The renderer libraries are where a new Win32 dependency is most likely to appear, and the
       # total is only a ratchet. Same budget file as levels 1-3: it is a set of names, and the
       # three in it are the mouse cursor path, which level 4 does not change.
