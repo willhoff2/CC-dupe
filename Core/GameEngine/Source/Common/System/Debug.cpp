@@ -221,7 +221,7 @@ static DWORD theMainThreadID = 0;
 // ----------------------------------------------------------------------------
 
 char* TheCurrentIgnoreCrashPtr = nullptr;
-#ifdef DEBUG_CRASHING
+#if defined(DEBUG_CRASHING) && !defined(_WIN32)
 const char* TheCurrentCrashFile = nullptr;
 int TheCurrentCrashLine = 0;
 const char* TheCurrentCrashCondition = nullptr;

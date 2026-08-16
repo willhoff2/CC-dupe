@@ -183,15 +183,35 @@ class AsciiString;
 	*/
 	DEBUG_EXTERN_C char* TheCurrentIgnoreCrashPtr;
 
+#ifndef _WIN32
+
 	/*
-		TheSuperHackers @tweak Where the assertion is, in the same sleazy-global style and for the
-		same reason: the message alone says what went wrong but not where, and the stack dump only
-		names it when the symbol survived linking. TheCurrentCrashCondition is null for a
-		DEBUG_CRASH(), which has no condition.
+		TheSuperHackers @port Where the assertion is, in the same sleazy-global style and for the
+		same reason: off Windows there is no assert dialog, so the one report an assertion gets is a
+		line on stderr, and the message alone says what went wrong but not where.
+		TheCurrentCrashCondition is null for a DEBUG_CRASH(), which has no condition.
+
+		Off Windows only, and not merely because Windows does not need it: the Windows debug
+		configuration also builds the MFC tools, which satisfy this header from
+		WWStub/wwdebugstub.cpp rather than from Debug.cpp, so a new global here is an unresolved
+		external there.
 	*/
 	DEBUG_EXTERN_C const char* TheCurrentCrashFile;
 	DEBUG_EXTERN_C int TheCurrentCrashLine;
 	DEBUG_EXTERN_C const char* TheCurrentCrashCondition;
+
+	#define DEBUG_CRASH_ENTER_SITE(c)	\
+		TheCurrentCrashFile = __FILE__; \
+		TheCurrentCrashLine = __LINE__; \
+		TheCurrentCrashCondition = c;
+	#define DEBUG_CRASH_LEAVE_SITE()	TheCurrentCrashCondition = nullptr;
+
+#else
+
+	#define DEBUG_CRASH_ENTER_SITE(c)
+	#define DEBUG_CRASH_LEAVE_SITE()
+
+#endif
 
 	#define DEBUG_CRASH_AT(c, m)	\
 		do { \
@@ -199,11 +219,9 @@ class AsciiString;
 				static char ignoreCrash = 0; \
 				if (!ignoreCrash) { \
 					TheCurrentIgnoreCrashPtr = &ignoreCrash; \
-					TheCurrentCrashFile = __FILE__; \
-					TheCurrentCrashLine = __LINE__; \
-					TheCurrentCrashCondition = c; \
+					DEBUG_CRASH_ENTER_SITE(c) \
 					DebugCrash m ; \
-					TheCurrentCrashCondition = nullptr; \
+					DEBUG_CRASH_LEAVE_SITE() \
 					TheCurrentIgnoreCrashPtr = nullptr; \
 				} \
 			} \
