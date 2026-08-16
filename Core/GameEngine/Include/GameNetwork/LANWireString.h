@@ -33,9 +33,12 @@
 
 #include "Lib/BaseType.h"
 #include "Common/UnicodeString.h"
+#include "Common/WideCharWire.h"
 
 /// One UTF-16 code unit on the wire. Fixed width on every target, unlike WideChar.
-typedef UnsignedShort LANWireChar;
+/// TheSuperHackers @port The same unit every other external format uses - see WideCharWire.h, which
+/// holds the conversion this seam is now a thin LAN-shaped wrapper around.
+typedef WideWireChar LANWireChar;
 
 STATIC_ASSERT_ALWAYS(sizeof(LANWireChar) == 2, "LANWireChar must be a 16 bit code unit on the wire");
 

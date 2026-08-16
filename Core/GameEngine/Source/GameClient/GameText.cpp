@@ -51,6 +51,7 @@
 #include "GameClient/LanguageFilter.h"
 #include "Common/Debug.h"
 #include "Common/UnicodeString.h"
+#include "Common/WideCharWire.h"
 #include "Common/AsciiString.h"
 #include "Common/GlobalData.h"
 #include "Common/file.h"
@@ -164,6 +165,7 @@ class GameTextManager : public GameTextInterface
 		Char						m_buffer2[MAX_UITEXT_LENGTH];
 		Char						m_buffer3[MAX_UITEXT_LENGTH];
 		WideChar				m_tbuffer[MAX_UITEXT_LENGTH*2];
+		WideWireChar			m_wirebuffer[MAX_UITEXT_LENGTH*2];
 
 		StringInfo			*m_stringInfo;
 		StringLookUp		*m_stringLUT;
@@ -942,27 +944,28 @@ Bool GameTextManager::parseCSF( const Char *filename )
 
 		 	file->read ( &len, sizeof ( Int ) );
 
+			// TheSuperHackers @port A .csf record counts 16 bit code units, not WideChar: sizing this
+			// read with sizeof(WideChar) consumed twice the bytes that exist where WideChar is 4 bytes
+			// wide and left the next record id inside this record's text. See
+			// docs/porting/widechar-wire.md.
 			if ( len )
 			{
-				file->read ( m_tbuffer, len*sizeof(WideChar) );
+				file->read ( m_wirebuffer, wideCharWireBytes( len ) );
 			}
 
 			if ( num == 0 )
 			{
 				// only use the first string found
-				m_tbuffer[len] = 0;
 
+				// The text is stored one's complemented, and is complemented here as code units,
+				// before decoding, because that is what the stored units are.
+				for ( Int unit = 0; unit < len; unit++ )
 				{
-					WideChar *ptr;
-
-					ptr = m_tbuffer;
-
-					while ( *ptr )
-					{
-						*ptr = ~*ptr;
-						ptr++;
-					}
+					m_wirebuffer[unit] = (WideWireChar)~m_wirebuffer[unit];
 				}
+
+				const Int chars = wireToWideChar( m_tbuffer, MAX_UITEXT_LENGTH*2 - 1, m_wirebuffer, len );
+				m_tbuffer[chars] = 0;
 
 				stripSpaces ( m_tbuffer );
 				m_stringInfo[listCount].text = m_tbuffer;
