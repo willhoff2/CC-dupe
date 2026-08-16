@@ -104,8 +104,16 @@ def d3d8_section(allow):
     lines = ["", "## D3D8 call surface", "",
              f"Direct (non-wrapper, non-backend) call sites permitted: **{total}**."]
     if files:
-        lines += ["", "| File | Budget |", "|---|---:|"]
-        lines += [f"| `{f}` | {n} |" for f, n in sorted(files.items())]
+        # An entry is either a bare count (the original schema) or {"allowed", "reason"}, which is
+        # what check-d3d8-surface.py --update writes. Print the reason: a budget without one reads
+        # as a bypass that nobody justified.
+        lines += ["", "| File | Budget | Why |", "|---|---:|---|"]
+        for f, entry in sorted(files.items()):
+            if isinstance(entry, dict):
+                allowed, reason = entry.get("allowed", 0), entry.get("reason", "")
+            else:
+                allowed, reason = entry, ""
+            lines.append(f"| `{f}` | {allowed} | {reason} |")
     else:
         lines.append("No file holds a direct-call budget: every D3D8 call goes through the "
                      "`DX8CALL*` macros or lives inside the render backend implementation.")
