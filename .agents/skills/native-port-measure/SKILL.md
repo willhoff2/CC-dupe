@@ -68,20 +68,52 @@ python3 scripts/ci/check-window-seam-wiring.py
 ```
 
 The native build and its gate, whose denominator must equal the probe's for the two to be
-comparable:
+comparable. CI measures it at two depths and there is a checked-in baseline for each. Measure into a
+scratch path first and copy over the baseline only after classifying the change — writing straight
+into `docs/porting/ci-baselines/` destroys the before-state you are supposed to compare against:
 
 ```sh
+# levels 1-3: the strict link is expected to fail (389 unresolved on main)
 CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims \
-  --strict-link \
-  --report docs/porting/native-build-report.md \
-  --json docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json
-python3 scripts/ci/check-native-build-baseline.py --results docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json
+  --strict-link --report /tmp/nb123.md --json /tmp/nb123.json
+python3 scripts/ci/check-native-build-baseline.py --results /tmp/nb123.json
+python3 scripts/ci/check-win32-undefined.py --results /tmp/nb123.json
+python3 scripts/ci/check-audio-backend-linked.py --results /tmp/nb123.json
+python3 scripts/ci/check-embedded-browser.py --results /tmp/nb123.json
+python3 scripts/ci/check-online-absent-seam.py --results /tmp/nb123.json
+
+# levels 1-4 (renderer and audio included): the strict link must produce a 64-bit executable,
+# so here native-build.py exits 0 and a non-zero exit is a real failure
+CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
+  --with-shims --strict-link --report /tmp/nb1234.md --json /tmp/nb1234.json
+python3 scripts/ci/check-native-build-baseline.py --results /tmp/nb1234.json
+python3 scripts/ci/check-win32-undefined.py --results /tmp/nb1234.json
+python3 scripts/ci/check-download-seam.py --results /tmp/nb1234.json
+python3 scripts/ci/check-audio-backend-linked.py --results /tmp/nb1234.json
+python3 scripts/ci/check-video-headers.py --results /tmp/nb1234.json
 ```
 
-`--strict-link` is not optional even though it exits non-zero: the strict link is expected to fail
-today, and the checker refuses to compare a result measured without it — the executable figure it
-ratchets simply went unmeasured, so it reports `regressed` on an otherwise identical tree. Read the
-non-zero exit of `native-build.py` as the strict link's own status and the checker's exit as the gate.
+The reports and baselines those replace when a measurement is accepted are
+`docs/porting/native-build-report.md`,
+`docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json` and
+`docs/porting/ci-baselines/native-build-shimmed-level1-2-3-4.json`.
+
+At levels 1-3 `--strict-link` is not optional even though it exits non-zero: the strict link is
+expected to fail today, and the checker refuses to compare a result measured without it — the
+executable figure it ratchets simply went unmeasured, so it reports `regressed` on an otherwise
+identical tree. Read the non-zero exit of `native-build.py` as the strict link's own status and the
+checker's exit as the gate.
+
+The remaining source-only gates a sweep runs, none of which need a build:
+
+```sh
+python3 scripts/ci/check-generated-baselines.py           # every baseline still parses
+CLANGXX=clang++-14 python3 scripts/ci/check-bool-pointer.py
+CLANGXX=clang++-14 python3 scripts/ci/check-stackwalk-symbols.py
+python3 scripts/ci/check-lanmessage-layout.py --clangxx clang++-14
+python3 spikes/renderer/tools/d3d8-lock-scan.py --check
+python3 spikes/renderer/tools/surface-lock-audit.py --check
+```
 
 The audio gates need the backend *built*, so they need the top-level CMake build (CMake >= 3.25,
 `libopenal-dev`), and `check-openal-symbols.py` needs both of its paths. Use a build directory other
@@ -130,10 +162,11 @@ tree.
   Without it the VC6 compatibility macros are undefined everywhere.
 - Keep `-fms-extensions`. Dropping it costs ~65 errors from `__int64` and `__forceinline` alone.
 - Report `clean / total`, never a bare percentage.
-- `scripts/ci/check-crt-compat.py` and `scripts/ci/check-bool-pointer.py` take their compiler from
-  the probe, i.e. from `CLANGXX`, whose default is plain `clang++`. On a box that only has
-  `clang++-14` they die with `FileNotFoundError: 'clang++'`, which is a missing env var and not a
-  gate failure — set `CLANGXX=clang++-14` as CI does.
+- `scripts/ci/check-crt-compat.py`, `scripts/ci/check-bool-pointer.py` and
+  `scripts/ci/check-stackwalk-symbols.py` take their compiler from the probe, i.e. from `CLANGXX`,
+  whose default is plain `clang++`. On a box that only has `clang++-14` they die with
+  `FileNotFoundError: 'clang++'`, which is a missing env var and not a gate failure — set
+  `CLANGXX=clang++-14` as CI does. `check-lanmessage-layout.py` takes `--clangxx` instead.
 - The layout test's 32-bit check needs `g++-multilib`; without it that check is skipped, not failed,
   and the sweep is incomplete until you install it and see the ILP32 assertions actually pass.
 - Opt-in backends (`probe.OPTIONAL_BACKENDS`, currently the SDL2 window backend) are excluded from
