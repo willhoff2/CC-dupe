@@ -10,6 +10,11 @@ success, and simulates 13,500 frames of a world with none of the map's objects i
 wrong answer, produced by a build in which the assertion that was written to catch exactly this cannot
 be compiled.
 
+The map defect itself is now fixed on `main` (#88, §3), and that is the least interesting part of this
+report. What it cost to *notice* is the finding: nothing in the build said a word, and the desync
+check meant to catch simulation error passed more comfortably on the empty world than it would have on
+a correct one.
+
 ## 0. What was measured, and with what
 
 | Thing | Value |
@@ -24,25 +29,39 @@ be compiled.
 | Map | `[RANK] Arctic Arena ZH v1`, loaded from `MapsZH.big` as the replay names it |
 | Harness | `spikes/sim` + `scripts/native-sim-probe.py`, for the pieces the game path cannot isolate |
 
+Running it off Windows needs two environment variables, and gets no error message without them: the
+binary exits 1 in silence unless `CNC_SETTINGS_FILE` points at a `Registry.ini` supplying
+`STRING_InstallPath` and `CNC_USER_DATA` points at a user-data directory holding `Replays/` and
+`Maps/` (`platform_settings.cpp:68`, `platform_path.cpp:520`). Both discoveries cost a debugger
+session; see §6 for why nothing tells you.
+
 `-headless` skips `WW3D::Init` (`W3DDisplay.cpp:814`), so the null `RenderBackend` that stopped the
 first native run (`first-native-run-arm64.md` §3) is not on this path. **The simulation is reachable
 today without a renderer.** That is the enabling result for everything below.
 
-### Data provenance caveat, stated up front
+### Data provenance, verified
 
-Both archives download at the expected size (Zero Hour: 53,307,598 bytes exactly) but **neither
-SHA-256 matches `.github/workflows/check-replays.yml`**:
+The archives used here are the same bytes the passing replay gate consumes:
 
-| Archive | Workflow expects | Measured |
+| Archive | Measured here | Expected by the gate |
 |---|---|---|
-| Zero Hour | `6837FE1E…AC05E21` | `2d137f6cd51609b517345fc7ab780dfbf4547eca0dd689e7212d8506a36b1b13` |
-| Generals | `37A351AA…CDB06372` | `15332b5dca7d94f672be061954c5cd09525a4adc689623fbcb3d1d6101600f3c` |
+| Zero Hour | `2d137f6cd51609b517345fc7ab780dfbf4547eca0dd689e7212d8506a36b1b13` | `2D137F6C…36B1B13` |
+| Generals | `15332b5dca7d94f672be061954c5cd09525a4adc689623fbcb3d1d6101600f3c` | `15332B5D…101600F3C` |
 
-Every conclusion below that depends on the *bytes* of a `.big` — above all the cross-platform CRC
-comparison in §5 — is therefore conditional. The mismatch is either a repack of the same content or a
-different content, and this probe cannot tell which. Resolving it is a prerequisite for treating the
-replay CRC as an oracle. The map/`.rep` files used for §1 and §3 are the in-repo ones, so those
-results do not depend on the archives.
+Size also matches exactly (Zero Hour: 53,307,598 bytes). The expected values are this repository's
+`vars.GAMEDATA_GENERALS_SHA256` / `vars.GAMEDATA_GENERALSMD_SHA256`, as printed by the first green
+`Replay Check GeneralsMD` run (run 31912666731, job 95082035738) and recorded in
+`replay-check-gamedata.md`. So the Windows CRC oracle in §5 was recorded from *this* data, and the
+cross-platform comparison is not provisional.
+
+One trap found while checking this, worth recording: the hash constants written inline in
+`.github/workflows/check-replays.yml` are **not** these values. They are `||` fallbacks that pair
+with the fallback `GAMEDATA_S3_BASE_URI` (`s3://github-ci`, upstream's bucket) and they describe
+upstream's archives, not this fork's; git history shows all three arriving together in upstream's
+`ci: Implement Replay Checker (#1366)`. Reading them as "the expected hashes" produces a false
+mismatch — this probe made exactly that error before the variables were checked. The fallbacks were
+not rewritten (their own bucket's contents cannot be verified from here); the comment above them now
+states the pairing, and the job log is the only place that shows the pair actually compared.
 
 ## 1. Can a `.map` be read? At the container level, yes
 
@@ -147,12 +166,35 @@ The mechanism, exactly:
 The guardrail exists — `DEBUG_ASSERTCRASH(file.atEndOfChunk(), ("Incorrect data file length."))`, the
 last line of `ParseSidesDataChunk` — and would have fired at once. See §6 for why it could not.
 
-This is the wide-character disk boundary, which is slice A's. It was **not** fixed. To measure what
-lies behind it, a throwaway experiment (kept out of this PR; the diff is 72 lines across
-`DataChunk.cpp`, `LocalFile.cpp::readWideChar` and `Recorder.cpp`'s `ARGUMENTDATATYPE_WIDECHAR`, all
-reading 2-byte units off Windows) was applied locally and the run repeated. Results in §4 and §5 are
-labelled with which build produced them. `LocalFile.cpp`/`Recorder.cpp` matter because the `.rep`
-header itself does not parse without them, so **no replay can be read off Windows today** either.
+This is the wide-character disk boundary, which is slice A's. It was **not** fixed in this probe; a
+throwaway experiment (72 lines across `DataChunk.cpp`, `LocalFile.cpp::readWideChar` and
+`Recorder.cpp`'s `ARGUMENTDATATYPE_WIDECHAR`, all reading 2-byte units off Windows) was applied
+locally to see what lay behind it, and the run repeated. Results in §4 and §5 are labelled with which
+build produced them. `LocalFile.cpp`/`Recorder.cpp` matter because the `.rep` header itself does not
+parse without them, so on the tree this probe measured, **no replay could be read off Windows at
+all**.
+
+A breakpoint on `MapObject::MapObject(Coord3D, AsciiString, float, int, const Dict*, const
+ThingTemplate*)` over the same replay run is the sharpest single number, and pins which build each
+figure below came from:
+
+| Build | `MapObject` constructions | Replay |
+|---|---|---|
+| the tree this probe measured (pre-#88) | — | `Cannot open replay`: the `.rep` header needs the widechar hunks too (blocker 3) |
+| + the replay-side hunks only (`LocalFile.cpp`, `Recorder.cpp`) | **0** | opens, map "loads", simulation runs |
+| + `DataChunk.cpp` as well | **1432** | opens, map loads its objects |
+| **current `main`** (slice A's `WideWireChar` seam, #88) | **1432** | opens, map loads its objects |
+
+The middle row is the silent-failure configuration and the one every figure in the left-hand column
+of §4 came from: the minimum needed to get a replay open at all, with the map boundary untouched.
+
+**The last row is the state of the tree now, measured, not inferred.** Slice A landed the
+`WideWireChar` seam in #88 while this probe was being written, so blockers 2 and 3 are closed on
+`main`: a real retail map loads all 1432 of its objects and the `.rep` header parses, with no local
+patch. The experiment was therefore never handed over — it was obsolete before it could be. What
+remains open from §5 is unchanged by that fix and re-confirmed on `main`: the same replay still
+reports `CRC Mismatch in Frame 110`, and the process still dies in
+`ObjectPoolClass<MultiListNodeClass,256>::~ObjectPoolClass` at exit (blockers 7 and 8).
 
 ## 4. Can `TheGameLogic` tick? Yes — 13,500 frames
 
@@ -161,7 +203,7 @@ commands into `TheCommandList` and running `GameLogic::update()` with no rendere
 read out of the process at each CRC checkpoint (`GameLogic.cpp:3778`) under gdb rather than trusting a
 log line.
 
-| | map broken (§3), tree as committed | with the slice-A experiment applied |
+| | map broken (§3) | with the full slice-A experiment |
 |---|---|---|
 | objects at frame 0 | **0** | **221** |
 | objects at frame 13,500 | 0 | 362, having peaked at 376 |
@@ -177,10 +219,24 @@ What this does **not** establish: that any of it is correct. The property verifi
 iterations of `GameLogic::update()` completed without crashing, with a plausibly evolving object
 count". Nothing here compares a single unit's position, health or order against Windows.
 
-The constant-CRC column is the point of the table. A CRC that never changes across 13,500 frames is
-the signature of an empty world, and it was produced by a run that reported no error at all. This is
-the "silently wrong value" of the probe brief, and it is worth more than the crash: a fix to the
-allocator plus a renderer would have produced a game that *ran*, on maps with no objects on them.
+The constant-CRC column is the point of the table, and it deserves stating at full strength rather
+than as a bullet. A retail skirmish map was opened, parsed, and reported as loaded successfully; not
+one of its objects reached the world; `TheGameLogic` then ran 13,500 frames — the full 7:30 of a real
+retail replay — simulating nothing, at a frame CRC that was the identical value `06b88758` at every
+one of the 134 checkpoints; and the process exited having emitted no error, no warning and no log
+line about any of it. Every gate this project owns passes on that run: it compiles, it links 977/977
+with 0 unresolved symbols, it starts, it does not crash, it reaches the end of the replay, and its
+desync CRC is perfectly stable across repeated runs. A determinism check is *more* likely to pass on
+an empty world than on a correct one, so the very measurement meant to catch simulation error is the
+one the failure hides behind. Had the renderer slice landed first, the visible result would have been
+a game that ran, on maps with nothing on them — and the number reported would have been "the
+simulation is deterministic for 13,500 frames". This is the same class of failure as the project's
+`-fsyntax-only` era, one level up: not a number measured on code that never ran, but a number
+measured on code that ran and did nothing.
+
+Detecting it took the whole chain — reading the object count out of the live process, noticing the
+CRC never moved, and instrumenting the chunk parser — because nothing in the build volunteers it.
+That is the argument for §6.
 
 ## 5. The CRC: deterministic on this platform, and it does not match Windows
 
@@ -207,6 +263,9 @@ The comparison is queue-lagged by design, so a naive first-mismatch frame proves
 prove something: of the 134 CRCs this build computed and the 134 the recording carries, **zero values
 are shared, at any alignment shift**. The two simulations differ by the first checkpoint (frame 100),
 and the divergence is not a bookkeeping offset.
+
+Because §0 establishes that this data is byte-identical to what the green Windows replay run used,
+this is a real cross-platform disagreement on identical inputs, not a data mismatch.
 
 That is expected rather than surprising — `xfer-64bit-audit.md` and `raw-blob-audit.md` already
 predicted it statically — but it is now measured on real data: 71 raw-blob `xferUser` sites and 13
@@ -242,23 +301,38 @@ objects 967/977, undefined symbols 113, binary produced: no
 | debug-log call passes a `const char*` where a struct is indexed | `StdLocalFileSystem.cpp` |
 
 `Debug.cpp` itself is one of them, which is why the link then loses `DebugCrash`/`DebugLog` 113 times.
-So the native port has no build in which any of the engine's ~thousands of assertions can fire. The
-map corruption in §3 is exactly the class of bug those assertions were written to catch, and it went
-undetected through a full 7:30 simulation. This is the cheapest high-value slice in the report.
+So the native port has no build in which any of the engine's ~thousands of assertions can fire. **A
+port whose assertions cannot run is a port whose bugs are all silent**: the map corruption in §3 is
+exactly the class of bug those assertions were written to catch, the guard sits on the last line of
+the function that got it wrong, and it went undetected through a full 7:30 simulation.
+
+What it would take, from this evidence: no engine logic and no new seam, only 6 debug-only Win32
+spellings across 10 files. `DebugBreak` needs the alias the shim header already has for
+`__debugbreak`; `GetPrecisionTimer`/`GetPrecisionTimerTicksPerSec` need a native implementation of
+the two-function precision-timer surface (`clock_gettime`/`mach_absolute_time`) rather than the
+`rdtsc` inline asm the Windows path uses — the largest of the six, and the only one that needs a
+decision; `WSABASEERR`, `GetUserNameA` and `MAX_COMPUTERNAME_LENGTH` are single constants/calls in
+code paths that are out of scope anyway (`GameResultsThread`, `LANAPI`) and can be satisfied by the
+platform shim; the `StdLocalFileSystem.cpp` failure is a genuine bug in a debug-only log statement,
+visible only because nothing ever compiled it. Exit criterion should be a *binary*, plus a CI job
+that builds it, plus one deliberately-failing assertion demonstrated firing — a `DEBUG_ASSERTCRASH`
+that compiles but cannot report is worth nothing. This is the cheapest high-value slice in the
+report, and it should go first: it is what makes every later probe in this subsystem self-reporting
+instead of requiring a debugger session like this one.
 
 ## 7. Blockers, classified
 
 | # | Blocker | Class | Owner |
 |---|---|---|---|
 | 1 | Pool allocator returned `8 mod 16` pointers; aligned SSE/NEON stores fault | port defect | **fixed here**, §2 |
-| 2 | `readUnicodeString` reads `len*sizeof(WideChar)`; map `SidesList` desyncs and swallows `ObjectsList` | port defect | slice A (widechar) |
-| 3 | `.rep` header unreadable off Windows (`LocalFile::readWideChar`, `ARGUMENTDATATYPE_WIDECHAR`) | port defect | slice A (widechar) |
+| 2 | `readUnicodeString` reads `len*sizeof(WideChar)`; map `SidesList` desyncs and swallows `ObjectsList` | port defect | **closed on `main` by #88**, re-measured §3 |
+| 3 | `.rep` header unreadable off Windows (`LocalFile::readWideChar`, `ARGUMENTDATATYPE_WIDECHAR`) | port defect | **closed on `main` by #88**, re-measured §3 |
 | 4 | Chunk parse reports success at EOF instead of failing (`SidesList.cpp:300`, nested `parse()`) | port defect, exposed by 2 | simulation slice |
 | 5 | `MapCache` requires `'\'` in enumerated paths → 0 maps; lowercased map path with backslashes | unimplemented path | filesystem seam |
 | 6 | No `RTS_DEBUG` native build: 10 TUs, 113 unresolved | unimplemented path | new slice, §6 |
 | 7 | Frame CRC disagrees with the Windows recording from the first checkpoint | port defect (serialisation width) | `xfer-64bit-audit.md` slice |
 | 8 | SIGSEGV at exit in `ObjectPoolClass<MultiListNodeClass,256>::~ObjectPoolClass` (`mempool.h:208`), *after* the replay completes | port defect | simulation slice |
-| 9 | Archive SHA-256s do not match the workflow's | data/provenance | user / replay CI |
+| 9 | Inline hash fallbacks in `check-replays.yml` are upstream's, not this fork's, and read as authoritative | documentation defect (data is authentic, §0) | comment clarified here |
 | 10 | `sim_probe replayhdr`/`mapcache` SIGSEGV inside `RecorderClass::init` → `GameSlot::setState` | harness limitation, not an engine finding | this harness |
 
 ## 8. What could not be determined
@@ -271,15 +345,19 @@ undetected through a full 7:30 simulation. This is the cheapest high-value slice
   reading is that it is *not* correct yet.
 - **Which serialised field diverges first.** Requires a per-`Xfer`-call trace on both platforms, or
   `XferDeepCRC` bisection. Not attempted.
-- **Whether the 221 objects loaded with the experiment applied are the *right* 221**, or their
-  positions and dictionaries correct. Only the count and the pointer chain were checked.
+- **Whether the 221 objects the map now loads are the *right* 221**, or their positions and
+  dictionaries correct. Only the count and the pointer chain were checked — including on `main` after
+  #88, where the count is right but nothing compares a single object's contents to Windows.
 - **Whether skirmish (not replay) can start**, which needs `MapCache` (blocker 5) and the shell or a
   synthetic `GameInfo`.
 - **Whether the exit-time crash (blocker 8) is independent** of earlier corruption.
 - **Whether the trimmed archives are sufficient**: they were, for everything reached here. Note that
   the Zero Hour archive alone is not — `Data\english\Language` is not in it, and init reads it; it
   comes from `English.big` in the *Generals* archive, which the ZH build loads via the base game's
-  `InstallPath` setting. The hash mismatch (blocker 9) makes any byte-level claim provisional.
+  `InstallPath` setting.
+- **Whether upstream's bucket holds the same archives as this fork's** — its hashes differ from this
+  fork's variables and it is not reachable from here. Irrelevant to every result above, which used
+  the fork's verified data (§0).
 
 ## 9. What the next slice on this subsystem should be scoped to
 
@@ -289,9 +367,10 @@ In this order, because each unblocks the measurement of the next:
    criterion: `scripts/native-build.py … -DRTS_DEBUG` produces a binary with 0 unresolved symbols, and
    CI builds it. Everything below is dramatically cheaper afterwards, because the engine starts telling
    you where it went wrong.
-2. **Slice A finishes the chunk-file widechar boundary** (blockers 2 and 3) and adds, as its gate, a
-   check that a real `.map` yields a non-zero `MapObject` count — not just that it parses. The failure
-   mode this probe found is "parses fine, loads nothing".
+2. ~~**Slice A finishes the chunk-file widechar boundary**~~ — done, #88. What is *not* done is its
+   gate: no check asserts that a real `.map` yields a non-zero `MapObject` count, so the exact failure
+   this probe found ("parses fine, loads nothing") would still land silently today. 1432 for
+   `[RANK] Arctic Arena ZH v1` is the number to pin.
 3. **Make a truncated chunk parse fail loudly** (blocker 4): `DataChunkInput::parse` reaching EOF with
    chunk data outstanding should be an error even in a release build. This is the difference between a
    port bug and a silently wrong game.
