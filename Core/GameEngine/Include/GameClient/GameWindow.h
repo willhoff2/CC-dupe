@@ -49,8 +49,6 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
-#include <stdint.h>
-
 #include "Lib/BaseType.h"
 #include "Common/GameMemory.h"
 #include "GameClient/Image.h"
@@ -76,7 +74,8 @@ enum { WIN_COLOR_UNDEFINED = GAME_COLOR_UNDEFINED };
 // WindowMsgData --------------------------------------------------------------
 // Gadget messages carry pointers in this payload (e.g. GGM_SET_LABEL passes a
 // UnicodeString*), so it must be wide enough to hold one. On the 32-bit Windows
-// build uintptr_t is the same 32-bit type UnsignedInt was.
+// build uintptr_t is the same 32-bit type UnsignedInt was. VC6 has no
+// <stdint.h>; the type comes from BaseType.h's stdint adapter.
 //-----------------------------------------------------------------------------
 typedef uintptr_t WindowMsgData;
 
