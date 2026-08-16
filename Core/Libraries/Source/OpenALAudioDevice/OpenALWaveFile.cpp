@@ -23,8 +23,13 @@
  *
  * Miles parsed and decoded audio internally; AIL_WAV_info, AIL_decompress_ADPCM and the
  * AIL_set_*_sample_file calls all hand the engine's raw file image straight to the sound system,
- * so this layer owns the container and codec handling. Only the formats Zero Hour's sound effects
- * actually use are supported: PCM (8/16-bit, mono/stereo) and IMA ADPCM.
+ * so this layer owns the container and codec handling.
+ *
+ * The formats are the ones the retail assets actually use, measured with
+ * scripts/audio-retail-survey.py over the Zero Hour audio archives: of 3523 WAV files, 2572 are
+ * IMA ADPCM (block-aligned 512, 1024 or 2048) and 951 are 16-bit PCM; there is no MS ADPCM and no
+ * 8-bit PCM anywhere in the retail set. 8-bit PCM is still accepted because the container allows it
+ * and the cost is nil. See docs/porting/audio-retail-validation.md.
  */
 
 #include "OpenALAudioInternal.h"
@@ -101,8 +106,19 @@ ALenum alFormatFor(unsigned int channels, unsigned int bits)
 	return bits == 8 ? AL_FORMAT_STEREO8 : AL_FORMAT_STEREO16;
 }
 
-bool parseWaveHeader(const void* image, unsigned int imageSize, AILSOUNDINFO& info,
-	unsigned int* dataOffset)
+unsigned int imaSamplesPerBlock(unsigned int blockSize, unsigned int channels)
+{
+	// Each IMA ADPCM block opens with a 4-byte preamble per channel (a 16-bit predictor, a step
+	// index and a pad byte) whose predictor is itself the block's first sample, then carries 4 bits
+	// per sample for the rest of the block.
+	if (channels == 0 || blockSize <= 4u * channels) {
+		return 0;
+	}
+	return ((blockSize - 4u * channels) * 2u) / channels + 1u;
+}
+
+bool parseWaveInfo(const void* image, unsigned int imageSize, AILSOUNDINFO& info,
+	unsigned int* dataOffset, bool requirePayload)
 {
 	if (image == nullptr || imageSize < 44) {
 		return false;
@@ -119,6 +135,7 @@ bool parseWaveHeader(const void* image, unsigned int imageSize, AILSOUNDINFO& in
 	r.at += 4;
 
 	bool haveFormat = false;
+	bool haveData = false;
 	std::memset(&info, 0, sizeof(info));
 
 	while (r.has(8)) {
@@ -141,15 +158,22 @@ bool parseWaveHeader(const void* image, unsigned int imageSize, AILSOUNDINFO& in
 			r.at = chunkStart + chunkSize;
 			haveFormat = true;
 		} else if (isData) {
-			if (!haveFormat || !r.has(chunkSize)) {
+			if (!haveFormat) {
 				return false;
 			}
-			info.data_ptr = r.base + r.at;
+			if (requirePayload && !r.has(chunkSize)) {
+				return false;
+			}
+			// A metadata-only parse describes a payload that is not in the buffer, so it reports the
+			// payload's offset and declared length and leaves the pointers null. The stream path
+			// reads the payload through the engine's file callbacks from that offset.
+			info.data_ptr = r.has(chunkSize) ? r.base + r.at : nullptr;
 			info.initial_ptr = info.data_ptr;
 			info.data_len = chunkSize;
 			if (dataOffset != nullptr) {
 				*dataOffset = r.at;
 			}
+			haveData = true;
 			break;
 		} else {
 			r.at += chunkSize;
@@ -158,7 +182,10 @@ bool parseWaveHeader(const void* image, unsigned int imageSize, AILSOUNDINFO& in
 		r.at += (chunkSize & 1); // chunks are word aligned
 	}
 
-	if (!haveFormat || info.data_ptr == nullptr || info.channels == 0) {
+	if (!haveFormat || !haveData || info.channels == 0) {
+		return false;
+	}
+	if (requirePayload && info.data_ptr == nullptr) {
 		return false;
 	}
 
@@ -166,41 +193,34 @@ bool parseWaveHeader(const void* image, unsigned int imageSize, AILSOUNDINFO& in
 		const unsigned int frameBytes = info.channels * (info.bits / 8);
 		info.samples = frameBytes ? info.data_len / frameBytes : 0;
 	} else if (info.format == WAVE_FORMAT_IMA_ADPCM) {
-		// Each ADPCM block holds a 4-byte per-channel preamble then 4 bits per sample.
 		const unsigned int blocks = info.block_size ? info.data_len / info.block_size : 0;
-		const unsigned int perBlock = info.block_size > 4u * info.channels
-			? ((info.block_size - 4u * info.channels) * 2u) / info.channels + 1u
-			: 0u;
-		info.samples = blocks * perBlock;
+		info.samples = blocks * imaSamplesPerBlock(info.block_size, (unsigned int)info.channels);
 	}
 
 	return true;
 }
 
-bool decodeImaAdpcm(const AILSOUNDINFO& info, void** outData, unsigned long* outSize)
+bool parseWaveHeader(const void* image, unsigned int imageSize, AILSOUNDINFO& info,
+	unsigned int* dataOffset)
 {
-	if (outData == nullptr || outSize == nullptr || info.data_ptr == nullptr) {
-		return false;
-	}
-	if (info.format != WAVE_FORMAT_IMA_ADPCM || info.channels < 1 || info.channels > 2) {
-		return false;
-	}
-	if (info.block_size <= 4u * (unsigned int)info.channels) {
-		return false;
+	return parseWaveInfo(image, imageSize, info, dataOffset, true);
+}
+
+bool parseWaveMetadata(const void* image, unsigned int imageSize, AILSOUNDINFO& info,
+	unsigned int* dataOffset)
+{
+	return parseWaveInfo(image, imageSize, info, dataOffset, false);
+}
+
+unsigned long decodeImaAdpcmBlocks(const void* payload, unsigned int blocks, unsigned int blockSize,
+	unsigned int channels, int16_t* out)
+{
+	if (payload == nullptr || out == nullptr || channels < 1 || channels > 2
+		|| blockSize <= 4u * channels) {
+		return 0;
 	}
 
-	const unsigned int channels = (unsigned int)info.channels;
-	const unsigned int blockSize = info.block_size;
-	const unsigned int blocks = info.data_len / blockSize;
-	const unsigned int samplesPerBlock = ((blockSize - 4u * channels) * 2u) / channels + 1u;
-	const unsigned long total = (unsigned long)blocks * samplesPerBlock * channels;
-
-	int16_t* out = (int16_t*)std::malloc(total * sizeof(int16_t));
-	if (out == nullptr) {
-		return false;
-	}
-
-	const unsigned char* src = (const unsigned char*)info.data_ptr;
+	const unsigned char* src = (const unsigned char*)payload;
 	int16_t* dst = out;
 
 	for (unsigned int b = 0; b < blocks; ++b) {
@@ -242,9 +262,91 @@ bool decodeImaAdpcm(const AILSOUNDINFO& info, void** outData, unsigned long* out
 		}
 	}
 
+	return (unsigned long)(dst - out);
+}
+
+bool decodeImaAdpcm(const AILSOUNDINFO& info, void** outData, unsigned long* outSize)
+{
+	if (outData == nullptr || outSize == nullptr || info.data_ptr == nullptr) {
+		return false;
+	}
+	if (info.format != WAVE_FORMAT_IMA_ADPCM || info.channels < 1 || info.channels > 2) {
+		return false;
+	}
+
+	const unsigned int channels = (unsigned int)info.channels;
+	const unsigned int blockSize = info.block_size;
+	const unsigned int samplesPerBlock = imaSamplesPerBlock(blockSize, channels);
+	if (samplesPerBlock == 0) {
+		return false;
+	}
+
+	const unsigned int blocks = info.data_len / blockSize;
+	const unsigned long total = (unsigned long)blocks * samplesPerBlock * channels;
+
+	int16_t* out = (int16_t*)std::malloc(total * sizeof(int16_t));
+	if (out == nullptr) {
+		return false;
+	}
+
+	const unsigned long written = decodeImaAdpcmBlocks(info.data_ptr, blocks, blockSize, channels,
+		out);
+	if (written == 0 && total != 0) {
+		std::free(out);
+		return false;
+	}
+
 	*outData = out;
-	*outSize = (unsigned long)((dst - out) * sizeof(int16_t));
+	*outSize = written * sizeof(int16_t);
 	return true;
+}
+
+void* buildWaveImage(const void* pcm, unsigned long pcmBytes, unsigned int channels,
+	unsigned int rate, unsigned int bits, unsigned long* imageBytes)
+{
+	constexpr unsigned int HEADER_BYTES = 44;
+	if (channels == 0 || rate == 0 || bits == 0) {
+		return nullptr;
+	}
+
+	unsigned char* image = (unsigned char*)std::malloc(HEADER_BYTES + pcmBytes);
+	if (image == nullptr) {
+		return nullptr;
+	}
+
+	const unsigned int frameBytes = channels * (bits / 8);
+	auto put32 = [](unsigned char* at, uint32_t v) {
+		at[0] = (unsigned char)(v & 0xFF);
+		at[1] = (unsigned char)((v >> 8) & 0xFF);
+		at[2] = (unsigned char)((v >> 16) & 0xFF);
+		at[3] = (unsigned char)((v >> 24) & 0xFF);
+	};
+	auto put16 = [](unsigned char* at, uint16_t v) {
+		at[0] = (unsigned char)(v & 0xFF);
+		at[1] = (unsigned char)((v >> 8) & 0xFF);
+	};
+
+	std::memcpy(image, "RIFF", 4);
+	put32(image + 4, (uint32_t)(36u + pcmBytes));
+	std::memcpy(image + 8, "WAVE", 4);
+	std::memcpy(image + 12, "fmt ", 4);
+	put32(image + 16, 16);
+	put16(image + 20, WAVE_FORMAT_PCM);
+	put16(image + 22, (uint16_t)channels);
+	put32(image + 24, rate);
+	put32(image + 28, rate * frameBytes);
+	put16(image + 32, (uint16_t)frameBytes);
+	put16(image + 34, (uint16_t)bits);
+	std::memcpy(image + 36, "data", 4);
+	put32(image + 40, (uint32_t)pcmBytes);
+	if (pcmBytes != 0) {
+		std::memcpy(image + HEADER_BYTES, pcm, pcmBytes);
+	}
+
+	if (imageBytes != nullptr) {
+		*imageBytes = HEADER_BYTES + pcmBytes;
+	}
+	return image;
 }
 
 bool decodeWaveImage(const void* image, unsigned int imageSize, DecodedAudio& out)
@@ -322,14 +424,40 @@ int AIL_WAV_info(const void* data, AILSOUNDINFO* info)
 
 int AIL_decompress_ADPCM(const AILSOUNDINFO* info, void** outdata, unsigned long* outsize)
 {
-	if (info == nullptr) {
+	if (info == nullptr || outdata == nullptr) {
 		return 0;
 	}
-	return OpenALAudio::decodeImaAdpcm(*info, outdata, outsize) ? 1 : 0;
+
+	// Miles returned a complete WAV *file image*, not bare PCM: AudioFileCache::openFile() stores
+	// what comes back as the cached file and later hands the same pointer to AIL_set_sample_file /
+	// AIL_set_3D_sample_file, which parse a RIFF container. Returning raw samples here made every
+	// IMA ADPCM asset on the one-shot path fail to play with "unsupported sample format": 181 of the
+	// 1081 files under the sounds folder, which 206 AudioEvent sample references resolve onto.
+	void* pcm = nullptr;
+	unsigned long pcmBytes = 0;
+	if (!OpenALAudio::decodeImaAdpcm(*info, &pcm, &pcmBytes)) {
+		OpenALAudio::setLastError("AIL_decompress_ADPCM: not decodable IMA ADPCM");
+		return 0;
+	}
+
+	unsigned long imageBytes = 0;
+	void* image = OpenALAudio::buildWaveImage(pcm, pcmBytes, (unsigned int)info->channels,
+		info->rate, 16, &imageBytes);
+	std::free(pcm);
+	if (image == nullptr) {
+		OpenALAudio::setLastError("AIL_decompress_ADPCM: out of memory");
+		return 0;
+	}
+
+	*outdata = image;
+	if (outsize != nullptr) {
+		*outsize = imageBytes;
+	}
+	return 1;
 }
 
 void AIL_mem_free_lock(void* ptr)
 {
-	// Pairs with the malloc in decodeImaAdpcm. MilesAudioManager.cpp frees ADPCM buffers here.
+	// Pairs with the malloc in buildWaveImage. MilesAudioManager.cpp frees ADPCM buffers here.
 	std::free(ptr);
 }

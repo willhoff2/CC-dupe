@@ -95,6 +95,14 @@ struct Object3D
 	void* userData[USER_DATA_SLOTS] = {};
 };
 
+/// What a stream's file holds. Retail dialogue is overwhelmingly IMA ADPCM (2391 of the 2442 files
+/// under the streaming folder), so the stream path decodes it as well as PCM.
+enum class StreamCodec
+{
+	Pcm,
+	ImaAdpcm,
+};
+
 struct StreamVoice
 {
 	static constexpr unsigned int BUFFER_COUNT = 4;
@@ -119,6 +127,8 @@ struct StreamVoice
 	void* file = nullptr;
 	std::string fileName;
 
+	/// Format of the PCM that is queued into OpenAL. For an ADPCM file that is the *decoded*
+	/// format, 16 bits per sample, not the format in the file.
 	ALenum format = AL_FORMAT_STEREO16;
 	unsigned int rate = 0;
 	unsigned int channels = 0;
@@ -126,10 +136,19 @@ struct StreamVoice
 	unsigned int totalFrames = 0;
 	unsigned int framesQueued = 0;
 	unsigned int framesPlayed = 0;
-	unsigned int dataOffset = 0;	///< byte offset of the PCM payload within the file
-	unsigned int dataLength = 0;	///< byte length of the PCM payload
+
+	StreamCodec codec = StreamCodec::Pcm;
+	unsigned int blockSize = 0;			///< ADPCM block alignment, in file bytes
+	unsigned int samplesPerBlock = 0;	///< decoded samples per ADPCM block, per channel
+
+	unsigned int dataOffset = 0;	///< byte offset of the payload within the file
+	unsigned int dataLength = 0;	///< byte length of the payload, as it is stored in the file
 	unsigned int readCursor = 0;	///< byte offset of the next read, relative to dataOffset
-	bool decodable = false;			///< false for formats we cannot decode (e.g. MP2/MP3 music)
+
+	/// Sub-region a looping stream repeats, as byte offsets into the payload. `loopEnd` of 0 means
+	/// "to the end of the payload", which is what AIL_set_stream_loop_block(h, 0, -1) asks for.
+	unsigned int loopStart = 0;
+	unsigned int loopEnd = 0;
 };
 
 /// The digital driver. Must begin with DIG_DRIVER because WWAudio.cpp reads emulated_ds.
@@ -195,14 +214,54 @@ void applyPlaybackRate(ALuint source, int playbackRate, unsigned int nativeRate)
 /// `out` untouched when the image is not a WAV we can decode.
 bool decodeWaveImage(const void* image, unsigned int imageSize, DecodedAudio& out);
 
-/// Parses a WAV header without decoding. Used by AIL_WAV_info and by stream setup.
+/// Parses a WAV header of a fully resident image: the payload must be inside `image`, and
+/// `info.data_ptr` points into it. Used by AIL_WAV_info and the sample paths.
 bool parseWaveHeader(const void* image, unsigned int imageSize, AILSOUNDINFO& info,
 	unsigned int* dataOffset);
 
-/// Decodes IMA ADPCM into freshly allocated 16-bit PCM. The caller frees with AIL_mem_free_lock.
+/// Parses a WAV header when only the front of the file is available, as when a stream has read a
+/// header window: `info.data_len` and `*dataOffset` describe a payload that is *not* in `image`,
+/// and `info.data_ptr` is null. Streams then read the payload through the file callbacks.
+bool parseWaveMetadata(const void* image, unsigned int imageSize, AILSOUNDINFO& info,
+	unsigned int* dataOffset);
+
+/// Decoded samples in one IMA ADPCM block, per channel. Zero when the block size cannot hold one.
+unsigned int imaSamplesPerBlock(unsigned int blockSize, unsigned int channels);
+
+/// Decodes whole IMA ADPCM blocks into interleaved 16-bit PCM, returning the sample count written.
+/// `out` must have room for blocks * imaSamplesPerBlock() * channels samples.
+unsigned long decodeImaAdpcmBlocks(const void* payload, unsigned int blocks, unsigned int blockSize,
+	unsigned int channels, int16_t* out);
+
+/// Decodes IMA ADPCM into freshly allocated 16-bit PCM. Frees with std::free.
 bool decodeImaAdpcm(const AILSOUNDINFO& info, void** outData, unsigned long* outSize);
 
+/// Wraps PCM in a freshly allocated 44-byte-header RIFF/WAVE image, as Miles' AIL_decompress_ADPCM
+/// returned: the engine feeds the result straight back in through AIL_set_sample_file. Returns null
+/// on failure; the caller frees with std::free (AIL_mem_free_lock).
+void* buildWaveImage(const void* pcm, unsigned long pcmBytes, unsigned int channels,
+	unsigned int rate, unsigned int bits, unsigned long* imageBytes);
+
 ALenum alFormatFor(unsigned int channels, unsigned int bits);
+
+/// Converts the third component of a Miles coordinate or vector into OpenAL's frame.
+///
+/// Miles' 3D frame is left-handed: +X right, +Y up, +Z *away* from the listener. OpenAL's is
+/// right-handed with the same X and Y but +Z *towards* the listener, so the two differ by the sign
+/// of Z alone and every position, orientation vector and velocity crossing this seam is negated
+/// there. Nothing above the seam changes, so the Windows Miles path is untouched.
+///
+/// The sign matters because the handedness decides which side is "right": OpenAL derives its right
+/// vector as at x up, Miles as up x forward. Zero Hour's listener is
+/// AIL_set_3D_orientation(listener, facing.x, facing.y, facing.z, 0, 0, -1) with world coordinates
+/// passed straight through (X east, Y north, Z up), so with facing = world north the un-negated
+/// triples give OpenAL at x up = (0,1,0) x (0,0,-1) = (-1,0,0): a source to the world east came out
+/// of the LEFT speaker, the exact inverse of Miles, which computes up x forward =
+/// (0,0,-1) x (0,1,0) = (+1,0,0). Negating Z restores east = +right for both.
+inline float milesToAlZ(float z)
+{
+	return -z;
+}
 
 /// Refills a playing stream's buffer queue. Sets `finished` when the stream has run out of data
 /// and OpenAL has drained the queue. Called from the service thread with the library lock held.
