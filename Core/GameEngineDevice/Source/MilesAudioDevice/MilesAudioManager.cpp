@@ -3059,7 +3059,14 @@ void *AudioFileCache::openFile( AudioEventRTS *eventToOpenFrom )
 	openedAudioFile.m_eventInfo = eventToOpenFrom->getAudioEventInfo();
 
 	AILSOUNDINFO soundInfo;
-	AIL_WAV_info(buffer, &soundInfo);
+	memset(&soundInfo, 0, sizeof(soundInfo));
+	// The result was ignored and soundInfo was uninitialised, so an unparsable file was classified
+	// by whatever happened to be on the stack.
+	if (AIL_WAV_info(buffer, &soundInfo) == 0) {
+		DEBUG_CRASH(("Could not parse audio file '%s'", strToFind.str()));
+		delete [] buffer;
+		return nullptr;
+	}
 
 	if (eventToOpenFrom->isPositionalAudio()) {
 		if (soundInfo.channels > 1) {
@@ -3070,9 +3077,16 @@ void *AudioFileCache::openFile( AudioEventRTS *eventToOpenFrom )
 	}
 
 	if (soundInfo.format == WAVE_FORMAT_IMA_ADPCM) {
-		void *decompressFileBuffer;
-		U32 newFileSize;
-		AIL_decompress_ADPCM(&soundInfo, &decompressFileBuffer, &newFileSize);
+		void *decompressFileBuffer = nullptr;
+		U32 newFileSize = 0;
+		// The result was ignored here, so a failed decompression cached a null buffer and the sound
+		// went silent with nothing said. Both Miles and the OpenAL layer return non-zero on success.
+		if (AIL_decompress_ADPCM(&soundInfo, &decompressFileBuffer, &newFileSize) == 0
+			|| decompressFileBuffer == nullptr || newFileSize == 0) {
+			DEBUG_CRASH(("Could not decompress ADPCM audio '%s'", strToFind.str()));
+			delete [] buffer;
+			return nullptr;
+		}
 		fileSize = newFileSize;
 		openedAudioFile.m_compressed = TRUE;
 		delete [] buffer;

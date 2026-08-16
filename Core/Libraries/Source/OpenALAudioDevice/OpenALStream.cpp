@@ -25,14 +25,20 @@
  * AIL_set_file_callbacks, because the engine's music lives inside its own .big archives and only
  * the engine can read them. Buffers are refilled by the service thread in OpenALDriver.cpp.
  *
- * Only PCM WAV streams are decoded. Retail Zero Hour music is MP2/MP3, which Miles decoded
- * internally and core OpenAL cannot; such streams open successfully, report zero length, and play
- * silence rather than failing. See docs/porting/audio-surface.md.
+ * WAV streams are decoded, PCM and IMA ADPCM alike: the retail survey
+ * (scripts/audio-retail-survey.py) finds 2442 files under the streaming folder, 2391 IMA ADPCM and
+ * 51 PCM, and the 2569 Zero Hour DialogEvents resolve onto 2429 of them, so a PCM-only stream path
+ * plays almost none of the retail dialogue.
+ *
+ * Retail music is MP3 (7 tracks in MusicZH.big) and no MPEG decoder is linked, so those streams
+ * FAIL to open with an explicit error instead of becoming zero-length silent streams.
+ * See docs/porting/audio-retail-validation.md.
  */
 
 #include "OpenALAudioInternal.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -51,19 +57,58 @@ unsigned int frameBytes(const StreamVoice& stream)
 	return stream.channels * (stream.bits / 8);
 }
 
-/// Reads the next chunk of PCM from the stream's file through the engine's file callbacks.
-/// Returns the number of bytes read, honouring the loop count by rewinding at the end.
+/// Largest header a stream will read looking for the `data` chunk. Retail WAV headers are 44 to 58
+/// bytes; the bound exists only so a corrupt or non-WAV file cannot make this read the whole file.
+constexpr unsigned int MAX_HEADER_BYTES = 64u * 1024u;
+
+/// Byte offset in the payload where playback stops, honouring any loop block.
+unsigned int playbackEnd(const StreamVoice& stream)
+{
+	if (stream.loopEnd != 0 && stream.loopEnd < stream.dataLength) {
+		return stream.loopEnd;
+	}
+	return stream.dataLength;
+}
+
+/// Rounds a payload byte offset down onto a boundary the decoder can start from: a frame for PCM,
+/// a whole block for ADPCM, whose predictor state lives in the block preamble.
+unsigned int alignToCodecBoundary(const StreamVoice& stream, unsigned int offset)
+{
+	const unsigned int unit = (stream.codec == StreamCodec::ImaAdpcm)
+		? stream.blockSize
+		: stream.channels * (stream.bits / 8);
+	if (unit == 0) {
+		return 0;
+	}
+	if (offset > stream.dataLength) {
+		offset = stream.dataLength;
+	}
+	return offset - (offset % unit);
+}
+
+/// True when the file's first bytes are an MPEG audio elementary stream (an ID3 tag or a frame
+/// sync). Used only to name the codec in the error message when a stream cannot be decoded.
+bool looksLikeMpeg(const unsigned char* front, size_t size)
+{
+	if (size >= 3 && std::memcmp(front, "ID3", 3) == 0) {
+		return true;
+	}
+	return size >= 2 && front[0] == 0xFF && (front[1] & 0xE0) == 0xE0;
+}
+
+/// Reads the next chunk of the stream's file through the engine's file callbacks and decodes it to
+/// PCM. Returns the number of PCM bytes produced, honouring the loop count by rewinding at the end.
 unsigned int readChunk(StreamVoice& stream, std::vector<unsigned char>& into)
 {
 	Library& l = lib();
-	if (!stream.decodable || l.fileRead == nullptr || l.fileSeek == nullptr
-		|| stream.file == nullptr) {
+	if (l.fileRead == nullptr || l.fileSeek == nullptr || stream.file == nullptr) {
 		return 0;
 	}
 
-	if (stream.readCursor >= stream.dataLength) {
+	const unsigned int end = playbackEnd(stream);
+	if (stream.readCursor >= end) {
 		if (stream.loopCount != 1) {
-			stream.readCursor = 0;
+			stream.readCursor = stream.loopStart;
 			if (stream.loopCount > 1) {
 				--stream.loopCount;
 			}
@@ -72,8 +117,19 @@ unsigned int readChunk(StreamVoice& stream, std::vector<unsigned char>& into)
 		}
 	}
 
-	unsigned int want = StreamVoice::BUFFER_FRAMES * frameBytes(stream);
-	const unsigned int remaining = stream.dataLength - stream.readCursor;
+	const unsigned int remaining = end - stream.readCursor;
+
+	// How many file bytes make about BUFFER_FRAMES of PCM. For ADPCM that is a whole number of
+	// blocks, because a block is the unit that carries its own predictor state.
+	unsigned int want = 0;
+	if (stream.codec == StreamCodec::ImaAdpcm) {
+		const unsigned int blocks = stream.samplesPerBlock
+			? (StreamVoice::BUFFER_FRAMES + stream.samplesPerBlock - 1) / stream.samplesPerBlock
+			: 0;
+		want = blocks * stream.blockSize;
+	} else {
+		want = StreamVoice::BUFFER_FRAMES * frameBytes(stream);
+	}
 	if (want > remaining) {
 		want = remaining;
 	}
@@ -81,14 +137,75 @@ unsigned int readChunk(StreamVoice& stream, std::vector<unsigned char>& into)
 		return 0;
 	}
 
-	into.resize(want);
+	std::vector<unsigned char> raw(want);
 	l.fileSeek(stream.file, (long)(stream.dataOffset + stream.readCursor), AIL_FILE_SEEK_BEGIN);
-	const unsigned long read = l.fileRead(stream.file, into.data(), want);
-	stream.readCursor += (unsigned int)read;
-	return (unsigned int)read;
+	const unsigned long read = l.fileRead(stream.file, raw.data(), want);
+	if (read == 0) {
+		return 0;
+	}
+
+	if (stream.codec == StreamCodec::Pcm) {
+		stream.readCursor += (unsigned int)read;
+		into.assign(raw.begin(), raw.begin() + (size_t)read);
+		return (unsigned int)read;
+	}
+
+	const unsigned int blocks = (unsigned int)(read / stream.blockSize);
+	if (blocks == 0) {
+		// A partial trailing block cannot be decoded: its predictor preamble may be missing.
+		stream.readCursor = end;
+		return 0;
+	}
+
+	into.resize((size_t)blocks * stream.samplesPerBlock * stream.channels * sizeof(int16_t));
+	const unsigned long samples = decodeImaAdpcmBlocks(raw.data(), blocks, stream.blockSize,
+		stream.channels, (int16_t*)into.data());
+	stream.readCursor += blocks * stream.blockSize;
+	into.resize((size_t)samples * sizeof(int16_t));
+	return (unsigned int)(samples * sizeof(int16_t));
 }
 
-/// Opens the file and works out the PCM payload's extent and format.
+/// Reads the front of the file until the WAV metadata parses, and reports the file's size.
+///
+/// The window is sized by where the `data` chunk *starts*, which is all that parsing needs; the
+/// payload is read later through the file callbacks. The previous code required the whole payload to
+/// sit inside a fixed 1024-byte read, so every stream longer than about a kilobyte -- which is every
+/// retail speech file -- failed to parse and fell back to a silent zero-length stream.
+bool readWaveMetadata(StreamVoice& stream, AILSOUNDINFO& info, unsigned int& dataOffset,
+	unsigned int& fileSize, std::vector<unsigned char>& front)
+{
+	Library& l = lib();
+
+	const long end = l.fileSeek(stream.file, 0, AIL_FILE_SEEK_END);
+	fileSize = (end > 0) ? (unsigned int)end : 0;
+
+	unsigned int window = 1024;
+	for (;;) {
+		const bool wholeFile = (fileSize != 0 && window >= fileSize);
+		if (wholeFile) {
+			window = fileSize;
+		}
+		front.assign(window, 0);
+		l.fileSeek(stream.file, 0, AIL_FILE_SEEK_BEGIN);
+		const unsigned long read = l.fileRead(stream.file, front.data(), window);
+		front.resize((size_t)read);
+		if (read == 0) {
+			return false;
+		}
+		if (parseWaveMetadata(front.data(), (unsigned int)read, info, &dataOffset)) {
+			return true;
+		}
+		// Nothing more to look at: the whole file, a short read, or the bound has been reached.
+		if (wholeFile || read < window || window >= MAX_HEADER_BYTES) {
+			return false;
+		}
+		window *= 2;
+	}
+}
+
+/// Opens the file and works out the payload's extent and codec. Fails, with a reportable error, for
+/// anything it cannot actually decode: a stream that opens and then plays silence is
+/// indistinguishable from a working one at every call site in MilesAudioManager.
 bool openStreamFile(StreamVoice& stream, const char* filename)
 {
 	Library& l = lib();
@@ -104,34 +221,69 @@ bool openStreamFile(StreamVoice& stream, const char* filename)
 
 	stream.fileName = filename;
 
-	// Read enough of the front of the file to cover a WAV header with a few extra chunks.
-	unsigned char header[1024];
-	l.fileSeek(stream.file, 0, AIL_FILE_SEEK_BEGIN);
-	const unsigned long read = l.fileRead(stream.file, header, sizeof(header));
-
 	AILSOUNDINFO info;
 	unsigned int dataOffset = 0;
-	if (read >= 44 && parseWaveHeader(header, (unsigned int)read, info, &dataOffset)
-		&& info.format == WAVE_FORMAT_PCM) {
-		stream.channels = (unsigned int)info.channels;
-		stream.bits = (unsigned int)info.bits;
-		stream.rate = info.rate;
-		stream.format = alFormatFor(stream.channels, stream.bits);
-		stream.dataOffset = dataOffset;
-		stream.dataLength = info.data_len;
-		const unsigned int fb = frameBytes(stream);
-		stream.totalFrames = fb ? info.data_len / fb : 0;
-		stream.decodable = true;
-	} else {
-		// Not a PCM WAV: most likely compressed music. Keep the handle valid and silent.
-		stream.decodable = false;
-		stream.channels = 2;
-		stream.bits = 16;
-		stream.rate = 44100;
-		stream.format = AL_FORMAT_STEREO16;
-		stream.totalFrames = 0;
+	unsigned int fileSize = 0;
+	std::vector<unsigned char> front;
+	if (!readWaveMetadata(stream, info, dataOffset, fileSize, front)) {
+		if (looksLikeMpeg(front.data(), front.size())) {
+			// UNIMPLEMENTED, and required rather than absent: the 7 retail Zero Hour music tracks in
+			// MusicZH.big are all MPEG-1 layer III, 44100 Hz stereo. Miles decoded MP3 internally;
+			// core OpenAL has no decoder and none is linked yet.
+			setLastError("MPEG audio streams (MP1/MP2/MP3) are not implemented: no MPEG decoder "
+				"is linked (retail Zero Hour music is MP3; "
+				"see docs/porting/audio-retail-validation.md)");
+		} else {
+			setLastError("stream is not a WAV file, or its header could not be parsed");
+		}
+		return false;
 	}
 
+	stream.channels = (unsigned int)info.channels;
+	stream.rate = info.rate;
+	stream.dataOffset = dataOffset;
+	stream.dataLength = info.data_len;
+	if (fileSize > dataOffset && stream.dataLength > fileSize - dataOffset) {
+		// A truncated or mis-declared file must not be read past its end through the callbacks.
+		stream.dataLength = fileSize - dataOffset;
+	}
+
+	if (info.format == WAVE_FORMAT_PCM) {
+		stream.codec = StreamCodec::Pcm;
+		stream.bits = (unsigned int)info.bits;
+		const unsigned int fb = frameBytes(stream);
+		if (fb == 0) {
+			setLastError("PCM stream has no frame size");
+			return false;
+		}
+		stream.dataLength -= stream.dataLength % fb;
+		stream.totalFrames = stream.dataLength / fb;
+	} else if (info.format == WAVE_FORMAT_IMA_ADPCM) {
+		stream.codec = StreamCodec::ImaAdpcm;
+		stream.bits = 16;	// what the decoder produces, not what the file holds
+		stream.blockSize = info.block_size;
+		stream.samplesPerBlock = imaSamplesPerBlock(stream.blockSize, stream.channels);
+		if (stream.samplesPerBlock == 0) {
+			setLastError("IMA ADPCM stream has an unusable block alignment");
+			return false;
+		}
+		stream.dataLength -= stream.dataLength % stream.blockSize;
+		stream.totalFrames = (stream.dataLength / stream.blockSize) * stream.samplesPerBlock;
+	} else {
+		char message[128];
+		std::snprintf(message, sizeof(message),
+			"unsupported stream codec 0x%04x (only PCM and IMA ADPCM WAV are decoded)",
+			(unsigned int)info.format);
+		setLastError(message);
+		return false;
+	}
+
+	if (stream.channels == 0 || stream.rate == 0 || stream.totalFrames == 0) {
+		setLastError("stream header describes no audio");
+		return false;
+	}
+
+	stream.format = alFormatFor(stream.channels, stream.bits);
 	return true;
 }
 
@@ -202,6 +354,10 @@ HSTREAM AIL_open_stream(HDIGDRIVER dig, const char* filename, int stream_mem)
 
 	StreamVoice* stream = new StreamVoice();
 	if (!openStreamFile(*stream, filename)) {
+		// openStreamFile has set the error; the caller reads it back with AIL_last_error().
+		if (stream->file != nullptr && l.fileClose != nullptr) {
+			l.fileClose(stream->file);
+		}
 		delete stream;
 		return nullptr;
 	}
@@ -378,10 +534,23 @@ void AIL_set_stream_loop_count(HSTREAM stream_handle, int count)
 
 void AIL_set_stream_loop_block(HSTREAM stream_handle, int loop_start, int loop_end)
 {
-	// Sub-region looping. Not implemented; no engine call site relies on it taking effect.
-	(void)stream_handle;
-	(void)loop_start;
-	(void)loop_end;
+	// Byte offsets into the stream's payload; a negative end means "to the end of the file", which
+	// is what SoundStreamHandleClass::Set_Sample_Loop_Count passes. Offsets are pulled back onto a
+	// decodable boundary, so a caller cannot ask playback to resume mid-ADPCM-block.
+	StreamVoice* stream = streamOf(stream_handle);
+	if (stream == nullptr) {
+		return;
+	}
+	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+
+	stream->loopStart = alignToCodecBoundary(*stream,
+		(loop_start > 0) ? (unsigned int)loop_start : 0u);
+	stream->loopEnd = (loop_end > 0)
+		? alignToCodecBoundary(*stream, (unsigned int)loop_end)
+		: 0u;
+	if (stream->loopEnd != 0 && stream->loopEnd <= stream->loopStart) {
+		stream->loopEnd = 0;
+	}
 }
 
 void AIL_stream_ms_position(HSTREAM stream_handle, S32* total_milliseconds, S32* current_milliseconds)
@@ -419,16 +588,29 @@ void AIL_stream_ms_position(HSTREAM stream_handle, S32* total_milliseconds, S32*
 void AIL_set_stream_ms_position(HSTREAM stream_handle, int pos)
 {
 	StreamVoice* stream = streamOf(stream_handle);
-	if (stream == nullptr || !stream->decodable) {
+	if (stream == nullptr || stream->rate == 0) {
 		return;
 	}
 
 	std::lock_guard<std::recursive_mutex> guard(lib().lock);
 
-	const unsigned int fb = frameBytes(*stream);
-	const unsigned int byteOffset = (unsigned int)((unsigned long long)pos * stream->rate / 1000ull) * fb;
-	stream->readCursor = (byteOffset < stream->dataLength) ? byteOffset : stream->dataLength;
-	stream->framesPlayed = fb ? stream->readCursor / fb : 0;
+	const unsigned long long frame = (unsigned long long)(pos > 0 ? pos : 0) * stream->rate / 1000ull;
+	unsigned int byteOffset = 0;
+	if (stream->codec == StreamCodec::ImaAdpcm) {
+		// Seeking is only exact to a block: a block's samples cannot be decoded without its
+		// predictor preamble.
+		byteOffset = (unsigned int)(frame / stream->samplesPerBlock) * stream->blockSize;
+	} else {
+		byteOffset = (unsigned int)frame * frameBytes(*stream);
+	}
+	stream->readCursor = alignToCodecBoundary(*stream, byteOffset);
+
+	if (stream->codec == StreamCodec::ImaAdpcm) {
+		stream->framesPlayed = (stream->readCursor / stream->blockSize) * stream->samplesPerBlock;
+	} else {
+		const unsigned int fb = frameBytes(*stream);
+		stream->framesPlayed = fb ? stream->readCursor / fb : 0;
+	}
 
 	// Requeue from the new position.
 	if (stream->source != 0) {

@@ -332,9 +332,9 @@ void AIL_set_3D_position(H3DPOBJECT obj, float X, float Y, float Z)
 	}
 	std::lock_guard<std::recursive_mutex> guard(lib().lock);
 	if (object->isListener) {
-		alListener3f(AL_POSITION, X, Y, Z);
+		alListener3f(AL_POSITION, X, Y, milesToAlZ(Z));
 	} else if (object->voice.source != 0) {
-		alSource3f(object->voice.source, AL_POSITION, X, Y, Z);
+		alSource3f(object->voice.source, AL_POSITION, X, Y, milesToAlZ(Z));
 	}
 }
 
@@ -347,11 +347,12 @@ void AIL_set_3D_orientation(
 	}
 	std::lock_guard<std::recursive_mutex> guard(lib().lock);
 	if (object->isListener) {
-		const ALfloat orientation[6] = { X_face, Y_face, Z_face, X_up, Y_up, Z_up };
+		const ALfloat orientation[6] = { X_face, Y_face, milesToAlZ(Z_face),
+			X_up, Y_up, milesToAlZ(Z_up) };
 		alListenerfv(AL_ORIENTATION, orientation);
 	} else if (object->voice.source != 0) {
 		// Sources have a cone direction rather than a full orientation; the up vector is unused.
-		alSource3f(object->voice.source, AL_DIRECTION, X_face, Y_face, Z_face);
+		alSource3f(object->voice.source, AL_DIRECTION, X_face, Y_face, milesToAlZ(Z_face));
 	}
 }
 
@@ -363,9 +364,9 @@ void AIL_set_3D_velocity_vector(H3DSAMPLE sample, float x, float y, float z)
 	}
 	std::lock_guard<std::recursive_mutex> guard(lib().lock);
 	if (object->isListener) {
-		alListener3f(AL_VELOCITY, x, y, z);
+		alListener3f(AL_VELOCITY, x, y, milesToAlZ(z));
 	} else if (object->voice.source != 0) {
-		alSource3f(object->voice.source, AL_VELOCITY, x, y, z);
+		alSource3f(object->voice.source, AL_VELOCITY, x, y, milesToAlZ(z));
 	}
 }
 

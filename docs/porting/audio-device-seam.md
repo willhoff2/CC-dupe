@@ -223,14 +223,18 @@ a symbol the engine references that `mss.h` never declares. Only a link can, and
    references — is compiled against the backend at all.~~ Done: it is one of `Core/GameEngineDevice`'s
    69 objects in the shimmed native build, and its `AIL_*` references resolve against the backend
    there (section 6a). Whether it *runs* is untouched by that.
-3. **MP2/MP3 decoding.** `AIL_open_stream` handles WAV; Zero Hour's music is compressed. Streams of
-   unsupported formats currently open, report zero length and play silence. FFmpeg is already an
-   optional dependency for video and is the obvious route.
+3. **MP3 decoding.** `AIL_open_stream` handles WAV, PCM and IMA ADPCM; Zero Hour's music is 7 MPEG-1
+   layer III tracks and there is no MP2 anywhere in the retail set
+   (`docs/porting/audio-retail-validation.md`). Such a stream now fails to open with an explicit
+   error instead of reporting zero length and playing silence. FFmpeg is already an optional
+   dependency for video and is the obvious route.
 4. **EFX**, to turn the 2 recorded filter entry points into audible reverb/mono-delay.
 5. **The Bink handoff.** `AIL_get_DirectSound_info` returns nulls by design: Bink asks Miles for the
    raw `IDirectSound`/`IDirectSoundBuffer` it should mix into. There is no portable equivalent —
    whatever replaces Bink natively has to own its own output path (its own OpenAL source fed by the
    video decoder, or a mixer both sides submit to). Supplying a fake `AILLPDIRECTSOUND` would be
    dishonest, so the backend does not.
-6. **Hearing it.** Everything above is compile-time. Playing one sample requires a linkable game
-   binary and retail `.big` archives.
+6. ~~**Hearing it.** Everything above is compile-time. Playing one sample requires a linkable game
+   binary and retail `.big` archives.~~ Done for the layer, not for the game: real retail one-shots,
+   streams and the engine's own ADPCM handoff decode and are measured as captured samples in
+   `docs/porting/audio-retail-validation.md`. macOS's own device is still unverified.

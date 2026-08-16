@@ -302,10 +302,23 @@ def measure_capture(path):
     }
 
 
+def payload_of(path):
+    """The PCM bytes of a file that may be a bare sample dump or a RIFF/WAVE image.
+
+    AIL_decompress_ADPCM returns a WAV image, as Miles' did, so the decoder's output has to be
+    unwrapped before it can be compared with a raw reference decode.
+    """
+    raw = pathlib.Path(path).read_bytes()
+    if raw[0:4] != b"RIFF":
+        return raw
+    parsed = read_riff(path)
+    return parsed[3] if parsed is not None else raw
+
+
 def compare_pcm(decoded_path, reference_path):
     """Compares the backend's ADPCM decode against ffmpeg's, sample by sample."""
-    decoded = pathlib.Path(decoded_path).read_bytes()
-    reference = pathlib.Path(reference_path).read_bytes()
+    decoded = payload_of(decoded_path)
+    reference = payload_of(reference_path)
     count = min(len(decoded), len(reference)) // 2
     if count == 0:
         return {"comparable": False, "decoded_bytes": len(decoded),
@@ -527,12 +540,11 @@ def summarise(report):
                   f"set_sample_file_result={stage.get('set_sample_file_result')} "
                   f"last_error={stage.get('set_sample_file_last_error')!r} "
                   f"rms={capture.get('rms')}")
-        if audible:
-            add(f"the engine's own ADPCM sequence is audible: {name}", True, detail)
-        else:
-            observe("DEFECT: the engine's own ADPCM sequence is silent -- "
-                    "AIL_decompress_ADPCM returns bare PCM where Miles returned a WAV image, "
-                    f"so AIL_set_sample_file drops it: {name}", detail)
+        add(f"the engine's own ADPCM sequence is audible: {name}",
+            stage.get("decompressed_is_riff_wave")
+            and stage.get("set_sample_file_result") == 1
+            and audible,
+            detail)
 
     # The short PCM WAV whose whole data chunk fits in the 1024-byte window the stream path reads
     # is the control for the long one; the pair localises the failure to the window, not the codec.
@@ -550,13 +562,16 @@ def summarise(report):
     long_stream = stages.get("stream:pcm16_stereo_44100")
     if long_stream is not None and short is not None:
         capture = long_stream.get("capture", {})
-        observe("DEFECT: a PCM WAV stream longer than the 1024-byte header window degrades to a "
-                "silent zero-length stream",
-                f"0.5 s file: length_ms={long_stream.get('stream_length_ms')} "
-                f"rms={capture.get('rms')} last_error="
-                f"{long_stream.get('open_stream_last_error')!r}; "
-                f"0.02 s file: length_ms={short.get('stream_length_ms')} "
-                f"rms={short.get('capture', {}).get('rms')}")
+        # The regression guard for the header-window defect: the parse window is now sized by where
+        # the data chunk starts, so a stream's length no longer depends on its payload fitting in
+        # one read. A 0.5 s file is ~86 KB of payload against a 1024-byte first window.
+        add("a PCM WAV stream far larger than the first header read still plays",
+            (long_stream.get("stream_length_ms") or 0) >= 450
+            and max(capture.get("rms") or [0.0]) > 0.001,
+            f"0.5 s file: length_ms={long_stream.get('stream_length_ms')} "
+            f"rms={capture.get('rms')}; "
+            f"0.02 s file: length_ms={short.get('stream_length_ms')} "
+            f"rms={short.get('capture', {}).get('rms')}")
 
     no_callbacks = stages.get("stream:no-callbacks")
     if no_callbacks is not None:
@@ -570,14 +585,17 @@ def summarise(report):
         stage = stages.get(f"stream:{name}")
         if stage is None:
             continue
-        capture = stage.get("capture", {})
-        # The wall: retail Zero Hour music is MP2/MP3. Recorded, not fixed. What matters for the
-        # report is *how* it fails -- a handle that opens, reports no length, reports no error and
-        # plays nothing is indistinguishable from working music at every call site.
-        observe(f"UNIMPLEMENTED: compressed music opens and plays silence without error: {name}",
-                f"handle={stage.get('open_stream_handle')} "
-                f"length_ms={stage.get('stream_length_ms')} "
-                f"last_error={stage.get('open_stream_last_error')!r} rms={capture.get('rms')}")
+        # The wall is still there -- there is no MPEG decoder -- but it is no longer silent: the
+        # open fails and names the reason. Retail Zero Hour music is MP3, so this is an
+        # UNIMPLEMENTED path that is REQUIRED, not a format that can be cut.
+        add(f"compressed music fails to open, loudly, rather than playing silence: {name}",
+            not stage.get("open_stream_handle") and stage.get("open_stream_last_error"),
+            f"handle={stage.get('open_stream_handle')} "
+            f"last_error={stage.get('open_stream_last_error')!r}")
+        observe("UNIMPLEMENTED (required): no MPEG decoder is linked, so music cannot play: "
+                f"{name}",
+                f"last_error={stage.get('open_stream_last_error')!r}; retail MusicZH.big holds 7 "
+                "MP3 tracks, so this blocks music entirely rather than being cuttable")
 
     mono_left = stages.get("pan:mono-hard-left", {}).get("capture", {})
     mono_right = stages.get("pan:mono-hard-right", {}).get("capture", {})
@@ -601,13 +619,13 @@ def summarise(report):
             max(left["rms"]) > 0.001 and max(right["rms"]) > 0.001
             and abs(left["rms"][0] - left["rms"][1]) > 0.001,
             f"x=-20 rms={left['rms']} x=+20 rms={right['rms']}")
-        # The engine sets the listener up vector to (0,0,-1) in a left-handed world
-        # (MilesAudioManager.cpp:2537). OpenAL is right-handed and the seam passes the vectors
-        # through unchanged, so the stereo image is mirrored against the Windows oracle.
-        mirrored = left["rms"][1] > left["rms"][0] and right["rms"][0] > right["rms"][1]
-        observe("DEFECT: 3D pan is mirrored -- a source at -x is rendered on the right"
-                if mirrored else "3D pan sign matches a left-handed world",
-                f"x=-20 rms={left['rms']} x=+20 rms={right['rms']}")
+        # Handedness. The engine's listener is (facing, up=(0,0,-1)) in Miles' left-handed frame
+        # (MilesAudioManager.cpp:2537); OpenAL is right-handed, so the seam negates Z
+        # (milesToAlZ in OpenALAudioInternal.h). Without that the image is mirrored, which is what
+        # this asserts: +x must be louder on the right, -x louder on the left.
+        add("3D pan is not mirrored: +x is heard on the right",
+            right["rms"][1] > right["rms"][0] * 1.5 and left["rms"][0] > left["rms"][1] * 1.5,
+            f"x=-20 rms={left['rms']} x=+20 rms={right['rms']}")
 
     plain = stages.get("sample3d:left", {}).get("capture", {})
     occluded = stages.get("sample3d:occluded", {}).get("capture", {})

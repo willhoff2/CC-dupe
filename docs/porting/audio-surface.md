@@ -182,9 +182,14 @@ Two important semantics:
 the replacement owns WAV parsing:
 
 - `WAVE_FORMAT_PCM` (8- and 16-bit, mono and stereo) — the bulk of the game's sound effects.
-- `WAVE_FORMAT_IMA_ADPCM` (0x11) — decoded to 16-bit PCM by `AIL_decompress_ADPCM`.
-- Streamed music is MP2/MP3 in retail Zero Hour. Miles decoded this internally. Core OpenAL
-  cannot; this is called out as a gap below.
+- `WAVE_FORMAT_IMA_ADPCM` (0x11) — decoded to 16-bit PCM by `AIL_decompress_ADPCM`, which returns it
+  as a RIFF/WAVE image because the engine hands the result back in through `AIL_set_sample_file`.
+- Streamed music is MP3 in retail Zero Hour (7 tracks, MPEG-1 layer III; no MP2 anywhere). Miles
+  decoded this internally. Core OpenAL cannot; this is called out as a gap below.
+
+Measured over the retail archives — `scripts/audio-retail-survey.py`, see
+`docs/porting/audio-retail-validation.md` — the set is 2572 IMA ADPCM WAVs, 951 16-bit PCM WAVs and 7
+MP3s. There is no MS ADPCM and no 8-bit PCM in retail data.
 
 ## Chosen replacement strategy
 
@@ -213,15 +218,14 @@ unaffected; nothing in `WWAudio` or `MilesAudioManager` changes behaviour there.
 
 Stated plainly, because none of this can be verified without retail game data:
 
-- **No audio output has been heard.** What was verified: every translation unit compiles clean at
-  64-bit with `clang++ -std=c++20 -Wall`, and `nm` over the resulting archive shows 101 defined
-  `AIL_*` symbols against 101 declared in the header — no missing entry points and no extras. It
-  has never produced a sample of sound, because that requires the retail `.big` archives.
-- **MP2/MP3 music streaming is not decoded.** `AIL_open_stream` parses and streams WAV. For
-  compressed music a decoder must be plugged in (the repo already has an optional FFmpeg
-  dependency for video — that is the obvious place to route it). Until then, streams of
-  unsupported formats open successfully, report zero length, and play silence rather than
-  crashing.
+- **MP3 music streaming is not decoded.** `AIL_open_stream` parses and streams WAV, PCM and IMA
+  ADPCM alike. For compressed music a decoder must be plugged in (the repo already has an optional
+  FFmpeg dependency for video — that is the obvious place to route it). Until then such a stream
+  **fails to open and sets an explicit error**; it used to open, report zero length and play silence,
+  which is the failure mode this project exists to stop. The music a retail install plays is 56 MP3
+  tracks (7 in `MusicZH.big`, 49 in the base game's `Music.big`), so this is a required gap, not a
+  cuttable one; `docs/porting/audio-retail-validation.md` §7 records where a decoder attaches and
+  why `RTS_USE_OPENAL` is *not* that route.
 - **Filters are accepted but not applied.** `AIL_set_filter_sample_preference` and
   `AIL_set_sample_processor` record their arguments and return success. Reverb and mono-delay are
   not audible. OpenAL Soft EFX is the intended route.
@@ -231,8 +235,12 @@ Stated plainly, because none of this can be verified without retail game data:
   is Windows-only anyway.
 - **Speaker-type selection is recorded, not honoured.** OpenAL Soft picks its own output
   configuration; `AIL_set_3D_speaker_type` stores the request so that queries stay consistent.
-- **`AIL_set_stream_loop_block` is a no-op.** Sub-region looping is unused by Zero Hour's own
-  data as far as the call site indicates, but this is an assumption, not a measurement.
+- **`AIL_set_stream_loop_block` stores block-aligned loop bounds** and the stream path honours them.
+  Offsets are pulled back onto a decodable boundary (a frame for PCM, a whole block for ADPCM).
 - **Playback-rate changes are implemented as pitch scaling** (`AL_PITCH`), which also changes
   duration. Miles resampled. For the engine's use (pitch-shift variation on effects) this is the
   intended effect.
+
+This section used to open with "no audio output has been heard", which is no longer true: real retail
+one-shots and streams decode and are measured as captured samples in
+`docs/porting/audio-retail-validation.md`. What remains unheard is macOS's own device.
