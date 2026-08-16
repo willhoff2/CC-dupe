@@ -116,15 +116,15 @@ and by compiling the same expression under both compilers over 20,001 angles.
 **The obvious fix does not survive the oracle.** Writing the rotation out directly —
 `Set(c, -s, 0.0f, ..., s, c, 0.0f, ..., 0.0f, 0.0f, 1.0f, ...)` — takes frame 0 from 132 differing
 records to 13, and it leaves this replay's Windows run byte-identical over all 440,035 frame-0 records.
-But across all 10 gate replays it **changes the Windows build**: `12-11-35_2v2_babai_ILnur_HardAI_HardAI`
-diverges from its recording at frame 110 instead of frame 3410. Reproduced twice, and rebuilding with
-that one file reverted restores unmodified `main`'s exact pattern on all 10:
+But it **changes the Windows build** on other maps, and the retail replay gate on real Windows says so:
 
-| Windows build | First divergence, 10 replays |
+| Windows build | `check-replays.yml`, GeneralsMD, 10 replays |
 |---|---|
-| unmodified `main` | 1724, 110, 110, 1810, 3210, 110, **3410**, 2310, 2210, 3211 |
-| this PR (no `Thing.cpp` change) | 1724, 110, 110, 1810, 3210, 110, **3410**, 2310, 2210, 3211 |
-| this PR **+ the direct spelling** | 1724, 110, 110, 1810, 3210, 110, **110**, 2310, 2210, 3211 |
+| this PR **+ the direct spelling** | **FAIL** — `12-11-35_2v2_babai_ILnur_HardAI_HardAI` mismatches at frame 110, `18-13-02_3v3_Supremac_Loonen_JB_HardAI_HardAI_HardAI` at frame 26910 |
+| this PR (that one file reverted, nothing else) | **PASS** — all 10, both `vc6+t+e` and `vc6-releaselog+t+e` |
+
+The local Wine differential predicted it first (`12-11-35` diverging at frame 110 instead of 3410,
+reproduced twice, restored by reverting only `Thing.cpp`), and CI on real Windows confirmed it.
 
 The reason is in the table above: VC6's folding is *value dependent*, so for some objects it produces
 `-0.0` at `[8]`/`[9]` — agreeing with clang, which is why those records are not in the 119 — and a
@@ -133,7 +133,7 @@ decisions, which is reverse engineering an optimiser, not a seam.
 
 What this measurement cost: an earlier draft of this PR carried that change and claimed it was
 behaviour preserving on the strength of the pre/post frame-0 comparison on **one** map. One map was not
-enough; the 10-replay bisect is what caught it. That is recorded here rather than quietly dropped.
+enough. That is recorded here rather than quietly dropped.
 
 ### 3.2 CONFIRMED — excess intermediate precision on the Windows side (10 of the 13 value-differing records; the dominant cause for the rest of the run)
 
@@ -240,7 +240,7 @@ checkpoints identical. No other locale could be generated (`localedef` has no ch
 **not** tested. Partial counter-evidence: INI-derived data agrees, since both runs produce identical
 template names and object counts.
 
-## 4. A finding about the oracle itself: it is only valid for the first 3,111 frames
+## 4. A finding about the oracle itself: under Wine it is only valid for the first 3,111 frames
 
 Running the same replay through the **Windows** build, the recorded CRCs match for 31 checkpoints and
 then stop:
@@ -251,23 +251,20 @@ C 3211 LOCAL 04D05717 REPLAY BC803967 MISMATCH
 ```
 
 This is not caused by anything in this PR: an unmodified `main` build, without the diagnostics,
-mismatches at the same frame. It also moves with the *data* staged (frame 3211 with the full archive,
-3611 with the trimmed one), which points at data or Wine, not at the engine change.
+mismatches at the same frame under Wine, and the same commit passes this replay on real Windows in CI.
+The frame also moves with the *data* staged (3211 with the full archive, 3611 with the trimmed one).
 
 Consequences, stated plainly:
-
-- The recording is a valid oracle for frames 0–3111 only. Beyond that, "native differs from the
-  recording" says nothing, because Windows differs from it too.
-- Comparing native against a **Windows run** (as §1–§3 do) is the sound comparison, and it does not
-  inherit this limit.
-- **The retail replay gate cannot produce a green verdict in this environment**, with either archive:
-  under Wine, with CI's registry key and layout, unmodified `main` fails all 10 replays on the trimmed
-  data *and* on the full data (only the frames move). So the gate's local exit code measures the
-  environment, not the change, and CI's `check-replays.yml` on real Windows remains the verdict.
-- It is still usable as a **differential** oracle, which is how §3.1's rejected fix was caught: run the
-  same 10 replays with the same data on two builds and compare the per-replay first-divergence frames.
-  On that comparison this PR is **identical to unmodified `main`, replay for replay** (table in §3.1),
-  which is the strongest Windows-behaviour statement available here.
+- **The retail replay gate cannot produce a green verdict under Wine**, with either archive: unmodified
+  `main` fails all 10 replays on the trimmed data *and* on the full data, and only the frames move. The
+  same commits pass on real Windows in CI, so that is a Wine artefact and CI is the verdict.
+- Under Wine the gate is still usable as a **differential** oracle, and that is what caught §3.1's
+  rejected fix before CI did: run the same 10 replays on two builds and compare the per-replay
+  first-divergence frames. This PR is identical to unmodified `main` replay for replay there, and green
+  on real Windows.
+- Frame 3211 on `366648.rep` is where the *Wine* Windows run stops matching the recording, which is why
+  §1–§3 compare native against a Windows **run** rather than against the recording. That comparison is
+  unaffected by this limit.
 
 ## 5. Is cross-platform lock-step reachable? A recommendation, not a decision
 
