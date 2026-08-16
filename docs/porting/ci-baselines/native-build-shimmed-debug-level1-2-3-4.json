@@ -1,0 +1,246 @@
+{
+  "archives": 14,
+  "clang_major": "14",
+  "compile_failures": {},
+  "compiled": {
+    "Core/GameEngine": {
+      "objects": 210,
+      "probe_clean": 210,
+      "total": 210
+    },
+    "Core/GameEngineDevice": {
+      "objects": 70,
+      "probe_clean": 70,
+      "total": 70
+    },
+    "Core/Libraries/Source/Compression": {
+      "objects": 11,
+      "probe_clean": 11,
+      "total": 11
+    },
+    "Core/Libraries/Source/WWVegas/WW3D2": {
+      "objects": 78,
+      "probe_clean": 78,
+      "total": 78
+    },
+    "Core/Libraries/Source/WWVegas/WWAudio": {
+      "objects": 19,
+      "probe_clean": 19,
+      "total": 19
+    },
+    "Core/Libraries/Source/WWVegas/WWDebug": {
+      "objects": 3,
+      "probe_clean": 3,
+      "total": 3
+    },
+    "Core/Libraries/Source/WWVegas/WWDownload": {
+      "objects": 4,
+      "probe_clean": 4,
+      "total": 4
+    },
+    "Core/Libraries/Source/WWVegas/WWLib": {
+      "objects": 79,
+      "probe_clean": 79,
+      "total": 79
+    },
+    "Core/Libraries/Source/WWVegas/WWMath": {
+      "objects": 37,
+      "probe_clean": 37,
+      "total": 37
+    },
+    "Core/Libraries/Source/WWVegas/WWSaveLoad": {
+      "objects": 12,
+      "probe_clean": 12,
+      "total": 12
+    },
+    "GeneralsMD/Code/GameEngine": {
+      "objects": 380,
+      "probe_clean": 380,
+      "total": 380
+    },
+    "GeneralsMD/Code/GameEngineDevice": {
+      "objects": 39,
+      "probe_clean": 39,
+      "total": 39
+    },
+    "GeneralsMD/Code/Libraries/Source/WWVegas": {
+      "objects": 35,
+      "probe_clean": 35,
+      "total": 35
+    },
+    "GeneralsMD/Code/Main": {
+      "objects": 1,
+      "probe_clean": 1,
+      "total": 1
+    }
+  },
+  "compiler": "Ubuntu clang version 14.0.0-1ubuntu1.1",
+  "config": "debug",
+  "config_defines": [
+    "RTS_DEBUG",
+    "WWDEBUG",
+    "DEBUG"
+  ],
+  "divergence": {
+    "probe_clean_compile_failed": [],
+    "probe_failed_compile_ok": []
+  },
+  "entry_point_symbol": "main",
+  "game_entry_target_built": true,
+  "host": "x86_64-pc-linux-gnu",
+  "host_translated": null,
+  "levels": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "libraries_without_archive": [],
+  "link_binary_produced": true,
+  "link_clean": true,
+  "link_dropped_entry_points": [
+    "libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)",
+    "libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)",
+    "libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)",
+    "libcore_libraries_source_wwvegas_wwlib(win32_user32_test.cpp.o)",
+    "libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)"
+  ],
+  "link_entry_point_archives": [
+    "libgeneralsmd_code_main"
+  ],
+  "link_entry_point_stub": false,
+  "objects": 978,
+  "pile_meaning": {
+    "compile-blocked": "An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker.",
+    "cut-scope-not-linked": "A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it.",
+    "harness-artefact": "An artefact of how this harness is configured: a build-time generated definition it does not generate, one a disabled `#if` removed, or one in a layer this level selection does not build.",
+    "library-not-linked": "A library defines it and this configuration links no such library. A link line, not port work.",
+    "no-definition-anywhere": "Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work."
+  },
+  "probe_clean": 978,
+  "providers": {
+    "ffmpeg": {
+      "evidence_files": 823,
+      "evidence_names": 7347,
+      "label": "FFmpeg (libavcodec / libavformat / libavutil / libswscale)",
+      "owner": "video/bink-excision-and-harness-headers",
+      "pile": "library-not-linked",
+      "reason": "The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route. `fetch-probe-deps.sh` provisions the pinned headers so the code compiles, and nothing installs an FFmpeg runtime for the link.",
+      "symbol_names": [],
+      "symbols": 0,
+      "system_libraries": [
+        "/lib/x86_64-linux-gnu/libavcodec.so.58",
+        "/lib/x86_64-linux-gnu/libavformat.so.58",
+        "/lib/x86_64-linux-gnu/libavutil.so.56",
+        "/lib/x86_64-linux-gnu/libswresample.so.3",
+        "/lib/x86_64-linux-gnu/libswscale.so.5",
+        "/usr/lib/x86_64-linux-gnu/libavcodec.so.58",
+        "/usr/lib/x86_64-linux-gnu/libavformat.so.58",
+        "/usr/lib/x86_64-linux-gnu/libavutil.so.56",
+        "/usr/lib/x86_64-linux-gnu/libswresample.so.3",
+        "/usr/lib/x86_64-linux-gnu/libswscale.so.5"
+      ],
+      "system_library_symbols_matched": []
+    },
+    "gamespy": {
+      "evidence_files": 279,
+      "evidence_names": 4714,
+      "label": "GameSpy SDK",
+      "owner": "online/absent-menu-seam",
+      "pile": "cut-scope-not-linked",
+      "reason": "Online matchmaking is permanently cut scope (docs/porting/native-port-plan.md). The SDK's own sources are provisioned and define these symbols, so this is a link refused rather than one that is missing: they disappear when the call sites go, which is `online/absent-menu-seam`'s work, and must not be stubbed to make a link pass.",
+      "symbol_names": [],
+      "symbols": 0,
+      "system_libraries": [],
+      "system_library_symbols_matched": []
+    },
+    "miles": {
+      "evidence_files": 8,
+      "evidence_names": 160,
+      "label": "Miles AIL_* API \u2014 the `milesstub`/OpenAL backend",
+      "owner": "platform/audio-device (the Miles/OpenAL link)",
+      "pile": "library-not-linked",
+      "reason": "`cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, and the 32-bit Windows build links the fetched miles-sdk-stub. This harness now builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links libopenal, so what is left here is the part of the Miles surface that backend does not implement rather than the whole API.",
+      "symbol_names": [],
+      "symbols": 0,
+      "system_libraries": [
+        "/lib/x86_64-linux-gnu/libopenal.so",
+        "/lib/x86_64-linux-gnu/libopenal.so.1",
+        "/lib/x86_64-linux-gnu/libopenal.so.1.19.1",
+        "/usr/lib/x86_64-linux-gnu/libopenal.so",
+        "/usr/lib/x86_64-linux-gnu/libopenal.so.1",
+        "/usr/lib/x86_64-linux-gnu/libopenal.so.1.19.1"
+      ],
+      "system_library_symbols_matched": []
+    },
+    "window-backend": {
+      "evidence_files": 2,
+      "evidence_names": 61,
+      "label": "The window/input backend this configuration does not choose (SDL2, Cocoa)",
+      "owner": "platform/macos-window-compile and platform/window-seam-wiring",
+      "pile": "library-not-linked",
+      "reason": "`probe.OPTIONAL_BACKENDS` keeps the SDL2 backend opt-in and the Cocoa backend is Objective-C++, so no target lists either. The definitions are in the tree; a configuration that picks one resolves all of them.",
+      "symbol_names": [],
+      "symbols": 0,
+      "system_libraries": [
+        "/lib/x86_64-linux-gnu/libSDL2-2.0.so.0",
+        "/usr/lib/x86_64-linux-gnu/libSDL2-2.0.so.0"
+      ],
+      "system_library_symbols_matched": []
+    }
+  },
+  "strict_link": {
+    "agrees_with_nm": true,
+    "attempted": true,
+    "binary": {
+      "bytes": 92138504,
+      "elf_type": "DYN",
+      "format": "ELF",
+      "machine": "x86-64",
+      "path": "build/native-debug/native_strict_link",
+      "word_size": 64
+    },
+    "binary_produced": true,
+    "clean": true,
+    "linker_name_form": "demangled",
+    "only_in_linker_report": [],
+    "only_in_nm_scan": [],
+    "referenced_by": {},
+    "symbol_name_form": "demangled",
+    "unresolved_total": 0
+  },
+  "symbol_prefix": "",
+  "system_symbol_sources": [
+    "/lib/x86_64-linux-gnu/libc.so.6",
+    "/lib/x86_64-linux-gnu/libm.so.6",
+    "/lib/x86_64-linux-gnu/libpthread.so.0",
+    "/lib/x86_64-linux-gnu/libdl.so.2",
+    "/lib/x86_64-linux-gnu/libgcc_s.so.1",
+    "/lib/x86_64-linux-gnu/libstdc++.so.6",
+    "/usr/lib/x86_64-linux-gnu/libstdc++.so.6"
+  ],
+  "system_symbols_discounted": 10008,
+  "third_party_linked": [
+    "libsupport_gitinfo",
+    "libsupport_openalaudiodevice",
+    "libsupport_renderbackend",
+    "libsupport_windowbackend",
+    "libthirdparty_lzhl",
+    "openal (system)",
+    "vulkan (system)",
+    "z (system)"
+  ],
+  "translation_units": 978,
+  "undefined_by_category": {},
+  "undefined_by_pile": {
+    "compile-blocked": 0,
+    "cut-scope-not-linked": 0,
+    "harness-artefact": 0,
+    "library-not-linked": 0,
+    "no-definition-anywhere": 0
+  },
+  "undefined_by_pile_symbols": {},
+  "undefined_symbols": {},
+  "undefined_total": 0,
+  "with_shims": true
+}

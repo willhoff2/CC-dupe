@@ -642,16 +642,19 @@ void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 
 // TheSuperHackers @port The deliberate stub. DbgHelp, the i386 frame walk and the SEH entry
 // points above have no equivalent off Windows, so this side is backtrace()/backtrace_symbols():
-// return addresses and mangled symbol names, no line numbers, no source files, and nothing at
-// all for a frame in a function the linker did not export. That is enough for DEBUG_CRASH and
+// return addresses and demangled symbol names, no line numbers, no source files, and nothing at
+// all for a frame in a function the linker did not export -- which is why the debug configuration
+// links with -rdynamic. That is enough for DEBUG_CRASH and
 // the memory pool leak reports, which are the only callers. See
 // docs/porting/process-and-crash-seam.md.
 
 #include "Common/StackDump.h"
 #include "Common/Debug.h"
 
+#include <cxxabi.h>
 #include <execinfo.h>
 #include <stdlib.h>
+#include <string.h>
 
 static void StackDumpDefaultHandler(const char *line)
 {
@@ -696,6 +699,33 @@ void GetFunctionDetails(void *pointer, char *name, char *filename, unsigned int 
 			// The buffer sizes are the caller's; every caller in the engine passes 512 bytes.
 			::strncpy(name, symbols[0], 511);
 			name[511] = 0;
+
+			// backtrace_symbols() spells a frame `image(_ZN4Some6MethodEv+0x2c) [0x...]`, and a
+			// mangled name is not a usable answer to "where did this assert fire", so the mangled
+			// run is demangled in place where the ABI can do it.
+			char *open = ::strchr(name, '(');
+			char *plus = (open != nullptr) ? ::strchr(open, '+') : nullptr;
+			if (open != nullptr && plus != nullptr && plus > open + 1)
+			{
+				*plus = 0;
+				int status = -1;
+				char *readable = abi::__cxa_demangle(open + 1, nullptr, nullptr, &status);
+				*plus = '+';
+				if (status == 0 && readable != nullptr)
+				{
+					// Rebuilt rather than patched in place, keeping the image name and the offset
+					// either side of the symbol; the demangled form is longer than the mangled one.
+					char rebuilt[512];
+					::snprintf(rebuilt, sizeof(rebuilt), "%.*s%s%s",
+						(int)(open + 1 - name), name, readable, plus);
+					::strncpy(name, rebuilt, 511);
+					name[511] = 0;
+				}
+				if (readable != nullptr)
+				{
+					::free(readable);
+				}
+			}
 			::free(symbols);
 		}
 	}
@@ -727,7 +757,7 @@ void StackDumpFromAddresses(void **addresses, unsigned int count, void (*callbac
 		char function_name[512];
 		char line[1024];
 		GetFunctionDetails(*addresses, function_name, nullptr, nullptr, nullptr);
-		::snprintf(line, sizeof(line), "  %s 0x%p", function_name, *addresses);
+		::snprintf(line, sizeof(line), "  %s %p", function_name, *addresses);
 		if (g_LastErrorDump.isNotEmpty())
 		{
 			g_LastErrorDump.concat(line);

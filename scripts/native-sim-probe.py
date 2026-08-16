@@ -10,8 +10,13 @@ translation unit, so the harness cannot drift from how the engine itself was com
 ordinary archive semantics (not --whole-archive) so only what the probe reaches is pulled in, and
 the game's own main() in libgeneralsmd_code_main.a stays out.
 
+The harness inherits the configuration of the build directory it is pointed at, because it takes its
+compile flags from that directory's compile database: `--build-dir build/native-debug` produces a
+probe compiled with `-DRTS_DEBUG`, and therefore one whose engine assertions are live.
+
 Usage:
     python3 scripts/native-sim-probe.py --build
+    python3 scripts/native-sim-probe.py --build-dir build/native-debug --build
     python3 scripts/native-sim-probe.py -- chunks path/to/map.map
 """
 
@@ -24,7 +29,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-BUILD = REPO / "build" / "native"
+DEFAULT_BUILD = REPO / "build" / "native"
+BUILD = DEFAULT_BUILD
 SOURCE = REPO / "spikes" / "sim" / "src" / "sim_probe.cpp"
 OUT = BUILD / "sim_probe"
 # The entry-point archive defines main(); linking it would either collide with the probe's main or
@@ -72,6 +78,13 @@ def archives():
 def extra_link_args():
     """The third-party libraries the engine archives depend on, as the native build links them."""
     args = ["-lstdc++", "-lm", "-lpthread", "-ldl", "-lz", "-lSDL2"]
+    # The render backend archive is on the link because the engine archives reference it; the debug
+    # configuration reaches more of it, so its Vulkan loader dependency has to be satisfied here as
+    # the native build itself satisfies it.
+    for prefix in ("/usr/lib/x86_64-linux-gnu", "/usr/lib", "/usr/local/lib"):
+        if (Path(prefix) / "libvulkan.so.1").exists():
+            args.append("-lvulkan")
+            break
     for name in ("libopenal.so", "libopenal.so.1"):
         for prefix in ("/usr/lib/x86_64-linux-gnu", "/usr/lib", "/usr/local/lib"):
             candidate = Path(prefix) / name
@@ -100,7 +113,10 @@ def build(verbose=False):
     sys.stdout.write(proc.stdout + proc.stderr)
 
     link_cmd = [
-        compiler, "-std=gnu++20", "-g", "-o", str(OUT), str(obj),
+        # -rdynamic for the same reason cmake/config-build.cmake passes it in the debug
+        # configuration: an assertion's stack dump is backtrace_symbols(), which can only name
+        # frames whose symbols are in the dynamic symbol table.
+        compiler, "-std=gnu++20", "-g", "-rdynamic", "-o", str(OUT), str(obj),
         "-Wl,--start-group", *[str(a) for a in archives()], "-Wl,--end-group",
         *extra_link_args(),
     ]
@@ -117,10 +133,17 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build", action="store_true", help="build the harness and exit")
+    ap.add_argument("--build-dir", default=str(DEFAULT_BUILD),
+                    help="native build directory to take flags and archives from "
+                         "(default: build/native); the probe inherits its configuration")
     ap.add_argument("--verbose", action="store_true", help="print the compile and link commands")
     ap.add_argument("args", nargs=argparse.REMAINDER,
                     help="arguments passed to the harness (after --)")
     opts = ap.parse_args()
+
+    global BUILD, OUT
+    BUILD = Path(opts.build_dir).resolve()
+    OUT = BUILD / "sim_probe"
 
     if opts.build or not OUT.exists():
         build(opts.verbose)

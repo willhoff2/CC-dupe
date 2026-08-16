@@ -106,7 +106,11 @@ static std::filesystem::path fixFilenameFromWindowsPath(const Char *filename, In
 				// Required to allow creation of new files
 				if (!(access & File::WRITE))
 				{
-					DEBUG_LOG(("StdLocalFileSystem::fixFilenameFromWindowsPath - Error finding file %s", filename.string().c_str()));
+					// TheSuperHackers @port `filename` is a `const Char *`, not a path; this line
+					// spelled it `filename.string().c_str()` and had never been compiled, because
+					// DEBUG_LOG expands to nothing without DEBUG_LOGGING and no debug build was
+					// possible off Windows.
+					DEBUG_LOG(("StdLocalFileSystem::fixFilenameFromWindowsPath - Error finding file %s", filename));
 					DEBUG_LOG(("StdLocalFileSystem::fixFilenameFromWindowsPath - Got so far %s", pathCurrent.string().c_str()));
 
 					return std::filesystem::path();

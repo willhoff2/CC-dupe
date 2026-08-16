@@ -183,19 +183,35 @@ class AsciiString;
 	*/
 	DEBUG_EXTERN_C char* TheCurrentIgnoreCrashPtr;
 
-	#define DEBUG_CRASH(m)	\
+	/*
+		TheSuperHackers @tweak Where the assertion is, in the same sleazy-global style and for the
+		same reason: the message alone says what went wrong but not where, and the stack dump only
+		names it when the symbol survived linking. TheCurrentCrashCondition is null for a
+		DEBUG_CRASH(), which has no condition.
+	*/
+	DEBUG_EXTERN_C const char* TheCurrentCrashFile;
+	DEBUG_EXTERN_C int TheCurrentCrashLine;
+	DEBUG_EXTERN_C const char* TheCurrentCrashCondition;
+
+	#define DEBUG_CRASH_AT(c, m)	\
 		do { \
 			{ \
 				static char ignoreCrash = 0; \
 				if (!ignoreCrash) { \
 					TheCurrentIgnoreCrashPtr = &ignoreCrash; \
+					TheCurrentCrashFile = __FILE__; \
+					TheCurrentCrashLine = __LINE__; \
+					TheCurrentCrashCondition = c; \
 					DebugCrash m ; \
+					TheCurrentCrashCondition = nullptr; \
 					TheCurrentIgnoreCrashPtr = nullptr; \
 				} \
 			} \
 		} while (0)
 
-	#define DEBUG_ASSERTCRASH(c, m)		do { { if (!(c)) DEBUG_CRASH(m); } } while (0)
+	#define DEBUG_CRASH(m)	DEBUG_CRASH_AT(nullptr, m)
+
+	#define DEBUG_ASSERTCRASH(c, m)		do { { if (!(c)) DEBUG_CRASH_AT(#c, m); } } while (0)
 
 	//Note: RELEASE_CRASH(m) is now always defined.
 	//#define RELEASE_CRASH(m)					DEBUG_CRASH((m))

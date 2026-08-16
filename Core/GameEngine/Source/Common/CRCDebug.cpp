@@ -25,6 +25,11 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port For CreateDirectory() and DeleteFile(), which used to arrive through
+// PreRTS.h. Only the DEBUG_CRC code below calls them, which is why this include was not needed
+// until a debug configuration could be built off Windows.
+#include <windows.h>
+
 #include "Common/CRCDebug.h"
 #include "Common/Debug.h"
 #include "Common/PerfTimer.h"

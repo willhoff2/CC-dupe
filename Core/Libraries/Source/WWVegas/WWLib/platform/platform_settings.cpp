@@ -49,15 +49,37 @@ static const char * const BIN_PREFIX = "BIN_";
 */
 enum { MAX_BIN_SIZE = 8192 };
 
-static StringClass _StorePath;
-static StringClass _StoreDirectory;
+/*
+**	The store's state lives in function local statics rather than file scope ones. The debug
+**	configuration reaches this store from DebugInit(), which the memory manager runs before main and
+**	therefore before this translation unit's own static constructors have run; a file scope
+**	StringClass is still all zeroes at that point and dereferences its null buffer. Function local
+**	statics are constructed on first use instead, so the order cannot bite. The Win32 spelling is
+**	ordering safe for the same reason: RegOpenKeyEx keeps no C++ state.
+*/
+static StringClass & Store_Path()
+{
+	static StringClass _store_path;
+	return _store_path;
+}
+
+static StringClass & Store_Directory()
+{
+	static StringClass _store_directory;
+	return _store_directory;
+}
+
 static INIClass * _Store = nullptr;
 
 /*
 **	One entry per key handle, the handle being the index plus one. A closed handle leaves an
 **	empty entry behind for the next open to claim, so live handles never move.
 */
-static DynamicVectorClass<StringClass> _OpenKeys;
+static DynamicVectorClass<StringClass> & Open_Keys()
+{
+	static DynamicVectorClass<StringClass> _open_keys;
+	return _open_keys;
+}
 
 
 /***********************************************************************************************
@@ -67,12 +89,12 @@ static void Build_Store_Path()
 {
 	const char * override_path = getenv("CNC_SETTINGS_FILE");
 	if (override_path != nullptr && *override_path != 0) {
-		_StorePath = override_path;
-		_StoreDirectory = "";
+		Store_Path() = override_path;
+		Store_Directory() = "";
 		const char * slash = strrchr(override_path, '/');
 		if (slash != nullptr) {
-			_StoreDirectory = _StorePath;
-			_StoreDirectory.Peek_Buffer()[slash - override_path] = 0;
+			Store_Directory() = Store_Path();
+			Store_Directory().Peek_Buffer()[slash - override_path] = 0;
 		}
 		return;
 	}
@@ -83,17 +105,17 @@ static void Build_Store_Path()
 	}
 
 #ifdef __APPLE__
-	_StoreDirectory.Format("%s/Library/Application Support/Command and Conquer Generals Zero Hour", home);
+	Store_Directory().Format("%s/Library/Application Support/Command and Conquer Generals Zero Hour", home);
 #else
 	const char * config = getenv("XDG_CONFIG_HOME");
 	if (config != nullptr && *config != 0) {
-		_StoreDirectory.Format("%s/CommandAndConquerGeneralsZeroHour", config);
+		Store_Directory().Format("%s/CommandAndConquerGeneralsZeroHour", config);
 	} else {
-		_StoreDirectory.Format("%s/.config/CommandAndConquerGeneralsZeroHour", home);
+		Store_Directory().Format("%s/.config/CommandAndConquerGeneralsZeroHour", home);
 	}
 #endif
 
-	_StorePath.Format("%s/Registry.ini", _StoreDirectory.Peek_Buffer());
+	Store_Path().Format("%s/Registry.ini", Store_Directory().Peek_Buffer());
 }
 
 
@@ -107,7 +129,7 @@ static INIClass * Get_Store()
 
 		_Store = W3DNEW INIClass;
 
-		RawFileClass file(_StorePath.Peek_Buffer());
+		RawFileClass file(Store_Path().Peek_Buffer());
 		if (file.Is_Available()) {
 			_Store->Load(file);
 		}
@@ -127,8 +149,8 @@ static void Flush_Store()
 	/*
 	**	Create the settings directory a component at a time; there is no portable mkdir -p.
 	*/
-	if (_StoreDirectory.Get_Length() > 0) {
-		StringClass partial = _StoreDirectory;
+	if (Store_Directory().Get_Length() > 0) {
+		StringClass partial = Store_Directory();
 		char * cursor = partial.Peek_Buffer();
 		for (char * scan = cursor + 1; *scan != 0; ++scan) {
 			if (*scan == '/') {
@@ -140,7 +162,7 @@ static void Flush_Store()
 		mkdir(cursor, 0755);
 	}
 
-	RawFileClass file(_StorePath.Peek_Buffer());
+	RawFileClass file(Store_Path().Peek_Buffer());
 	store->Save(file);
 }
 
@@ -150,13 +172,13 @@ static void Flush_Store()
  *=============================================================================================*/
 static const char * Section_Of(int key)
 {
-	if (key <= 0 || key > _OpenKeys.Count()) {
+	if (key <= 0 || key > Open_Keys().Count()) {
 		return nullptr;
 	}
-	if (_OpenKeys[key - 1].Get_Length() == 0) {
+	if (Open_Keys()[key - 1].Get_Length() == 0) {
 		return nullptr;
 	}
-	return _OpenKeys[key - 1].Peek_Buffer();
+	return Open_Keys()[key - 1].Peek_Buffer();
 }
 
 
@@ -183,22 +205,22 @@ int Open_Key(const char * sub_key, bool create)
 	**	The store has no empty sections, so a key that is created but never written to is simply
 	**	absent from the file until the first value lands in it.
 	*/
-	for (int index = 0; index < _OpenKeys.Count(); index++) {
-		if (_OpenKeys[index].Get_Length() == 0) {
-			_OpenKeys[index] = sub_key;
+	for (int index = 0; index < Open_Keys().Count(); index++) {
+		if (Open_Keys()[index].Get_Length() == 0) {
+			Open_Keys()[index] = sub_key;
 			return index + 1;
 		}
 	}
 
-	_OpenKeys.Add(sub_key);
-	return _OpenKeys.Count();
+	Open_Keys().Add(sub_key);
+	return Open_Keys().Count();
 }
 
 
 void Close_Key(int key)
 {
-	if (key > 0 && key <= _OpenKeys.Count()) {
-		_OpenKeys[key - 1] = "";
+	if (key > 0 && key <= Open_Keys().Count()) {
+		Open_Keys()[key - 1] = "";
 	}
 }
 
@@ -386,7 +408,7 @@ void Delete_Tree(const char * sub_key)
 const char * Get_Store_Path()
 {
 	Get_Store();
-	return _StorePath.Peek_Buffer();
+	return Store_Path().Peek_Buffer();
 }
 
 }	// namespace Settings

@@ -52,8 +52,10 @@
 
 #ifdef __APPLE__
 #include <crt_externs.h>
+#include <malloc/malloc.h>
 #include <sys/sysctl.h>
 #else
+#include <malloc.h>
 #include <sys/sysinfo.h>
 #endif
 
@@ -357,6 +359,30 @@ HGLOBAL GlobalHandle(LPCVOID memory)
 	**	written in terms of. A handle here is the pointer, so its inverse is the identity too.
 	*/
 	return (HGLOBAL)memory;
+}
+
+
+/*
+**	Win32 reports the size it actually committed, which is the requested size rounded up to the
+**	allocator's granularity, and GameMemory.cpp's MEMORYPOOL_DEBUG accounting depends on it being
+**	the *usable* size rather than the requested one: it fills the whole block with the filler
+**	value and adds the same number to its running total that sysFree() later subtracts. So this
+**	asks the C library the same question -- malloc_usable_size()/malloc_size() -- rather than
+**	remembering the requested size in a side table. Both return 0 for a null pointer, as
+**	GlobalSize() does for an invalid handle.
+*/
+SIZE_T GlobalSize(HGLOBAL memory)
+{
+	if (memory == nullptr) {
+		WWPlatform::Win32::Set_Last_Error(ERROR_INVALID_HANDLE);
+		return 0;
+	}
+
+#ifdef __APPLE__
+	return (SIZE_T)malloc_size((const void *)memory);
+#else
+	return (SIZE_T)malloc_usable_size((void *)memory);
+#endif
 }
 
 

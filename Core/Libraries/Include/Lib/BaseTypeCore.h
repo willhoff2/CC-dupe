@@ -121,5 +121,17 @@ typedef char						Byte;					// 1 byte		USED TO BE "SignedByte"
 typedef char						Char;					// 1 byte of text
 typedef bool						Bool;					//
 // note, the types below should use "long long", but MSVC doesn't support it yet
+// TheSuperHackers @port These have to be the same TYPE as `__int64`, not merely the same width.
+// The debug-only perf-timer code mixes the two spellings: PartitionManager.cpp declares `Int64
+// freq64` and GameLogic.cpp declares `__int64 freq64`, and both pass the address to the same
+// `GetPrecisionTimerTicksPerSec(Int64*)`. On MSVC that compiles because `int64_t` there *is*
+// `__int64`. On an LP64 target `int64_t` is `long`, a distinct type from the `long long` clang
+// spells `__int64` as, so `__int64*` does not convert and the translation unit fails. Spelling
+// these `long long` off MSVC gives every target what Windows already had.
+#ifdef _MSC_VER
 typedef int64_t						Int64;						// 8 bytes
 typedef uint64_t					UnsignedInt64;	  	        // 8 bytes
+#else
+typedef long long					Int64;						// 8 bytes, == __int64
+typedef unsigned long long			UnsignedInt64;	  	        // 8 bytes, == unsigned __int64
+#endif

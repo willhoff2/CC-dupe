@@ -35,6 +35,13 @@ REQUIRED_KEYS = {
         "objects", "translation_units", "compile_failures", "undefined_total",
         "undefined_by_category", "levels", "with_shims", "archives",
     ),
+    # The same build in the debug configuration. `config` is required as well as the rest, because
+    # comparing a debug measurement with a release baseline compares different compiled code, and
+    # check-native-build-baseline.py can only refuse that while the field is present.
+    "native-build-shimmed-debug-level1-2-3-4.json": (
+        "objects", "translation_units", "compile_failures", "undefined_total",
+        "undefined_by_category", "levels", "with_shims", "archives", "config",
+    ),
     "native-port-probe-native.json": ("targets", "clean", "total", "mode"),
     "native-port-probe-shimmed.json": ("targets", "clean", "total", "mode"),
 }

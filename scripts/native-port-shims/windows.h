@@ -428,6 +428,8 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define ERROR_INVALID_HANDLE     6L
 #define ERROR_NO_MORE_FILES      18L
 #define ERROR_INVALID_PARAMETER  87L
+#define ERROR_BUFFER_OVERFLOW    111L
+#define ERROR_INSUFFICIENT_BUFFER 122L
 #define ERROR_ALREADY_EXISTS     183L
 #define ERROR_MORE_DATA          234L
 #define CREATE_SUSPENDED         0x00000004
@@ -440,6 +442,7 @@ typedef struct _GLYPHMETRICSFLOAT {
 #define WAIT_TIMEOUT             258L
 #define WAIT_FAILED              0xFFFFFFFF
 #define INFINITE                 0xFFFFFFFF
+#define MAX_COMPUTERNAME_LENGTH  15
 #define FILE_ATTRIBUTE_READONLY  0x00000001
 #define FILE_ATTRIBUTE_HIDDEN    0x00000002
 #define FILE_ATTRIBUTE_DIRECTORY 0x00000010
@@ -729,6 +732,10 @@ void   ExitProcess(UINT);
 BOOL   TerminateProcess(HANDLE, UINT);
 BOOL   CreateProcessA(LPCSTR, LPSTR, LPSECURITY_ATTRIBUTES, LPSECURITY_ATTRIBUTES, BOOL, DWORD,
                       LPVOID, LPCSTR, LPSTARTUPINFOA, LPPROCESS_INFORMATION);
+// Machine and user identity. LANAPI.cpp puts them in the LAN lobby's player name and Recorder.cpp
+// puts the machine name in the debug stats log, so only a debug configuration reaches the latter.
+BOOL   GetComputerNameA(LPSTR, LPDWORD);
+BOOL   GetUserNameA(LPSTR, LPDWORD);
 DWORD  GetEnvironmentVariableA(LPCSTR, LPSTR, DWORD);
 LPSTR  GetCommandLineA();
 DWORD  FormatMessageA(DWORD, LPCVOID, DWORD, DWORD, LPSTR, DWORD, va_list*);
@@ -861,6 +868,8 @@ BOOL    SetDeviceGammaRamp(HDC, LPVOID);
 #define GetFileVersionInfo GetFileVersionInfoA
 #define VerQueryValue    VerQueryValueA
 #define CreateProcess    CreateProcessA
+#define GetComputerName  GetComputerNameA
+#define GetUserName      GetUserNameA
 #define GetEnvironmentVariable GetEnvironmentVariableA
 #define GetCommandLine   GetCommandLineA
 #define FormatMessage    FormatMessageA

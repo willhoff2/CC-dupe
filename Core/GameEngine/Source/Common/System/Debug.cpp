@@ -81,6 +81,17 @@
 // dialog: see docs/porting/window-event-loop.md.
 #include "GameClient/PlatformWindowHost.h"
 #include "WWLib/platform/platform_dialog.h"
+// TheSuperHackers @port DebugBreak() and GetModuleFileName() are called by the debug logging and
+// assert paths below, which only compile in a debug configuration, so they were missing from this
+// block until one could be built off Windows. Both have seams already: the debugger trap is
+// Utility/intrin_compat.h's __debugbreak(), and "where is the running executable" is
+// WWPlatform::Path::Get_Executable_Path(), which is also what the file seam's own
+// GetModuleFileNameA() is built on. The path seam is declared here rather than included, because
+// its header reaches WWLib/always.h and the port's <windows.h>, whose MB_* and ID* macros would
+// collide with the enumerations below.
+#include <Utility/intrin_compat.h>
+
+namespace WWPlatform { namespace Path { bool Get_Executable_Path(char * buffer, unsigned size); } }
 
 enum
 {
@@ -146,6 +157,21 @@ static void ShowWindow( HWND window, int )
 		WWPlatform::Window_Show( window, false );
 }
 
+static void DebugBreak()
+{
+	__debugbreak();
+}
+
+// The Win32 signature is DWORD GetModuleFileName(HMODULE, LPSTR, DWORD); the only caller here
+// ignores the result, and asks for the running executable by passing a null module handle.
+static void GetModuleFileName( void * /* module */, char * buffer, size_t size )
+{
+	if( buffer == nullptr || size == 0 )
+		return;
+	if( !WWPlatform::Path::Get_Executable_Path( buffer, (unsigned)size ) )
+		buffer[ 0 ] = '\0';
+}
+
 #endif // !_WIN32
 
 // Horrible reference, but we really, really need to know if we are windowed.
@@ -195,6 +221,11 @@ static DWORD theMainThreadID = 0;
 // ----------------------------------------------------------------------------
 
 char* TheCurrentIgnoreCrashPtr = nullptr;
+#ifdef DEBUG_CRASHING
+const char* TheCurrentCrashFile = nullptr;
+int TheCurrentCrashLine = 0;
+const char* TheCurrentCrashCondition = nullptr;
+#endif
 #ifdef DEBUG_LOGGING
 UnsignedInt DebugLevelMask = 0;
 const char *TheDebugLevels[DEBUG_LEVEL_MAX] = {
@@ -218,6 +249,10 @@ static int doCrashBox(const char *buffer, Bool logResult);
 static void whackFunnyCharacters(char *buf);
 #ifdef DEBUG_STACKTRACE
 static void doStackDump();
+#endif
+#if defined(DEBUG_CRASHING) && !defined(_WIN32)
+static void doStderrOutput(const char *buffer);
+static void doStderrStackDump();
 #endif
 
 // ----------------------------------------------------------------------------
@@ -349,12 +384,29 @@ static int doCrashBox(const char *buffer, Bool logResult)
 {
 	int result;
 
+#ifdef _WIN32
 	if (!ignoringAsserts()) {
 		result = MessageBoxWrapper(buffer, "Assertion Failure", MB_ABORTRETRYIGNORE|MB_TASKMODAL|MB_ICONWARNING|MB_DEFBUTTON3);
 		//result = MessageBoxWrapper(buffer, "Assertion Failure", MB_ABORTRETRYIGNORE|MB_TASKMODAL|MB_ICONWARNING);
 	}	else {
 		result = IDIGNORE;
 	}
+#else
+	/*
+		TheSuperHackers @port There is no modal dialog and no human to answer it, so the answer is
+		decided here rather than asked for: abort, which is the Abort branch below and a non-zero
+		exit. Answering Ignore instead -- what the dialog seam returns for MB_DEFBUTTON3, and what
+		ignoringAsserts() answers on Windows when nobody can see a dialog -- would let a failed
+		assertion continue unnoticed, which is precisely the blindfold a native debug build exists
+		to remove. `-ignoreAsserts` still means continue, because that is the engine's own
+		explicit request for it; the implicit auto-ignores (full screen, headless) do not apply,
+		since they only exist to avoid a dialog nobody can dismiss.
+	*/
+	result = (TheGlobalData != nullptr && TheGlobalData->m_debugIgnoreAsserts) ? IDIGNORE : IDABORT;
+	if (result == IDABORT)
+		doStderrOutput("[Abort: assertion failed off Windows, where there is no assert dialog to "
+			"ignore it. Pass -ignoreAsserts to continue instead.]");
+#endif
 
 	switch(result)
 	{
@@ -398,6 +450,37 @@ static void doStackDump()
 	doLogOutput("\nStack Dump:");
 	::FillStackAddresses(stacktrace, STACKTRACE_SIZE, STACKTRACE_SKIP);
 	::StackDumpFromAddresses(stacktrace, STACKTRACE_SIZE, doLogOutput);
+}
+#endif
+
+#if defined(DEBUG_CRASHING) && !defined(_WIN32)
+// ----------------------------------------------------------------------------
+/**
+	TheSuperHackers @port An assertion report on stderr, written whether or not logging was ever
+	initialised: the log file is opened by DebugInit(), which runs after the asserts in static
+	initialisers, and the "console" half of doLogOutput() is OutputDebugString(), which off Windows
+	is a printf to stdout and so is indistinguishable from the game's ordinary output.
+*/
+static void doStderrOutput(const char *buffer)
+{
+	fprintf(stderr, "%s\n", buffer != nullptr ? buffer : "");
+	fflush(stderr);
+}
+
+// ----------------------------------------------------------------------------
+/**
+	The walk doStackDump() does, on stderr, for the same reason. Off Windows the frames are
+	return addresses and mangled names with no line numbers; see StackDump.cpp.
+*/
+static void doStderrStackDump()
+{
+	const int STACKTRACE_SIZE	= 24;
+	const int STACKTRACE_SKIP = 2;
+	void* stacktrace[STACKTRACE_SIZE];
+
+	doStderrOutput("Stack Dump:");
+	::FillStackAddresses(stacktrace, STACKTRACE_SIZE, STACKTRACE_SKIP);
+	::StackDumpFromAddresses(stacktrace, STACKTRACE_SIZE, doStderrOutput);
 }
 #endif
 
@@ -597,6 +680,27 @@ void DebugCrash(const char *format, ...)
 	prepBuffer(theCrashBuffer);
 	strlcat(theCrashBuffer, "ASSERTION FAILURE: ", ARRAY_SIZE(theCrashBuffer));
 
+#ifndef _WIN32
+	// TheSuperHackers @port The site of the assertion, which the message on its own does not say
+	// and which the stack dump only names when the symbol survived linking. Set by
+	// DEBUG_CRASH_AT(); absent when DebugCrash() is called directly. Off Windows only: the assert
+	// dialog is the Windows report and its text is behaviour the Windows build owns, whereas off
+	// Windows the only report is this line on stderr, and a line without a source location is not
+	// actionable.
+	if (TheCurrentCrashFile != nullptr)
+	{
+		size_t at = strlen(theCrashBuffer);
+		snprintf(theCrashBuffer + at, ARRAY_SIZE(theCrashBuffer) - at, "%s:%d: ",
+			TheCurrentCrashFile, TheCurrentCrashLine);
+	}
+	if (TheCurrentCrashCondition != nullptr)
+	{
+		size_t at = strlen(theCrashBuffer);
+		snprintf(theCrashBuffer + at, ARRAY_SIZE(theCrashBuffer) - at, "!(%s): ",
+			TheCurrentCrashCondition);
+	}
+#endif
+
 	va_list arg;
 	va_start(arg, format);
 	size_t offset =  strlen(theCrashBuffer);
@@ -623,6 +727,20 @@ void DebugCrash(const char *format, ...)
 		}
 #endif
 	}
+
+#ifndef _WIN32
+	/*
+		TheSuperHackers @port On stderr as well, and not conditional on useLogging: off Windows
+		this is the only channel an assertion is certain to reach, because there is no assert
+		dialog and because a report suppressed for want of a log file is exactly the silent
+		failure this build exists to end.
+	*/
+	doStderrOutput(theCrashBuffer);
+	if (!(TheGlobalData && TheGlobalData->m_debugIgnoreStackTrace))
+	{
+		doStderrStackDump();
+	}
+#endif
 
 	strlcat(theCrashBuffer, "\n\nAbort->exception; Retry->debugger; Ignore->continue", ARRAY_SIZE(theCrashBuffer));
 

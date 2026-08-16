@@ -1318,6 +1318,32 @@ bool Is_Trying_To_Exit()
 
 
 
+#else	//_WIN32
+
+#include "Except.h"
+
+/***********************************************************************************************
+ *                                                                                             *
+ *  TheSuperHackers @port The only entry point of this file that a non-Windows build needs.     *
+ *                                                                                             *
+ *  On Windows the flag is raised by Exception_Handler() once it has decided to quit, and       *
+ *  WWDebug_Assert_Fail() consults it so that an assert tripped while a crash is already        *
+ *  unwinding exits instead of stopping in a modal dialog. Off Windows there is no unhandled    *
+ *  exception filter yet -- WinMain.cpp owns it and the non-Windows entry point is a later      *
+ *  slice -- so nothing can raise the flag and the answer is always false. That is the correct  *
+ *  answer rather than a placeholder: with no exception handler installed, no assert can fire   *
+ *  during one. When the native crash handler lands it sets this flag, and the assert path      *
+ *  behaves as Windows already does.                                                           *
+ *                                                                                             *
+ * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+static bool TryingToExit = false;
+
+bool Is_Trying_To_Exit()
+{
+	return(TryingToExit);
+}
+
 #endif	//_WIN32
 
 
