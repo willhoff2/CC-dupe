@@ -4,24 +4,28 @@ The headless native build ticks a retail replay to the end and is deterministic 
 **none** of its 134 checkpoint CRCs equal the recorded ones. This report says *where* that starts, *what
 state* differs, and *which mechanism* produces each difference. It fixes none of them: the one cause
 whose fix looked cheap turned out to change the Windows oracle, which is measured in §3.1 and is why
-that change is not in this PR.
+that change was not landed.
 
 Cross-platform CRC equality is **not a shipping requirement** — retail replay/save compatibility is out
 of scope. Its value is as an **oracle**: it is the only mechanism that can say the native simulation
 computes the same game as the known-good Windows build, and the previous wave showed how badly that
 oracle is needed (13,500 "successful" frames of an empty map).
 
+**Decided, do not relitigate:** the project stops at *oracle-grade agreement* and does not pursue
+bit-exactness with Windows. §5 defines what oracle-grade means as an acceptance criterion for later
+slices; `decisions-resolved.md` §8 records the decision itself.
+
 ## 0. What was measured, and with what
 
 | Thing | Value |
 |---|---|
-| Commit | this branch, off `main` @ `8c6dfaab0` (after #96/#98/#99/#100) |
+| Commit | #105, off `main` @ `8c6dfaab0` (after #96/#98/#99/#100) |
 | Host | Ubuntu 22.04, x86-64 Linux — **not** Apple Silicon (see §6) |
 | Native binary | `build/native/native_strict_link`, ELF 64-bit x86-64, 979/979 objects, 0 unresolved |
 | Windows binary | `./scripts/docker-build.sh` VC6 build, `RTS_BUILD_OPTION_DEBUG=OFF`, run under Wine |
 | Data | `zerohour104_gamedata_full.7z` + `generals108_gamedata_trimmed.7z`, extracted outside the repo |
 | Replay | `GeneralsReplays/GeneralsZH/1.04/Replays/366648.rep`, `[RANK] Arctic Arena ZH v1`, 7:30, plus all 10 gate replays for §3.1 |
-| Instrument | `CRCDiag` (this PR): opt-in, env-gated, does not touch the production CRC |
+| Instrument | `CRCDiag` (#105): opt-in, env-gated, does not touch the production CRC |
 
 `CRCDiag` is off unless `CNC_CRC_DIAG` names a log file. When on it records, per frame: every
 `xferUser` blob with its bytes, every object's running CRC with its template name, each subsystem
@@ -89,7 +93,7 @@ plus, where a mechanism is not visible at frame 0, a direct A/B of the same expr
 compilers. That metric is honest about what it is: a count of differing serialised records at one
 instant, not a claim about long-run influence.
 
-### 3.1 CONFIRMED — VC6 folds the constant multiplies out of `setOrientation`'s cross products, inconsistently (119/132 records; **candidate fix rejected by the oracle, not in this PR**)
+### 3.1 CONFIRMED — VC6 folds the constant multiplies out of `setOrientation`'s cross products, inconsistently (119/132 records; **candidate fix rejected by the oracle, not landed**)
 
 `Thing::setOrientation()` builds the rotation by crossing the heading with the constant Z axis:
 
@@ -120,8 +124,8 @@ But it **changes the Windows build** on other maps, and the retail replay gate o
 
 | Windows build | `check-replays.yml`, GeneralsMD, 10 replays |
 |---|---|
-| this PR **+ the direct spelling** | **FAIL** — `12-11-35_2v2_babai_ILnur_HardAI_HardAI` mismatches at frame 110, `18-13-02_3v3_Supremac_Loonen_JB_HardAI_HardAI_HardAI` at frame 26910 |
-| this PR (that one file reverted, nothing else) | **PASS** — all 10, both `vc6+t+e` and `vc6-releaselog+t+e` |
+| the instrument **+ the direct spelling** | **FAIL** — `12-11-35_2v2_babai_ILnur_HardAI_HardAI` mismatches at frame 110, `18-13-02_3v3_Supremac_Loonen_JB_HardAI_HardAI_HardAI` at frame 26910 |
+| the instrument alone (that one file reverted, nothing else) | **PASS** — all 10, both `vc6+t+e` and `vc6-releaselog+t+e` |
 
 The local Wine differential predicted it first (`12-11-35` diverging at frame 110 instead of 3410,
 reproduced twice, restored by reverting only `Thing.cpp`), and CI on real Windows confirmed it.
@@ -131,7 +135,7 @@ The reason is in the table above: VC6's folding is *value dependent*, so for som
 literal `0.0f` changes them. Matching VC6 by spelling means reproducing its per-element folding
 decisions, which is reverse engineering an optimiser, not a seam.
 
-What this measurement cost: an earlier draft of this PR carried that change and claimed it was
+What this measurement cost: an earlier draft of #105 carried that change and claimed it was
 behaviour preserving on the strength of the pre/post frame-0 comparison on **one** map. One map was not
 enough. That is recorded here rather than quietly dropped.
 
@@ -224,13 +228,34 @@ the object stream would reorder. Native and Windows emit the same 221 objects at
 
 Attempted with Valgrind against the native binary; it aborts before running the game with
 `debuginfo reader: Possibly corrupted debuginfo file. I can't recover.` MemorySanitizer is not an
-option either — it needs every dependency instrumented, and this binary links prebuilt FFmpeg, OpenAL
-and zlib. So this remains a genuine possibility, and it is *consistent* with per-platform
-self-consistency. What it would take: a Valgrind run against a binary built with `-gline-tables-only`,
-or an MSan build of the simulation-only subset (no audio/video deps) — a slice of its own.
+option as the binary stands either — it needs *every* dependency instrumented, and this one links
+prebuilt FFmpeg, OpenAL and zlib. So this remains a genuine possibility, and it is *consistent* with
+per-platform self-consistency.
 
 Weak counter-evidence, not a measurement: an uninitialised read would have to land in one of the 132
 differing records and nowhere else, and those 132 are all explained, element by element, by §3.1–3.3.
+
+**How to measure it without redoing the work above.** Either route is a slice of its own; the second is
+the stronger answer.
+
+1. *Valgrind, cheap.* The abort is a debuginfo problem, not a memcheck problem. Rebuild with
+   `-gline-tables-only` instead of `-g` (`CMAKE_CXX_FLAGS_RELWITHDEBINFO` in `cmake/native/`) — or with
+   `-g0`, which loses the symbolisation but still reports — and run the same replay under
+   `valgrind --error-exitcode=0 --track-origins=yes`. Expect ~50× slowdown, so bound it with the
+   existing `--max-frames`-style limit at ~200 frames: §2 shows frame 0 already carries 132 of the
+   differing records, so a short run is enough.
+2. *MSan, sound.* MSan needs the simulation-only subset, which already exists: the native strict-link
+   target minus audio and video. Build with `RTS_BUILD_OPTION_FFMPEG=OFF`, the null OpenAL path
+   (`ALSOFT_DRIVERS=null` is already how the harness runs) and `-fsanitize=memory
+   -fsanitize-memory-track-origins=2`, and instrument the one remaining prebuilt dependency (zlib) from
+   source, or use the engine's bundled copy. `libc++` must be an instrumented one
+   (`-stdlib=libc++ -fsanitize=memory` against an MSan-built libc++), which is the actual cost here.
+
+What a positive result looks like, so it is not confused with §3.1–3.3: an MSan/Valgrind report whose
+stack lands inside a `crc()`/`xfer` path or in something feeding a `Matrix3D`, correlated against the
+`CNC_CRC_DIAG_BYTES` dump for the same frame — i.e. the differing *record* is identified first, and the
+report must point at the code that produced that record. A report anywhere else is a real bug but not a
+divergence cause, and should be filed separately rather than added to this ranking.
 
 ### 3.9 UNMEASURED — locale-dependent parsing
 
@@ -239,6 +264,23 @@ checkpoints identical. No other locale could be generated (`localedef` has no ch
 `character map file 'UTF-8' not found`), so a comma-decimal locale — the classic `atof()` failure — was
 **not** tested. Partial counter-evidence: INI-derived data agrees, since both runs produce identical
 template names and object counts.
+
+**How to measure it.** Install the charmaps and generate one comma-decimal locale, then rerun the same
+comparison:
+
+```sh
+sudo apt-get install -y locales                     # provides /usr/share/i18n/charmaps
+sudo localedef -i de_DE -f UTF-8 de_DE.UTF-8
+LC_ALL=de_DE.UTF-8 CNC_CRC_DIAG=/tmp/nat-de.log CNC_CRC_DIAG_CONTINUE=1 <the harness command in §0>
+diff <(grep '^C ' /tmp/nat-de.log) <(grep '^C ' /tmp/nat-c.log)
+```
+
+Any difference in the 134 checkpoint lines confirms it; identical lines exclude it for this map. Two
+things make this worth doing properly rather than declaring it excluded: the engine calls `atof`/`scanf`
+family functions in INI parsing, and macOS inherits the user's locale from the environment, so a German
+or French user's machine is the realistic case, not an artificial one. Note also that this is a
+*native-only* hazard class — it can make the port wrong on its own terms, independent of any Windows
+comparison — so it belongs in the acceptance criterion of §5 rather than in the divergence ranking.
 
 ## 4. A finding about the oracle itself: under Wine it is only valid for the first 3,111 frames
 
@@ -250,7 +292,7 @@ C 3111 LOCAL 0A8ED60F REPLAY 0A8ED60F MATCH
 C 3211 LOCAL 04D05717 REPLAY BC803967 MISMATCH
 ```
 
-This is not caused by anything in this PR: an unmodified `main` build, without the diagnostics,
+This is not caused by the instrument: an unmodified `main` build, without the diagnostics,
 mismatches at the same frame under Wine, and the same commit passes this replay on real Windows in CI.
 The frame also moves with the *data* staged (3211 with the full archive, 3611 with the trimmed one).
 
@@ -260,30 +302,77 @@ Consequences, stated plainly:
   same commits pass on real Windows in CI, so that is a Wine artefact and CI is the verdict.
 - Under Wine the gate is still usable as a **differential** oracle, and that is what caught §3.1's
   rejected fix before CI did: run the same 10 replays on two builds and compare the per-replay
-  first-divergence frames. This PR is identical to unmodified `main` replay for replay there, and green
-  on real Windows.
+  first-divergence frames. The landed instrument is identical to unmodified `main` replay for replay
+  there, and green on real Windows.
 - Frame 3211 on `366648.rep` is where the *Wine* Windows run stops matching the recording, which is why
   §1–§3 compare native against a Windows **run** rather than against the recording. That comparison is
   unaffected by this limit.
 
-## 5. Is cross-platform lock-step reachable? A recommendation, not a decision
+## 5. DECIDED: stop at oracle-grade agreement, do not pursue bit-exactness
 
-**Reachable in principle, but it is a project, not a fix** — and the user should decide whether to buy
-it, because it is not needed for the stated scope (single-player campaign and skirmish; retail
-replay/save compatibility already out of scope).
+This was raised as a recommendation and the project owner has **accepted it**. The decision is recorded
+in `decisions-resolved.md` §8; it is settled, and a later slice should not reopen it.
 
-What it would take, given §3: every checksummed float expression spelled to evaluate at double
-precision to match x87 (§3.2), the engine carrying its own `sinf`/`cosf`/`sqrtf` (§3.3), and each new
-divergence found by exactly the bisect-in-time/bisect-in-state loop used here. That is broad,
-invasive, touches Windows code paths, and each step must keep the Windows build bit-identical.
+**Cross-platform lock-step is reachable in principle but is a project, not a fix**, and it is not needed
+for the stated scope (single-player campaign and skirmish; retail replay/save compatibility already out
+of scope). It would take every checksummed float expression spelled to evaluate at double precision to
+match x87 (§3.2) plus the engine carrying its own `sinf`/`cosf`/`sqrtf` (§3.3), invasively, across
+Windows code paths — and §3.1 is the measured warning: the cheapest-looking bit-exact fix in the whole
+report moved Windows behaviour on two of ten replays, so every such step must be bought with a full
+replay-gate run. That is the main argument for the decision.
 
-The recommendation is to **stop at oracle-grade agreement, not bit-exactness**: keep the
-`CRCDiag`-based native-vs-Windows comparison as the wave's acceptance instrument, require that the
-divergence stays within a bounded handful of ULP-level records and that structure (object count, IDs,
-order, templates) matches exactly. §3.1 is the cautionary case: even the cheapest-looking bit-exact fix
-turned out to move Windows behaviour, so each one has to be paid for with a 10-replay differential run.
-Pursuing full lock-step is only worth it if cross-platform multiplayer or shared replays ever come back
-into scope — at which point §3.2 is the thing to schedule first.
+### What "oracle-grade agreement" means, concretely
+
+This is the acceptance criterion for future slices that touch simulation, serialisation or float
+arithmetic. It is deliberately checkable rather than aspirational. A native run agrees with the Windows
+oracle when, on the same replay and the same retail data:
+
+1. **Structure is identical.** Same object count per frame, same object IDs in the same order, same
+   template names, same subsystem marker sequence and nesting depth. This is a *hard* criterion — any
+   difference here is a port defect and blocks, because it means the two runs are not simulating the
+   same world (this is exactly what would have caught the empty-map result of the previous wave).
+2. **Value divergence is bounded and ULP-shaped.** Every differing `xferUser` record differs only in
+   float elements, and only by a signed zero or a small number of ULPs. A differing record length, a
+   differing offset, an integer field difference, or a float difference larger than a few ULPs is a
+   defect, not float weather.
+3. **It does not amplify.** The differing-record count stays in the same order of magnitude between the
+   first checkpoint and the last measured one (this report: 132 → 133 → 141 across frames 0, 100,
+   1000). Growth means feedback, which is a defect.
+4. **The native run is self-consistent.** Two native runs of the same replay are bit-identical at all
+   134 checkpoints, and the run reaches the replay's end without an assertion or a mid-run crash.
+5. **The Windows build is unchanged.** The retail replay gate on real Windows CI stays green.
+
+Equal CRCs are explicitly **not** required, and no slice should be blocked for failing to achieve them.
+What is required is the ability to *show* items 1–5, which means keeping `CRCDiag` working: it is the
+acceptance instrument, not a debugging leftover. Frame CRC equality remains useful in one place — native
+versus native, where it is exact and where item 4 uses it.
+
+If cross-platform multiplayer or shared replays ever return to scope, this decision is the thing to
+revisit, and §3.2 is the first item to schedule.
+
+## 5a. What the native simulation is now known to do, and what it is not
+
+Stated plainly, because the point of this project is not to blur these:
+
+**Known to do**, measured on this branch, x86-64 Linux:
+
+- Load the real retail map: 221 objects at frame 0 from `[RANK] Arctic Arena ZH v1`, with the same IDs,
+  order and template names as the Windows build — not an empty world.
+- Tick the replay to its end (07:30/07:30) and emit all 134 checkpoint CRCs, with a *varying* frame CRC.
+- Be deterministic against itself: two runs are bit-identical at all 134 checkpoints.
+- Agree with the Windows oracle to within 132 of 440,035 raw-byte records at frame 0, all of them
+  `Matrix3D` floats, all differing only by signed zeros or ~1 ULP, without amplifying (§2).
+
+**Not known to do, and not claimed:**
+
+- It does not reproduce the Windows CRCs. Zero of 134 checkpoints match, and after this decision they
+  are not expected to.
+- It is not proven free of uninitialised reads (§3.8) or locale sensitivity (§3.9).
+- It has not been measured on Apple Silicon at all (§6) — arm64 adds FMA and a different libm, so its
+  divergence set is a superset of this one.
+- It does not shut down cleanly: it exits 139 in teardown *after* the last checkpoint (§6).
+- Nothing here says anything about rendering, audio or the campaign; this is the headless simulation
+  only.
 
 ## 6. What could not be measured here
 
