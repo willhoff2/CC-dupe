@@ -161,3 +161,12 @@ python3 scripts/ci/check-native-build-baseline.py --results /tmp/l4.json
 Windows is verified by the Wine/VC6 build and the retail replay check
 (`.agents/skills/windows-build-and-replays`), not by inspection: every non-Windows branch this slice
 adds is unreachable there, but the claim is only worth what the build says.
+
+**The replay gate ran green on this seam, so it is verified behaviourally and not only as a
+compile.** This slice changed what `Core/GameEngine` links and put two new guard spellings around
+live code, and a build check cannot see a simulation drift. On #82's own head, CI run 31915003815
+simulated the ten recorded retail replays under `vc6+t+e` and `vc6-releaselog+t+e` with
+`Simulation of all replays completed. Errors occurred: 0`, alongside all twelve green Windows build
+configurations. Anyone changing `RTS_HAS_GAMESPY` or the `_WIN32` guards here should re-run that gate:
+it is the strongest evidence this repository can produce that the simulation is unchanged, and it is
+cheap to demand.
