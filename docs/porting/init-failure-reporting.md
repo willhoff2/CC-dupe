@@ -62,13 +62,22 @@ Three limits worth stating plainly, because they bound what the table proves:
   [decisions-resolved.md](decisions-resolved.md) on not redesigning subsystem lifecycle for the
   port.
 
+Where a factory can return one of two classes (the `-headless` dummies), both are listed and the row
+is classified by the **weakest** of the two, because that is what a caller can rely on — which is why
+rows 22 and 40 read `no-failure-path` with `DEBUG_CRASH` in the evidence.
+
 Everything in `GameEngine::init()` is on the single-player startup path: skirmish and campaign both
 start behind it. The exceptions are noted per row.
 
 ## The enumeration
 
-Generated. Regenerate with `python3 scripts/init-reporting-scan.py --doc --json docs/porting/ci-baselines/init-reporting.json`; the machine copy
-is `ci-baselines/init-reporting.json` and CI holds it with
+Generated — do not hand-edit. Regenerate both copies with
+
+```sh
+python3 scripts/init-reporting-scan.py --doc --json docs/porting/ci-baselines/init-reporting.json
+```
+
+The machine copy is `ci-baselines/init-reporting.json` and CI holds it with
 `python3 scripts/init-reporting-scan.py --check`, which fails if any entry point's reporting gets
 quieter than the baseline or if a new entry point cannot report at all.
 
@@ -174,7 +183,11 @@ not `init()` calls, and two of them are the largest remaining silent surfaces.
 2. `GameTextManager::init()` — the five failure returns now report. **Only** the failure-reporting
    seam is touched; the `.csf` width bug belongs to slice A and is untouched, including
    `parseCSF()`'s body.
-3. `GameEngine::init()`'s `catch (ErrorCode ec)` — any code other than `ERROR_INVALID_D3D` used to
+3. `Generals` shares `GameText.cpp`, and its `GameEngine::init()` has the same
+   `catch (INIException)` → `RELEASE_CRASH` clause, so the string manager's failures are loud in
+   both games. Its `catch (ErrorCode)` is *not* touched: Generals is out of scope for port purposes
+   (`decisions-resolved.md`), and the swallowed code below is a Zero Hour startup-path fix.
+4. `GameEngine::init()`'s `catch (ErrorCode ec)` — any code other than `ERROR_INVALID_D3D` used to
    be caught and dropped, so a `throw ERROR_BUG` or `throw ERROR_OUT_OF_MEMORY` during
    initialisation resumed at the bottom of the `try` having skipped everything after the throw. It
    now `RELEASE_CRASH`es with the code.
@@ -185,8 +198,8 @@ added, removed or reordered, and the throw sites are all inside branches that we
 
 ## Negative control
 
-`python3 scripts/native-init-failure-test.py` (CI: `native-behaviour-tests`, and it needs no game
-data). It compiles `Core/GameEngine/Source/Common/System/tests/init_failure_test.cpp` against the
+`python3 scripts/native-init-failure-test.py` (CI: a step of the `native-build` job, and it needs no
+game data). It compiles `Core/GameEngine/Source/Common/System/tests/init_failure_test.cpp` against the
 real `InitFailure.h` and `INIException.h`, forces a stand-in subsystem's `init()` to fail, and drives
 it through the shape the engine uses — `initSubsystem()` calling a `void init()`, with the engine's
 `catch (INIException)` clause producing the text a `RELEASE_CRASH` would be handed. It asserts:
