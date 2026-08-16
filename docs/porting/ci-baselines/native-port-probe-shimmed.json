@@ -10,8 +10,8 @@
     "miles-src/mss",
     "stb-src"
   ],
-  "clean": 714,
-  "total": 759,
+  "clean": 716,
+  "total": 760,
   "targets": {
     "Core/Libraries/Source/Compression": {
       "clean": 11,
@@ -22,8 +22,8 @@
       "total": 37
     },
     "Core/Libraries/Source/WWVegas/WWLib": {
-      "clean": 78,
-      "total": 78
+      "clean": 79,
+      "total": 79
     },
     "Core/Libraries/Source/WWVegas/WWDebug": {
       "clean": 3,
@@ -42,7 +42,7 @@
       "total": 6
     },
     "Core/GameEngine": {
-      "clean": 195,
+      "clean": 196,
       "total": 210
     },
     "GeneralsMD/Code/GameEngine": {

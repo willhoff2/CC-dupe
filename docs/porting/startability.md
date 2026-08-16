@@ -20,8 +20,8 @@ None of it is quoted from prose.
 
 ## 1. The headline, and its exact limits
 
-"Before" is the branch point, `4d4b096b3` — main plus the window/GDI and D3DX entry-point slice
-(#85), whose baseline is the last one measured without a binary.
+"Before" is the branch point, main at `51322470b` — the window/GDI and D3DX entry-point slice (#85)
+as merged, whose baseline is the last one measured without a binary.
 
 | | before this slice | now |
 |---|---|---|

@@ -572,11 +572,11 @@ and the per-pile symbol lists. Because it exits non-zero today by design, the st
 status in the job summary and asserts the JSON exists; the ratchet is the baseline check, which fails
 if the count the linker refuses grows.
 
-## The strict link produces an executable, measured 2026-08-16 on `4d4b096b3` with clang 14 (current baseline)
+## The strict link produces an executable, measured 2026-08-16 on main `51322470b` with clang 14 (current baseline)
 
 Every figure above this line was a count of what does not link. This one is a file.
 
-| Levels 1-4, `--with-shims`, `--strict-link` | branch point `4d4b096b3` | now |
+| Levels 1-4, `--with-shims`, `--strict-link` | branch point `51322470b` | now |
 |---|---:|---:|
 | Translation units | 976 | 977 |
 | Object files produced | 976 | **977** |
