@@ -10,6 +10,11 @@ success, and simulates 13,500 frames of a world with none of the map's objects i
 wrong answer, produced by a build in which the assertion that was written to catch exactly this cannot
 be compiled.
 
+The map defect itself is now fixed on `main` (#88, §3), and that is the least interesting part of this
+report. What it cost to *notice* is the finding: nothing in the build said a word, and the desync
+check meant to catch simulation error passed more comfortably on the empty world than it would have on
+a correct one.
+
 ## 0. What was measured, and with what
 
 | Thing | Value |
@@ -161,26 +166,35 @@ The mechanism, exactly:
 The guardrail exists — `DEBUG_ASSERTCRASH(file.atEndOfChunk(), ("Incorrect data file length."))`, the
 last line of `ParseSidesDataChunk` — and would have fired at once. See §6 for why it could not.
 
-This is the wide-character disk boundary, which is slice A's. It was **not** fixed here. To measure
-what lies behind it, a throwaway experiment (kept out of this PR; 72 lines across `DataChunk.cpp`,
-`LocalFile.cpp::readWideChar` and `Recorder.cpp`'s `ARGUMENTDATATYPE_WIDECHAR`, all reading 2-byte
-units off Windows) was applied locally and the run repeated; it has since been handed to slice A
-(PR #88) as a patch rather than merged here. Results in §4 and §5 are labelled with which build
-produced them. `LocalFile.cpp`/`Recorder.cpp` matter because the `.rep` header itself does not parse
-without them, so **no replay can be read off Windows today** either.
+This is the wide-character disk boundary, which is slice A's. It was **not** fixed in this probe; a
+throwaway experiment (72 lines across `DataChunk.cpp`, `LocalFile.cpp::readWideChar` and
+`Recorder.cpp`'s `ARGUMENTDATATYPE_WIDECHAR`, all reading 2-byte units off Windows) was applied
+locally to see what lay behind it, and the run repeated. Results in §4 and §5 are labelled with which
+build produced them. `LocalFile.cpp`/`Recorder.cpp` matter because the `.rep` header itself does not
+parse without them, so on the tree this probe measured, **no replay could be read off Windows at
+all**.
 
-The sharpest single number, re-measured on the final tree. A breakpoint on
-`MapObject::MapObject(Coord3D, AsciiString, float, int, const Dict*, const ThingTemplate*)` over the
-same replay run:
+A breakpoint on `MapObject::MapObject(Coord3D, AsciiString, float, int, const Dict*, const
+ThingTemplate*)` over the same replay run is the sharpest single number, and pins which build each
+figure below came from:
 
 | Build | `MapObject` constructions | Replay |
 |---|---|---|
-| tree as committed | — | `Cannot open replay`: the `.rep` header needs the widechar hunks too (blocker 3) |
+| the tree this probe measured (pre-#88) | — | `Cannot open replay`: the `.rep` header needs the widechar hunks too (blocker 3) |
 | + the replay-side hunks only (`LocalFile.cpp`, `Recorder.cpp`) | **0** | opens, map "loads", simulation runs |
 | + `DataChunk.cpp` as well | **1432** | opens, map loads its objects |
+| **current `main`** (slice A's `WideWireChar` seam, #88) | **1432** | opens, map loads its objects |
 
 The middle row is the silent-failure configuration and the one every figure in the left-hand column
 of §4 came from: the minimum needed to get a replay open at all, with the map boundary untouched.
+
+**The last row is the state of the tree now, measured, not inferred.** Slice A landed the
+`WideWireChar` seam in #88 while this probe was being written, so blockers 2 and 3 are closed on
+`main`: a real retail map loads all 1432 of its objects and the `.rep` header parses, with no local
+patch. The experiment was therefore never handed over — it was obsolete before it could be. What
+remains open from §5 is unchanged by that fix and re-confirmed on `main`: the same replay still
+reports `CRC Mismatch in Frame 110`, and the process still dies in
+`ObjectPoolClass<MultiListNodeClass,256>::~ObjectPoolClass` at exit (blockers 7 and 8).
 
 ## 4. Can `TheGameLogic` tick? Yes — 13,500 frames
 
@@ -311,8 +325,8 @@ instead of requiring a debugger session like this one.
 | # | Blocker | Class | Owner |
 |---|---|---|---|
 | 1 | Pool allocator returned `8 mod 16` pointers; aligned SSE/NEON stores fault | port defect | **fixed here**, §2 |
-| 2 | `readUnicodeString` reads `len*sizeof(WideChar)`; map `SidesList` desyncs and swallows `ObjectsList` | port defect | slice A (widechar) |
-| 3 | `.rep` header unreadable off Windows (`LocalFile::readWideChar`, `ARGUMENTDATATYPE_WIDECHAR`) | port defect | slice A (widechar) |
+| 2 | `readUnicodeString` reads `len*sizeof(WideChar)`; map `SidesList` desyncs and swallows `ObjectsList` | port defect | **closed on `main` by #88**, re-measured §3 |
+| 3 | `.rep` header unreadable off Windows (`LocalFile::readWideChar`, `ARGUMENTDATATYPE_WIDECHAR`) | port defect | **closed on `main` by #88**, re-measured §3 |
 | 4 | Chunk parse reports success at EOF instead of failing (`SidesList.cpp:300`, nested `parse()`) | port defect, exposed by 2 | simulation slice |
 | 5 | `MapCache` requires `'\'` in enumerated paths → 0 maps; lowercased map path with backslashes | unimplemented path | filesystem seam |
 | 6 | No `RTS_DEBUG` native build: 10 TUs, 113 unresolved | unimplemented path | new slice, §6 |
@@ -331,8 +345,9 @@ instead of requiring a debugger session like this one.
   reading is that it is *not* correct yet.
 - **Which serialised field diverges first.** Requires a per-`Xfer`-call trace on both platforms, or
   `XferDeepCRC` bisection. Not attempted.
-- **Whether the 221 objects loaded with the experiment applied are the *right* 221**, or their
-  positions and dictionaries correct. Only the count and the pointer chain were checked.
+- **Whether the 221 objects the map now loads are the *right* 221**, or their positions and
+  dictionaries correct. Only the count and the pointer chain were checked — including on `main` after
+  #88, where the count is right but nothing compares a single object's contents to Windows.
 - **Whether skirmish (not replay) can start**, which needs `MapCache` (blocker 5) and the shell or a
   synthetic `GameInfo`.
 - **Whether the exit-time crash (blocker 8) is independent** of earlier corruption.
@@ -352,9 +367,10 @@ In this order, because each unblocks the measurement of the next:
    criterion: `scripts/native-build.py … -DRTS_DEBUG` produces a binary with 0 unresolved symbols, and
    CI builds it. Everything below is dramatically cheaper afterwards, because the engine starts telling
    you where it went wrong.
-2. **Slice A finishes the chunk-file widechar boundary** (blockers 2 and 3) and adds, as its gate, a
-   check that a real `.map` yields a non-zero `MapObject` count — not just that it parses. The failure
-   mode this probe found is "parses fine, loads nothing".
+2. ~~**Slice A finishes the chunk-file widechar boundary**~~ — done, #88. What is *not* done is its
+   gate: no check asserts that a real `.map` yields a non-zero `MapObject` count, so the exact failure
+   this probe found ("parses fine, loads nothing") would still land silently today. 1432 for
+   `[RANK] Arctic Arena ZH v1` is the number to pin.
 3. **Make a truncated chunk parse fail loudly** (blocker 4): `DataChunkInput::parse` reaching EOF with
    chunk data outstanding should be an error even in a release build. This is the difference between a
    port bug and a silently wrong game.
