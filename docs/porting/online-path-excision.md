@@ -64,8 +64,28 @@ which is the split the diagnostics predicted.
 | Unit | First diagnostic | Decision | Why |
 | --- | --- | --- | --- |
 | `GameSpy/MainMenuUtils.cpp` | `unknown type name 'HANDLE'` | **shim, then excise the servserv client** | Mixed file. Its write-access probe is CRT (`_open`/`_close`/`_O_CREAT`/`_S_IREAD`) and gets the existing `Utility/path_compat.h` spellings — that part is portable and should compile. Everything else in it is GameSpy's HTTP SDK talking to `servserv.generals.ea.com`: patch check, MOTD, config fetch, online player counts, and the `CreateThread`-based async DNS lookup that exists only to reach that host. That is the online path, and it is excised, entry points kept (below). |
-| `GameSpy/StagingRoomGameInfo.cpp` | `unknown type name 'AsnObjectIdentifier'` | **excise the SNMP function; keep the file** | The type comes from the Windows SNMP SDK, and the hint is right: `GetLocalChatConnectionAddress()` loads `inetmib1.dll` and walks the MIB-II TCP connection table to find which local address the **GameSpy chat connection** is using, so a hosted game can advertise it. Both halves — an SNMP agent and a chat connection — exist only when online does. There is no portable SNMP agent to walk, and if NAT discovery is ever wanted it is UPnP/NAT-PMP, a new implementation. Compiled on Windows only; its one live caller is the peer thread's connect callback, which is compiled out with the rest of the SDK path, so **nothing references it and no fallback definition exists**. The other 90% of the file is the staging-room `GameInfo` the menus use, and builds either way. |
+| `GameSpy/StagingRoomGameInfo.cpp` | `unknown type name 'AsnObjectIdentifier'` | **excise the SNMP function; keep the file** | The type comes from the Windows SNMP SDK, and the hint is right: `GetLocalChatConnectionAddress()` loads `inetmib1.dll` and walks the MIB-II TCP connection table to find which local address the **GameSpy chat connection** is using, so a hosted game can advertise it. Both halves — an SNMP agent and a chat connection — exist only when online does. There is no portable SNMP agent to walk, and if NAT discovery is ever wanted it is UPnP/NAT-PMP, a new implementation. Compiled on Windows only, with no fallback definition; the caller audit below is what justifies that. The other 90% of the file is the staging-room `GameInfo` the menus use, and builds either way. |
 | `GameSpy/Thread/PingThread.cpp` | `unknown type name 'HOSTENT'` | **shim, then excise the ICMP round trip** | `HOSTENT` came from a direct `<winsock.h>` include; that is the established seam's job and the file now includes `Utility/socket_compat.h`, so the thread, its request queue and its hostname resolution are portable and *run*. Only `doPing()` is Win32: `IcmpCreateFile`/`IcmpSendEcho`, hand-declared because they never had a public header, from `icmp.dll` loaded at run time. Off Windows it returns `-1`, which is the value this code already returns on a Windows box where `LoadLibrary("ICMP.DLL")` fails, and which every caller already handles as "no ping". |
+
+### Caller audit for `GetLocalChatConnectionAddress()`
+
+Excising a function with no fallback definition is only safe if nothing outside the excised path can
+reach it, so this is the search rather than an inference. `grep -rn GetLocalChatConnectionAddress`
+over the whole tree (excluding `.git`) returns, in code:
+
+| Site | Reaches the excised definition? |
+| --- | --- |
+| `Core/.../GameSpy/PeerDefs.h:285` | declaration only |
+| `Core/.../GameSpy/StagingRoomGameInfo.cpp:119` | the definition itself, now `_WIN32`-only |
+| `Core/.../GameSpy/Thread/PeerThread.cpp:2292` | **yes — the only live call in any build.** It is inside the peer SDK's connect/room callback path, which `RTS_HAS_GAMESPY` compiles out, so off Windows the call disappears with the callee |
+| `Core/.../GameSpy/Thread/PeerThread.cpp:1412` | commented out |
+| `Generals/.../GameNetwork/GameSpyGameInfo.{h,cpp}` and `GeneralsMD/.../GameNetwork/GameSpyGameInfo.{h,cpp}` | no. Each declares *and defines its own* copy (`GameSpyGameInfo.cpp:97`, SNMP and all) and calls that local copy at line 443, so neither binds to the Core definition — and both files are commented out of `CMakeLists.txt` in Generals, GeneralsMD and Core (`# unused`), so they are built on no platform |
+| `Generals/.../GameNetwork/GameSpy.cpp:964` | no. Same story: the file is commented out of `Generals/Code/GameEngine/CMakeLists.txt:1017`, and it includes `GameSpyGameInfo.h`, so it would bind to that per-game copy |
+
+So on Windows nothing changes, and off Windows there is exactly one caller and it is compiled out by
+the same guard as the callee. **Finding for a later slice:** those two per-game files carry an
+unguarded duplicate of the SNMP code. They are dead in every configuration today, so this slice does
+not touch them; whoever revives them owns giving them the same treatment.
 
 The three biggest SDK consumers in the strict link needed the same treatment, since compiling the
 three files above without them would only have moved their symbols from `compile-blocked` into
@@ -141,3 +161,12 @@ python3 scripts/ci/check-native-build-baseline.py --results /tmp/l4.json
 Windows is verified by the Wine/VC6 build and the retail replay check
 (`.agents/skills/windows-build-and-replays`), not by inspection: every non-Windows branch this slice
 adds is unreachable there, but the claim is only worth what the build says.
+
+**The replay gate ran green on this seam, so it is verified behaviourally and not only as a
+compile.** This slice changed what `Core/GameEngine` links and put two new guard spellings around
+live code, and a build check cannot see a simulation drift. On #82's own head, CI run 31915003815
+simulated the ten recorded retail replays under `vc6+t+e` and `vc6-releaselog+t+e` with
+`Simulation of all replays completed. Errors occurred: 0`, alongside all twelve green Windows build
+configurations. Anyone changing `RTS_HAS_GAMESPY` or the `_WIN32` guards here should re-run that gate:
+it is the strongest evidence this repository can produce that the simulation is unchanged, and it is
+cheap to demand.
