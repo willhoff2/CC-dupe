@@ -46,6 +46,33 @@ twin `pack-gamedata.ps1`) and in the comments of `check-replays.yml`.
 
 Retail game data is not redistributable. Keep the bucket private, and do not commit the archives.
 
+### The third object: `zerohour104_gamedata_full.7z`
+
+The trimmed pair is what the *replay gate* reads. It is not what the *native-port probes* read, and
+two of them have now stalled on the difference rather than on any code defect: the startup probe
+could not execute the menu path or `TheSkirmishGameInfo` without GUI data, and the audio probe found
+three real defects but decoded zero retail bytes.
+
+So there is a third object, packed by `pack-gamedata.py --archives full`: **every `.big` from both
+install roots**, which is what those probes need and then some. Measured with
+`spikes/assets/zh-asset-inspect`, the parts that matter are `WindowZH.big` (80 `.wnd`),
+`EnglishZH.big` (`generals.csf` plus 66 tga), `AudioZH`/`AudioEnglishZH`/`SpeechZH` (1,093 wav),
+`MusicZH.big` (7 mp3 — the MP2/MP3 stream path `audio-surface.md` records as never exercised), and
+`TexturesZH.big` (3,496 dds).
+
+Two structural facts about it:
+
+- **The two install roots are not flattened together.** Both ship a `Music.big` and they are
+  different files — Zero Hour's is a 787 KB security stub, Generals' is 159 MB of streamed music.
+  Merging the roots would silently drop one. The archive therefore has two top-level directories,
+  `Generals/` and `GeneralsMD/`, each extracted to the install path it belongs to.
+- **It is a separate object, and the trimmed pair is not repacked.** The gate compares
+  `generals108_gamedata_trimmed.7z` and `zerohour104_gamedata_trimmed.7z` against hashes pinned in
+  repository variables; repacking either would break that comparison for no gain.
+
+`.bik` movies are *not* in any `.big` — they are loose under `Data/Movies` (452 KB, the two menu
+backgrounds) and `Data/English/Movies` (281 MB of campaign cutscenes). Neither is in this object.
+
 ## Running it manually
 
 `scripts/ci/run-replays-local.ps1` is the manual equivalent of the CI job, against local
@@ -146,6 +173,11 @@ Packing does **not** need Windows; only running the check does.
    `BINKW32.DLL`/`mss32.dll` (see [above](#the-retail-data-on-hand-measured-2026-08-14)), takes
    those two from the Zero Hour install, saying so. Pass `--no-dll-fallback` to forbid that.
 
+   `--archives` selects what to pack: `trimmed` (the default, the replay gate's pair), `full`
+   ([the probe object](#the-third-object-zerohour104_gamedata_full7z)), or `both`. Packing `full`
+   does not touch the trimmed pair, so their pinned hashes keep matching. Only the Python packer
+   has this; `pack-gamedata.ps1` still packs the trimmed pair alone.
+
 2. **Upload both files** to a private bucket, keeping the file names
    (`generals108_gamedata_trimmed.7z`, `zerohour104_gamedata_trimmed.7z`). Plain AWS S3 and any
    S3-compatible service (Cloudflare R2, MinIO, Backblaze B2) all work:
@@ -160,6 +192,14 @@ Packing does **not** need Windows; only running the check does.
    GitHub. Note that AWS charges egress on every cache miss (~$0.09/GB, and the pair is ~1 GB);
    Cloudflare R2 does not, which is the only reason to prefer it here.
 
+   Add `s3:ListBucket` on the **bucket** ARN (`arn:aws:s3:::your-bucket`, no `/*`) as well. It is
+   not needed to fetch an object by key, so the gate runs without it — but without it S3 answers a
+   GET for a key that does not exist with `403 Access Denied` rather than `404 NoSuchKey`, to avoid
+   confirming existence to a principal that cannot list. That turns "the object was never uploaded"
+   into a message that reads as a credentials fault, which is the same class of misdiagnosis as the
+   hash-check failure described under [Notes](#notes). Note the ARN: `s3:ListBucket` on the `/*`
+   form matches nothing and fails silently.
+
 3. **Set repository variables** (Settings → Secrets and variables → Actions → *Variables*):
 
    | Variable | Value |
@@ -167,6 +207,7 @@ Packing does **not** need Windows; only running the check does.
    | `GAMEDATA_S3_BASE_URI` | `s3://your-bucket` (optionally with a key prefix, e.g. `s3://your-bucket/ci`) |
    | `GAMEDATA_GENERALS_SHA256` | hash printed for `generals108_gamedata_trimmed.7z` |
    | `GAMEDATA_GENERALSMD_SHA256` | hash printed for `zerohour104_gamedata_trimmed.7z` |
+   | `GAMEDATA_FULL_SHA256` | hash printed for `zerohour104_gamedata_full.7z`, if that object is hosted |
 
 4. **Set repository secrets** (same page, *Secrets* tab):
 
