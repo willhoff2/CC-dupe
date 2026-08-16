@@ -29,6 +29,16 @@ cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_COMPILER=clang++-14 -DVulkan_INCLUDE_DIR=$HOME/vk-headers/include
 ```
 
+On a box whose blueprint already provisioned the pinned headers, `$VULKAN_HEADERS_INCLUDE` points at
+them and passing them as a flag configures and builds the same way:
+
+```sh
+cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DSPIKE_USE_SDL2=OFF -DCMAKE_CXX_COMPILER=clang++-14 \
+  -DCMAKE_CXX_FLAGS="-I$VULKAN_HEADERS_INCLUDE"
+cmake --build build/spike
+```
+
 On jammy the lavapipe manifest is `lvp_icd.x86_64.json`, not `lvp_icd.json`:
 `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`.
 
@@ -45,6 +55,20 @@ build/spike/zh-resource-lock-tests --validation
 ZH_SPIKE_NO_VIEW_SWIZZLE=1 build/spike/zh-fixedfunc-tests --validation
 ZH_SPIKE_NO_VIEW_SWIZZLE=1 build/spike/zh-resource-lock-tests --validation
 python3 scripts/ci/check-backend-coverage.py
+```
+
+The spike also carries a measured ceiling and two derived counts, all three gated in the
+`renderer-spike-linux` job and all three part of a measurement sweep. The staging gate needs
+`XDG_RUNTIME_DIR` set to a private directory and no `DISPLAY`, and its `--self-check` additionally
+proves the ceiling *rejects* the pre-pool per-resource-staging behaviour, so a pass means the gate
+can still catch a regression:
+
+```sh
+mkdir -p /tmp/xdgrt && chmod 700 /tmp/xdgrt
+XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-staging-cost.py \
+  --binary build/spike/zh-staging-workload --self-check
+python3 spikes/renderer/tools/d3d8-lock-scan.py --check
+python3 spikes/renderer/tools/surface-lock-audit.py --check
 ```
 
 A validation message is a failure even when the pixels are right. The failure class to expect:
