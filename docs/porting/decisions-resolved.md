@@ -182,6 +182,53 @@ Consequences:
 * `SKIP_FFMPEG_LIBS=1` skips the build for the CI jobs that compile without linking; the link then
   reports the 29 symbols honestly rather than pretending they are resolved.
 
+## 8. Cross-platform lock-step determinism — **stop at oracle-grade agreement; do not pursue bit-exactness**
+
+**Question** (raised by wave 8 slice 3, #105): the native headless simulation ticks a retail replay to
+the end and is bit-identical across native runs, but **none** of its 134 checkpoint CRCs equal the
+Windows-recorded ones. `crc-divergence.md` ranked the causes. Pursue bit-exactness with Windows, or
+accept native-only determinism and use the Windows comparison only as an oracle?
+
+**Answer: stop at oracle-grade agreement. Do not pursue bit-exactness.**
+
+The argument that settled it is the one measurement that cost the most to get. The cheapest-looking
+bit-exact fix in the whole report — writing `Thing::setOrientation()`'s rotation out directly instead of
+crossing the heading with the constant Z axis, which removed 119 of the 132 differing frame-0 records —
+**changed the Windows build**. VC6's constant folding of those cross products is *value dependent*, so a
+literal `0.0f` alters the objects where VC6 already agreed with clang. The retail replay gate on real
+Windows failed it: `12-11-35_2v2_babai_ILnur_HardAI_HardAI` at frame 110 and
+`18-13-02_3v3_Supremac_Loonen_JB_HardAI_HardAI_HardAI` at frame 26910, both green again with that one
+file reverted. It was caught at all only because the full retail archive let the gate reproduce locally
+as a differential.
+
+So bit-exactness is not one bug: it is per-expression work against an optimiser's undocumented
+decisions, where every step risks the behavioural oracle and must be paid for with a full ten-replay
+Windows gate run. It buys nothing the stated scope needs — single-player campaign and skirmish, with
+retail replay/save compatibility already out of scope (decision list preamble and the scope note).
+
+Consequences for later slices:
+
+* **The acceptance criterion is oracle-grade agreement, defined in `crc-divergence.md` §5**: identical
+  structure (object count, IDs, order, template names, marker sequence) as a *hard* gate; value
+  divergence confined to float elements differing by a signed zero or a few ULPs; no amplification over
+  the run; native-vs-native bit-identity; and the Windows replay gate green. **Equal cross-platform CRCs
+  are not required and must not block a slice.**
+* **Do not "fix" a divergence for bit-exactness alone.** A change is only warranted if it fixes a
+  structural difference, a non-ULP value difference, or a native defect. Anything that exists purely to
+  make the two CRCs agree is out.
+* **Any change to a checksummed float expression must run the real-Windows replay gate**, not a local
+  Wine run and not a single-map before/after dump. §3.1 is what one map proves: nothing.
+* **`CRCDiag` is the acceptance instrument, not debugging scaffolding.** It stays, it stays opt-in and
+  env-gated, and the production CRC, the checkpoint interval and the recorded baselines stay untouched.
+* The unresolved measurements are still worth doing, because they are *native correctness* questions
+  rather than bit-exactness ones: uninitialised reads (`crc-divergence.md` §3.8) and locale-dependent
+  parsing (§3.9), each with a concrete recipe recorded there, plus the first Apple Silicon measurement
+  (§6) and the teardown crash in `~ObjectPoolClass` (§6).
+* This decision is revisited only if cross-platform multiplayer or shared replays return to scope. At
+  that point the first item to schedule is excess intermediate precision (§3.2): VC6 evaluates `float`
+  expressions at x87 double precision, and its answer *was* the double-precision answer in 1,500 of
+  1,500 sampled `GetGameLogicRandomValueReal()` draws.
+
 ## Consequence for the font seam (not itself a listed decision)
 
 The 18 `HFONT` compile failures have no Windows behaviour to "match" in the sense of decision 2 —
