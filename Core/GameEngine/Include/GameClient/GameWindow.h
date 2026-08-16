@@ -72,8 +72,12 @@ struct GameWindowEditData;
 enum { WIN_COLOR_UNDEFINED = GAME_COLOR_UNDEFINED };
 
 // WindowMsgData --------------------------------------------------------------
+// Gadget messages carry pointers in this payload (e.g. GGM_SET_LABEL passes a
+// UnicodeString*), so it must be wide enough to hold one. On the 32-bit Windows
+// build uintptr_t is the same 32-bit type UnsignedInt was. VC6 has no
+// <stdint.h>; the type comes from BaseType.h's stdint adapter.
 //-----------------------------------------------------------------------------
-typedef UnsignedInt WindowMsgData;
+typedef uintptr_t WindowMsgData;
 
 //-----------------------------------------------------------------------------
 enum WindowMsgHandledType CPP_11(: Int) { MSG_IGNORED, MSG_HANDLED };
