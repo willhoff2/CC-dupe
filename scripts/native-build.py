@@ -993,11 +993,18 @@ def write_render_backend_manifest(manifest_dir, build_dir):
         "set(NATIVE_INCLUDES",
         f'    "{root}"',
         f'    "{include_dir}"',
+        # `platform/platform_window.h`, which the backend includes under SPIKE_WITH_PLATFORM_WINDOW.
+        f'    "{REPO_ROOT / WINDOW_BACKEND_DIR}/.."',
         # This project force-includes Utility/CppMacros.h into every target, this one included.
         f'    "{REPO_ROOT / "Dependencies" / "Utility"}"',
         ")",
         "set(NATIVE_DEFINES",
         f'    "SPIKE_SHADER_DIR=\\"{shader_dir}\\""',
+        # Without this the backend's surface and swapchain paths compile to `return true` and
+        # Present() returns success having presented nothing -- measured on the outpost, where
+        # `nm -um` on the archive showed no vkCreateSwapchainKHR at all. The window seam it needs
+        # is WWLib's, and its implementations are already in the window support archive.
+        '    "SPIKE_WITH_PLATFORM_WINDOW"',
         ")",
     ]
     (manifest_dir / f"{RENDER_BACKEND_SLUG}.cmake").write_text("\n".join(lines) + "\n")
