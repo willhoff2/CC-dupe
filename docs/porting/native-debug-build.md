@@ -77,7 +77,7 @@ The seams, each under the existing spelling so no consumer changed:
 | Gap | Where it was closed |
 |---|---|
 | `GetPrecisionTimer`/`GetPrecisionTimerTicksPerSec` taking `Int64*` where the debug callers pass `__int64*` | `BaseTypeCore.h`: off MSVC, `Int64` is now `long long`, the same type `__int64` maps to, so the two spellings are one type at LP64 |
-| `CreateDirectory`, `DeleteFile` undeclared in `CRCDebug.cpp` | include `<windows.h>`, which off Windows is the port's own compatibility header |
+| `CreateDirectory`, `DeleteFile` undeclared in `CRCDebug.cpp` | include `<windows.h>`, which off Windows is the port's own compatibility header. It is inside `#ifdef DEBUG_CRC`, and `wwdebug.cpp`'s is inside `WWDEBUG`, so the release configuration still compiles with no Windows header available at all — which is what `native-port-probe.py` measures unshimmed, and it caught both of these when they were unconditional |
 | `GetUserNameA`, `GetComputerNameA`, `MAX_COMPUTERNAME_LENGTH` | declared in the shim header, implemented in `platform_win32_kernel.cpp` over `gethostname`/`getpwuid` with Win32 error codes |
 | `unsigned long` buffer length passed to `GetComputerNameA` | `Recorder.cpp` uses `DWORD`; `unsigned long` is 64-bit at LP64 and `LPDWORD` is not |
 | `WSABASEERR` and the rest of a debug-only WinSock result switch | portable values in `socket_compat.h`. GameSpy stays cut: this makes its *logging* compile, nothing else |
@@ -140,8 +140,10 @@ retail Zero Hour install and the retail map and replay used by `headless-simulat
 
 Two findings, both stated at full strength:
 
-**Finding 1 — a port defect this slice introduced and fixed here, because nothing else could run
-until it was.** `MemoryPool::createBlob` asserts that a blob's block *count* is a multiple of
+**Finding 1 — a port defect found *by* this debug build, and the argument for the whole slice.** It
+is invisible in the release configuration, which compiles the assertion out; it is what the debug
+harness aborted on before reaching any engine code; and it is fixed here, in a commit of its own,
+because nothing else could run until it was. `MemoryPool::createBlob` asserts that a blob's block *count* is a multiple of
 `MEM_BOUND_ALIGNMENT`. An earlier slice raised `MEM_BOUND_ALIGNMENT` from 4 to 16 at 64-bit for a
 real reason (the pool allocator must satisfy `alignof(max_align_t)`), which silently tightened this
 unrelated *count* check, and the retail pool table has `{ "NameKeyBucketPool", 9000, 1024 }` — legal
@@ -153,12 +155,25 @@ the bound, so every block is aligned whatever the count. The check now uses its 
 `GameMemoryInit.cpp` still rounds counts to. The predicate on 32-bit Windows is unchanged (4 either
 way), and the assertion is not weakened: it still rejects zero, negative and off-granularity counts.
 
-**Finding 2 — for a later slice, not fixed here.** `MapUtil.cpp:536` requires a backslash in an
-enumerated map path. The engine's own file enumeration returns forward slashes off Windows, so the
-assertion is about a Windows-only assumption rather than about corrupt data. It is a real port defect
-in the filesystem seam and it is blocker 5 already; what this slice changes is that it is no longer
-silent — the same code path previously produced an empty map cache and reported success. Fixing it
-belongs with the rest of the path-separator seam, not here.
+**Finding 2 — for a later slice, not fixed here, and it is one slice rather than three items.**
+`MapUtil.cpp:536` requires a backslash in an enumerated map path. The engine's own file enumeration
+returns forward slashes off Windows, so the assertion is about a Windows-only assumption rather than
+about corrupt data. It is a real port defect in the filesystem seam and it is blocker 5 already; what
+this slice changes is that it is no longer silent — the same code path previously produced an empty
+map cache and reported success.
+
+Scope it together with the two defects it shares a code path and a cause with, rather than as three
+tickets:
+
+- the `MapCache` path defect the startup probe reports (`startability.md` §6 item 2, and
+  `review-and-decisions.md` §2.6's path-separator-and-case sub-decision) — the same seam and the same
+  assumption, one layer up;
+- the `GameSlot::setState` dereference in the `replayhdr` row above (`GameInfo.cpp:239`), reached
+  through the same map/slot-list initialisation and guarded by no assertion, so the debug
+  configuration does not make that one audible either.
+
+One slice that settles the path-separator seam and the map-cache initialisation it feeds closes all
+three; split, three sessions re-derive the same decision.
 
 ## 6. What was not measured
 
@@ -172,3 +187,10 @@ belongs with the rest of the path-separator seam, not here.
   13,500-frame run now trips assertions is the obvious next measurement and is not answered here.
 - **Any assertion beyond the ones reached.** Three code paths were exercised. The claim proved is
   "assertions compile, fire, report and stop the process", not "the engine is assertion-clean".
+- **The retail replay gate off Windows.** It was attempted and it cannot be certified anywhere but
+  Windows; the attempt produced a correction to how this repository described the local gate, recorded
+  in `replay-check-gamedata.md` §"Wine is not a replay oracle". In short: the check *runs* under wine,
+  but unmodified `main` fails all ten replays at the same frames as any branch, so wine yields only a
+  differential answer. For this change the differential answer is clean — identical mismatch frames,
+  and every Windows object file this PR could affect is code-identical to base — and the authoritative
+  verdict is the `Replay Check GeneralsMD` job on the PR.
