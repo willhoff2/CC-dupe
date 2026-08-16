@@ -97,6 +97,32 @@ thing that can quietly come back:
 The engine side is observable rather than assumed: `DX8Wrapper::Get_FrameCount()` advances only on a
 successful present, so the harness records it before and after.
 
+### 3.1 What the run-time half caught: the window spike had never presented either
+
+The refusal immediately failed a gate that had been green for several PRs — the `window-seam-linux`
+job's "Present 240 frames to a real X11 window and check the readback", and its macOS counterpart.
+Cause, and it is the same class as the engine's: `spikes/renderer/CMakeLists.txt` defined
+`SPIKE_WITH_PLATFORM_WINDOW` on the *executable* `zh-window-spike`, which defines it for that
+executable's own sources only. `vulkan_backend.cpp` lives in the `zh-render-backend` **library**,
+which was compiled with neither presentation define, so the window targets linked a backend with no
+surface and no swapchain code at all: they created a real window, drew 240 frames, presented none of
+them, and passed — the frame they read back and asserted geometry on was the offscreen colour target,
+never anything a compositor saw. The same was true of `zh-renderer-spike --window`.
+
+The fix is one library per presentation path, all built from the same two sources by
+`zh_add_render_backend()` — `zh-render-backend` (headless), `zh-render-backend-sdl` (`--window`) and
+`zh-render-backend-window` (the seam's `Window_Create_Vulkan_Surface`, which is also exactly how
+`scripts/native-build.py` builds the engine's archive). Nothing is copied and no renderer code is
+duplicated. With it, the window spike passes for the first time having actually presented:
+`vkQueuePresentKHR` 240 times through a swapchain that was rebuilt across the mode change, with 0
+validation messages. `main.cpp` now flips only when it has a window (`End_Scene(!headless)`).
+
+**This is a defect this PR found and fixed, not one it introduced.** Every window-seam presentation
+figure recorded before it — including the Linux and macOS "presented 240 frames" lines and the arm64
+`backingScaleFactor` presentation runs in `renderer-integration-arm64.md` — measured a draw and a
+readback, not a flip. The window/resize/input/scan-code assertions in those runs are unaffected: they
+do not depend on the swapchain.
+
 ## 4. Where the engine went next, and the wall that appeared there
 
 With D3DX routed, the engine got past texture creation and stopped one call later — still inside
