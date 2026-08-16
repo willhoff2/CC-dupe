@@ -108,6 +108,16 @@
    "sites": 2,
    "status": "none-needed"
   },
+  "CreateCubeTexture": {
+   "category": "backend",
+   "entry": [
+    "Create_Cube_Texture"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "reached only through D3DXCreateCubeTexture() off Windows; no backend entry point exists yet, so this reads as absent",
+   "sites": 1,
+   "status": "absent"
+  },
   "CreateImageSurface": {
    "category": "backend",
    "entry": [
@@ -145,7 +155,7 @@
    ],
    "interface": "IDirect3DDevice8",
    "note": "",
-   "sites": 2,
+   "sites": 3,
    "status": "implemented"
   },
   "CreateVertexBuffer": {
@@ -167,6 +177,16 @@
    "note": "declaration-only FVF handles are served by Set_Vertex_Buffer's fvf; real vs.1.1 not started",
    "sites": 2,
    "status": "implemented"
+  },
+  "CreateVolumeTexture": {
+   "category": "backend",
+   "entry": [
+    "Create_Volume_Texture"
+   ],
+   "interface": "IDirect3DDevice8",
+   "note": "reached only through D3DXCreateVolumeTexture() off Windows; no backend entry point exists yet, so this reads as absent",
+   "sites": 1,
+   "status": "absent"
   },
   "DeletePixelShader": {
    "category": "backend",
@@ -1093,11 +1113,11 @@
   }
  },
  "totals": {
-  "backend_methods": 45,
+  "backend_methods": 47,
   "backend_methods_implemented": 44,
   "cascade_ops_implemented": 17,
   "cascade_ops_used": 17,
-  "methods_reached": 64,
+  "methods_reached": 66,
   "primitive_types_implemented": 3,
   "primitive_types_used": 3,
   "render_states_implemented": 48,
