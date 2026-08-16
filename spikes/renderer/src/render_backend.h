@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace spike {
 
@@ -212,6 +213,31 @@ struct MaterialState {
 	float power = 0.0f;
 };
 
+// What the engine's D3D8 adapter enumeration and D3DCAPS8 need, measured from the
+// Vulkan device rather than invented: DX8Wrapper::Enumerate_Devices asks IDirect3D8 for
+// an adapter count, an identifier and a device caps block *before* it creates anything,
+// so a backend has to be able to answer those questions without a device. The engine-side
+// translation into D3DCAPS8 bits lives in the engine's backend adapter, which is the only
+// layer that speaks D3D8; this struct is deliberately Vulkan-shaped numbers only.
+struct AdapterInfo {
+	std::string name;              // VkPhysicalDeviceProperties::deviceName
+	std::string driver;            // driverName/driverInfo when VK_KHR_driver_properties is there
+	uint32_t vendor_id = 0;
+	uint32_t device_id = 0;
+	uint32_t driver_version = 0;
+	uint32_t api_version = 0;
+	uint64_t device_memory_bytes = 0;   // sum of the DEVICE_LOCAL heaps
+	uint32_t max_texture_dimension = 0; // limits.maxImageDimension2D
+	uint32_t max_texture_stages = 0;    // sampled images per stage, clamped to kMaxTextureStages
+	uint32_t max_vertex_index = 0;      // limits.maxDrawIndexedIndexValue, clamped to 16-bit reality
+	uint32_t max_primitive_count = 0;
+	float max_anisotropy = 1.0f;
+	bool anisotropic_filtering = false;
+	bool discrete = false;
+	// One bit per TextureFormat this device can sample, as 1u << static_cast<int>(format).
+	uint32_t sampled_formats = 0;
+};
+
 class RenderBackend {
 public:
 	virtual ~RenderBackend() = default;
@@ -226,6 +252,11 @@ public:
 	virtual void Clear(bool clear_color, bool clear_z_stencil,
 	                   float r, float g, float b, float dest_alpha = 0.0f,
 	                   float z = 1.0f, uint32_t stencil = 0) = 0;
+	// D3D8 splits EndScene from Present and the engine uses both halves -- it ends the
+	// scene, then decides whether to present at all (DX8Wrapper::End_Scene(flip_frame)).
+	// End_Scene(false) followed by Present() is that split; End_Scene(true) is the spike's
+	// own convenience for a one-frame test. False when the swapchain could not be presented.
+	virtual bool Present() = 0;
 
 	// --- state: DX8Wrapper::Set_DX8_Render_State / _Texture_Stage_State -------
 	// Raw D3D8 enum values, exactly as the engine's 370 SetRenderState and 865
@@ -266,6 +297,14 @@ public:
 	                                                 uint32_t fvf) = 0;
 	virtual IndexBufferHandle* Create_Index_Buffer(const uint16_t* data,
 	                                               size_t count) = 0;
+	// The engine never creates an index buffer with its contents in hand: DX8IndexBufferClass
+	// creates an empty one and fills it through Lock/Unlock, dynamic or not, so the D3D8
+	// CreateIndexBuffer + LockRange pattern needs the same host-mapped ring the vertex path
+	// already has. `dynamic` false is a static buffer written once and never renamed.
+	virtual IndexBufferHandle* Create_Lockable_Index_Buffer(size_t count, bool dynamic) = 0;
+	virtual bool Lock_Index_Buffer(IndexBufferHandle* ib, size_t offset_indices,
+	                               size_t count, uint32_t flags, void** out_bits) = 0;
+	virtual bool Unlock_Index_Buffer(IndexBufferHandle* ib) = 0;
 
 	// --- lockable resources: the seam under investigation ---------------------
 	// A texture whose contents arrive through Lock/Unlock rather than at creation,
@@ -282,6 +321,11 @@ public:
 	// DISCARD/NOOVERWRITE many times per frame.
 	virtual VertexBufferHandle* Create_Dynamic_Vertex_Buffer(size_t bytes,
 	                                                         uint32_t fvf) = 0;
+	// The same buffer with the renaming ring made optional: D3D8's CreateVertexBuffer
+	// without D3DUSAGE_DYNAMIC is still filled through Lock/Unlock but is never
+	// DISCARDed, so one copy behind the handle is the whole difference.
+	virtual VertexBufferHandle* Create_Lockable_Vertex_Buffer(size_t bytes, uint32_t fvf,
+	                                                          bool dynamic) = 0;
 	virtual bool Lock_Vertex_Buffer(VertexBufferHandle* vb, size_t offset, size_t size,
 	                                uint32_t flags, void** out_bits) = 0;
 	virtual bool Unlock_Vertex_Buffer(VertexBufferHandle* vb) = 0;
@@ -386,6 +430,10 @@ public:
 	virtual bool Read_Back_Color_Target(std::string& out_rgba,
 	                                    SurfaceFormat& out_format) = 0;
 
+	// The chosen device's measured properties, for the D3DCAPS8 the engine asks the device
+	// for after creation. False before Init().
+	virtual bool Get_Adapter_Info(AdapterInfo& out) const = 0;
+
 	virtual const char* Device_Description() const = 0;
 	virtual uint32_t Pipeline_Count() const = 0;
 
@@ -395,5 +443,12 @@ public:
 
 // Backing implementation lives in vulkan_backend.cpp.
 RenderBackend* Create_Vulkan_Backend(bool enable_validation, bool headless);
+
+// Every Vulkan device on the machine, in Vulkan's own order, measured through a temporary
+// instance that is destroyed before this returns. This is what the engine's
+// IDirect3D8::GetAdapterCount / GetAdapterIdentifier / GetDeviceCaps(adapter) need, and it
+// deliberately does not create a rendering device: an adapter query that created a device
+// would answer a different question from the one D3D8 asks.
+bool Enumerate_Adapters(std::vector<AdapterInfo>& out, bool enable_validation);
 
 } // namespace spike

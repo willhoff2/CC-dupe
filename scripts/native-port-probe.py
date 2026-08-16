@@ -216,7 +216,12 @@ DOWNLOAD_INCLUDES = GAME_RENDERER_INCLUDES + GAMEENGINE_INCLUDES + [
 RENDERER_TARGETS = [
     Target(
         name="Core/Libraries/Source/WWVegas/WW3D2",
-        includes=tuple(RENDERER_INCLUDES),
+        # vulkanrenderbackend.cpp -- the non-Windows RenderBackendClass -- includes the renderer's
+        # own interface header, "render_backend.h", from spikes/renderer/src. That directory is the
+        # one place the Vulkan backend lives; the engine implements the D3D8-shaped seam over it
+        # rather than carrying a second copy of it. Only this target gets the directory, because
+        # only this file may talk to the backend interface.
+        includes=tuple(RENDERER_INCLUDES) + ("spikes/renderer/src",),
         cmake_dirs=("Core/Libraries/Source/WWVegas/WW3D2",),
     ),
     Target(

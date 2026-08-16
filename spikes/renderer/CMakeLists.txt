@@ -75,18 +75,28 @@ foreach(shader fixedfunc.vert fixedfunc.frag probe.vert probe.frag)
 endforeach()
 add_custom_target(spike-shaders DEPENDS ${SPIRV_OUTPUTS})
 
+# --- the backend, as a library -------------------------------------------------
+# The two sources every target here compiled separately are now one static library, because the
+# engine needs them too: Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.cpp implements
+# the engine's RenderBackendClass over this interface, and scripts/native-build.py builds these
+# same two files into the native binary as the `support_renderbackend` archive.  Nothing moved
+# and nothing was copied; the file list simply has one home now, so the engine's copy of the
+# renderer cannot drift from the one the spike ladder verifies.
+add_library(zh-render-backend STATIC
+    src/state_translate.cpp
+    src/vulkan_backend.cpp)
+add_dependencies(zh-render-backend spike-shaders)
+target_include_directories(zh-render-backend PUBLIC src)
+target_link_libraries(zh-render-backend PUBLIC Vulkan::Vulkan)
+target_compile_definitions(zh-render-backend PUBLIC
+    SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+
 # --- executable ---------------------------------------------------------------
 add_executable(zh-renderer-spike
     src/main.cpp
-    src/png_write.cpp
-    src/state_translate.cpp
-    src/vulkan_backend.cpp)
+    src/png_write.cpp)
 add_dependencies(zh-renderer-spike spike-shaders)
-
-target_include_directories(zh-renderer-spike PRIVATE src)
-target_link_libraries(zh-renderer-spike PRIVATE Vulkan::Vulkan)
-target_compile_definitions(zh-renderer-spike PRIVATE
-    SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+target_link_libraries(zh-renderer-spike PRIVATE zh-render-backend)
 
 # Capability probe: queries only, no rendering. Answers the format/feature questions
 # the two-draw spike cannot -- see docs/porting/moltenvk-findings.md.
@@ -102,49 +112,29 @@ target_compile_definitions(zh-feature-probe PRIVATE SPIKE_SHADER_DIR="${SHADER_O
 # Fixed-function tests: drive the backend through the DX8Wrapper-shaped interface
 # and assert on read-back pixels. This is the harness the measured feature set is
 # validated in.
-add_executable(zh-fixedfunc-tests
-    src/fixedfunc_tests.cpp
-    src/state_translate.cpp
-    src/vulkan_backend.cpp)
+add_executable(zh-fixedfunc-tests src/fixedfunc_tests.cpp)
 add_dependencies(zh-fixedfunc-tests spike-shaders)
-target_include_directories(zh-fixedfunc-tests PRIVATE src)
-target_link_libraries(zh-fixedfunc-tests PRIVATE Vulkan::Vulkan)
-target_compile_definitions(zh-fixedfunc-tests PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+target_link_libraries(zh-fixedfunc-tests PRIVATE zh-render-backend)
 
 # Resource-lock tests: drive the D3D8 Lock/Unlock contract over Vulkan and assert on
 # read-back pixels and read-back bytes. This is what backs
 # docs/porting/renderer-resource-seam.md.
-add_executable(zh-resource-lock-tests
-    src/resource_lock_tests.cpp
-    src/state_translate.cpp
-    src/vulkan_backend.cpp)
+add_executable(zh-resource-lock-tests src/resource_lock_tests.cpp)
 add_dependencies(zh-resource-lock-tests spike-shaders)
-target_include_directories(zh-resource-lock-tests PRIVATE src)
-target_link_libraries(zh-resource-lock-tests PRIVATE Vulkan::Vulkan Threads::Threads)
-target_compile_definitions(zh-resource-lock-tests PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+target_link_libraries(zh-resource-lock-tests PRIVATE zh-render-backend Threads::Threads)
 
 # Staging workload: replays a frame's worth of locks in the measured usage-class mix
 # and prints the host-visible cost as JSON. scripts/ci/check-staging-cost.py enforces a
 # ceiling on it, and threads need pthreads on Linux.
-add_executable(zh-staging-workload
-    src/staging_workload.cpp
-    src/state_translate.cpp
-    src/vulkan_backend.cpp)
+add_executable(zh-staging-workload src/staging_workload.cpp)
 add_dependencies(zh-staging-workload spike-shaders)
-target_include_directories(zh-staging-workload PRIVATE src)
-target_link_libraries(zh-staging-workload PRIVATE Vulkan::Vulkan Threads::Threads)
-target_compile_definitions(zh-staging-workload PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+target_link_libraries(zh-staging-workload PRIVATE zh-render-backend Threads::Threads)
 
 # Throughput baseline: draw calls/sec and state changes/sec, so the Mac has a Linux
 # number to be compared against.
-add_executable(zh-throughput
-    src/throughput.cpp
-    src/state_translate.cpp
-    src/vulkan_backend.cpp)
+add_executable(zh-throughput src/throughput.cpp)
 add_dependencies(zh-throughput spike-shaders)
-target_include_directories(zh-throughput PRIVATE src)
-target_link_libraries(zh-throughput PRIVATE Vulkan::Vulkan)
-target_compile_definitions(zh-throughput PRIVATE SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+target_link_libraries(zh-throughput PRIVATE zh-render-backend)
 
 if(SPIKE_HAVE_SDL2)
     target_compile_definitions(zh-renderer-spike PRIVATE SPIKE_WITH_SDL)
@@ -168,15 +158,11 @@ if(SPIKE_HAVE_SDL2)
     add_executable(zh-window-spike
         src/window_spike.cpp
         src/png_write.cpp
-        src/state_translate.cpp
-        src/vulkan_backend.cpp
         "${WWLIB_PLATFORM_DIR}/platform/platform_window_sdl2.cpp")
     add_dependencies(zh-window-spike spike-shaders)
-    target_include_directories(zh-window-spike PRIVATE src "${WWLIB_PLATFORM_DIR}")
-    target_link_libraries(zh-window-spike PRIVATE Vulkan::Vulkan)
-    target_compile_definitions(zh-window-spike PRIVATE
-        SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}"
-        SPIKE_WITH_PLATFORM_WINDOW)
+    target_include_directories(zh-window-spike PRIVATE "${WWLIB_PLATFORM_DIR}")
+    target_link_libraries(zh-window-spike PRIVATE zh-render-backend)
+    target_compile_definitions(zh-window-spike PRIVATE SPIKE_WITH_PLATFORM_WINDOW)
     if(TARGET SDL2::SDL2)
         target_link_libraries(zh-window-spike PRIVATE SDL2::SDL2)
     else()
@@ -205,16 +191,13 @@ if(APPLE)
         add_executable(zh-window-spike-cocoa
             src/window_spike.cpp
             src/png_write.cpp
-            src/state_translate.cpp
-            src/vulkan_backend.cpp
             "${WWLIB_PLATFORM_DIR}/platform/platform_window_cocoa.mm")
         add_dependencies(zh-window-spike-cocoa spike-shaders)
-        target_include_directories(zh-window-spike-cocoa PRIVATE src "${WWLIB_PLATFORM_DIR}")
-        target_link_libraries(zh-window-spike-cocoa PRIVATE Vulkan::Vulkan
+        target_include_directories(zh-window-spike-cocoa PRIVATE "${WWLIB_PLATFORM_DIR}")
+        target_link_libraries(zh-window-spike-cocoa PRIVATE zh-render-backend
             "-framework AppKit" "-framework QuartzCore" "-framework Metal"
             "-framework CoreGraphics" "-framework Foundation" "-framework Carbon")
         target_compile_definitions(zh-window-spike-cocoa PRIVATE
-            SPIKE_SHADER_DIR="${SHADER_OUTPUT_DIR}"
             SPIKE_WITH_PLATFORM_WINDOW
             # Checks the backend's 104 kVK_* literals against HIToolbox's real constants at
             # compile time. WWLib itself does not do this, because it must not need Carbon.
@@ -241,8 +224,8 @@ if(APPLE)
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    foreach(target zh-renderer-spike zh-caps-probe zh-feature-probe zh-fixedfunc-tests
-                   zh-resource-lock-tests zh-staging-workload zh-throughput)
+    foreach(target zh-render-backend zh-renderer-spike zh-caps-probe zh-feature-probe
+                   zh-fixedfunc-tests zh-resource-lock-tests zh-staging-workload zh-throughput)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
     foreach(target zh-window-spike zh-window-spike-cocoa zh-metal-surface-probe

@@ -27,13 +27,20 @@ Everything below is measured on this Linux x86-64 box against Mesa **lavapipe** 
 | `Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.h` | 218 | the non-Windows `RenderBackendClass` declaration, `#ifndef _WIN32` |
 | `Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.cpp` | 2156 | its implementation: a translation layer over `spike::RenderBackend` |
 | `Core/Libraries/Source/WWVegas/WW3D2/tests/native_render_run.cpp` | 210 | the runtime harness: window → `DX8Wrapper::Init` → device → frames → ledger |
-| `scripts/native-render-backend-run.py` | 228 | compiles, links and runs that harness against the native build's own archives |
+| `scripts/native-render-backend-run.py` | 327 | compiles, links and runs that harness against the native build's own archives |
 
 **Nothing was copied.** `spikes/renderer/CMakeLists.txt` now builds its two backend sources
 (`src/state_translate.cpp`, `src/vulkan_backend.cpp`) as a static library, `zh-render-backend`, and
 every spike executable links it instead of compiling those sources again. `scripts/native-build.py`
 compiles the *same two files* into a `libsupport_renderbackend.a` support archive and links it into
 the engine, so the renderer the engine calls and the renderer the ladder verifies cannot diverge.
+It compiles them with `SPIKE_WITH_PLATFORM_WINDOW`, which is not decoration: without it the
+backend's surface and swapchain paths compile to `return true` and `Present()` returns success
+having presented nothing. The first version of this slice omitted the define and the outpost caught
+it by looking at the archive rather than the source — `nm -u libsupport_renderbackend.a` referenced
+no `vkCreateSwapchainKHR` at all. The seam it needs is WWLib's `platform/platform_window.h`, whose
+implementations are already in the window support archive, so nothing new is linked.
+
 The spike gained public API (`Present()`, lockable vertex/index buffers, adapter enumeration) but no
 second copy of anything exists.
 
@@ -41,7 +48,8 @@ Support archives are a platform dependency of the measured libraries rather than
 is how the window and audio backends are already handled, so the renderer does not enter the
 objects / translation-unit denominators. The one new *engine* translation unit is
 `vulkanrenderbackend.cpp`: levels 1-4 objects **977/977 → 978/978**, 0 compile failures, strict link
-still clean at **0 unresolved symbols** with an executable produced (82.6 MiB, ELF 64-bit x86-64).
+still clean at **0 unresolved symbols** with an executable produced (82.7 MiB, ELF 64-bit x86-64),
+re-measured on the rebased head.
 
 Windows is untouched at runtime: `vulkanrenderbackend.{h,cpp}` are wholly inside `#ifndef _WIN32`,
 and the only change to `dx8wrapper.cpp` is which of the two backends the non-Windows branch of that
@@ -251,7 +259,7 @@ Renderer ladder, on lavapipe with the validation layer loaded and silent:
 | `check-backend-coverage.py` | matches the committed baseline exactly (44/47 backend methods, 48 render states, 23 stage states, 17 cascade ops) |
 
 Native build and probes, `clang++-14`, levels 1-4 shimmed with `--strict-link`: **978/978** objects,
-0 compile failures, 0 unresolved symbols, executable produced. Probe unchanged at 671/760 native and
+0 compile failures, 0 unresolved symbols, executable produced. Probe unchanged at 672/760 native and
 716/760 shimmed, both gated. `flake8 --max-line-length=100 scripts/` and `actionlint` clean.
 
 No new resource lock was introduced in the spike by this slice, so the C1-C9 classification of
@@ -260,6 +268,10 @@ route into the already-classified `Surface_Bits` / buffer-lock funnels, and the 
 class stays where #85 put it — the D3DX creation entry points do not reach the backend yet (§4).
 
 ## 7. What only a Mac can decide
+
+The outpost's measurement is a separate slice (`docs/porting/renderer-integration-arm64.md`, PR #97);
+the one finding of it that belongs in this slice, and is fixed here, is the missing
+`SPIKE_WITH_PLATFORM_WINDOW` of §1.
 
 - Whether the engine reaches the same wall on MoltenVK, or an earlier one. The adapter is
   platform-neutral, but `VK_KHR_portability_enumeration`, the `CAMetalLayer` surface and the
@@ -283,10 +295,10 @@ measurement, and it answers the three questions above.
   allocator active, `Create_Device` returns `D3D_OK` on MoltenVK and `--stdlib-new` changes nothing.
 - The points/pixels boundary holds at `backingScaleFactor` **2.00**: 800x600 points of client size,
   a 1600x1200 `CAMetalLayer` drawable.
-- Additionally, and not visible from here: `scripts/native-build.py` compiles the backend without
-  `SPIKE_WITH_PLATFORM_WINDOW`, so the engine's copy has no surface and no swapchain and
-  `Present()` would have returned success without presenting. That is a second thing the next slice
-  must fix; see §5 of the arm64 document.
+- Additionally, and not visible from here: the first version of this slice compiled the backend
+  without `SPIKE_WITH_PLATFORM_WINDOW`, so the engine's copy had no surface and no swapchain and
+  `Present()` would have returned success without presenting. §5 of the arm64 document records how
+  the outpost caught it; `scripts/native-build.py` now defines it, and §1 above says why.
 
 `scripts/native-render-backend-run.py` selects Mach-O link flags, the Cocoa/QuartzCore/Metal/IOKit
 frameworks, MoltenVK's ICD and LLVM's `objcopy`/`nm` when `sys.platform == "darwin"`. That selection

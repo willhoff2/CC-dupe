@@ -225,6 +225,10 @@ set(WW3D2_SRC
     #vertmaterial.h
     visrasterizer.cpp
     visrasterizer.h
+    # TheSuperHackers @port The non-Windows RenderBackendClass. Entirely inside #ifndef _WIN32,
+    # so the Windows build compiles an empty translation unit and its behaviour is unchanged.
+    vulkanrenderbackend.cpp
+    vulkanrenderbackend.h
     w3d_dep.cpp
     w3d_dep.h
     #w3d_file.h
@@ -249,6 +253,25 @@ target_sources(corei_ww3d2 INTERFACE ${WW3D2_SRC})
 target_include_directories(corei_ww3d2 INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+
+# TheSuperHackers @port Off Windows, vulkanrenderbackend.cpp implements the RenderBackendClass seam
+# over the renderer in spikes/renderer, so it needs that interface header and Vulkan's. On Windows
+# the file is empty and neither is looked for. Kept as an interface include rather than a link to
+# zh-render-backend: the library that carries the backend's objects is chosen by whoever builds the
+# game target (scripts/native-build.py builds it as a support archive), and adding a dependency here
+# would make every consumer of corei_ww3d2 need Vulkan at link time.
+if (NOT WIN32)
+    target_include_directories(corei_ww3d2 INTERFACE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../spikes/renderer/src"
+    )
+    # Not REQUIRED: configuring a target that does not compile this file (the audio and probe jobs
+    # configure the tree without building WW3D2) must not fail for want of a renderer. Compiling it
+    # without Vulkan's headers fails loudly on the include, which is the honest failure.
+    find_package(Vulkan QUIET)
+    if (Vulkan_FOUND)
+        target_include_directories(corei_ww3d2 INTERFACE "${Vulkan_INCLUDE_DIRS}")
+    endif()
+endif()
 
 if (MSVC AND NOT IS_VS6_BUILD)
     target_link_libraries(corei_ww3d2 INTERFACE

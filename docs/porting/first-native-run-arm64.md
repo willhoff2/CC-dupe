@@ -199,6 +199,13 @@ it one is a change, and this slice reports.
 So the honest boundary is: **the engine initialises, finds and reads retail assets, builds its object
 stores from INI, and creates a Cocoa window; it has no renderer, so no frame exists.**
 
+> **This failure has since been implemented away, off Windows.** `VulkanRenderBackendClass` is now the
+> non-Windows `RenderBackendClass`, so `DX8Wrapper::Init()` and the device enumeration and creation
+> all succeed; on Linux/lavapipe the engine reaches `Do_Onetime_Device_Dependent_Inits()` and stops on
+> a null texture from the D3DX creation entry points instead. `docs/porting/renderer-integration.md`
+> §4 is that measurement. Whether the Mac reaches the same wall is unmeasured — re-running this
+> hardware record is the way to find out.
+
 ## 5. What this run says about points, pixels and Retina
 
 `decisions-resolved.md` puts the renderer in pixels and the engine, UI and mouse in points, converting

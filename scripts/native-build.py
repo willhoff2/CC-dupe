@@ -795,6 +795,40 @@ WINDOW_BACKEND_SLUG = "support_windowbackend"
 WINDOW_BACKEND_SDL2 = "platform_window_sdl2.cpp"
 WINDOW_BACKEND_COCOA = "platform_window_cocoa.mm"
 
+# The render backend. Off Windows `DX8Wrapper`'s RenderBackendClass is
+# Core/Libraries/Source/WWVegas/WW3D2/vulkanrenderbackend.cpp, which is a translation layer over the
+# renderer in spikes/renderer -- the one the spike ladder verifies pixel-for-pixel. Those two
+# sources are the `zh-render-backend` library the spike's own CMakeLists.txt now builds; this
+# harness compiles the same two files, so the engine and the ladder cannot diverge.
+#
+# A support archive, like the window and audio backends: a platform dependency of the measured
+# libraries, not one of them, so it stays out of the objects/translation-unit denominators.
+RENDER_BACKEND_DIR = "spikes/renderer/src"
+RENDER_BACKEND_SLUG = "support_renderbackend"
+RENDER_BACKEND_SOURCES = ("state_translate.cpp", "vulkan_backend.cpp")
+# The backend loads its SPIR-V from SPIKE_SHADER_DIR at device-creation time, so the shaders are
+# compiled here with the same compiler and the same flags spikes/renderer/CMakeLists.txt uses.
+RENDER_BACKEND_SHADERS = ("fixedfunc.vert", "fixedfunc.frag", "probe.vert", "probe.frag")
+# Ubuntu jammy's Vulkan headers (1.3.204) predate VK_KHR_portability_enumeration, which the backend
+# needs for the MoltenVK opt-in, so the spike is built against pinned headers there (see
+# .agents/skills/renderer-spike-verify/SKILL.md). The same search order applies here, and the
+# portability macro -- not merely the presence of <vulkan/vulkan.h> -- is what makes a directory
+# usable, so a too-old system header is reported rather than silently failing to compile.
+# build/docker/_deps/vulkan-headers-src/include comes first because scripts/ci/fetch-probe-deps.sh
+# provisions it at a pinned tag: a CI run must not depend on what happens to be installed.
+VULKAN_HEADER_DIRS = ("build/docker/_deps/vulkan-headers-src/include",
+                      "$VULKAN_SDK/include", "$HOME/vk-headers/include",
+                      "$HOME/vulkan-headers/include", "/usr/local/include",
+                      "/opt/homebrew/include", "/usr/include")
+VULKAN_PORTABILITY_MACRO = "VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME"
+VULKAN_CANDIDATES = (
+    "/usr/lib/x86_64-linux-gnu/libvulkan.so.1",
+    "/lib/x86_64-linux-gnu/libvulkan.so.1",
+    "/usr/lib/aarch64-linux-gnu/libvulkan.so.1",
+    "/usr/local/lib/libvulkan.1.dylib",
+    "/opt/homebrew/lib/libvulkan.1.dylib",
+)
+
 SDL2_HEADER_DIRS = ("/usr/include/SDL2", "/usr/local/include/SDL2", "/opt/homebrew/include/SDL2")
 SDL2_CANDIDATES = (
     "/usr/lib/x86_64-linux-gnu/libSDL2-2.0.so.0",
@@ -892,6 +926,89 @@ def write_audio_backend_manifest(manifest_dir, deps_dir):
     ]
     (manifest_dir / f"{AUDIO_BACKEND_SLUG}.cmake").write_text("\n".join(lines) + "\n")
     return AUDIO_BACKEND_SLUG
+
+
+def vulkan_include_dir():
+    """Where a new enough <vulkan/vulkan.h> lives, which is how the backend includes it."""
+    for candidate in VULKAN_HEADER_DIRS:
+        expanded = pathlib.Path(os.path.expandvars(candidate))
+        if "$" in str(expanded):
+            continue
+        if not expanded.is_absolute():
+            expanded = REPO_ROOT / expanded
+        core = expanded / "vulkan" / "vulkan_core.h"
+        if not (expanded / "vulkan" / "vulkan.h").is_file() or not core.is_file():
+            continue
+        if VULKAN_PORTABILITY_MACRO in core.read_text(errors="ignore"):
+            return expanded
+    return None
+
+
+def vulkan_library():
+    return next((pathlib.Path(p) for p in VULKAN_CANDIDATES if pathlib.Path(p).exists()), None)
+
+
+def compile_spike_shaders(build_dir):
+    """Compile the backend's four shaders to SPIR-V. Returns (directory, None) or (None, why)."""
+    compiler = shutil.which("glslangValidator") or shutil.which("glslc")
+    if compiler is None:
+        return None, "no glslangValidator or glslc on PATH"
+    source_dir = REPO_ROOT / "spikes" / "renderer" / "shaders"
+    out_dir = build_dir / "generated" / "spike-shaders"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for shader in RENDER_BACKEND_SHADERS:
+        source = source_dir / shader
+        if not source.is_file():
+            return None, f"{source.relative_to(REPO_ROOT)} is missing"
+        out = out_dir / f"{shader}.spv"
+        if compiler.endswith("glslc"):
+            cmd = [compiler, str(source), "-o", str(out)]
+        else:
+            cmd = [compiler, "-V", str(source), "-o", str(out)]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0 or not out.is_file():
+            return None, f"{shader}: {(proc.stdout or proc.stderr).strip()[:200]}"
+    return out_dir, None
+
+
+def write_render_backend_manifest(manifest_dir, build_dir):
+    """CMake fragment for the Vulkan render backend. Returns (slug, None) or (None, why)."""
+    root = REPO_ROOT / RENDER_BACKEND_DIR
+    sources = [root / name for name in RENDER_BACKEND_SOURCES]
+    missing = [s for s in sources if not s.is_file()]
+    if missing:
+        return None, f"{missing[0].relative_to(REPO_ROOT)} is missing"
+    include_dir = vulkan_include_dir()
+    if include_dir is None:
+        return None, "no <vulkan/vulkan.h>; install the Vulkan headers"
+    shader_dir, why = compile_spike_shaders(build_dir)
+    if shader_dir is None:
+        return None, why
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Generated by scripts/native-build.py for the Vulkan render backend. Do not edit.",
+        "set(NATIVE_SOURCES",
+        *[f'    "{s}"' for s in sources],
+        ")",
+        "set(NATIVE_INCLUDES",
+        f'    "{root}"',
+        f'    "{include_dir}"',
+        # `platform/platform_window.h`, which the backend includes under SPIKE_WITH_PLATFORM_WINDOW.
+        f'    "{REPO_ROOT / WINDOW_BACKEND_DIR}/.."',
+        # This project force-includes Utility/CppMacros.h into every target, this one included.
+        f'    "{REPO_ROOT / "Dependencies" / "Utility"}"',
+        ")",
+        "set(NATIVE_DEFINES",
+        f'    "SPIKE_SHADER_DIR=\\"{shader_dir}\\""',
+        # Without this the backend's surface and swapchain paths compile to `return true` and
+        # Present() returns success having presented nothing -- measured on the outpost, where
+        # `nm -um` on the archive showed no vkCreateSwapchainKHR at all. The window seam it needs
+        # is WWLib's, and its implementations are already in the window support archive.
+        '    "SPIKE_WITH_PLATFORM_WINDOW"',
+        ")",
+    ]
+    (manifest_dir / f"{RENDER_BACKEND_SLUG}.cmake").write_text("\n".join(lines) + "\n")
+    return RENDER_BACKEND_SLUG, None
 
 
 def sdl2_include_dir():
@@ -1992,6 +2109,13 @@ def main():
     sdl2_path = sdl2_library() if sys.platform != "darwin" else None
     if window_slug is not None and sys.platform != "darwin" and sdl2_path is None:
         print("   warning: no libSDL2 found; the backend's own SDL_* calls will stay unresolved")
+    render_slug, render_detail = write_render_backend_manifest(manifest_dir, build_dir)
+    if render_slug is None:
+        print(f"   warning: no render backend built ({render_detail}); DX8Wrapper's non-Windows "
+              "RenderBackendClass will have no renderer to call")
+    vulkan_path = vulkan_library() if render_slug is not None else None
+    if render_slug is not None and vulkan_path is None:
+        print("   warning: no libvulkan found; the backend's own vk* calls will stay unresolved")
     gitinfo_slug, gitinfo_detail = generate_gitinfo(build_dir, manifest_dir)
     if gitinfo_slug is None:
         print(f"   warning: gitinfo was not generated ({gitinfo_detail});"
@@ -2003,7 +2127,7 @@ def main():
         print("   warning: the pinned FFmpeg libraries are not built "
               f"({deps_dir / FFMPEG_LIB_SUBDIR}); re-run scripts/ci/fetch-probe-deps.sh, or the "
               "video path's av_*/sws_* calls stay unresolved")
-    extra_slugs = [s for s in (lzhl_slug, audio_slug, window_slug, gitinfo_slug) if s]
+    extra_slugs = [s for s in (lzhl_slug, audio_slug, window_slug, render_slug, gitinfo_slug) if s]
 
     print(f"== compiling {len(all_sources)} translation units")
     configure(build_dir, manifest_dir, targets, extra_slugs)
@@ -2055,7 +2179,8 @@ def main():
         print(f"   warning: {len(second_failed)} further failures in the second pass")
 
     all_archives = sorted(build_dir.rglob("*.a"))
-    support_slugs = (LZHL_SLUG, AUDIO_BACKEND_SLUG, WINDOW_BACKEND_SLUG, GITINFO_SLUG)
+    support_slugs = (LZHL_SLUG, AUDIO_BACKEND_SLUG, WINDOW_BACKEND_SLUG, RENDER_BACKEND_SLUG,
+                     GITINFO_SLUG)
     support_archives = [a for a in all_archives if a.stem.endswith(support_slugs)]
     archives = [a for a in all_archives if a not in support_archives]
     game_archive = next(
@@ -2071,11 +2196,12 @@ def main():
     if window_slug is not None and sys.platform == "darwin":
         for framework in ("AppKit", "QuartzCore", "Metal", "CoreGraphics", "Foundation"):
             platform_link_args += ["-framework", framework]
-    link_extra = list(ffmpeg_paths) + platform_libraries
+    link_extra = list(ffmpeg_paths) + platform_libraries + ([vulkan_path] if vulkan_path else [])
     print(f"== linking {len(archives)} archives "
           f"(+{len(support_archives)} support, zlib: {'yes' if zlib_path else 'no'}, "
           f"openal: {'yes' if openal_path else 'no'}, "
           f"ffmpeg: {'yes' if ffmpeg_paths else 'no'}, "
+          f"render backend: {'yes' if render_slug else 'no'}, "
           f"window backend: {window_source.name if window_source else 'none'})")
     # Whether the game's own entry-point target is in this build at all. It decides whether a
     # generated stub `main()` is a legitimate anchor or a silent substitution the run must refuse:
@@ -2246,7 +2372,8 @@ def main():
         "third_party_linked": sorted(
             [a.stem for a in support_archives]
             + (["z (system)"] if zlib_path else [])
-            + (["openal (system)"] if openal_path else [])),
+            + (["openal (system)"] if openal_path else [])
+            + (["vulkan (system)"] if vulkan_path else [])),
         "undefined_total": len(symbols),
         "undefined_by_category": dict(by_category.most_common()),
         # The categorised list is the deliverable, so it goes in the machine-readable output in

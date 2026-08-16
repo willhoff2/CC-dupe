@@ -1,10 +1,15 @@
 # The renderer backend seam
 
 `DX8Wrapper` now talks to an abstract `RenderBackendClass` instead of to
-`IDirect3DDevice8` / `IDirect3D8` directly. There is exactly one implementation,
-`D3D8RenderBackendClass`, which contains the D3D8 calls that used to be expanded inline from
-the `DX8CALL` macros. No Vulkan code is involved; this document describes the socket, not a
-second plug.
+`IDirect3DDevice8` / `IDirect3D8` directly. When this document was written there was exactly one
+implementation, `D3D8RenderBackendClass`, which contains the D3D8 calls that used to be expanded
+inline from the `DX8CALL` macros. It describes the socket, not a plug.
+
+> **There is now a second implementation.** Off Windows the seam is
+> `VulkanRenderBackendClass` (`vulkanrenderbackend.{h,cpp}`, `#ifndef _WIN32`), a translation layer
+> over the renderer in `spikes/renderer`. `docs/porting/renderer-integration.md` is that record: what
+> it implements, what it refuses and where the engine stops with it. Everything below still describes
+> the interface, which that slice did not reshape.
 
 Files:
 

@@ -19,9 +19,9 @@
       "total": 11
     },
     "Core/Libraries/Source/WWVegas/WW3D2": {
-      "objects": 77,
-      "probe_clean": 77,
-      "total": 77
+      "objects": 78,
+      "probe_clean": 78,
+      "total": 78
     },
     "Core/Libraries/Source/WWVegas/WWAudio": {
       "objects": 19,
@@ -103,7 +103,7 @@
     "libgeneralsmd_code_main"
   ],
   "link_entry_point_stub": false,
-  "objects": 977,
+  "objects": 978,
   "pile_meaning": {
     "compile-blocked": "An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker.",
     "cut-scope-not-linked": "A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it.",
@@ -111,7 +111,7 @@
     "library-not-linked": "A library defines it and this configuration links no such library. A link line, not port work.",
     "no-definition-anywhere": "Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work."
   },
-  "probe_clean": 977,
+  "probe_clean": 978,
   "providers": {
     "ffmpeg": {
       "evidence_files": 823,
@@ -149,8 +149,8 @@
       "system_library_symbols_matched": []
     },
     "miles": {
-      "evidence_files": 7,
-      "evidence_names": 134,
+      "evidence_files": 8,
+      "evidence_names": 160,
       "label": "Miles AIL_* API \u2014 the `milesstub`/OpenAL backend",
       "owner": "platform/audio-device (the Miles/OpenAL link)",
       "pile": "library-not-linked",
@@ -187,7 +187,7 @@
     "agrees_with_nm": true,
     "attempted": true,
     "binary": {
-      "bytes": 84657584,
+      "bytes": 86729904,
       "elf_type": "DYN",
       "format": "ELF",
       "machine": "x86-64",
@@ -217,12 +217,14 @@
   "third_party_linked": [
     "libsupport_gitinfo",
     "libsupport_openalaudiodevice",
+    "libsupport_renderbackend",
     "libsupport_windowbackend",
     "libthirdparty_lzhl",
     "openal (system)",
+    "vulkan (system)",
     "z (system)"
   ],
-  "translation_units": 977,
+  "translation_units": 978,
   "undefined_by_category": {},
   "undefined_by_pile": {
     "compile-blocked": 0,

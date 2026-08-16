@@ -26,6 +26,14 @@ Where the two disagree about the platform, the hardware run is the one measured 
 | Every measured translation unit compiles | **yes** on Linux, 977/977 | Linux; 976/977 on Apple Silicon | the one Darwin holdout, `WWLib/regexpr.cpp`, is ported off glibc's GNU regex to POSIX `<regex.h>` in the slice that wrote this row and has **not** been recompiled on a Mac: [`regexpr-posix-port.md`](regexpr-posix-port.md) |
 | The entry point is the game's own | **yes** | Linux; unverified on macOS | `link_entry_point_stub` false with `game_entry_target_built` true. A missing entry point now fails the run instead of being replaced by a generated stub, and the Mach-O spelling (`_main`) is measured rather than hardcoded — `native-build.md` §"What the harness had to learn about Mach-O" |
 
+> **Superseded figures.** The renderer-integration slice added one engine translation unit
+> (`vulkanrenderbackend.cpp`, the non-Windows `RenderBackendClass`), so the level 1-4 measurement is
+> now **978/978** objects and the executable **82.6 MiB**, still 0 compile failures and 0 unresolved
+> symbols. The first startup failure has also moved: it is no longer the null render backend but a
+> null texture from the D3DX creation entry points inside
+> `DX8Wrapper::Do_Onetime_Device_Dependent_Inits()`. See
+> `docs/porting/renderer-integration.md` §1 and §4. No figure in the body below was rewritten.
+
 Measured with `clang++-14` on Ubuntu 22.04, levels 1-4 shimmed:
 
 ```sh

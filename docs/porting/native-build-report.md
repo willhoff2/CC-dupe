@@ -19,22 +19,22 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
 | `Core/GameEngine` | 210 | 210 | 210 |
 | `GeneralsMD/Code/GameEngine` | 380 | 380 | 380 |
-| `Core/Libraries/Source/WWVegas/WW3D2` | 77 | 77 | 77 |
+| `Core/Libraries/Source/WWVegas/WW3D2` | 78 | 78 | 78 |
 | `Core/Libraries/Source/WWVegas/WWAudio` | 19 | 19 | 19 |
 | `Core/Libraries/Source/WWVegas/WWDownload` | 4 | 4 | 4 |
 | `GeneralsMD/Code/Libraries/Source/WWVegas` | 35 | 35 | 35 |
 | `Core/GameEngineDevice` | 70 | 70 | 70 |
 | `GeneralsMD/Code/GameEngineDevice` | 39 | 39 | 39 |
 | `GeneralsMD/Code/Main` | 1 | 1 | 1 |
-| **Total** | **977** | **977** | **977** |
+| **Total** | **978** | **978** | **978** |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 977 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 978 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
-The 14 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_gitinfo`, `libsupport_openalaudiodevice`, `libsupport_windowbackend`, `libthirdparty_lzhl`, `openal (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point `main` from: `libgeneralsmd_code_main`; 5 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_user32_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **0 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
+The 14 archives were linked into one binary with `--whole-archive`, plus the third-party libraries the engine calls into: `libsupport_gitinfo`, `libsupport_openalaudiodevice`, `libsupport_renderbackend`, `libsupport_windowbackend`, `libthirdparty_lzhl`, `openal (system)`, `vulkan (system)`, `z (system)` (binary produced: yes; linker exited 0 -- unresolved symbols are warnings here, so a file being produced does not mean it can run; entry point `main` from: `libgeneralsmd_code_main`; 5 standalone test-tool `main()` object(s) removed from the archives first: `libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwlib(win32_user32_test.cpp.o)`, `libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)`). **0 distinct symbols are unresolved** once libc, libstdc++, libm, libpthread and the CRT/unwinder symbols are discounted. The full categorised list is in the JSON output; examples follow each count.
 
 | Cause | Symbols |
 |---|---:|
@@ -55,7 +55,7 @@ The libraries in the `library-not-linked` and `cut-scope-not-linked` piles, the 
 
 | Library | Pile | Symbols | Evidence files | Why it is not linked | Owner |
 |---|---|---:|---:|---|---|
-| Miles AIL_* API — the `milesstub`/OpenAL backend | `library-not-linked` | 0 | 7 | `cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, and the 32-bit Windows build links the fetched miles-sdk-stub. This harness now builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links libopenal, so what is left here is the part of the Miles surface that backend does not implement rather than the whole API. | platform/audio-device (the Miles/OpenAL link) |
+| Miles AIL_* API — the `milesstub`/OpenAL backend | `library-not-linked` | 0 | 8 | `cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, and the 32-bit Windows build links the fetched miles-sdk-stub. This harness now builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links libopenal, so what is left here is the part of the Miles surface that backend does not implement rather than the whole API. | platform/audio-device (the Miles/OpenAL link) |
 | FFmpeg (libavcodec / libavformat / libavutil / libswscale) | `library-not-linked` | 0 | 823 | The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route. `fetch-probe-deps.sh` provisions the pinned headers so the code compiles, and nothing installs an FFmpeg runtime for the link. | video/bink-excision-and-harness-headers |
 | The window/input backend this configuration does not choose (SDL2, Cocoa) | `library-not-linked` | 0 | 2 | `probe.OPTIONAL_BACKENDS` keeps the SDL2 backend opt-in and the Cocoa backend is Objective-C++, so no target lists either. The definitions are in the tree; a configuration that picks one resolves all of them. | platform/macos-window-compile and platform/window-seam-wiring |
 | GameSpy SDK | `cut-scope-not-linked` | 0 | 279 | Online matchmaking is permanently cut scope (docs/porting/native-port-plan.md). The SDK's own sources are provisioned and define these symbols, so this is a link refused rather than one that is missing: they disappear when the call sites go, which is `online/absent-menu-seam`'s work, and must not be stubbed to make a link pass. | online/absent-menu-seam |
@@ -70,7 +70,7 @@ The linker's list and §3's `nm` scan agree, so the categorised list above is th
 
 Symbol resolution is necessary and not sufficient; `docs/porting/startability.md` defines what else a first launch needs.
 
-The file is `build/native/native_strict_link`, 80.7 MiB, ELF 64-bit x86-64. That it loads and runs is a separate question from whether it links, and one this run does not answer: see `docs/porting/startability.md`.
+The file is `build/native/native_strict_link`, 82.7 MiB, ELF 64-bit x86-64. That it loads and runs is a separate question from whether it links, and one this run does not answer: see `docs/porting/startability.md`.
 
 ## Reproducing
 

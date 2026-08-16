@@ -308,6 +308,15 @@ struct VertexBufferHandle {
 struct IndexBufferHandle {
 	Buffer buffer;
 	uint32_t count = 0;
+
+	// --- lockable / dynamic ring, the same shape the vertex path has --------------
+	bool dynamic = false;
+	VkDeviceSize capacity = 0; // bytes the engine thinks the buffer has
+	uint32_t region_count = 1;
+	uint32_t region = 0;
+	std::vector<uint64_t> region_last_use;
+	void* mapped = nullptr;
+	VkDeviceSize bind_offset = 0;
 };
 
 // IDirect3DSurface8. Two shapes behind one handle, exactly as D3D8 has it:
@@ -400,6 +409,11 @@ public:
 	VertexBufferHandle* Create_Vertex_Buffer(const void* data, size_t bytes,
 	                                         uint32_t fvf) override;
 	IndexBufferHandle* Create_Index_Buffer(const uint16_t* data, size_t count) override;
+	IndexBufferHandle* Create_Lockable_Index_Buffer(size_t count, bool dynamic) override;
+	bool Lock_Index_Buffer(IndexBufferHandle* ib, size_t offset_indices, size_t count,
+	                       uint32_t flags, void** out_bits) override;
+	bool Unlock_Index_Buffer(IndexBufferHandle* ib) override;
+	bool Get_Adapter_Info(AdapterInfo& out) const override;
 
 	TextureHandle* Create_Lockable_Texture(uint32_t width, uint32_t height,
 	                                       TextureFormat format,
@@ -408,6 +422,8 @@ public:
 	                  uint32_t flags, LockedRect& out) override;
 	bool Unlock_Texture(TextureHandle* texture, uint32_t level) override;
 	VertexBufferHandle* Create_Dynamic_Vertex_Buffer(size_t bytes, uint32_t fvf) override;
+	VertexBufferHandle* Create_Lockable_Vertex_Buffer(size_t bytes, uint32_t fvf,
+	                                                 bool dynamic) override;
 	bool Lock_Vertex_Buffer(VertexBufferHandle* vb, size_t offset, size_t size,
 	                        uint32_t flags, void** out_bits) override;
 	bool Unlock_Vertex_Buffer(VertexBufferHandle* vb) override;
@@ -463,8 +479,7 @@ public:
 		return static_cast<uint32_t>(pipelines_.size());
 	}
 
-	// Public so main.cpp can drive the optional presentation path.
-	bool Present();
+	bool Present() override;
 
 	bool Resize_Presentation(uint32_t width, uint32_t height) override;
 
@@ -1666,6 +1681,7 @@ void VulkanBackend::Shutdown() {
 	}
 	owned_vbs_.clear();
 	for (auto* ib : owned_ibs_) {
+		if (ib->mapped != nullptr) vkUnmapMemory(device_, ib->buffer.memory);
 		free_buffer(ib->buffer);
 		delete ib;
 	}
@@ -2655,6 +2671,11 @@ bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
 
 VertexBufferHandle* VulkanBackend::Create_Dynamic_Vertex_Buffer(size_t bytes,
                                                                 uint32_t fvf) {
+	return Create_Lockable_Vertex_Buffer(bytes, fvf, true);
+}
+
+VertexBufferHandle* VulkanBackend::Create_Lockable_Vertex_Buffer(size_t bytes, uint32_t fvf,
+                                                                 bool dynamic) {
 	if (bytes == 0) return nullptr;
 	auto* handle = new VertexBufferHandle();
 	handle->fvf = fvf;
@@ -2663,12 +2684,12 @@ VertexBufferHandle* VulkanBackend::Create_Dynamic_Vertex_Buffer(size_t bytes,
 		delete handle;
 		return nullptr;
 	}
-	handle->dynamic = true;
+	handle->dynamic = dynamic;
 	handle->capacity = bytes;
 	// D3DLOCK_DISCARD is "rename this buffer": the driver hands back memory the GPU
 	// is not reading. Reproducing that needs more than one copy behind the handle,
 	// one per frame that can be in flight, plus one being written.
-	handle->region_count = kDynamicRingRegions;
+	handle->region_count = dynamic ? kDynamicRingRegions : 1;
 	handle->region_last_use.assign(handle->region_count, 0);
 	const VkMemoryPropertyFlags host =
 	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -2679,8 +2700,10 @@ VertexBufferHandle* VulkanBackend::Create_Dynamic_Vertex_Buffer(size_t bytes,
 		delete handle;
 		return nullptr;
 	}
-	++resource_stats_.dynamic_buffer_allocations;
-	resource_stats_.dynamic_buffer_bytes += total;
+	if (dynamic) {
+		++resource_stats_.dynamic_buffer_allocations;
+		resource_stats_.dynamic_buffer_bytes += total;
+	}
 	owned_vbs_.push_back(handle);
 	return handle;
 }
@@ -3417,7 +3440,9 @@ void VulkanBackend::Draw_Indexed_Primitive(uint32_t primitive_type, uint32_t sta
 	if (!Prepare_Draw(primitive_type, *bound_vb_)) return;
 	if (bound_vb_->dynamic) bound_vb_->region_last_use[bound_vb_->region] = frame_counter_;
 
-	vkCmdBindIndexBuffer(frame_cmd_, bound_ib_->buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
+	vkCmdBindIndexBuffer(frame_cmd_, bound_ib_->buffer.buffer, bound_ib_->bind_offset,
+	                     VK_INDEX_TYPE_UINT16);
+	if (bound_ib_->dynamic) bound_ib_->region_last_use[bound_ib_->region] = frame_counter_;
 	vkCmdDrawIndexed(frame_cmd_, Vertex_Count_For_Primitives(primitive_type, primitive_count),
 	                 1, start_index, index_base_offset_, 0);
 	++draw_index_;
@@ -4245,6 +4270,218 @@ void VulkanBackend::Set_Vertex_Shader_Constant(uint32_t start_register, const vo
 		if (reg >= kMaxVertexShaderConstants) return;
 		for (uint32_t i = 0; i < 4; ++i) vertex_shader_constants_[reg][i] = src[v * 4 + i];
 	}
+}
+
+// ---------------------------------------------------------------------------
+// lockable index buffers (class C6 static / C5 dynamic ring)
+// ---------------------------------------------------------------------------
+// D3D8's CreateIndexBuffer hands back an empty buffer and the engine fills it through
+// Lock/Unlock; nothing in the engine ever creates one with its contents in hand. The
+// static and dynamic cases differ only in how many renamed copies sit behind the handle,
+// exactly as in the vertex path above, so this mirrors it rather than inventing a second
+// policy.
+
+IndexBufferHandle* VulkanBackend::Create_Lockable_Index_Buffer(size_t count, bool dynamic) {
+	if (count == 0) return nullptr;
+	auto* handle = new IndexBufferHandle();
+	handle->count = static_cast<uint32_t>(count);
+	handle->dynamic = dynamic;
+	handle->capacity = count * sizeof(uint16_t);
+	handle->region_count = dynamic ? kDynamicRingRegions : 1;
+	handle->region_last_use.assign(handle->region_count, 0);
+	const VkMemoryPropertyFlags host =
+	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	const VkDeviceSize total = handle->capacity * handle->region_count;
+	if (!Allocate_Buffer(total, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, host, handle->buffer) ||
+	    vkMapMemory(device_, handle->buffer.memory, 0, total, 0, &handle->mapped) !=
+	        VK_SUCCESS) {
+		delete handle;
+		return nullptr;
+	}
+	if (dynamic) {
+		++resource_stats_.dynamic_buffer_allocations;
+		resource_stats_.dynamic_buffer_bytes += total;
+	}
+	owned_ibs_.push_back(handle);
+	return handle;
+}
+
+bool VulkanBackend::Lock_Index_Buffer(IndexBufferHandle* ib, size_t offset_indices,
+                                      size_t count, uint32_t flags, void** out_bits) {
+	if (ib == nullptr || out_bits == nullptr || ib->mapped == nullptr) return false;
+	const VkDeviceSize offset = offset_indices * sizeof(uint16_t);
+	const VkDeviceSize size = count * sizeof(uint16_t);
+	if (offset + size > ib->capacity) return false;
+
+	if ((flags & LOCK_DISCARD) != 0 && ib->region_count > 1) {
+		ib->region = (ib->region + 1) % ib->region_count;
+		if (ib->region_last_use[ib->region] > completed_frame_) {
+			++resource_stats_.ring_wrap_waits;
+			if (ib->region_last_use[ib->region] < frame_counter_) {
+				vkWaitForFences(device_, 1, &frame_fence_, VK_TRUE, UINT64_MAX);
+				completed_frame_ = frame_counter_ - 1;
+			}
+		}
+		++resource_stats_.ring_discards;
+	} else if ((flags & LOCK_NOOVERWRITE) != 0) {
+		++resource_stats_.ring_appends;
+	}
+	ib->bind_offset = ib->capacity * ib->region;
+	resource_stats_.ring_bytes += size;
+	*out_bits = static_cast<uint8_t*>(ib->mapped) + ib->bind_offset + offset;
+	return true;
+}
+
+bool VulkanBackend::Unlock_Index_Buffer(IndexBufferHandle* ib) {
+	// Host-coherent, so nothing to flush -- the same free ride the vertex path gets.
+	return ib != nullptr && ib->mapped != nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// adapter enumeration and measured capabilities
+// ---------------------------------------------------------------------------
+namespace {
+
+// Every TextureFormat the device can sample, as a bitmask, measured one format at a time.
+uint32_t Sampled_Format_Mask(VkPhysicalDevice physical, bool view_swizzle) {
+	static const TextureFormat kAll[] = {
+	    TextureFormat::A8R8G8B8, TextureFormat::X8R8G8B8, TextureFormat::R8G8B8,
+	    TextureFormat::A4R4G4B4, TextureFormat::A1R5G5B5, TextureFormat::R5G6B5,
+	    TextureFormat::L8,       TextureFormat::A8,       TextureFormat::A8L8,
+	    TextureFormat::V8U8,     TextureFormat::P8,       TextureFormat::DXT1,
+	    TextureFormat::DXT2,     TextureFormat::DXT3,     TextureFormat::DXT4,
+	    TextureFormat::DXT5,
+	};
+	uint32_t mask = 0;
+	for (TextureFormat format : kAll) {
+		const FormatPlan plan = Plan_For(format, view_swizzle);
+		VkFormatProperties props{};
+		vkGetPhysicalDeviceFormatProperties(physical, plan.vk, &props);
+		if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0) {
+			mask |= 1u << static_cast<int>(format);
+		}
+	}
+	return mask;
+}
+
+void Fill_Adapter_Info(VkPhysicalDevice physical, bool view_swizzle, AdapterInfo& out) {
+	VkPhysicalDeviceProperties props{};
+	vkGetPhysicalDeviceProperties(physical, &props);
+	VkPhysicalDeviceFeatures features{};
+	vkGetPhysicalDeviceFeatures(physical, &features);
+	VkPhysicalDeviceMemoryProperties mem{};
+	vkGetPhysicalDeviceMemoryProperties(physical, &mem);
+
+	out.name = props.deviceName;
+	out.vendor_id = props.vendorID;
+	out.device_id = props.deviceID;
+	out.driver_version = props.driverVersion;
+	out.api_version = props.apiVersion;
+	out.discrete = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+	out.max_texture_dimension = props.limits.maxImageDimension2D;
+	// The engine's cascade is at most kMaxTextureStages stages, so a device that could
+	// bind more still reports what this backend implements.
+	out.max_texture_stages =
+	    std::min<uint32_t>(kMaxTextureStages, props.limits.maxPerStageDescriptorSampledImages);
+	// 16-bit indices are the only ones the backend binds, so the reachable vertex index
+	// is bounded by the index type, not only by the device limit.
+	out.max_vertex_index = std::min<uint32_t>(props.limits.maxDrawIndexedIndexValue, 0xFFFFu);
+	out.max_primitive_count = out.max_vertex_index;
+	out.anisotropic_filtering = features.samplerAnisotropy == VK_TRUE;
+	out.max_anisotropy = out.anisotropic_filtering ? props.limits.maxSamplerAnisotropy : 1.0f;
+	for (uint32_t i = 0; i < mem.memoryHeapCount; ++i) {
+		if ((mem.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0) {
+			out.device_memory_bytes += mem.memoryHeaps[i].size;
+		}
+	}
+	out.sampled_formats = Sampled_Format_Mask(physical, view_swizzle);
+
+	if (Device_Extension_Available(physical, VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) {
+		VkPhysicalDeviceDriverPropertiesKHR driver{
+		    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR};
+		VkPhysicalDeviceProperties2 props2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+		props2.pNext = &driver;
+		vkGetPhysicalDeviceProperties2(physical, &props2);
+		out.driver = driver.driverName;
+		if (driver.driverInfo[0] != '\0') {
+			out.driver += " ";
+			out.driver += driver.driverInfo;
+		}
+	}
+}
+
+} // namespace
+
+bool VulkanBackend::Get_Adapter_Info(AdapterInfo& out) const {
+	if (physical_ == VK_NULL_HANDLE) return false;
+	out = AdapterInfo();
+	Fill_Adapter_Info(physical_, view_swizzle_, out);
+	return true;
+}
+
+bool Enumerate_Adapters(std::vector<AdapterInfo>& out, bool enable_validation) {
+	out.clear();
+
+	std::vector<const char*> extensions;
+	std::vector<const char*> layers;
+	VkInstanceCreateFlags flags = 0;
+	if (Instance_Extension_Available(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+		extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+		flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+	}
+	if (enable_validation) {
+		uint32_t layer_count = 0;
+		vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
+		std::vector<VkLayerProperties> available(layer_count);
+		vkEnumerateInstanceLayerProperties(&layer_count, available.data());
+		for (const auto& l : available) {
+			if (std::strcmp(l.layerName, "VK_LAYER_KHRONOS_validation") == 0) {
+				layers.push_back("VK_LAYER_KHRONOS_validation");
+			}
+		}
+	}
+
+	VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+	app.pApplicationName = "zh-adapter-enumeration";
+	app.apiVersion = VK_API_VERSION_1_1;
+	VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+	ci.pApplicationInfo = &app;
+	ci.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+	ci.ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data();
+	ci.enabledLayerCount = static_cast<uint32_t>(layers.size());
+	ci.ppEnabledLayerNames = layers.empty() ? nullptr : layers.data();
+	ci.flags = flags;
+
+	VkInstance instance = VK_NULL_HANDLE;
+	const VkResult created = vkCreateInstance(&ci, nullptr, &instance);
+	if (created != VK_SUCCESS) {
+		std::fprintf(stderr, "Enumerate_Adapters: vkCreateInstance failed with VkResult %d\n",
+		             static_cast<int>(created));
+		return false;
+	}
+
+	uint32_t count = 0;
+	if (vkEnumeratePhysicalDevices(instance, &count, nullptr) != VK_SUCCESS || count == 0) {
+		vkDestroyInstance(instance, nullptr);
+		return false;
+	}
+	std::vector<VkPhysicalDevice> devices(count);
+	if (vkEnumeratePhysicalDevices(instance, &count, devices.data()) != VK_SUCCESS) {
+		vkDestroyInstance(instance, nullptr);
+		return false;
+	}
+
+	// The swizzle mode only decides which VkFormat a D3D8 format maps onto, and the
+	// engine asks about formats before a device exists, so the enumeration reports what
+	// the default (swizzled) mapping supports; the backend re-measures after Init().
+	for (VkPhysicalDevice d : devices) {
+		AdapterInfo info;
+		Fill_Adapter_Info(d, true, info);
+		out.push_back(std::move(info));
+	}
+
+	vkDestroyInstance(instance, nullptr);
+	return true;
 }
 
 RenderBackend* Create_Vulkan_Backend(bool enable_validation, bool headless) {
