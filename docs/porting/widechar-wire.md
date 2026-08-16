@@ -162,17 +162,24 @@ Ladder run on this branch, `clang++-14`, Ubuntu 22.04 x86-64:
 * `scripts/xfer-blob-audit.py`, `scripts/porting-status.py`,
   `scripts/ci/check-generated-baselines.py`, `scripts/ci/check-probe-baseline.py`.
 
+The two expensive Windows gates were both run on the PR head (#88):
+
+* The Wine/VC6 Zero Hour build (`scripts/docker-build.sh --game zh`) completed all 1361 targets and
+  produced `generalszh.exe`, and CI's `Build GeneralsMD`/`Build Generals` matrices are green in all
+  of `vc6`, `vc6-debug`, `vc6-profile`, `vc6-releaselog`, `win32`, `win32-debug` and `win32-profile`.
+* The retail replay determinism gate passed: `Replay Check GeneralsMD / vc6+t+e` and
+  `vc6-releaselog+t+e` both green over the ten `GeneralsReplays/` replays. This is the check that
+  would catch an `XferCRC` regression, since the CRC feeds the lock-step desync check.
+
 ## What was NOT verified
 
 * **Retail binary compatibility is out of scope and unproven** (and, for save games, was already
   out of scope): a save written by this build is not claimed to load in the retail game. What *is*
   claimed and tested is self-consistency — this build reads what it writes — and cross-width
   agreement, i.e. the Windows and native builds produce the same external bytes for the same text.
-* The Windows/VC6 build and the retail replay gate: see the PR for the outcome. Where that gate did
-  not run, nothing here should be read as "behaviour preserved on Windows" beyond the byte-identity
-  argument above.
-* No test exercises a real `.csf`, `.map`, save game or replay *file* end to end — the tests drive
-  the seam and reconstruct the record shapes. The replay gate is what covers real files.
+* No test exercises a real `.csf`, `.map` or save game *file* end to end — the tests drive the seam
+  and reconstruct the record shapes. Real replay files are covered by the gate above; `.csf`, `.map`
+  and save-game files are not, beyond whatever the replay run happens to read.
 * Astral code points are handled deliberately, not exercised by the game: nothing in the shipped
   data or the input path is known to produce one. The behaviour is defined so that it cannot corrupt
   a stream, not because it is expected.
