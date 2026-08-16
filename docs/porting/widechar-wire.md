@@ -80,7 +80,8 @@ a copy and `wideCharWireBytes(n) == n * sizeof(WideChar)`. That is asserted, not
 `scripts/ci/check-widechar-wire.py` compiles the real header twice, once at each width, and requires
 
 * `memcmp(wire, text, bytes) == 0` at 2 bytes, in both directions;
-* the `.csf` bytes, the save blob and the wire bytes to be **byte-identical between the two runs**.
+* the `.csf` bytes, the `.map` Dict bytes, the save blob and the wire bytes to be **byte-identical
+  between the two runs**.
 
 ## The crossing register
 
@@ -153,7 +154,11 @@ Ladder run on this branch, `clang++-14`, Ubuntu 22.04 x86-64:
 * `scripts/ci/check-widechar-wire.py` — compiles and **runs** the real header at both `wchar_t`
   widths. All cases pass at both; the external bytes are identical between them; the negative
   control (the old `sizeof(WideChar)` sizing) desynchronises the `.csf` reader by **24 bytes** at 4
-  bytes and is correct at 2 — the same 24 bytes the first native run lost.
+  bytes and is correct at 2 — the same 24 bytes the first native run lost. A second negative control
+  covers `DataChunk`: over a miniature `SidesList`-shaped Dict it over-reads `playerDisplayName` by
+  **16 bytes**, walks past the following chunk id and drives `dataLeft` to **-16**, which is the
+  defect that made a retail skirmish map load zero objects while reporting success (PR #93). Both
+  symptoms are asserted, so the crossing cannot silently regress to a native-width read again.
 * `scripts/ci/check-lanmessage-layout.py` — 471 bytes in all four configurations, negative control
   still fails in 18 assertions, after `LANWireChar` became `WideWireChar`.
 * `scripts/native-layout-test.py` — LP64 and ILP32 layouts, poisoned control fails.
