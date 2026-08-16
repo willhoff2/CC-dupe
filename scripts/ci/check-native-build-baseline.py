@@ -68,6 +68,20 @@ def check_binary_gate(base_strict, got_strict):
                         "symbol(s); the baseline's link had none")
     binary = got_strict.get("binary")
     base_binary = base_strict.get("binary") or {}
+    if binary and binary.get("format") == "Mach-O universal":
+        failures.append(
+            f"the executable is a universal Mach-O of {binary.get('architectures', '?')} "
+            "architectures; this port measures a thin binary of the host architecture, and a fat "
+            "file says nothing about which slice was actually built or run")
+    # `lipo -archs` is the platform's own answer, decoded by a different tool from the header
+    # fields above. A build that silently came out for another architecture -- x86-64 on an Apple
+    # Silicon machine, say -- would satisfy every other check here while invalidating every
+    # conclusion drawn from the run.
+    if binary and binary.get("lipo_archs") and binary.get("machine") \
+            and set(binary["lipo_archs"]) != {binary["machine"]}:
+        failures.append(
+            f"`lipo -archs` reports {' '.join(binary['lipo_archs'])} for a file whose header says "
+            f"{binary['machine']}; the two tools must agree on one architecture")
     if got_strict.get("binary_produced") and not binary:
         failures.append("the strict link reports an executable but describes no file, so this run "
                         "cannot say what was produced; re-run with a harness that records it")
@@ -86,6 +100,38 @@ def check_binary_gate(base_strict, got_strict):
         if base_binary.get("machine") and binary.get("machine") != base_binary["machine"]:
             failures.append(f"the executable is for {binary['machine']}, the baseline's was for "
                             f"{base_binary['machine']}")
+    return failures
+
+
+def check_entry_point(baseline, results):
+    """The link must be anchored by the game's own entry point once that target is in the build.
+
+    A generated stub `main()` is legitimate only below level 3, where the entry-point target is not
+    built at all. With it in the build, a stub turns a link of the game into a link of a three-line
+    program while `binary_produced` and every other figure keep their names -- #87's Darwin run,
+    where the scan looked for the ELF spelling of `main` in Mach-O archives. `native-build.py` now
+    refuses to generate one, and this is the assertion that a baseline can never record having had
+    one either.
+    """
+    failures = []
+    if results.get("game_entry_target_built") and results.get("link_entry_point_stub"):
+        failures.append(
+            "the link was anchored by a generated stub main() while "
+            "GeneralsMD/Code/Main was in the build: the figures would describe a link of the stub, "
+            "not of the game")
+    if baseline.get("link_entry_point_archives") and not results.get("link_entry_point_archives"):
+        failures.append(
+            "the baseline's link was anchored by the game's own entry point ("
+            + ", ".join(baseline["link_entry_point_archives"])
+            + ") and this run's is not")
+    # An arm64 measurement taken by an x86-64 toolchain under Rosetta 2 reports the host as Apple
+    # Silicon and produces x86-64 objects. The platform answers this directly, so it is asserted
+    # rather than inferred from the file.
+    if results.get("host_translated"):
+        failures.append(
+            "this run was measured under Rosetta 2 (`sysctl.proc_translated` is 1), so the "
+            "toolchain and everything it produced are x86-64 regardless of the host's "
+            "architecture; re-run in a native shell")
     return failures
 
 
@@ -238,6 +284,8 @@ def main():
     # The strict link is the only figure here that answers "is there an executable", so it is
     # gated whenever both runs attempted it, and a disagreement with the `nm` scan is a failure
     # in its own right: it would mean the categorised list is not the list the linker fails on.
+    failures += check_entry_point(baseline, results)
+
     base_strict = baseline.get("strict_link") or {}
     got_strict = results.get("strict_link") or {}
     if got_strict.get("attempted"):

@@ -31,6 +31,8 @@ import argparse
 import collections
 import concurrent.futures
 import dataclasses
+import functools
+import glob
 import json
 import os
 import pathlib
@@ -38,6 +40,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -1112,25 +1115,127 @@ def probe_sources(sources, target_by_source, deps_dir, jobs, with_shims=False,
 
 NM = os.environ.get("NM", "nm")
 
+# ---------------------------------------------------------------------------------------------
+# One symbol namespace
+#
+# An object file's symbol table does not spell a C name the way the source does: Mach-O prefixes
+# every C symbol with an underscore (`main` is `_main`, `_ZN...` is `__ZN...`), ELF does not. #87's
+# Darwin run is what this abstraction is for. The harness compared names from four sources -- `nm`
+# over the archives, `nm` over the system libraries, the linker's diagnostics, and a hard-coded
+# `"main"` -- and only ELF spells all four the same way, so on macOS the entry-point scan matched
+# nothing and the checker's `agrees_with_nm` was false.
+#
+# The fix is not a per-platform table of spellings, which is a special case waiting for the next
+# platform. Every name entering this script is converted once, at the boundary, into a single
+# prefix-free namespace, and the prefix itself is *measured* from the toolchain being used rather
+# than inferred from `sys.platform`.
+# ---------------------------------------------------------------------------------------------
+
+SYMBOL_PREFIX_PROBE_NAME = "native_build_symbol_prefix_probe"
+
+
+@functools.cache
+def symbol_prefix():
+    """What this toolchain puts in front of a C symbol name: `""` under ELF, `"_"` under Mach-O.
+
+    Measured by compiling a one-line translation unit and reading the name back out of the object
+    file, so a platform whose convention this script has never seen is handled by asking it. There
+    is deliberately no fallback: every symbol comparison here, the entry-point scan included,
+    depends on this answer, and guessing it wrong is how a link of a generated stub gets reported
+    as a link of the game.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        source = pathlib.Path(tmp) / "symbol_prefix_probe.c"
+        obj = pathlib.Path(tmp) / "symbol_prefix_probe.o"
+        source.write_text(f"void {SYMBOL_PREFIX_PROBE_NAME}(void) {{}}\n")
+        compile_proc = subprocess.run([CXX, "-x", "c", "-c", str(source), "-o", str(obj)],
+                                      capture_output=True, text=True)
+        if compile_proc.returncode != 0 or not obj.exists():
+            raise SystemExit(
+                f"FAIL: cannot determine this toolchain's C symbol prefix: {CXX} could not compile "
+                f"a one-line probe.\n{compile_proc.stderr.strip()}")
+        proc = subprocess.run([NM, "--defined-only", "--extern-only", str(obj)],
+                              capture_output=True, text=True)
+        for line in proc.stdout.splitlines():
+            parts = line.split()
+            if parts and parts[-1].endswith(SYMBOL_PREFIX_PROBE_NAME):
+                return parts[-1][:-len(SYMBOL_PREFIX_PROBE_NAME)]
+    raise SystemExit(
+        f"FAIL: cannot determine this toolchain's C symbol prefix: `{NM}` did not report "
+        f"`{SYMBOL_PREFIX_PROBE_NAME}` in an object file that defines it. Every symbol comparison "
+        "in this script depends on knowing it, so the run stops rather than measuring the wrong "
+        "names.")
+
+
+def canonical_symbol(name):
+    """A symbol table name in this script's namespace: exactly one platform prefix removed.
+
+    One, not `lstrip("_")`: `__ZN...` is the Mach-O spelling of the mangled name `_ZN...` and
+    `___cxa_throw` of `__cxa_throw`, so stripping greedily corrupts both and no two lists of names
+    can then be compared.
+    """
+    prefix = symbol_prefix()
+    if prefix and name.startswith(prefix):
+        return name[len(prefix):]
+    return name
+
+
+def platform_symbol(name):
+    """The inverse: how this platform's symbol table spells `name`."""
+    return symbol_prefix() + name
+
+
 # Libraries a native build may legitimately link against. What they export is resolved, not a
 # blocker, and must not show up in the report as one.
-SYSTEM_LIBRARIES = [
-    "/lib/x86_64-linux-gnu/libc.so.6",
-    "/lib/x86_64-linux-gnu/libm.so.6",
-    "/lib/x86_64-linux-gnu/libpthread.so.0",
-    "/lib/x86_64-linux-gnu/libdl.so.2",
-    "/lib/x86_64-linux-gnu/libgcc_s.so.1",
-    "/lib/x86_64-linux-gnu/libstdc++.so.6",
-    "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
+#
+# Globbed per architecture rather than listed for x86-64 alone: on any other Linux multiarch triple
+# the list matched no file, and an empty discount list silently turns every libc symbol into a
+# reported blocker.
+SYSTEM_LIBRARY_GLOBS = [
+    "/lib/*-linux-gnu/lib[cm].so.6",
+    "/lib/*-linux-gnu/libpthread.so.0",
+    "/lib/*-linux-gnu/libdl.so.2",
+    "/lib/*-linux-gnu/libgcc_s.so.1",
+    "/lib/*-linux-gnu/libstdc++.so.6",
+    "/usr/lib/*-linux-gnu/libstdc++.so.6",
 ]
 
-# Supplied by the CRT startup files or the unwinder rather than by a library nm can be pointed at.
+# macOS has no such files to point `nm` at. Since Big Sur the system dylibs exist only inside the
+# dyld shared cache -- `/usr/lib/libSystem.B.dylib` is not on disk -- so the glob above found
+# nothing, the discount list came out EMPTY, and #87's Darwin run reported libc and libc++ symbols
+# as unresolved while ld64 resolved every one of them. That is the whole of `agrees_with_nm` being
+# false against a clean link, and relaxing the check would have hidden it.
+#
+# What ld64 itself links against is on disk: the SDK's text-based stubs (`.tbd`), which list the
+# exports of each system dylib. Only the libraries this script actually links are read -- the
+# libSystem umbrella's re-exported members, libc++ and libobjc -- because discounting every SDK
+# library would hide a real unresolved symbol from a library nothing put on the link line.
+SDK_STUB_LIBRARIES = (
+    "usr/lib/libSystem.tbd",
+    "usr/lib/libc++.tbd",
+    "usr/lib/libc++abi.tbd",
+    "usr/lib/libobjc.tbd",
+)
+SDK_STUB_GLOBS = ("usr/lib/system/*.tbd",)
+# `dyld_info` reads the shared cache directly, and is the fallback when no SDK is installed.
+DYLD_INFO_LIBRARIES = (
+    "/usr/lib/libSystem.B.dylib",
+    "/usr/lib/libc++.1.dylib",
+    "/usr/lib/libc++abi.dylib",
+    "/usr/lib/libobjc.A.dylib",
+)
+
+# Supplied by the CRT startup files, the unwinder or the dynamic loader rather than by a library nm
+# can be pointed at. Written in this script's namespace, i.e. with the platform prefix already off:
+# Mach-O's `___cxa_throw` arrives here as `__cxa_throw`, and `__mh_execute_header` -- which the
+# linker synthesises rather than any library exporting -- as `_mh_execute_header`.
 TOOLCHAIN_SYMBOL_RE = re.compile(
     r"^(__gmon_start__|_ITM_\w+|_Unwind_\w+|__cxa_\w+|__gxx_\w+|__dso_handle|"
-    r"_GLOBAL_OFFSET_TABLE_|__stack_chk_\w+)$")
+    r"_GLOBAL_OFFSET_TABLE_|__stack_chk_\w+|_mh_execute_header|dyld_stub_binder)$")
 
 
 def nm_symbols(path, *flags):
+    """Symbol names `nm` reports for `path`, in this script's prefix-free namespace."""
     proc = subprocess.run([NM, *flags, str(path)], capture_output=True, text=True)
     names = set()
     for line in proc.stdout.splitlines():
@@ -1138,19 +1243,134 @@ def nm_symbols(path, *flags):
         if parts:
             # Dynamic symbol tables carry a version suffix (`acosf@@GLIBC_2.2.5`), which is not
             # part of the name an archive references.
-            names.add(parts[-1].split("@", 1)[0])
+            names.add(canonical_symbol(parts[-1].split("@", 1)[0]))
     return names
 
 
-def system_symbols():
+def exported_symbol_flags():
+    """`nm` flags for the exports of a shared library.
+
+    `-D` selects ELF's dynamic symbol table and has no Mach-O counterpart; llvm-nm rejects it for a
+    dylib, which would have made every such read come back empty.
+    """
+    if sys.platform == "darwin":
+        return ("--defined-only", "--extern-only")
+    return ("-D", "--defined-only", "--extern-only")
+
+
+# `symbols: [ _foo, _bar ]`, possibly wrapped over several lines, in a .tbd stub.
+TBD_SYMBOLS_RE = re.compile(r"\bsymbols:\s*\[(.*?)\]", re.S)
+
+
+def tbd_symbols(path):
+    """Exports listed in a text-based dylib stub, in this script's namespace."""
     names = set()
-    for path in SYSTEM_LIBRARIES:
-        if pathlib.Path(path).exists():
-            names |= nm_symbols(path, "-D", "--defined-only", "--extern-only")
+    text = pathlib.Path(path).read_text(errors="replace")
+    for match in TBD_SYMBOLS_RE.finditer(text):
+        for name in match.group(1).replace("\n", " ").split(","):
+            name = name.strip().strip("'\"")
+            if name:
+                names.add(canonical_symbol(name))
     return names
 
 
-def unresolved_symbols(archives, support_archives=(), extra_libraries=()):
+@functools.cache
+def sdk_path():
+    proc = subprocess.run(["xcrun", "--show-sdk-path"], capture_output=True, text=True)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    path = pathlib.Path(proc.stdout.strip())
+    return path if path.is_dir() else None
+
+
+def dyld_info_exports(path):
+    """Exports of a dylib that lives only in the dyld shared cache, in this script's namespace."""
+    if not shutil.which("dyld_info"):
+        return set()
+    proc = subprocess.run(["dyld_info", "-exports", str(path)], capture_output=True, text=True)
+    names = set()
+    for line in proc.stdout.splitlines():
+        # `0x00012345  _foo` / `0x00012345  _foo [re-export from libsystem_c]`
+        for field in line.split():
+            if field.startswith(symbol_prefix() or "_") and re.fullmatch(r"[\w$.]+", field):
+                names.add(canonical_symbol(field))
+                break
+    return names
+
+
+def darwin_system_symbols():
+    """(exports, sources read) of the macOS libraries this script's link line pulls in."""
+    names, sources = set(), []
+    sdk = sdk_path()
+    if sdk is not None:
+        stubs = [sdk / name for name in SDK_STUB_LIBRARIES]
+        stubs += [pathlib.Path(p) for pattern in SDK_STUB_GLOBS
+                  for p in sorted(glob.glob(str(sdk / pattern)))]
+        for stub in stubs:
+            if stub.is_file():
+                found = tbd_symbols(stub)
+                if found:
+                    names |= found
+                    sources.append(str(stub))
+    if not names:
+        for dylib in DYLD_INFO_LIBRARIES:
+            found = dyld_info_exports(dylib)
+            if found:
+                names |= found
+                sources.append(f"dyld_info -exports {dylib}")
+    return names, sources
+
+
+@functools.cache
+def system_symbols():
+    """(exports of the platform's own libraries, what was read to get them).
+
+    Empty is not an acceptable answer: it would discount nothing, so every `memcpy` and every
+    libc++ symbol would be reported as an unresolved blocker and the totals would describe this
+    function rather than the port. The run stops instead.
+    """
+    if sys.platform == "darwin":
+        names, sources = darwin_system_symbols()
+    else:
+        names, sources = set(), []
+        for pattern in SYSTEM_LIBRARY_GLOBS:
+            for path in sorted(glob.glob(pattern)):
+                names |= nm_symbols(path, *exported_symbol_flags())
+                sources.append(path)
+    if not names:
+        raise SystemExit(
+            "FAIL: could not read the exports of a single system library on this platform "
+            f"({sys.platform}), so libc and libc++ symbols would be counted as unresolved port "
+            "work. That is a measurement bug, not a result, so nothing is written. On macOS this "
+            "means neither an SDK (`xcrun --show-sdk-path`) nor `dyld_info` was usable; on Linux, "
+            f"that none of {SYSTEM_LIBRARY_GLOBS} matched.")
+    return frozenset(names), sources
+
+
+def framework_symbols(link_args):
+    """Exports of the `-framework X` libraries on the link line.
+
+    The Cocoa backend's frameworks are passed as `-framework`, not as paths, so they were invisible
+    to the scan while ld64 resolved everything they define -- the same class of disagreement as the
+    system libraries above, one link-line spelling further out.
+    """
+    names = set()
+    if sys.platform != "darwin":
+        return names
+    sdk = sdk_path()
+    wanted = [b for a, b in zip(link_args, link_args[1:]) if a == "-framework"]
+    for framework in wanted:
+        stub = sdk / "System" / "Library" / "Frameworks" / f"{framework}.framework" / \
+            f"{framework}.tbd" if sdk is not None else None
+        if stub is not None and stub.is_file():
+            names |= tbd_symbols(stub)
+        else:
+            names |= dyld_info_exports(
+                f"/System/Library/Frameworks/{framework}.framework/{framework}")
+    return names
+
+
+def unresolved_symbols(archives, support_archives=(), extra_libraries=(), extra_link_args=()):
     """Symbols the engine archives reference that nothing linked into the binary defines.
 
     Read out of the archives with `nm` rather than scraped from linker diagnostics: ld demangles
@@ -1158,36 +1378,36 @@ def unresolved_symbols(archives, support_archives=(), extra_libraries=()):
     ordering happened to require.
 
     `support_archives` (lzhl) and `extra_libraries` (zlib) contribute definitions only: they are
-    dependencies, so what *they* reference is not this measurement's business.
+    dependencies, so what *they* reference is not this measurement's business. `extra_link_args`
+    contributes the `-framework` libraries for the same reason.
     """
     defined = set()
     referenced_from = collections.defaultdict(set)
     for archive in list(archives) + list(support_archives):
         defined |= nm_symbols(archive, "--defined-only", "--extern-only")
     for library in extra_libraries:
-        defined |= nm_symbols(library, "-D", "--defined-only", "--extern-only")
+        defined |= nm_symbols(library, *exported_symbol_flags())
+    defined |= framework_symbols(list(extra_link_args))
     for archive in archives:
         for name in nm_symbols(archive, "--undefined-only"):
             referenced_from[name].add(archive.stem)
 
-    system = system_symbols()
+    system, _ = system_symbols()
     return {
         name: sorted(archives_using) for name, archives_using in referenced_from.items()
         if name not in defined and name not in system and not TOOLCHAIN_SYMBOL_RE.match(name)
     }
 
 
-# Mach-O prefixes every C symbol with an underscore, so the entry point is `_main` there and `main`
-# under ELF. Looking for the ELF spelling on macOS finds no entry point at all, which silently turns
-# a link of the real game target into a link of a stub main() *and* leaves every test tool's own
-# main() in the archives -- 17 duplicate symbols, and no executable.
-MAIN_SYMBOL = "_main" if sys.platform == "darwin" else "main"
+# The entry point, in this script's namespace. `platform_symbol()` spells it for the symbol table
+# being read, so nothing here has to know that Mach-O calls it `_main`.
+ENTRY_SYMBOL = "main"
 
 
 def archives_defining_main(archives):
     """Archives that define `main`, i.e. that carry the game's real entry point."""
     return [a for a in archives
-            if MAIN_SYMBOL in nm_symbols(a, "--defined-only", "--extern-only")]
+            if ENTRY_SYMBOL in nm_symbols(a, "--defined-only", "--extern-only")]
 
 
 # The one library whose `main()` is the game's: GeneralsMD/Code/Main. Everything else that defines
@@ -1202,7 +1422,8 @@ def objects_defining_main(archive):
     proc = subprocess.run([NM, "-A", "--defined-only", "--extern-only", str(archive)],
                           capture_output=True, text=True)
     # `libfoo.a:bar.cpp.o:0000000000000000 T main`
-    pattern = re.compile(r"^.*?:([^:]+\.o):\s*\S+\s+\S+\s+" + re.escape(MAIN_SYMBOL) + r"$")
+    pattern = re.compile(r"^.*?:([^:]+\.o):\s*\S+\s+\S+\s+"
+                         + re.escape(platform_symbol(ENTRY_SYMBOL)) + r"$")
     return [m.group(1) for m in (pattern.match(line) for line in proc.stdout.splitlines())
             if m is not None]
 
@@ -1224,8 +1445,42 @@ def drop_rival_entry_points(archives, keep):
     return sorted(removed)
 
 
+def entry_point_anchor(entry_archives, game_target_built):
+    """The source of the link's anchor translation unit, and why it is what it is.
+
+    Returns (text, stub_used). A generated `int main() { return 0; }` is legitimate in exactly one
+    situation: the entry-point *target* is not in the selected levels, as in a levels 1-2 build,
+    which measures libraries and has no entry point of its own to link.
+
+    Once `GeneralsMD/Code/Main` is in the build and no archive defines the entry point, a stub is a
+    lie in the shape of a measurement -- the link succeeds, `binary_produced` goes true, and the
+    file is a program that returns 0 while every figure still carries the game's name. That is
+    precisely what happened on Darwin in #87, where the scan looked for the ELF spelling of `main`
+    in a Mach-O archive: the substitution was silent and the only visible symptom was 17 duplicate
+    symbols from the test tools whose entry points had not been dropped. So it stops the run.
+    """
+    if entry_archives:
+        return ("// Generated by scripts/native-build.py: empty on purpose. The game target's own\n"
+                "// main() anchors this link, so a stub entry point would collide with it.\n"), \
+            False
+    if game_target_built:
+        raise SystemExit(
+            f"FAIL: {GAME_ENTRY_TARGET} is in this build, but no archive defines the entry point "
+            f"`{platform_symbol(ENTRY_SYMBOL)}`, so there is nothing to link the game through. "
+            "Refusing to substitute a generated stub main(): that would report a link of a "
+            "three-line program as a link of the game, which is the failure mode this harness "
+            "exists to catch. Look for a compile failure in that target (PlatformMain.cpp), or for "
+            "a symbol-table spelling this script's namespace does not cover -- "
+            f"`{NM} --defined-only --extern-only` over the archives says which.")
+    return ("// Generated by scripts/native-build.py: an entry point so the linker has something\n"
+            "// to anchor to, because the game's own entry-point target is not in the selected\n"
+            f"// levels ({GAME_ENTRY_TARGET} is level 3). The archives are pulled in whole, so\n"
+            "// what matters is what they reference.\n"
+            "int main() { return 0; }\n"), True
+
+
 def link_probe(build_dir, archives, support_archives=(), link_zlib=False, openal_path=None,
-               extra_libraries=(), extra_link_args=()):
+               extra_libraries=(), extra_link_args=(), game_target_built=False):
     """Run the linker over every archive, so "no linker has ever run" stops being true.
 
     `--whole-archive` forces every object in, since a trivial main() otherwise pulls in nothing,
@@ -1233,24 +1488,13 @@ def link_probe(build_dir, archives, support_archives=(), link_zlib=False, openal
     rather than a wall of errors. The third-party archives follow without `--whole-archive`: they
     are dependencies, so only what the engine actually calls needs to come in.
 
-    The stub entry point is used only while nothing else provides one. Once `GeneralsMD/Code/Main`
-    produces an object, its `main()` is the game's own entry point and the stub would be a
-    duplicate definition, so this becomes a link of the real game target.
+    The stub entry point is used only while the game's own entry-point target is outside the
+    selected levels; see `entry_point_anchor`, which refuses to generate one otherwise.
     """
     entry_point = archives_defining_main(archives)
     stub = build_dir / "native_link_probe.cpp"
-    if entry_point:
-        stub.write_text(
-            "// Generated by scripts/native-build.py: empty on purpose. The game target's own\n"
-            "// main() anchors this link, so a stub entry point would collide with it.\n"
-        )
-    else:
-        stub.write_text(
-            "// Generated by scripts/native-build.py: an entry point so the linker has something\n"
-            "// to anchor to. The archives are pulled in whole, so what matters is what they\n"
-            "// reference.\n"
-            "int main() { return 0; }\n"
-        )
+    text, stub_used = entry_point_anchor(entry_point, game_target_built)
+    stub.write_text(text)
     out = build_dir / "native_link_probe"
     if sys.platform == "darwin":
         # ld64 has none of the GNU spellings: -all_load is --whole-archive, -undefined warning is
@@ -1284,7 +1528,7 @@ def link_probe(build_dir, archives, support_archives=(), link_zlib=False, openal
     cmd += list(extra_link_args)
     proc = subprocess.run(cmd, capture_output=True, text=True)
     return (proc.returncode == 0, out.exists(), proc.stdout + proc.stderr,
-            [a.stem for a in entry_point])
+            [a.stem for a in entry_point], stub_used)
 
 
 UNDEFINED_REFERENCE_RE = re.compile(r"undefined reference to `([^']+)'")
@@ -1312,7 +1556,7 @@ def parse_strict_link_log(log):
             referenced_by.setdefault(match.group(1), member)
         mach = MACH_UNDEFINED_RE.match(line)
         if mach:
-            pending = mach.group(1).lstrip("_")
+            pending = canonical_symbol(mach.group(1))
             referenced_by.setdefault(pending, None)
             continue
         site = MACH_REFERENCED_FROM_RE.search(line)
@@ -1322,7 +1566,8 @@ def parse_strict_link_log(log):
 
 
 def strict_link(build_dir, archives, support_archives=(), link_zlib=False,
-                openal_path=None, extra_libraries=(), extra_link_args=()):
+                openal_path=None, extra_libraries=(), extra_link_args=(),
+                game_target_built=False):
     """Link with no tolerance for unresolved symbols, i.e. attempt an actual executable.
 
     `link_probe` above passes `--warn-unresolved-symbols`, which is why it produces a file: the
@@ -1339,10 +1584,8 @@ def strict_link(build_dir, archives, support_archives=(), link_zlib=False,
     """
     entry_point = archives_defining_main(archives)
     stub = build_dir / "native_strict_link.cpp"
-    stub.write_text(
-        "// Generated by scripts/native-build.py for the strict link.\n"
-        + ("// The game target's own main() anchors this link.\n" if entry_point
-           else "int main() { return 0; }\n"))
+    text, _ = entry_point_anchor(entry_point, game_target_built)
+    stub.write_text("// Generated by scripts/native-build.py for the strict link.\n" + text)
     out = build_dir / "native_strict_link"
     if out.exists():
         out.unlink()
@@ -1384,6 +1627,12 @@ MACHO_MAGICS = {
     0xfeedface: ("Mach-O", 32),
 }
 MACHO_CPUS = {0x0100000c: "arm64", 0x01000007: "x86-64", 0x00000007: "i386"}
+# A universal (fat) file, big-endian magic by definition. Worth naming rather than reporting as
+# "unknown": an `arm64` slice inside a fat file is not the thin native binary this port measures,
+# and the header of a fat file says nothing about the word size of what is inside it.
+MACHO_FAT_MAGICS = (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf")
+# `lipo` spells the same CPU differently from the Mach-O header table above.
+LIPO_ARCH_ALIASES = {"x86_64": "x86-64"}
 
 
 def describe_binary(path):
@@ -1412,17 +1661,46 @@ def describe_binary(path):
             int.from_bytes(head[16:18], "little" if head[5] == 1 else "big"), "other")
     else:
         magic = int.from_bytes(head[:4], "little")
-        if magic in MACHO_MAGICS:
+        if head[:4] in MACHO_FAT_MAGICS:
+            info["format"] = "Mach-O universal"
+            count = int.from_bytes(head[4:8], "big")
+            info["architectures"] = count
+        elif magic in MACHO_MAGICS:
             info["format"], info["word_size"] = MACHO_MAGICS[magic]
             cpu = int.from_bytes(head[4:8], "little")
             info["machine"] = MACHO_CPUS.get(cpu, f"0x{cpu:x}")
             info["macho_filetype"] = int.from_bytes(head[12:16], "little")
+    # The independent answer to "is this really an arm64 binary": the header above is decoded by
+    # this script, `lipo -archs` by the platform's own tool, and a slice list with anything but
+    # this host's architecture in it means the build came out for another one. A build that
+    # silently came out x86-64 under Rosetta would invalidate every conclusion drawn from it.
+    lipo = shutil.which("lipo")
+    if lipo:
+        proc = subprocess.run([lipo, "-archs", str(path)], capture_output=True, text=True)
+        if proc.returncode == 0:
+            info["lipo_archs"] = [LIPO_ARCH_ALIASES.get(a, a) for a in proc.stdout.split()]
     tool = shutil.which("file")
     if tool:
         proc = subprocess.run([tool, "-b", str(path)], capture_output=True, text=True)
         if proc.returncode == 0:
             info["file_output"] = proc.stdout.strip()
     return info
+
+
+def host_translated():
+    """Whether this process is a translated (Rosetta 2) one, or None where the question is absent.
+
+    An arm64 Mac running an x86-64 Python and toolchain under Rosetta produces x86-64 objects while
+    every other field in this file still says the host is an Apple Silicon machine, so a run taken
+    that way is not the measurement it claims to be. The platform answers it directly.
+    """
+    if sys.platform != "darwin":
+        return None
+    proc = subprocess.run(["sysctl", "-n", "sysctl.proc_translated"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() == "1"
 
 
 def demangle(names):
@@ -1520,9 +1798,12 @@ def render_report(data, examples):
         f"plus the third-party libraries the engine calls into: {third_party} "
         f"(binary produced: {'yes' if data['link_binary_produced'] else 'no'}; linker exited "
         f"{'0' if data['link_clean'] else 'non-zero'} -- unresolved symbols are warnings here, so "
-        f"a file being produced does not mean it can run; entry point: "
+        f"a file being produced does not mean it can run; entry point "
+        f"`{data.get('entry_point_symbol', 'main')}` from: "
         + (", ".join(f"`{name}`" for name in data.get("link_entry_point_archives") or [])
-           or "this script's stub `main()`")
+           or "this script's stub `main()`, because the game's entry-point target is not in the "
+              "selected levels — with it in the build, a missing entry point stops the run "
+              "instead of being substituted")
         + (f"; {len(data['link_dropped_entry_points'])} standalone test-tool `main()` "
            f"object(s) removed from the archives first: "
            + ", ".join(f"`{name}`" for name in data["link_dropped_entry_points"])
@@ -1615,6 +1896,9 @@ def render_report(data, examples):
                 f"The file is `{binary['path']}`, "
                 f"{binary['bytes'] / (1024 * 1024):.1f} MiB, "
                 f"{binary['format']} {binary['word_size']}-bit {binary['machine']}"
+                + (f", `lipo -archs`: {' '.join(binary['lipo_archs'])}"
+                   if binary.get("lipo_archs") else "")
+                + (", built under Rosetta 2" if data.get("host_translated") else "")
                 + (f" (`file`: {binary['file_output']})" if binary.get("file_output") else "")
                 + ". That it loads and runs is a separate question from whether it links, and one "
                 "this run does not answer: see `docs/porting/startability.md`.",
@@ -1793,12 +2077,20 @@ def main():
           f"openal: {'yes' if openal_path else 'no'}, "
           f"ffmpeg: {'yes' if ffmpeg_paths else 'no'}, "
           f"window backend: {window_source.name if window_source else 'none'})")
-    link_ok, binary_produced, _, entry_archives = link_probe(
+    # Whether the game's own entry-point target is in this build at all. It decides whether a
+    # generated stub `main()` is a legitimate anchor or a silent substitution the run must refuse:
+    # see `entry_point_anchor`.
+    game_target_built = any(t.name == GAME_ENTRY_TARGET for t in link_targets)
+    link_ok, binary_produced, _, entry_archives, stub_main = link_probe(
         build_dir, archives, support_archives, link_zlib=zlib_path is not None,
         openal_path=openal_path, extra_libraries=link_extra,
-        extra_link_args=platform_link_args)
+        extra_link_args=platform_link_args, game_target_built=game_target_built)
     if entry_archives:
-        print(f"   entry point from {', '.join(entry_archives)} (no stub main)")
+        print(f"   entry point from {', '.join(entry_archives)} "
+              f"(`{platform_symbol(ENTRY_SYMBOL)}`, no stub main)")
+    else:
+        print(f"   entry point: this script's stub main(), because {GAME_ENTRY_TARGET} is not in "
+              "this build")
     strict_referenced_by = None
     strict_ok = strict_binary = False
     strict_binary_info = None
@@ -1807,7 +2099,7 @@ def main():
         strict_ok, strict_binary, strict_referenced_by, strict_log = strict_link(
             build_dir, archives, support_archives, link_zlib=zlib_path is not None,
             openal_path=openal_path, extra_libraries=link_extra,
-            extra_link_args=platform_link_args)
+            extra_link_args=platform_link_args, game_target_built=game_target_built)
         # Kept, because a link can fail with zero *unresolved* symbols -- a duplicate definition, a
         # missing framework, a linker crash -- and then the parsed symbol list says nothing at all
         # about why there is no executable.
@@ -1826,7 +2118,8 @@ def main():
                   f"{strict_binary_info['format']} {strict_binary_info['word_size']}-bit "
                   f"{strict_binary_info['machine']}")
     extra_libraries = [p for p in (zlib_path, openal_path) if p] + link_extra
-    symbols = unresolved_symbols(archives, support_archives, extra_libraries)
+    symbols = unresolved_symbols(archives, support_archives, extra_libraries,
+                                 extra_link_args=platform_link_args)
     demangled = demangle(list(symbols))
 
     built_sources = [s for s in all_sources if s not in failed]
@@ -1913,6 +2206,10 @@ def main():
         "clang_major": clang_major,
         "host": subprocess.run([CXX, "-dumpmachine"], capture_output=True,
                                text=True).stdout.strip(),
+        # True when this process is running under Rosetta 2, i.e. when an "arm64" measurement was
+        # taken by an x86-64 translation of the toolchain and the binary it produced is x86-64 too.
+        # `sysctl.proc_translated` is the platform's own answer; absent everywhere else.
+        "host_translated": host_translated(),
         "levels": levels,
         "with_shims": args.with_shims,
         "compiled": compiled,
@@ -1922,8 +2219,21 @@ def main():
         "link_clean": link_ok,
         "link_binary_produced": binary_produced,
         # Which archives supplied `main`. Empty means the link was anchored by this script's stub
-        # entry point because the game's own entry point produced no object.
+        # entry point, which is only permitted while the game's entry-point target is outside the
+        # selected levels -- otherwise the run stops rather than substituting one.
         "link_entry_point_archives": sorted(entry_archives),
+        # The symbol namespace every list here is in, measured from the toolchain rather than
+        # assumed from the platform: the entry point is spelled `main` under ELF and `_main` under
+        # Mach-O, and comparing the two spellings is what made #87's Darwin run substitute a stub.
+        "symbol_prefix": symbol_prefix(),
+        "entry_point_symbol": platform_symbol(ENTRY_SYMBOL),
+        "link_entry_point_stub": stub_main,
+        "game_entry_target_built": game_target_built,
+        # What was discounted as "the platform provides this", and where that list came from. An
+        # empty list is a measurement bug rather than a result, so the run refuses to produce one;
+        # recording the sources is what makes the discount auditable per platform.
+        "system_symbol_sources": system_symbols()[1],
+        "system_symbols_discounted": len(system_symbols()[0]),
         # Standalone test tools inside a measured directory define a `main()` of their own; they
         # are removed from the archives before the link so the game's entry point is unique.
         "link_dropped_entry_points": dropped_entry_points,
@@ -1968,22 +2278,29 @@ def main():
         # The tolerant link's list comes from `nm` over the archives; the strict link's comes from
         # the linker itself. They should agree, and disagreement is the interesting result: it
         # would mean the categorised 412 is not the set standing between here and an executable.
-        reported = set(strict_referenced_by)
+        # The two lists have to be brought into one namespace before they can be compared at all:
+        # GNU ld demangles in its diagnostics, ld64 reports the mangled Mach-O spelling, and the
+        # `nm` scan has its own. `parse_strict_link_log` has already removed the platform prefix;
+        # demangling both sides is the rest of it, and a no-op for a name GNU ld demangled.
+        linker_demangled = demangle(sorted(strict_referenced_by))
+        reported = {linker_demangled.get(s, s) for s in strict_referenced_by}
         expected = {demangled.get(s, s) for s in symbols}
         data["strict_link"] = {
             "attempted": True,
             "clean": strict_ok,
             "binary_produced": strict_binary,
             "unresolved_total": len(reported),
-            # Demangled under GNU ld, mangled under ld64, so the lists are not comparable across
-            # platforms and the form is recorded rather than assumed.
-            "symbol_name_form": STRICT_LINK_NAME_FORM,
+            # The form both lists are compared in, after normalisation. What the linker itself
+            # printed is recorded separately, because that differs per platform.
+            "symbol_name_form": "demangled",
+            "linker_name_form": STRICT_LINK_NAME_FORM,
             "agrees_with_nm": reported == expected,
             "only_in_linker_report": sorted(reported - expected),
             "only_in_nm_scan": sorted(expected - reported),
             # Which archive member needs each symbol: the answer to "who calls this", which a bare
             # count does not give, and the thing a slice owner needs to excise or implement it.
-            "referenced_by": {name: strict_referenced_by[name] for name in sorted(reported)},
+            "referenced_by": {linker_demangled.get(name, name): member
+                              for name, member in sorted(strict_referenced_by.items())},
             # What the file actually is, read out of its own header: the answer to "a binary of
             # what?", which `binary_produced: true` alone does not give. Size is recorded but not
             # gated -- it moves with the toolchain -- while format, word size and machine are.

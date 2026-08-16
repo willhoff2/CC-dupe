@@ -18,11 +18,20 @@ by humans as facts about the port rather than about the harness:
    that stops completing, a file that is not 64-bit, a `binary_produced: true` with no file
    description behind it -- so they are asserted here rather than waited for.
 
+3. The symbol namespace and the entry-point rule, both of which #87's Darwin run broke without any
+   compile or link noticing. Mach-O prefixes C symbols with an underscore, the scan looked for the
+   ELF spelling of `main`, found no entry point, and a generated stub `main()` silently replaced the
+   game's -- so the cases here are that exactly one prefix is removed (never `lstrip("_")`, which
+   corrupts `__ZN...` and `___cxa_throw`), and that a missing entry point stops the run instead.
+   Written on Linux: the Mach-O cases drive the prefix directly rather than needing a Mac.
+
 Run: python3 scripts/native-build-categorise-test.py
 """
 import importlib.util
 import pathlib
+import shutil
 import sys
+import tempfile
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -57,6 +66,38 @@ def check_contains(label, haystack, needle):
         print(f"FAIL {label}\n     nothing mentioning {needle!r} in {haystack!r}")
     else:
         print(f"ok   {label}")
+
+
+def check_raises(label, call, needle):
+    global CHECKS
+    CHECKS += 1
+    try:
+        call()
+    except SystemExit as exit_:
+        if needle in str(exit_):
+            print(f"ok   {label}")
+            return
+        FAILURES.append(f"{label}: raised without {needle!r}: {exit_}")
+        print(f"FAIL {label}\n     raised without {needle!r}: {exit_}")
+        return
+    FAILURES.append(f"{label}: did not raise")
+    print(f"FAIL {label}\n     did not raise")
+
+
+class symbol_prefix_of:
+    """Run a case in another platform's symbol namespace, without needing that platform."""
+
+    def __init__(self, build, prefix):
+        self.build, self.prefix = build, prefix
+
+    def __enter__(self):
+        self.saved = self.build.symbol_prefix
+        self.build.symbol_prefix = lambda: self.prefix
+        return self
+
+    def __exit__(self, *exc):
+        self.build.symbol_prefix = self.saved
+        return False
 
 
 def attribution_with(build, **kwargs):
@@ -174,6 +215,26 @@ def test_binary_gate(gate):
                                           dict(good_result, unresolved_total=2)),
                    "2 unresolved")
 
+    # The arm64 questions. A universal file, or two tools disagreeing about the architecture, would
+    # satisfy every check above while invalidating the conclusions drawn from the run -- an x86-64
+    # build on an Apple Silicon Mac is the case that matters, and it is silent by nature.
+    mac_baseline = {"attempted": True, "clean": True, "binary_produced": True,
+                    "unresolved_total": 0,
+                    "binary": {"path": "build/native/native_strict_link", "bytes": 27_900_000,
+                               "format": "Mach-O", "word_size": 64, "machine": "arm64",
+                               "lipo_archs": ["arm64"]}}
+    check("a thin arm64 Mach-O against an arm64 baseline",
+          gate.check_binary_gate(mac_baseline, dict(mac_baseline)), [])
+    fat = dict(mac_baseline, binary={"path": "x", "bytes": 1, "format": "Mach-O universal",
+                                     "architectures": 2, "word_size": None, "machine": None,
+                                     "lipo_archs": ["arm64", "x86-64"]})
+    check_contains("a universal binary is not the thin native one being measured",
+                   gate.check_binary_gate(mac_baseline, fat), "universal Mach-O")
+    disagree = dict(mac_baseline,
+                    binary=dict(mac_baseline["binary"], lipo_archs=["x86-64"]))
+    check_contains("lipo and the header disagreeing about the architecture fails",
+                   gate.check_binary_gate(mac_baseline, disagree), "lipo -archs")
+
 
 def test_describe_binary(build):
     print()
@@ -188,12 +249,118 @@ def test_describe_binary(build):
           build.describe_binary(REPO_ROOT / "build" / "native" / "no-such-file"), None)
 
 
+def test_symbol_namespace(build):
+    print()
+    print("== one symbol namespace, one prefix removed")
+
+    with symbol_prefix_of(build, "_"):
+        check("Mach-O `_main` is the entry point", build.canonical_symbol("_main"), "main")
+        # The two names greedy stripping destroys. `__ZN...` is Mach-O for the mangled `_ZN...`, and
+        # a corrupted name cannot match the same symbol read from anywhere else.
+        check("a mangled C++ name keeps its own leading underscore",
+              build.canonical_symbol("__ZN9DX8Wrapper4InitEv"), "_ZN9DX8Wrapper4InitEv")
+        check("an ABI name keeps its own two",
+              build.canonical_symbol("___cxa_throw"), "__cxa_throw")
+        check("a name without the prefix is left alone",
+              build.canonical_symbol("dyld_stub_binder"), "dyld_stub_binder")
+        check("the entry point is spelled for the platform",
+              build.platform_symbol(build.ENTRY_SYMBOL), "_main")
+        # The names the toolchain supplies rather than any library, in this namespace.
+        for supplied in ("__cxa_throw", "_mh_execute_header", "dyld_stub_binder"):
+            check(f"{supplied} is a toolchain symbol, not a blocker",
+                  bool(build.TOOLCHAIN_SYMBOL_RE.match(supplied)), True)
+
+    with symbol_prefix_of(build, ""):
+        for name in ("main", "_ZN9DX8Wrapper4InitEv", "__cxa_throw"):
+            check(f"ELF leaves {name} untouched", build.canonical_symbol(name), name)
+
+    # And the prefix itself is measured from the toolchain rather than taken from sys.platform, so
+    # the round trip has to hold on whatever this box is. Only where there is a compiler to measure
+    # it with: this file is in the cheap CI tier, which is not required to have one.
+    if shutil.which(build.CXX):
+        check("the measured prefix round-trips",
+              build.canonical_symbol(build.platform_symbol(build.ENTRY_SYMBOL)),
+              build.ENTRY_SYMBOL)
+
+    # macOS keeps its system libraries in the dyld shared cache, so the discount list is read from
+    # the SDK's text-based stubs. An empty list would report every libc symbol as port work.
+    with symbol_prefix_of(build, "_"), tempfile.TemporaryDirectory() as tmp:
+        stub = pathlib.Path(tmp) / "libSystem.tbd"
+        stub.write_text(
+            "--- !tapi-tbd\ntbd-version: 4\nexports:\n"
+            "  - targets: [ arm64-macos ]\n"
+            "    symbols: [ _malloc, _free,\n"
+            "               _dyld_stub_binder ]\n")
+        check("a .tbd stub's exports are read in this namespace",
+              build.tbd_symbols(stub), {"malloc", "free", "dyld_stub_binder"})
+
+
+def test_entry_point_anchor(build):
+    print()
+    print("== a missing entry point stops the run; it is never replaced by a stub")
+
+    # In Mach-O's namespace throughout, because that is the platform the substitution happened on,
+    # and so that these cases need no compiler to measure a prefix with.
+    with symbol_prefix_of(build, "_"):
+        entry_point_anchor_cases(build)
+
+
+def entry_point_anchor_cases(build):
+    text, stub_used = build.entry_point_anchor(["libgeneralsmd_code_main"], True)
+    check("the game's own main() anchors the link", stub_used, False)
+    check("...and nothing is generated to compete with it", "int main" in text, False)
+
+    text, stub_used = build.entry_point_anchor([], False)
+    check("a levels 1-2 build has no entry point of its own to link", stub_used, True)
+    check("...so a stub anchors it, and says why", "int main" in text, True)
+
+    # The case that made #87's Darwin run measure a stub: the entry-point target was built, its
+    # `main()` was in the archive under a name the scan did not know, and the harness quietly linked
+    # three lines of generated code instead of the game.
+    check_raises("the entry-point target built with no entry point found stops the run",
+                 lambda: build.entry_point_anchor([], True),
+                 "Refusing to substitute a generated stub main()")
+
+
+def test_entry_point_gate(gate):
+    print()
+    print("== and a baseline can never record having had one")
+
+    anchored = {"game_entry_target_built": True,
+                "link_entry_point_archives": ["libgeneralsmd_code_main"],
+                "link_entry_point_stub": False}
+    check("the game's entry point, before and after",
+          gate.check_entry_point(anchored, anchored), [])
+
+    check_contains("a stub while the entry-point target is built fails",
+                   gate.check_entry_point(anchored, {"game_entry_target_built": True,
+                                                     "link_entry_point_archives": [],
+                                                     "link_entry_point_stub": True}),
+                   "stub main()")
+    check_contains("losing the game's entry point fails even without a stub",
+                   gate.check_entry_point(anchored, {"game_entry_target_built": False,
+                                                     "link_entry_point_archives": []}),
+                   "baseline's link was anchored by the game's own entry point")
+    # A levels 1-2 baseline has no entry point either side, and must not start failing.
+    check("no entry point in either, below level 3",
+          gate.check_entry_point({"link_entry_point_archives": []},
+                                 {"game_entry_target_built": False,
+                                  "link_entry_point_archives": [], "link_entry_point_stub": True}),
+          [])
+    check_contains("a run measured under Rosetta 2 fails",
+                   gate.check_entry_point(anchored, dict(anchored, host_translated=True)),
+                   "Rosetta 2")
+
+
 def main():
     build = load("scripts/native-build.py", "native_build_under_test")
     gate = load("scripts/ci/check-native-build-baseline.py", "native_build_gate_under_test")
     test_categorisation(build)
     test_binary_gate(gate)
     test_describe_binary(build)
+    test_symbol_namespace(build)
+    test_entry_point_anchor(build)
+    test_entry_point_gate(gate)
     print()
     print(f"{CHECKS} checks, {len(FAILURES)} failures")
     return 1 if FAILURES else 0
