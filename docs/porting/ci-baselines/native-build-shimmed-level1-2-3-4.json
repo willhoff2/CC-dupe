@@ -19,9 +19,9 @@
       "total": 11
     },
     "Core/Libraries/Source/WWVegas/WW3D2": {
-      "objects": 73,
-      "probe_clean": 73,
-      "total": 73
+      "objects": 76,
+      "probe_clean": 76,
+      "total": 76
     },
     "Core/Libraries/Source/WWVegas/WWAudio": {
       "objects": 19,
@@ -39,9 +39,9 @@
       "total": 4
     },
     "Core/Libraries/Source/WWVegas/WWLib": {
-      "objects": 78,
-      "probe_clean": 78,
-      "total": 78
+      "objects": 79,
+      "probe_clean": 79,
+      "total": 79
     },
     "Core/Libraries/Source/WWVegas/WWMath": {
       "objects": 37,
@@ -93,12 +93,13 @@
     "libcore_libraries_source_wwvegas_wwlib(gdi_font_metrics_dump.cpp.o)",
     "libcore_libraries_source_wwvegas_wwlib(win32_file_api_test.cpp.o)",
     "libcore_libraries_source_wwvegas_wwlib(win32_runtime_test.cpp.o)",
+    "libcore_libraries_source_wwvegas_wwlib(win32_user32_test.cpp.o)",
     "libcore_libraries_source_wwvegas_wwmath(d3dx8math_test.cpp.o)"
   ],
   "link_entry_point_archives": [
     "libgeneralsmd_code_main"
   ],
-  "objects": 972,
+  "objects": 976,
   "pile_meaning": {
     "compile-blocked": "An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker.",
     "cut-scope-not-linked": "A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it.",
@@ -106,7 +107,7 @@
     "library-not-linked": "A library defines it and this configuration links no such library. A link line, not port work.",
     "no-definition-anywhere": "Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work."
   },
-  "probe_clean": 972,
+  "probe_clean": 976,
   "providers": {
     "ffmpeg": {
       "evidence_files": 823,
@@ -226,26 +227,38 @@
     },
     "window-backend": {
       "evidence_files": 2,
-      "evidence_names": 46,
+      "evidence_names": 61,
       "label": "The window/input backend this configuration does not choose (SDL2, Cocoa)",
       "owner": "platform/macos-window-compile and platform/window-seam-wiring",
       "pile": "library-not-linked",
       "reason": "`probe.OPTIONAL_BACKENDS` keeps the SDL2 backend opt-in and the Cocoa backend is Objective-C++, so no target lists either. The definitions are in the tree; a configuration that picks one resolves all of them.",
       "symbol_names": [
+        "WWPlatform::Window_Client_Origin(void*, int&, int&)",
         "WWPlatform::Window_Client_Size(void*, int&, int&)",
         "WWPlatform::Window_Create(WWPlatform::WindowConfig const&)",
+        "WWPlatform::Window_Current()",
+        "WWPlatform::Window_Cursor_Position(void*, int&, int&)",
         "WWPlatform::Window_Destroy(void*)",
+        "WWPlatform::Window_Display_Bounds(int, int&, int&, int&, int&)",
+        "WWPlatform::Window_Display_For_Window(void*)",
+        "WWPlatform::Window_Display_Work_Area(int, int&, int&, int&, int&)",
+        "WWPlatform::Window_Frame_Insets(void*, int&, int&, int&, int&)",
         "WWPlatform::Window_Is_Active(void*)",
+        "WWPlatform::Window_Is_Fullscreen(void*)",
         "WWPlatform::Window_Is_Minimised(void*)",
         "WWPlatform::Window_Modifier_State(void*)",
         "WWPlatform::Window_Poll_Event(void*, WWPlatform::WindowEvent&)",
+        "WWPlatform::Window_Set_Always_On_Top(void*, bool)",
+        "WWPlatform::Window_Set_Client_Size(void*, int, int)",
         "WWPlatform::Window_Set_Cursor_Clip(void*, bool)",
         "WWPlatform::Window_Set_Mode(void*, int, int, bool)",
+        "WWPlatform::Window_Set_Position(void*, int, int)",
         "WWPlatform::Window_Set_Title(void*, char const*)",
         "WWPlatform::Window_Show(void*, bool)",
+        "WWPlatform::Window_Show_System_Cursor(void*, bool)",
         "WWPlatform::Window_Warp_Cursor(void*, int, int)"
       ],
-      "symbols": 12,
+      "symbols": 24,
       "system_libraries": [
         "/lib/x86_64-linux-gnu/libSDL2-2.0.so.0",
         "/usr/lib/x86_64-linux-gnu/libSDL2-2.0.so.0"
@@ -261,48 +274,43 @@
     "only_in_linker_report": [],
     "only_in_nm_scan": [],
     "referenced_by": {
-      "AdjustWindowRect": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
-      "D3DXAssembleShader": "libcore_gameenginedevice.a(W3DWater.cpp.o)",
       "D3DXCreateCubeTexture": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
       "D3DXCreateTexture": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
       "D3DXCreateTextureFromFileExA": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
       "D3DXCreateVolumeTexture": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
-      "D3DXFilterTexture": "libcore_gameenginedevice.a(W3DTreeBuffer.cpp.o)",
       "D3DXGetErrorStringA": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
-      "D3DXGetFVFVertexSize": "libcore_libraries_source_wwvegas_ww3d2.a(dx8fvf.cpp.o)",
-      "D3DXLoadSurfaceFromSurface": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
       "FillStackAddresses(void**, unsigned int, unsigned int)": "libcore_gameengine.a(Debug.cpp.o)",
-      "GetClientRect": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
-      "GetCursorPos": "libcore_gameenginedevice.a(W3DMouse.cpp.o)",
-      "GetDesktopWindow": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
-      "GetMonitorInfoA": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
-      "GetWindowLongA": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
       "GitCommitAuthorName": "libgeneralsmd_code_gameengine.a(version.cpp.o)",
       "GitCommitTimeStamp": "libgeneralsmd_code_gameengine.a(version.cpp.o)",
       "GitRevision": "libgeneralsmd_code_gameengine.a(version.cpp.o)",
       "GitShortSHA1": "libgeneralsmd_code_gameengine.a(version.cpp.o)",
       "GitTag": "libgeneralsmd_code_gameengine.a(version.cpp.o)",
       "GitUncommittedChanges": "libgeneralsmd_code_gameengine.a(version.cpp.o)",
-      "IsIconic": "libgeneralsmd_code_gameenginedevice.a(W3DDisplay.cpp.o)",
-      "ListenerHandleClass::Initialize(SoundBufferClass*)": "libcore_libraries_source_wwvegas_wwaudio.a(listenerhandle.cpp.o)",
       "MSS_auto_cleanup": "libcore_gameenginedevice.a(MilesAudioManager.cpp.o)",
-      "MonitorFromWindow": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
-      "ScreenToClient": "libcore_gameenginedevice.a(W3DMouse.cpp.o)",
-      "SetCursor": "libcore_gameenginedevice.a(W3DMouse.cpp.o)",
-      "SetDeviceGammaRamp": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
-      "SetWindowPos": "libcore_libraries_source_wwvegas_ww3d2.a(dx8wrapper.cpp.o)",
       "StackDumpFromAddresses(void**, unsigned int, void (*)(char const*))": "libcore_gameengine.a(Debug.cpp.o)",
+      "WWPlatform::Window_Client_Origin(void*, int&, int&)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
       "WWPlatform::Window_Client_Size(void*, int&, int&)": "libcore_gameengine.a(PlatformWindowHost.cpp.o)",
       "WWPlatform::Window_Create(WWPlatform::WindowConfig const&)": "libcore_gameengine.a(PlatformWindowHost.cpp.o)",
+      "WWPlatform::Window_Current()": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
+      "WWPlatform::Window_Cursor_Position(void*, int&, int&)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
       "WWPlatform::Window_Destroy(void*)": "libcore_gameengine.a(PlatformWindowHost.cpp.o)",
+      "WWPlatform::Window_Display_Bounds(int, int&, int&, int&, int&)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
+      "WWPlatform::Window_Display_For_Window(void*)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
+      "WWPlatform::Window_Display_Work_Area(int, int&, int&, int&, int&)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
+      "WWPlatform::Window_Frame_Insets(void*, int&, int&, int&, int&)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
       "WWPlatform::Window_Is_Active(void*)": "libcore_gameengine.a(PlatformWindowHost.cpp.o)",
+      "WWPlatform::Window_Is_Fullscreen(void*)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
       "WWPlatform::Window_Is_Minimised(void*)": "libcore_gameengine.a(PlatformWindowHost.cpp.o)",
       "WWPlatform::Window_Modifier_State(void*)": "libcore_gameengine.a(PlatformWindowHost.cpp.o)",
       "WWPlatform::Window_Poll_Event(void*, WWPlatform::WindowEvent&)": "libcore_gameengine.a(PlatformWindowHost.cpp.o)",
+      "WWPlatform::Window_Set_Always_On_Top(void*, bool)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
+      "WWPlatform::Window_Set_Client_Size(void*, int, int)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
       "WWPlatform::Window_Set_Cursor_Clip(void*, bool)": "libcore_gameengine.a(PlatformWindowHost.cpp.o)",
       "WWPlatform::Window_Set_Mode(void*, int, int, bool)": "libcore_gameengine.a(PlatformWindowHost.cpp.o)",
+      "WWPlatform::Window_Set_Position(void*, int, int)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
       "WWPlatform::Window_Set_Title(void*, char const*)": "libgeneralsmd_code_gameengine.a(GameEngine.cpp.o)",
       "WWPlatform::Window_Show(void*, bool)": "libcore_gameengine.a(Debug.cpp.o)",
+      "WWPlatform::Window_Show_System_Cursor(void*, bool)": "libcore_libraries_source_wwvegas_wwlib.a(platform_win32_user.cpp.o)",
       "WWPlatform::Window_Warp_Cursor(void*, int, int)": "libcore_gameengine.a(PlatformWindowHost.cpp.o)",
       "av_frame_alloc": "libcore_gameenginedevice.a(FFmpegFile.cpp.o)",
       "av_frame_clone": "libcore_gameenginedevice.a(FFmpegVideoPlayer.cpp.o)",
@@ -336,7 +344,7 @@
       "sws_scale": "libcore_gameenginedevice.a(FFmpegVideoPlayer.cpp.o)"
     },
     "symbol_name_form": "demangled",
-    "unresolved_total": 73
+    "unresolved_total": 68
   },
   "third_party_linked": [
     "libsupport_openalaudiodevice",
@@ -344,23 +352,21 @@
     "openal (system)",
     "z (system)"
   ],
-  "translation_units": 972,
+  "translation_units": 976,
   "undefined_by_category": {
     "Defined in a built translation unit behind a disabled #if (build option / platform)": 3,
-    "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": 12,
-    "Direct3D 8 / DirectX": 9,
-    "Engine C++ not built at this level": 1,
+    "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": 24,
+    "Direct3D 8 / DirectX": 5,
     "FFmpeg (not linked here)": 29,
     "Generated gitinfo (build-time, not a blocker)": 6,
-    "Other / unclassified": 1,
-    "Win32 API": 12
+    "Other / unclassified": 1
   },
   "undefined_by_pile": {
     "compile-blocked": 0,
     "cut-scope-not-linked": 0,
     "harness-artefact": 9,
-    "library-not-linked": 42,
-    "no-definition-anywhere": 22
+    "library-not-linked": 54,
+    "no-definition-anywhere": 5
   },
   "undefined_by_pile_symbols": {
     "harness-artefact": [
@@ -376,17 +382,29 @@
     ],
     "library-not-linked": [
       "MSS_auto_cleanup",
+      "WWPlatform::Window_Client_Origin(void*, int&, int&)",
       "WWPlatform::Window_Client_Size(void*, int&, int&)",
       "WWPlatform::Window_Create(WWPlatform::WindowConfig const&)",
+      "WWPlatform::Window_Current()",
+      "WWPlatform::Window_Cursor_Position(void*, int&, int&)",
       "WWPlatform::Window_Destroy(void*)",
+      "WWPlatform::Window_Display_Bounds(int, int&, int&, int&, int&)",
+      "WWPlatform::Window_Display_For_Window(void*)",
+      "WWPlatform::Window_Display_Work_Area(int, int&, int&, int&, int&)",
+      "WWPlatform::Window_Frame_Insets(void*, int&, int&, int&, int&)",
       "WWPlatform::Window_Is_Active(void*)",
+      "WWPlatform::Window_Is_Fullscreen(void*)",
       "WWPlatform::Window_Is_Minimised(void*)",
       "WWPlatform::Window_Modifier_State(void*)",
       "WWPlatform::Window_Poll_Event(void*, WWPlatform::WindowEvent&)",
+      "WWPlatform::Window_Set_Always_On_Top(void*, bool)",
+      "WWPlatform::Window_Set_Client_Size(void*, int, int)",
       "WWPlatform::Window_Set_Cursor_Clip(void*, bool)",
       "WWPlatform::Window_Set_Mode(void*, int, int, bool)",
+      "WWPlatform::Window_Set_Position(void*, int, int)",
       "WWPlatform::Window_Set_Title(void*, char const*)",
       "WWPlatform::Window_Show(void*, bool)",
+      "WWPlatform::Window_Show_System_Cursor(void*, bool)",
       "WWPlatform::Window_Warp_Cursor(void*, int, int)",
       "av_frame_alloc",
       "av_frame_clone",
@@ -419,28 +437,11 @@
       "sws_scale"
     ],
     "no-definition-anywhere": [
-      "AdjustWindowRect",
-      "D3DXAssembleShader",
       "D3DXCreateCubeTexture",
       "D3DXCreateTexture",
       "D3DXCreateTextureFromFileExA",
       "D3DXCreateVolumeTexture",
-      "D3DXFilterTexture",
-      "D3DXGetErrorStringA",
-      "D3DXGetFVFVertexSize",
-      "D3DXLoadSurfaceFromSurface",
-      "GetClientRect",
-      "GetCursorPos",
-      "GetDesktopWindow",
-      "GetMonitorInfoA",
-      "GetWindowLongA",
-      "IsIconic",
-      "ListenerHandleClass::Initialize(SoundBufferClass*)",
-      "MonitorFromWindow",
-      "ScreenToClient",
-      "SetCursor",
-      "SetDeviceGammaRamp",
-      "SetWindowPos"
+      "D3DXGetErrorStringA"
     ]
   },
   "undefined_symbols": {
@@ -450,32 +451,37 @@
       "g_LastErrorDump"
     ],
     "Defined only in a backend this configuration excludes (SDL2 / Cocoa)": [
+      "WWPlatform::Window_Client_Origin(void*, int&, int&)",
       "WWPlatform::Window_Client_Size(void*, int&, int&)",
       "WWPlatform::Window_Create(WWPlatform::WindowConfig const&)",
+      "WWPlatform::Window_Current()",
+      "WWPlatform::Window_Cursor_Position(void*, int&, int&)",
       "WWPlatform::Window_Destroy(void*)",
+      "WWPlatform::Window_Display_Bounds(int, int&, int&, int&, int&)",
+      "WWPlatform::Window_Display_For_Window(void*)",
+      "WWPlatform::Window_Display_Work_Area(int, int&, int&, int&, int&)",
+      "WWPlatform::Window_Frame_Insets(void*, int&, int&, int&, int&)",
       "WWPlatform::Window_Is_Active(void*)",
+      "WWPlatform::Window_Is_Fullscreen(void*)",
       "WWPlatform::Window_Is_Minimised(void*)",
       "WWPlatform::Window_Modifier_State(void*)",
       "WWPlatform::Window_Poll_Event(void*, WWPlatform::WindowEvent&)",
+      "WWPlatform::Window_Set_Always_On_Top(void*, bool)",
+      "WWPlatform::Window_Set_Client_Size(void*, int, int)",
       "WWPlatform::Window_Set_Cursor_Clip(void*, bool)",
       "WWPlatform::Window_Set_Mode(void*, int, int, bool)",
+      "WWPlatform::Window_Set_Position(void*, int, int)",
       "WWPlatform::Window_Set_Title(void*, char const*)",
       "WWPlatform::Window_Show(void*, bool)",
+      "WWPlatform::Window_Show_System_Cursor(void*, bool)",
       "WWPlatform::Window_Warp_Cursor(void*, int, int)"
     ],
     "Direct3D 8 / DirectX": [
-      "D3DXAssembleShader",
       "D3DXCreateCubeTexture",
       "D3DXCreateTexture",
       "D3DXCreateTextureFromFileExA",
       "D3DXCreateVolumeTexture",
-      "D3DXFilterTexture",
-      "D3DXGetErrorStringA",
-      "D3DXGetFVFVertexSize",
-      "D3DXLoadSurfaceFromSurface"
-    ],
-    "Engine C++ not built at this level": [
-      "ListenerHandleClass::Initialize(SoundBufferClass*)"
+      "D3DXGetErrorStringA"
     ],
     "FFmpeg (not linked here)": [
       "av_frame_alloc",
@@ -518,22 +524,8 @@
     ],
     "Other / unclassified": [
       "MSS_auto_cleanup"
-    ],
-    "Win32 API": [
-      "AdjustWindowRect",
-      "GetClientRect",
-      "GetCursorPos",
-      "GetDesktopWindow",
-      "GetMonitorInfoA",
-      "GetWindowLongA",
-      "IsIconic",
-      "MonitorFromWindow",
-      "ScreenToClient",
-      "SetCursor",
-      "SetDeviceGammaRamp",
-      "SetWindowPos"
     ]
   },
-  "undefined_total": 73,
+  "undefined_total": 68,
   "with_shims": true
 }
