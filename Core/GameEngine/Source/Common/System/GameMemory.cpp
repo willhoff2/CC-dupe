@@ -214,6 +214,15 @@ static Bool theMainInitFlag = false;
 #define MEM_BOUND_ALIGNMENT 16
 #endif
 
+// TheSuperHackers @bugfix Devin 16/08/2026 The granularity the pool block *counts* are expected to
+// come in, which is a data convention and not an alignment: a blob is allocationCount blocks of
+// m_allocationSize bytes, and m_allocationSize is already rounded up to MEM_BOUND_ALIGNMENT, so
+// every block is aligned whatever the count. It is 4 on every platform because that is the value
+// the retail pool tables were authored against (GameMemoryInit.cpp rounds counts to the same 4) and
+// because MEM_BOUND_ALIGNMENT rising to 16 at 64-bit would otherwise make legal retail counts --
+// NameKeyBucketPool's 9000 among them -- trip an assertion about an alignment they do not affect.
+#define MEM_POOL_COUNT_GRANULARITY 4
+
 // The user data follows the block header, so the header itself has to be padded out to the same
 // bound for the user data to be aligned.
 #define MPSB_HEADER_SIZE \
@@ -1573,7 +1582,7 @@ MemoryPool::~MemoryPool()
 */
 MemoryPoolBlob* MemoryPool::createBlob(Int allocationCount)
 {
-	DEBUG_ASSERTCRASH(allocationCount > 0 && allocationCount%MEM_BOUND_ALIGNMENT==0, ("bad allocationCount (must be >0 and evenly divisible by %d)",MEM_BOUND_ALIGNMENT));
+	DEBUG_ASSERTCRASH(allocationCount > 0 && allocationCount%MEM_POOL_COUNT_GRANULARITY==0, ("bad allocationCount (must be >0 and evenly divisible by %d)",MEM_POOL_COUNT_GRANULARITY));
 
 	MemoryPoolBlob* blob = new (::sysAllocateDoNotZero(sizeof(MemoryPoolBlob))) MemoryPoolBlob;	// will throw on failure
 
