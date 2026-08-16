@@ -203,8 +203,21 @@ static Bool theMainInitFlag = false;
 // PRIVATE PROTOTYPES
 // ----------------------------------------------------------------------------
 
-/// @todo srj -- make this work for 8
+// TheSuperHackers @bugfix Devin 16/08/2026 The global operator new routes through this allocator,
+// so the memory it hands back has to satisfy the platform's fundamental alignment. On LP64 targets
+// alignof(max_align_t) is 16 and clang emits aligned SSE/NEON stores into freshly constructed
+// objects, which fault (or silently misbehave) on an 8-byte-aligned block. 32-bit Windows keeps the
+// historical 4-byte bound so its allocation layout is unchanged.
+#if defined(_WIN32) && !defined(_WIN64)
 #define MEM_BOUND_ALIGNMENT 4
+#else
+#define MEM_BOUND_ALIGNMENT 16
+#endif
+
+// The user data follows the block header, so the header itself has to be padded out to the same
+// bound for the user data to be aligned.
+#define MPSB_HEADER_SIZE \
+	((Int)((sizeof(MemoryPoolSingleBlock) + (MEM_BOUND_ALIGNMENT-1)) & ~(MEM_BOUND_ALIGNMENT-1)))
 
 static Int roundUpMemBound(Int i);
 static void *sysAllocateDoNotZero(Int numBytes);
@@ -535,7 +548,7 @@ inline void **BlockCheckpointInfo::getStacktraceInfo() { return m_stacktrace; }
 */
 inline void* MemoryPoolSingleBlock::getUserDataNoDbg()
 {
-	char* p = ((char*)this) + sizeof(MemoryPoolSingleBlock);
+	char* p = ((char*)this) + MPSB_HEADER_SIZE;
 	#ifdef MEMORYPOOL_BOUNDINGWALL
 	p += WALLSIZE;
 	#endif
@@ -561,7 +574,7 @@ inline void* MemoryPoolSingleBlock::getUserData()
 */
 inline /*static*/ Int MemoryPoolSingleBlock::calcRawBlockSize(Int logicalSize)
 {
-	Int s = ::roundUpMemBound(logicalSize) + sizeof(MemoryPoolSingleBlock);
+	Int s = ::roundUpMemBound(logicalSize) + MPSB_HEADER_SIZE;
 	#ifdef MEMORYPOOL_BOUNDINGWALL
 	s += WALLSIZE*2;
 	#endif
@@ -907,7 +920,7 @@ void MemoryPoolSingleBlock::initBlock(Int logicalSize, MemoryPoolBlob *owningBlo
 	DEBUG_ASSERTCRASH(pUserData, ("null pUserData"));
 	if (!pUserData)
 		return nullptr;
-	char* p = ((char*)pUserData) - sizeof(MemoryPoolSingleBlock);
+	char* p = ((char*)pUserData) - MPSB_HEADER_SIZE;
 	#ifdef MEMORYPOOL_BOUNDINGWALL
 	p -= WALLSIZE;
 	#endif
