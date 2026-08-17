@@ -248,7 +248,21 @@ unreachable from retail data, so it is not an observed behaviour change to the o
   unresolved symbols, executable produced in both.
 - `check-d3d8-surface.py` + `check-backend-coverage.py` (run together), `check-generated-baselines.py`,
   `classify-changes.py --self-check`, `flake8 scripts/`, `actionlint`.
-- The Wine/VC6 Windows build (`scripts/docker-build.sh`) and the retail replay check — the oracle for
-  "this is a refactor". Their results are recorded in the PR description for the commit they ran on.
+- The Wine/VC6 Windows build (`scripts/docker-build.sh`): clean, `generalszh.exe` 6,352,964 bytes,
+  from the `Release` / `RTS_BUILD_OPTION_DEBUG=OFF` cache the replay run requires.
+- The replay **differential** under wine, per the rule in `replay-check-gamedata.md` — this branch and
+  its base (`30a7a3434`) built with the identical toolchain in a `git worktree`, run by the same
+  harness over the ten `GeneralsReplays/GeneralsZH/1.04` replays with the two trimmed retail archives
+  (neither repacked, both extracted read-only). Both: `CRC Mismatch` on all ten at frames 9724, 3810,
+  8310, 3310, 6210, 110, 4810, 4210, 4510, 3611, `Errors occurred: 10`, and a `diff` of the two
+  filtered logs is empty. Those are also the frames this document's baseline records for unmodified
+  `main`, so the harness is not the variable. **This is not the replay gate** and is not quoted as
+  one: it says the change moved no simulation behaviour these ten replays observe. The authoritative
+  run is `Replay Check GeneralsMD` on `windows-2022` in CI.
+
+  Worth recording because it cost a run to notice: a stage that puts the replays anywhere but the
+  current wine user's `Documents\Command and Conquer Generals Zero Hour Data\Replays` prints
+  `Simulation of all replays completed. Errors occurred: 0` — a green from simulating nothing.
+  Any replay result without a `1/10 … 10/10 Simulating` list above it is that false green.
 - No baseline was regenerated: no translation unit was added or removed and no measured number in
   `docs/porting/ci-baselines/*.json` is affected by this change.
