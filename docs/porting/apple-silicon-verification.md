@@ -306,12 +306,13 @@ recognisably the Zero Hour main menu — and it is **wrong**. What the readback 
 - the validation layer is silent throughout, so no *Vulkan* rule is being broken. Whatever is wrong
   is legal Vulkan being asked to do the wrong thing.
 
-The two diagnostics in §3.1 name the mechanism precisely enough to fix without redoing this
-measurement: `Decode_Fvf: unsupported FVF 0x0` (twice) is a vertex declaration the backend does not
-translate, and `Copy_Rects: source and destination formats differ` is exactly the 2D blit the shell
-uses to compose the background and the text — a `CopyRects` that declines to copy leaves the
-destination as it was, which is the magenta-and-noise field, and a text pass that goes through it
-twice at two offsets is how one label becomes two.
+The two diagnostics in §3.1 named a mechanism, and re-measuring on Linux found that neither of them
+was the cause; see `main-menu-2d-composition.md`, which supersedes the reading below. Measured: the
+magenta field is the **missing base-game archive set** (the backdrop texture is absent, so the shell
+draws the missing-texture placeholder), and the doubled labels are a `CopyRects` that *did* copy —
+silently, 2-byte-per-texel host bytes into 4-byte-per-texel image texels, which is a port defect now
+fixed. The `formats differ` line does not occur at all on Linux, and the zero FVF belongs to the
+shadow managers, which the menu never draws from.
 
 **Verdict: the retail menu loads and rasterises on this machine, and it does not render correctly.**
 Q3 is a *no* on the render, a *yes* on everything upstream of it: retail archives, INI, WND parsing,
@@ -528,7 +529,7 @@ the stack. Everything measured above happens before it. §8.5.
 | Fixed-function/resource-lock suites, both swizzle modes, layer silent | **yes** | — | validation layer proven loaded |
 | Staging-cost ceiling incl. self-check | **yes** (reuse 0.9831) | — | on `Apple M1 Pro` |
 | Retail archives, INI, `MainMenu.wnd`, 207-window shell | **yes** | — | §3.2 |
-| Retail menu renders *correctly* | **no** — magenta field, doubled labels | — | §3.3, §8.2/§8.3 |
+| Retail menu renders *correctly* | **no** — magenta field, doubled labels | fixed and re-measured on Linux | §3.3, `main-menu-2d-composition.md` |
 | A menu button responds to a click | **not measured** | — | window cannot be activated, §3.4 |
 | GUI hit-test, mouse, `TheDisplay` all in points at scale 2.00 | **yes** | — | §4.3 |
 | Render resolution at scale 2.00 | **no** — 800x600 upscaled to 1600x1200 | Linux is scale 1.00, cannot see it | §4.2, §8.4 |
@@ -553,15 +554,19 @@ with an absolute `library_path` plus `VK_LAYER_PATH` (§2.5), and update the rec
 hands the gates `VK_LAYER_PATH`/`VK_ICD_FILENAMES`; a `--validation` run that did not load the layer
 now fails instead of reporting zero messages. `docs/porting/hidpi-scale.md` §5.
 
-### 8.2 `Copy_Rects: source and destination formats differ` — unimplemented path
-The shell's 2D composition blit declines when the formats differ, leaving the destination
-unwritten — which is the magenta/noise field behind the retail menu, and (drawn twice at two
-offsets) the doubled labels. Reproduce: run the retail binary with `-win -noshellmap -nologo`,
-`Measure_Frame` the colour target, and count the `Copy_Rects` line. One occurrence per run.
+### 8.2 `Copy_Rects: source and destination formats differ` — superseded, not reproduced on Linux
+This line was read as the cause of the magenta field and the doubled labels. It is neither, and it
+does not occur on Linux at all (0 occurrences in four instrumented runs against retail data, where
+all 313 `CopyRects` calls are the shell's text composition). The two symptoms and their real causes —
+missing base-game data, and a `CopyRects` that copied 2-byte texels into 4-byte texels without
+converting — are in `main-menu-2d-composition.md`, with the fix and the pixel evidence. The one Mac
+occurrence remains unexplained; the refusal now prints both D3D8 formats, so one Mac run names it.
 
 ### 8.3 `Decode_Fvf: unsupported FVF 0x0` — unimplemented path
-Twice per retail run. An FVF of 0 reaches the backend's vertex-declaration decoder, which has no
-translation for it. Same reproduction as §8.2.
+Twice per retail run, and measured to be deliberate engine state rather than state never set: the
+volumetric and projected shadow managers create vertex buffers whose format comes from a declaration,
+which D3D8 spells as a zero FVF. Buffer creation fails honestly and the menu never draws from them.
+Serving it means the declaration-driven vertex path. Detail in `main-menu-2d-composition.md` §5.
 
 ### 8.4 Half-resolution render at `backingScaleFactor` 2.00 — port defect
 Colour target, viewport and scissor are sized from the client area in **points** (800x600) while the

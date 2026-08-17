@@ -353,7 +353,11 @@ public:
 	virtual SurfaceHandle* Create_Image_Surface(uint32_t width, uint32_t height,
 	                                            TextureFormat format) = 0;
 	// CopyRects. `rects`/`points` null copies the whole surface, as D3D8 defines it;
-	// no stretching and no format conversion, also as D3D8 defines it.
+	// no stretching, and the two surfaces' D3D8 formats must be equal, also as D3D8
+	// defines it. Equal D3D8 formats are not necessarily equal bytes in a backend that
+	// emulates a format the device lacks (A4R4G4B4 held as B8G8R8A8, say), so an
+	// implementation may have to convert *representations* on the way through; what it
+	// must never do is reinterpret one representation as the other.
 	virtual bool Copy_Rects(SurfaceHandle* source, const LockRect* rects,
 	                        uint32_t rect_count, SurfaceHandle* destination,
 	                        const SurfacePoint* points) = 0;

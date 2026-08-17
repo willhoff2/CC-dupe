@@ -334,6 +334,11 @@ struct SurfaceHandle {
 	uint32_t height = 0;
 	uint32_t pitch = 0;
 	uint32_t texel_bytes = 4;
+	// The D3D8 format the caller sees, which is not derivable from vk_format: every
+	// CPU-expanded format becomes VK_FORMAT_B8G8R8A8_UNORM, so two surfaces can share a
+	// VkFormat and still have different texel layouts. CopyRects has to compare the D3D8
+	// formats, which is also the pair D3D8 itself requires to match.
+	TextureFormat format = TextureFormat::A8R8G8B8;
 	VkFormat vk_format = VK_FORMAT_B8G8R8A8_UNORM;
 	// Tracked rather than assumed: a surface is an attachment, a transfer source, a
 	// transfer destination and a sampled image at different points in one frame, and
@@ -548,6 +553,11 @@ private:
 	bool Acquire_Staging(VkDeviceSize size, StagingBlock& out);
 	void Release_Staging(StagingBlock& block);
 	bool Ensure_Texture_Staging(TextureHandle* texture);
+	// Copy_Rects for a format whose host layout and image layout differ, i.e. one the
+	// device has no equivalent of and the seam emulates with B8G8R8A8.
+	bool Copy_Rects_Converting(SurfaceHandle* source, const LockRect* rects,
+	                           uint32_t count, SurfaceHandle* destination,
+	                           const SurfacePoint* points);
 	// --- the GPU-write dirty bit (renderer-resource-seam.md §4.4) ---------------
 	// Called from every funnel that lets the GPU write an image: after it, a host
 	// read of that image or of any surface viewing it has to pay a readback, and
@@ -2160,17 +2170,23 @@ void Expand_To_Bgra8(TextureFormat format, const TextureMip& mip, const uint32_t
 // exception: X8R8G8B8's X byte is not stored in the image, because D3D8 does not
 // sample it, so it contracts back as zero. Returns false for a format the
 // expansion pass does not produce, so a caller can refuse rather than guess.
-bool Contract_From_Bgra8(TextureFormat format, const uint8_t* bgra, uint32_t width,
-                         uint32_t height, uint8_t* dst, uint32_t dst_pitch) {
+// Asked separately from the conversion itself so a caller that must refuse before it
+// copies anything can find out without running a dummy pass.
+bool Contractable_From_Bgra8(TextureFormat format) {
 	switch (format) {
 	case TextureFormat::R8G8B8:
 	case TextureFormat::X8R8G8B8:
 	case TextureFormat::L8:
 	case TextureFormat::A8:
 	case TextureFormat::A8L8:
-	case TextureFormat::A4R4G4B4: break;
+	case TextureFormat::A4R4G4B4: return true;
 	default: return false;
 	}
+}
+
+bool Contract_From_Bgra8(TextureFormat format, const uint8_t* bgra, uint32_t width,
+                         uint32_t height, uint8_t* dst, uint32_t dst_pitch) {
+	if (!Contractable_From_Bgra8(format)) return false;
 	for (uint32_t y = 0; y < height; ++y) {
 		const uint8_t* src = bgra + static_cast<size_t>(y) * width * 4;
 		uint8_t* row = dst + static_cast<size_t>(y) * dst_pitch;
@@ -3996,6 +4012,9 @@ SurfaceHandle* VulkanBackend::Get_Surface_Level(TextureHandle* texture, uint32_t
 	surface->owner = texture;
 	surface->width = texture->image.width;
 	surface->height = texture->image.height;
+	// The D3D8 format of the texture, not of its image: a level of an A4R4G4B4 texture is
+	// an A4R4G4B4 surface to the caller even though the image behind it is B8G8R8A8.
+	surface->format = texture->format;
 	surface->vk_format = texture->vk_format;
 	surface->layout = texture->layout;
 	surface->pitch = texture->image.width * 4;
@@ -4054,6 +4073,7 @@ SurfaceHandle* VulkanBackend::Create_Image_Surface(uint32_t width, uint32_t heig
 	auto* surface = new SurfaceHandle();
 	surface->width = width;
 	surface->height = height;
+	surface->format = format;
 	surface->texel_bytes = texel_bytes;
 	surface->pitch = width * texel_bytes;
 	surface->vk_format = Plan_For(format, view_swizzle_).vk;
@@ -4173,6 +4193,158 @@ bool VulkanBackend::Surface_Bits(SurfaceHandle* surface, LockedRect& out) {
 	return out.bits != nullptr;
 }
 
+// CopyRects between a host surface and an image of a format the device has no
+// equivalent of. The host side holds the D3D8 texel layout, the image side holds the
+// B8G8R8A8 the seam emulates it with, so the rectangle is expanded (or contracted)
+// on the CPU on its way through, by the same two passes Unlock and Readback_Level
+// use and through the same staging pool.
+// Takes resource_mutex_, which is what the staging pool is guarded by; Copy_Rects
+// does not hold it.
+bool VulkanBackend::Copy_Rects_Converting(SurfaceHandle* source, const LockRect* rects,
+                                          uint32_t count, SurfaceHandle* destination,
+                                          const SurfacePoint* points) {
+	std::lock_guard<std::mutex> guard(resource_mutex_);
+	const LockRect whole{0, 0, source->width, source->height};
+	const SurfacePoint origin{0, 0};
+
+	// One block serves the whole call, so the pool sees one acquire rather than
+	// rect_count of them. The write direction stages every rectangle at once and submits
+	// once, so it needs the sum; the read direction submits and contracts one rectangle
+	// at a time, so it needs the largest.
+	VkDeviceSize scratch_bytes = 0;
+	for (uint32_t i = 0; i < count; ++i) {
+		const LockRect r = rects != nullptr ? rects[i] : whole;
+		const SurfacePoint p = points != nullptr ? points[i] : origin;
+		const uint32_t w = r.right - r.left;
+		const uint32_t h = r.bottom - r.top;
+		if (r.right > source->width || r.bottom > source->height || r.left >= r.right ||
+		    r.top >= r.bottom || p.x + w > destination->width ||
+		    p.y + h > destination->height) {
+			return false;
+		}
+		const VkDeviceSize rect_bytes = static_cast<VkDeviceSize>(w) * h * 4;
+		scratch_bytes = source->system_memory() ? scratch_bytes + rect_bytes
+		                                        : std::max(scratch_bytes, rect_bytes);
+	}
+	if (scratch_bytes == 0) return true;
+
+	SurfaceHandle* host = source->system_memory() ? source : destination;
+	SurfaceHandle* image = source->system_memory() ? destination : source;
+	if (host->mapped == nullptr || image->image == nullptr) return false;
+	if (!source->system_memory() && !Contractable_From_Bgra8(source->format)) {
+		// The read direction needs the inverse pass. A format the expansion is not
+		// invertible for is refused here, before anything is copied, rather than
+		// having plausible bytes written into the caller's surface.
+		std::fprintf(stderr,
+		             "Copy_Rects: no contraction for format %d; the read direction "
+		             "cannot be served\n",
+		             static_cast<int>(source->format));
+		return false;
+	}
+
+	StagingBlock scratch;
+	if (!Acquire_Staging(scratch_bytes, scratch)) return false;
+
+	bool one_shot = false;
+	VkCommandBuffer cmd = Begin_Transfer(one_shot);
+	if (cmd == VK_NULL_HANDLE) {
+		Release_Staging(scratch);
+		return false;
+	}
+	const VkImageLayout image_layout = image->layout;
+	Transition_Surface(cmd, image,
+	                   source->system_memory() ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+	                                           : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+	// The engine's 2D composition passes a null rect array (the whole surface), so this
+	// loop runs once there.
+	std::vector<uint8_t> row;
+	VkDeviceSize scratch_offset = 0;
+	bool ok = true;
+	for (uint32_t i = 0; i < count && ok; ++i) {
+		const LockRect r = rects != nullptr ? rects[i] : whole;
+		const SurfacePoint p = points != nullptr ? points[i] : origin;
+		const uint32_t w = r.right - r.left;
+		const uint32_t h = r.bottom - r.top;
+
+		if (source->system_memory()) {
+			// Expand the rectangle into the scratch block, tightly packed, then upload
+			// it as its own image: bufferRowLength is the rectangle's width, not the
+			// surface's, because the block holds only the rectangle.
+			const auto* src = static_cast<const uint8_t*>(host->mapped);
+			auto* dst = static_cast<uint8_t*>(scratch.mapped) + scratch_offset;
+			for (uint32_t y = 0; y < h; ++y) {
+				const TextureMip mip{src + static_cast<size_t>(r.top + y) * host->pitch +
+				                         static_cast<size_t>(r.left) * host->texel_bytes,
+				                     static_cast<size_t>(w) * host->texel_bytes, w, 1};
+				Expand_To_Bgra8(host->format, mip, nullptr, row);
+				std::memcpy(dst + static_cast<size_t>(y) * w * 4, row.data(), row.size());
+			}
+			++resource_stats_.cpu_expansions;
+			VkBufferImageCopy copy{};
+			copy.bufferOffset = scratch_offset;
+			scratch_offset += static_cast<VkDeviceSize>(w) * h * 4;
+			copy.bufferRowLength = w;
+			copy.bufferImageHeight = h;
+			copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+			copy.imageOffset = {static_cast<int32_t>(p.x), static_cast<int32_t>(p.y), 0};
+			copy.imageExtent = {w, h, 1};
+			vkCmdCopyBufferToImage(cmd, scratch.buffer.buffer, image->image->image,
+			                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+			continue;
+		}
+
+		// Read direction: the rectangle comes back as B8G8R8A8 and is contracted into
+		// the caller's surface. It needs the copy to have executed, so the submit is
+		// inside the loop.
+		VkBufferImageCopy copy{};
+		copy.bufferRowLength = w;
+		copy.bufferImageHeight = h;
+		copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+		copy.imageOffset = {static_cast<int32_t>(r.left), static_cast<int32_t>(r.top), 0};
+		copy.imageExtent = {w, h, 1};
+		vkCmdCopyImageToBuffer(cmd, image->image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		                       scratch.buffer.buffer, 1, &copy);
+		ok = one_shot ? End_One_Shot(cmd) : Flush_Frame_Commands(false);
+		if (ok) {
+			ok = Contract_From_Bgra8(host->format,
+			                         static_cast<const uint8_t*>(scratch.mapped), w, h,
+			                         static_cast<uint8_t*>(host->mapped) +
+			                             static_cast<size_t>(p.y) * host->pitch +
+			                             static_cast<size_t>(p.x) * host->texel_bytes,
+			                         host->pitch);
+			++resource_stats_.cpu_expansions;
+		}
+		if (ok && i + 1 < count) {
+			cmd = Begin_Transfer(one_shot);
+			if (cmd == VK_NULL_HANDLE) ok = false;
+			else Transition_Surface(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+		} else {
+			cmd = VK_NULL_HANDLE;
+		}
+	}
+
+	if (cmd != VK_NULL_HANDLE) {
+		// Back to what the image was in, then submitted and waited for: the scratch
+		// block goes back to the pool, so nothing may still be reading it.
+		if (image_layout != VK_IMAGE_LAYOUT_UNDEFINED) {
+			Transition_Surface(cmd, image, image_layout);
+		} else if (image->owner != nullptr) {
+			Transition_Surface(cmd, image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		}
+		const bool submitted = one_shot ? End_One_Shot(cmd) : Flush_Frame_Commands(false);
+		ok = ok && submitted;
+	}
+	Release_Staging(scratch);
+	if (!ok) return false;
+
+	// Write funnel 4, the destination half. The host destination is not marked: the
+	// contraction wrote it and the copy it read has already executed, so host and
+	// image agree.
+	if (!destination->system_memory()) Mark_Gpu_Write(destination);
+	return true;
+}
+
 bool VulkanBackend::Copy_Rects(SurfaceHandle* source, const LockRect* rects,
                                uint32_t rect_count, SurfaceHandle* destination,
                                const SurfacePoint* points) {
@@ -4187,16 +4359,40 @@ bool VulkanBackend::Copy_Rects(SurfaceHandle* source, const LockRect* rects,
 		             static_cast<double>(render_scale_));
 		return false;
 	}
-	if (source->vk_format != destination->vk_format) {
+	// Scale first, then formats: the refusal above leaves every surface that reaches the
+	// conversion below advertising exactly the pixels its image holds, so the rectangles the
+	// conversion walks are in one unit and there is no point/pixel ambiguity to reintroduce.
+	// The device's own targets are the only surfaces whose scale can differ from 1
+	// (Surface_Render_Scale) and they are B8G8R8A8, not an emulated format, so the two rules
+	// cannot both apply to one copy.
+	if (source->format != destination->format) {
 		// D3D8 requires matching formats too; a mismatch here would silently
-		// reinterpret bytes.
-		std::fprintf(stderr, "Copy_Rects: source and destination formats differ\n");
+		// reinterpret bytes. The pair compared is the *D3D8* pair, because the
+		// CPU-expanded formats all share VK_FORMAT_B8G8R8A8_UNORM: comparing VkFormats
+		// passed an A4R4G4B4 surface into a B8G8R8A8 image as if it needed no
+		// conversion.
+		std::fprintf(stderr, "Copy_Rects: source and destination formats differ (%d vs %d)\n",
+		             static_cast<int>(source->format), static_cast<int>(destination->format));
 		return false;
 	}
 	const LockRect whole{0, 0, source->width, source->height};
 	const SurfacePoint origin{0, 0};
 	const uint32_t count = rects != nullptr ? rect_count : 1;
 	if (count == 0) return true;
+
+	// One side host, the other an image, and the D3D8 format is one Vulkan has no
+	// equivalent for: the host bytes are in the D3D8 layout and the image holds the
+	// B8G8R8A8 that layout is emulated with, so the bytes cannot travel unchanged. This
+	// is the same CPU expansion the resource seam's Unlock does (Expand_To_Bgra8 /
+	// Contract_From_Bgra8), run over the copied rectangle and staged through the same
+	// pool -- not a second upload path, the same one addressed by rectangle. The
+	// engine reaches this with the shell's text composition: a system-memory
+	// A4R4G4B4 surface of rasterised glyphs copied into level 0 of an A4R4G4B4 texture
+	// (render2dsentence.cpp, Render2DSentenceClass::Build_Textures).
+	if (Plan_For(source->format, view_swizzle_).expand_to_bgra8 &&
+	    source->system_memory() != destination->system_memory()) {
+		return Copy_Rects_Converting(source, rects, count, destination, points);
+	}
 
 	// The all-host case needs no queue at all.
 	if (source->system_memory() && destination->system_memory()) {

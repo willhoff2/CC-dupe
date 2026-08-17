@@ -1127,6 +1127,197 @@ Outcome Case_L8_Lock(Harness& h) {
 	return Pass(detail);
 }
 
+// ---------------------------------------------------------------------------
+// The shell's 2D text composition, which is CopyRects between two A4R4G4B4
+// surfaces: Render2DSentenceClass::Build_Textures rasterises glyphs into a
+// system-memory surface and copies it into level 0 of an A4R4G4B4 texture. The
+// format has no Vulkan equivalent, so the image behind the texture holds B8G8R8A8
+// and the host surface holds 16-bit D3D8 texels: the two agree on the D3D8 format
+// and disagree on the bytes, which is the case this asserts.
+//
+// The assertion is a residual against a CPU reference, with controls: a copy that
+// reinterpreted the host bytes instead of converting them produced the retail main
+// menu's doubled, offset labels, so a "shifted by one texel" control stands in for
+// exactly that failure and has to be far worse than the correct image.
+// ---------------------------------------------------------------------------
+
+uint16_t Pattern_4444(uint32_t x, uint32_t y) {
+	// Per-texel distinct in every channel, so a wrong pitch, a swapped nibble pair or
+	// a one-texel shift all show up.
+	const uint32_t a = 8 + ((x + y) & 7);
+	const uint32_t r = (x * 3 + 1) & 0xf;
+	const uint32_t g = (y * 5 + 2) & 0xf;
+	const uint32_t b = (x + y * 3) & 0xf;
+	return static_cast<uint16_t>((a << 12) | (r << 8) | (g << 4) | b);
+}
+
+Rgba Expand_4444(uint16_t v) {
+	return Rgba{static_cast<int>(((v >> 8) & 0xf) * 17), static_cast<int>(((v >> 4) & 0xf) * 17),
+	            static_cast<int>((v & 0xf) * 17), static_cast<int>(((v >> 12) & 0xf) * 17)};
+}
+
+Outcome Case_Copy_Rects_4444(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	if (!g.Supports_Texture_Format(TextureFormat::A4R4G4B4)) {
+		return Skip("device has no A4R4G4B4 path");
+	}
+	SurfaceHandle* src =
+	    g.Create_Image_Surface(kTexWidth, kTexHeight, TextureFormat::A4R4G4B4);
+	TextureHandle* tex =
+	    g.Create_Lockable_Texture(kTexWidth, kTexHeight, TextureFormat::A4R4G4B4, 1);
+	if (src == nullptr || tex == nullptr) return Fail("A4R4G4B4 surface or texture creation failed");
+	SurfaceHandle* dst = g.Get_Surface_Level(tex, 0);
+	if (dst == nullptr) return Fail("GetSurfaceLevel failed");
+
+	LockedRect locked;
+	if (!g.Surface_Bits(src, locked)) return Fail("locking the system-memory surface failed");
+	if (locked.pitch < kTexWidth * 2) return Fail("pitch smaller than a row of A4R4G4B4");
+	for (uint32_t y = 0; y < kTexHeight; ++y) {
+		auto* row = static_cast<uint8_t*>(locked.bits) + static_cast<size_t>(y) * locked.pitch;
+		for (uint32_t x = 0; x < kTexWidth; ++x) {
+			const uint16_t v = Pattern_4444(x, y);
+			std::memcpy(row + x * 2, &v, sizeof(v));
+		}
+	}
+	// The whole surface, no rect array and no point array: what the engine's text
+	// composition passes.
+	if (!g.Copy_Rects(src, nullptr, 0, dst, nullptr)) return Fail("Copy_Rects refused the copy");
+
+	h.Reset_State();
+	g.Set_Texture(0, tex);
+	h.Begin();
+	h.Draw_Textured_Quad(0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight));
+	h.End();
+	if (!h.Read_Back()) return Fail("read back failed");
+
+	const float sx = static_cast<float>(kWidth) / kTexWidth;
+	const float sy = static_cast<float>(kHeight) / kTexHeight;
+	// Mean |delta| per channel against the CPU reference, and against two wrong
+	// images. The first control is the defect itself rather than a generic
+	// perturbation: a copy that reinterprets the host's 16-bit texels as the image's
+	// 32-bit ones consumes two host rows per image row, so image row y holds host rows
+	// 2y and 2y+1 side by side at half width and the bottom half of the image reads
+	// off the end of the surface -- which is what the retail main menu's labels drawn
+	// twice, horizontally offset, were. `model` is that image and `to_model` says how
+	// close the readback is to it. The second control is a flat grey: the copy never
+	// happening at all.
+	double residual = 0.0, to_model = 0.0, model_off = 0.0, flat = 0.0;
+	Rgba worst_actual, worst_expected;
+	int worst = -1;
+	for (uint32_t ty = 0; ty < kTexHeight; ++ty) {
+		for (uint32_t tx = 0; tx < kTexWidth; ++tx) {
+			const Rgba expected = Expand_4444(Pattern_4444(tx, ty));
+			// The two 16-bit texels the reinterpretation reads as one B8G8R8A8:
+			// little-endian, so B and G are the low texel's bytes and R and A the
+			// high one's. Past the end of the surface it reads nothing.
+			const uint32_t idx = 2 * (ty * kTexWidth + tx);
+			const uint32_t iy = idx / kTexWidth;
+			Rgba model{0, 0, 0, 0};
+			if (iy + 1 < kTexHeight || (iy < kTexHeight && idx % kTexWidth + 1 < kTexWidth)) {
+				const uint16_t t0 = Pattern_4444(idx % kTexWidth, iy);
+				const uint16_t t1 = Pattern_4444((idx + 1) % kTexWidth, (idx + 1) / kTexWidth);
+				model = Rgba{static_cast<int>(t1 & 0xff), static_cast<int>(t0 >> 8),
+				             static_cast<int>(t0 & 0xff), static_cast<int>(t1 >> 8)};
+			}
+			const Rgba actual = h.Pixel(static_cast<uint32_t>((tx + 0.5f) * sx),
+			                            static_cast<uint32_t>((ty + 0.5f) * sy));
+			const int d = std::abs(actual.r - expected.r) + std::abs(actual.g - expected.g) +
+			              std::abs(actual.b - expected.b) + std::abs(actual.a - expected.a);
+			if (d > worst) {
+				worst = d;
+				worst_actual = actual;
+				worst_expected = expected;
+			}
+			residual += d;
+			to_model += std::abs(actual.r - model.r) + std::abs(actual.g - model.g) +
+			            std::abs(actual.b - model.b) + std::abs(actual.a - model.a);
+			model_off += std::abs(model.r - expected.r) + std::abs(model.g - expected.g) +
+			             std::abs(model.b - expected.b) + std::abs(model.a - expected.a);
+			flat += std::abs(128 - expected.r) + std::abs(128 - expected.g) +
+			        std::abs(128 - expected.b) + std::abs(255 - expected.a);
+		}
+	}
+	const double texels = static_cast<double>(kTexWidth) * kTexHeight * 4.0;
+	residual /= texels;
+	to_model /= texels;
+	model_off /= texels;
+	flat /= texels;
+	if (worst > 1) {
+		char detail[256];
+		std::snprintf(detail, sizeof(detail),
+		              "worst texel got=%s expected=%s; mean |delta| %.3f to the "
+		              "reference, %.3f to the byte-reinterpretation model",
+		              To_String(worst_actual).c_str(), To_String(worst_expected).c_str(),
+		              residual, to_model);
+		return Fail(detail);
+	}
+	// The controls have to be far worse, or the residual is not measuring anything.
+	if (model_off < residual * 20.0 + 1.0 || flat < residual * 20.0 + 1.0) {
+		char detail[224];
+		std::snprintf(detail, sizeof(detail),
+		              "controls too close: correct %.3f, reinterpreted %.3f, flat %.3f",
+		              residual, model_off, flat);
+		return Fail(detail);
+	}
+
+	// Sub-rectangle with a destination corner, the other half of the CopyRects
+	// contract: only the addressed rectangle may change.
+	const LockRect rect{0, 0, 4, 4};
+	const SurfacePoint point{static_cast<uint32_t>(kTexWidth - 4),
+	                         static_cast<uint32_t>(kTexHeight - 4)};
+	if (!g.Copy_Rects(src, &rect, 1, dst, &point)) return Fail("Copy_Rects refused the sub-rect");
+	h.Begin();
+	h.Draw_Textured_Quad(0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight));
+	h.End();
+	if (!h.Read_Back()) return Fail("second read back failed");
+	for (uint32_t ty = 0; ty < kTexHeight; ++ty) {
+		for (uint32_t tx = 0; tx < kTexWidth; ++tx) {
+			const bool inside = tx >= point.x && ty >= point.y;
+			const Rgba expected = inside ? Expand_4444(Pattern_4444(tx - point.x, ty - point.y))
+			                             : Expand_4444(Pattern_4444(tx, ty));
+			const Rgba actual = h.Pixel(static_cast<uint32_t>((tx + 0.5f) * sx),
+			                            static_cast<uint32_t>((ty + 0.5f) * sy));
+			if (!Near(actual, expected)) {
+				char detail[224];
+				std::snprintf(detail, sizeof(detail),
+				              "sub-rect texel (%u,%u) got=%s expected=%s", tx, ty,
+				              To_String(actual).c_str(), To_String(expected).c_str());
+				return Fail(detail);
+			}
+		}
+	}
+
+	char detail[256];
+	std::snprintf(detail, sizeof(detail),
+	              "A4R4G4B4 host surface into an A4R4G4B4 texture: mean |delta| %.3f, "
+	              "controls %.1f (bytes reinterpreted) and %.1f (flat); sub-rect at "
+	              "(%u,%u) correct and the rest untouched",
+	              residual, model_off, flat, point.x, point.y);
+	return Pass(detail);
+}
+
+// The refusal half: two different D3D8 formats cannot be copied, and the backend has
+// to say so rather than reinterpret the bytes. Both of these hold B8G8R8A8 images, so
+// a VkFormat comparison would let this through.
+Outcome Case_Copy_Rects_Format_Mismatch(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	if (!g.Supports_Texture_Format(TextureFormat::A4R4G4B4) ||
+	    !g.Supports_Texture_Format(TextureFormat::A8R8G8B8)) {
+		return Skip("device has no A4R4G4B4 or A8R8G8B8 path");
+	}
+	SurfaceHandle* src =
+	    g.Create_Image_Surface(kTexWidth, kTexHeight, TextureFormat::A4R4G4B4);
+	TextureHandle* tex =
+	    g.Create_Lockable_Texture(kTexWidth, kTexHeight, TextureFormat::A8R8G8B8, 1);
+	if (src == nullptr || tex == nullptr) return Fail("surface or texture creation failed");
+	SurfaceHandle* dst = g.Get_Surface_Level(tex, 0);
+	if (dst == nullptr) return Fail("GetSurfaceLevel failed");
+	if (g.Copy_Rects(src, nullptr, 0, dst, nullptr)) {
+		return Fail("A4R4G4B4 into A8R8G8B8 was accepted; D3D8 requires equal formats");
+	}
+	return Pass("A4R4G4B4 into A8R8G8B8 refused, though both images are B8G8R8A8");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1170,6 +1361,8 @@ int main(int argc, char** argv) {
 	report("C8 read across update", Case_Update_Texture_Surface_Read(harness));
 	report("C5 dynamic ring stream", Case_Dynamic_Ring_Stream(harness));
 	report("L8 lock (no swizzle)", Case_L8_Lock(harness));
+	report("CopyRects A4R4G4B4", Case_Copy_Rects_4444(harness));
+	report("CopyRects format refusal", Case_Copy_Rects_Format_Mismatch(harness));
 	report("staging pool recycling", Case_Pool_Recycles_Staging(harness));
 
 	// The cost model in docs/porting/renderer-resource-seam.md, measured rather than
