@@ -1205,6 +1205,28 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Draws per frame, per draw. A mission frame issues thousands of draws and the backend gives
+      # each one its own descriptor set and uniform slice, so this is a resource limit: before the
+      # growable allocator the 65th draw was silently dropped and the frame was reported as a
+      # success (docs/porting/draws-per-frame.md). --self-check reimposes the old fixed 64 and
+      # requires that the gate fail, so it is known to catch that regression.
+      - name: Draws per frame sustained without a dropped or aliased draw
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+          XDG_RUNTIME_DIR: /tmp/xdgrt
+        run: |
+          set -o pipefail
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          unset DISPLAY
+          {
+            echo '## Draw capacity (Linux, lavapipe)'
+            echo '```'
+            python3 scripts/ci/check-draw-capacity.py \
+              --binary build/spike/zh-draw-capacity \
+              --self-check
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Re-derive the resource-seam counts
         run: |
           set -o pipefail
@@ -1484,6 +1506,20 @@ jobs:
             echo '## D3D8 Lock/Unlock usage classes (macOS arm64, MoltenVK)'
             echo '```'
             build/spike/zh-resource-lock-tests
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The draw-capacity gate on the device the defect was found on: the dropped draws were
+      # measured through MoltenVK, and its descriptor-set allocation is its own implementation.
+      - name: Draws per frame through MoltenVK
+        run: |
+          set -eux -o pipefail
+          {
+            echo '## Draw capacity (macOS arm64, MoltenVK)'
+            echo '```'
+            python3 scripts/ci/check-draw-capacity.py \
+              --binary build/spike/zh-draw-capacity \
+              --self-check
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

@@ -177,6 +177,24 @@ struct ResourceStats {
 	uint32_t ring_wrap_waits = 0;
 };
 
+// Per-draw resource accounting (docs/porting/draws-per-frame.md). A draw costs a
+// descriptor set and a slice of the draw-uniform buffer, so "draws per frame" is a
+// resource limit, not a performance figure: a real mission frame issues thousands of them
+// and a backend that runs out has to say so rather than lose geometry silently.
+// `draws_requested`/`issued`/`dropped` describe the frame that was last submitted;
+// `peak_draws_per_frame` and the descriptor figures are for the whole device lifetime.
+struct DrawStats {
+	uint32_t draws_requested = 0;
+	uint32_t draws_issued = 0;
+	uint32_t draws_dropped = 0;
+	uint32_t peak_draws_per_frame = 0;
+	uint64_t draws_dropped_total = 0;
+	// Descriptor sets allocated, and the number of pool allocations they came from: the
+	// growth this accounting exists to make visible.
+	uint32_t descriptor_capacity = 0;
+	uint32_t descriptor_blocks = 0;
+};
+
 // D3DLIGHT8, minus the fields the engine never fills.
 struct LightState {
 	uint32_t type = 0; // D3DLIGHTTYPE; 0 disables the slot
@@ -450,6 +468,9 @@ public:
 		out_width = 0;
 		out_height = 0;
 	}
+
+	// Per-draw resource accounting; zero on a backend that does not track it.
+	virtual void Get_Draw_Stats(DrawStats& out) const { out = DrawStats{}; }
 
 	// --- spike-only: prove what was rasterised -------------------------------
 	// Reads the colour target back to host memory as tightly packed RGBA8.

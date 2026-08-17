@@ -153,6 +153,13 @@ add_executable(zh-staging-workload src/staging_workload.cpp)
 add_dependencies(zh-staging-workload spike-shaders)
 target_link_libraries(zh-staging-workload PRIVATE zh-render-backend Threads::Threads)
 
+# Draw capacity: how many draws one frame carries, with every draw's own texture and
+# uniforms verified in the readback, so a dropped or aliased draw is named rather than
+# guessed at. scripts/ci/check-draw-capacity.py gates the number.
+add_executable(zh-draw-capacity src/draw_capacity.cpp)
+add_dependencies(zh-draw-capacity spike-shaders)
+target_link_libraries(zh-draw-capacity PRIVATE zh-render-backend)
+
 # Throughput baseline: draw calls/sec and state changes/sec, so the Mac has a Linux
 # number to be compared against.
 add_executable(zh-throughput src/throughput.cpp)
@@ -300,7 +307,7 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     foreach(target zh-render-backend zh-renderer-spike zh-caps-probe zh-feature-probe
                    zh-fixedfunc-tests zh-resource-lock-tests zh-hidpi-tests
-                   zh-staging-workload zh-throughput)
+                   zh-staging-workload zh-throughput zh-draw-capacity)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
     foreach(target zh-window-spike zh-window-spike-cocoa zh-metal-surface-probe
