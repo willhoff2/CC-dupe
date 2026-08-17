@@ -43,7 +43,7 @@ POSIX_SPELLED = "Maps/Fixture Alpha/Fixture Alpha.map"
 
 
 def to_quoted_printable(text):
-    """The encoding `AsciiStringToQuotedPrintable` uses for a cache key: `_HH` per non-alnum byte."""
+    """The encoding `AsciiStringToQuotedPrintable` uses for a key: `_HH` per non-alnum byte."""
     out = []
     for char in text:
         if char.isalnum() and char.isascii():
@@ -143,7 +143,7 @@ def check_key_resolution(probe, workdir, failures):
 
 
 def check_untagged_entry_survives(probe, workdir, failures):
-    """A `/`-spelled key with no localization tag: the display-name path must not walk off a null."""
+    """A `/`-spelled key with no name tag: the display-name path must not walk off a null."""
     directory = workdir / "untagged"
     write_fixture(directory, [cache_entry(POSIX_SPELLED, 4, True, "")])
 
@@ -197,7 +197,7 @@ def main():
             print("  - {}".format(failure))
         return 1
 
-    print("\nOK: both spellings of a cached map resolve to the same entry, multiplayer state intact")
+    print("\nOK: both spellings of a map resolve to one entry, multiplayer state intact")
     return 0
 
 
