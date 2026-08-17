@@ -97,12 +97,17 @@ def donor_command(donor=FLAG_DONOR):
     sys.exit(f"no compile command for {donor} in {database}")
 
 
-def compile_harness(out_object, harness=HARNESS, donor=FLAG_DONOR, extra_includes=()):
+def compile_harness(out_object, harness=HARNESS, donor=FLAG_DONOR, extra_includes=(),
+                    extra_arguments=()):
     """Compile a harness with the donor's flags, only the source and -o replaced.
 
     `harness`/`donor` are arguments so that a second harness -- the video one in
     scripts/native-video-frame-run.py -- links against the same archives with the same flags
     rather than growing its own idea of how the engine is compiled.
+
+    `extra_arguments` is appended last, which is how scripts/native-lock-failure-test.py compiles
+    the same harness twice: once as it ships and once with the negative control's -D, so the two
+    binaries differ in nothing else.
     """
     command, directory = donor_command(donor)
     # Everything except the donor's own output, its `-c source`, and the source path itself. The
@@ -125,6 +130,7 @@ def compile_harness(out_object, harness=HARNESS, donor=FLAG_DONOR, extra_include
     # does not have. It calls nothing else from there.
     rebuilt += [f"-isystem{REPO_ROOT / directory_}"
                 for directory_ in (*HARNESS_INCLUDES, *extra_includes)]
+    rebuilt += list(extra_arguments)
     rebuilt += ["-g", "-o", str(out_object), "-c", str(harness)]
     proc = subprocess.run(rebuilt, cwd=directory, capture_output=True, text=True)
     if proc.returncode != 0:

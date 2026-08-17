@@ -54,9 +54,9 @@
       "total": 12
     },
     "GeneralsMD/Code/GameEngine": {
-      "objects": 380,
-      "probe_clean": 380,
-      "total": 380
+      "objects": 381,
+      "probe_clean": 381,
+      "total": 381
     },
     "GeneralsMD/Code/GameEngineDevice": {
       "objects": 39,
@@ -109,7 +109,7 @@
     "libgeneralsmd_code_main"
   ],
   "link_entry_point_stub": false,
-  "objects": 979,
+  "objects": 980,
   "pile_meaning": {
     "compile-blocked": "An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker.",
     "cut-scope-not-linked": "A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it.",
@@ -117,7 +117,7 @@
     "library-not-linked": "A library defines it and this configuration links no such library. A link line, not port work.",
     "no-definition-anywhere": "Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work."
   },
-  "probe_clean": 979,
+  "probe_clean": 980,
   "providers": {
     "ffmpeg": {
       "evidence_files": 823,
@@ -175,7 +175,7 @@
     },
     "window-backend": {
       "evidence_files": 2,
-      "evidence_names": 61,
+      "evidence_names": 62,
       "label": "The window/input backend this configuration does not choose (SDL2, Cocoa)",
       "owner": "platform/macos-window-compile and platform/window-seam-wiring",
       "pile": "library-not-linked",
@@ -193,8 +193,9 @@
     "agrees_with_nm": true,
     "attempted": true,
     "binary": {
-      "bytes": 92429784,
+      "bytes": 92503328,
       "elf_type": "DYN",
+      "file_output": "ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=e47196a4fb594f785c9141f55a2939aa80dc96e7, for GNU/Linux 3.2.0, with debug_info, not stripped",
       "format": "ELF",
       "machine": "x86-64",
       "path": "build/native-debug/native_strict_link",
@@ -230,7 +231,7 @@
     "vulkan (system)",
     "z (system)"
   ],
-  "translation_units": 979,
+  "translation_units": 980,
   "undefined_by_category": {},
   "undefined_by_pile": {
     "compile-blocked": 0,

@@ -70,15 +70,69 @@ struct ChildProcess
 	ChildProcess() : Pid(-1), ReadDescriptor(-1), Reaped(false), ExitCode(0) {}
 };
 
+/*
+**	TheSuperHackers @bugfix Devin 17/08/2026 The last refusal, kept so the caller can say why it
+**	is not starting. Static storage and no allocation: this is read on a path that is about to
+**	exit.
+*/
+InstanceLockFailure Last_Failure = { nullptr, nullptr, 0, -1, false };
+char Last_Failure_Path[512] = { 0 };
+
+/*
+**	The pid the holder wrote into the lock file, or -1. Read with the descriptor already open, so
+**	it cannot be a different file than the one that refused.
+*/
+long Read_Holder_Pid(int descriptor)
+{
+	char text[32];
+	ssize_t length = pread(descriptor, text, sizeof(text) - 1, 0);
+	if (length <= 0) {
+		return -1;
+	}
+	text[length] = 0;
+	char * end = nullptr;
+	long pid = strtol(text, &end, 10);
+	if (end == text || pid <= 0) {
+		return -1;
+	}
+	return pid;
+}
+
+void Record_Failure(const char * operation, int error, int descriptor)
+{
+	Last_Failure.Path = Last_Failure_Path;
+	Last_Failure.Operation = operation;
+	Last_Failure.Error = error;
+	Last_Failure.Holder_Pid = descriptor >= 0 ? Read_Holder_Pid(descriptor) : -1;
+	/*
+	**	kill(pid, 0) answers "does this process exist and may I signal it", which is as close as
+	**	POSIX gets to "is the holder still there". A holder that has gone is not the usual case,
+	**	because flock() releases on death - but it is the case worth naming if it happens.
+	*/
+	Last_Failure.Holder_Is_Running = Last_Failure.Holder_Pid > 0
+		&& (kill((pid_t)Last_Failure.Holder_Pid, 0) == 0 || errno == EPERM);
+}
+
 }	// anonymous namespace
+
+bool Instance_Lock_Last_Failure(InstanceLockFailure & failure)
+{
+	if (Last_Failure.Path == nullptr) {
+		return false;
+	}
+	failure = Last_Failure;
+	return true;
+}
 
 void * Instance_Lock_Acquire(const char * name)
 {
 	char path[512];
 	snprintf(path, sizeof(path), "%s/%s.lock", Runtime_Directory(), name);
+	snprintf(Last_Failure_Path, sizeof(Last_Failure_Path), "%s", path);
 
 	int descriptor = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
 	if (descriptor < 0) {
+		Record_Failure("open", errno, -1);
 		return nullptr;
 	}
 
@@ -89,6 +143,7 @@ void * Instance_Lock_Acquire(const char * name)
 	**	races with the next process opening it.
 	*/
 	if (flock(descriptor, LOCK_EX | LOCK_NB) != 0) {
+		Record_Failure("flock", errno, descriptor);
 		close(descriptor);
 		return nullptr;
 	}

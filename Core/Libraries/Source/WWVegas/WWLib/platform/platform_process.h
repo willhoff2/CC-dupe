@@ -52,6 +52,30 @@ void * Instance_Lock_Acquire(const char * name);
 void Instance_Lock_Release(void * handle);
 
 /*
+**	TheSuperHackers @bugfix Devin 17/08/2026 Why the last Instance_Lock_Acquire() in this
+**	process returned null. The two reasons it collapses into one return value are worth
+**	telling apart to anyone looking at a launch that did nothing: another live process holds
+**	the lock, or the lock could not be used at all. A leftover holder made a dozen launches
+**	fail in silence once already - see docs/porting/init-failure-reporting.md.
+**
+**	Reporting only. The lock's own contract is unchanged: any failure is still a refusal.
+*/
+struct InstanceLockFailure
+{
+	const char * Path;			// The lock file that was tried.
+	const char * Operation;		// "open" or "flock": which call refused.
+	int Error;					// Its errno.
+	long Holder_Pid;			// The pid the holder wrote into the file, or -1 if unreadable.
+	bool Holder_Is_Running;		// Whether that pid still exists.
+};
+
+/*
+**	Fills in the last failure and returns true, or returns false when this process has not had
+**	one. Valid until the next Instance_Lock_Acquire() call.
+*/
+bool Instance_Lock_Last_Failure(InstanceLockFailure & failure);
+
+/*
 **	Equivalent of _spawnl(_P_NOWAIT, path, path, nullptr). Starts the executable detached from
 **	this process and does not wait for it. Returns false if the process could not be started.
 **	Unlike _spawnl() the search is not extended with PATHEXT, and unlike Win32 the child is not

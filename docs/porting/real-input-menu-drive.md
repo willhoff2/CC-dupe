@@ -222,13 +222,22 @@ DynamicMemoryAllocator::allocateBytesDoNotZeroImplementation(int)
 operator new(unsigned long)                     ← and around again
 ```
 
-Two properties matter for the next slice. The failure is in the memory manager's *pre-main* initialization,
-so it precedes anything a session can drive. And the recursion is what turns a recoverable mutex error into
-a crash: an allocation failure path that allocates cannot report a mutex failure. This is the same family as
-§8.5's exit-time stack overflow in OpenAL's static destructors (also reproduced here, `__cxa_finalize_ranges`
-→ `SimpleVecClass<Vector4>::~SimpleVecClass` → `DynamicMemoryAllocator::freeBytes`): static-lifetime
-allocation outside the memory manager's live window. Not fixed here — it needs the allocator/static-init
-seam, not the input seam.
+Two properties matter for the next slice. The failure looks like the memory manager's *pre-main*
+initialization, so it would precede anything a session can drive. And the recursion is what turns a
+recoverable mutex error into a crash: an allocation failure path that allocates cannot report a mutex
+failure. This is the same family as §8.5's exit-time stack overflow in OpenAL's static destructors (also
+reproduced here, `__cxa_finalize_ranges` → `SimpleVecClass<Vector4>::~SimpleVecClass` →
+`DynamicMemoryAllocator::freeBytes`): static-lifetime allocation outside the memory manager's live window.
+Not fixed here — it needs the allocator/static-init seam, not the input seam.
+
+> **Superseded, and one reading above is wrong.** The recursion is fixed —
+> [allocator-lock-failure.md](allocator-lock-failure.md), which reproduces it deterministically with a
+> negative control and replaces the failure path with one that cannot allocate. That document also
+> corrects the "pre-main" reading: `operator new` calls `preMainInitMemoryManager()` before *every*
+> allocation, so that frame dates nothing, and a genuine pre-main allocation cannot enter a critical
+> section at all — the five section pointers are still null until `main`'s prologue sets them. A trace
+> containing `CriticalSection::enter()` is therefore after `main` began. The lock failed because the
+> section it named had been destroyed, which is §8.5's cause and #113's lifetime fix.
 
 ### 4.4 A stale instance-lock holder silently refuses new launches — port defect (lifecycle)
 
@@ -238,6 +247,10 @@ reported the file busy). `ClientInstance::initialize` takes that `flock` and, in
 returns `false` when it is held — the process then leaves without saying why on stdout or stderr. Killing
 the holder was enough for the next launch to reach a live window. The lock itself is correct; the missing
 piece is a diagnostic, which belongs with `docs/porting/init-failure-reporting.md`.
+
+> **Fixed.** The refusal now names the lock file and the holder's pid, and separates a lock that cannot be
+> used from a lock that is held:
+> [init-failure-reporting.md](init-failure-reporting.md) §"The single instance lock".
 
 ### 4.5 Drag selection did not change the selection — unclassified, deliberately
 
@@ -290,10 +303,14 @@ because the accessors are inlined away.
    `loadBigFilesFromDirectory(installPath, "*.big")` directly rather than inferring it from a missing model.
 2. **The allocator's static-init and teardown window** (§4.3, §8.5). While startup is intermittently fatal,
    every session pays a retry tax, and no measurement of the shell is reliably reproducible.
+   *Done — [allocator-lock-failure.md](allocator-lock-failure.md); a failed lock now prints one line naming
+   the errno, the section and the mutex's bytes instead of overflowing the stack, so the next occurrence on
+   that hardware is classified from its output.*
 3. **`W3DShroud::getShroudLevel` bounds under river water** (§4.2), with a map that reaches it.
 4. **Selection semantics** (§4.5): drive a drag with a known selectable object under it, with the renderer
    slice's fix in, and settle whether in-game selection works.
-5. **Init failure diagnostics** (§4.4): say why the process is leaving.
+5. **Init failure diagnostics** (§4.4): say why the process is leaving. *Done for the instance lock —
+   [init-failure-reporting.md](init-failure-reporting.md) §"The single instance lock".*
 
 ## 7. Reproducing this
 
