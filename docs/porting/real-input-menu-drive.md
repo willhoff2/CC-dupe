@@ -315,3 +315,17 @@ python3 scripts/macos-input-drive.py screenshot --pid <pid> --out /tmp/shot.png
 
 Both the Accessibility and Screen Recording grants must be held by the terminal that hosts the harness; the
 `capabilities` command says whether they are.
+
+## 8. The Windows oracle cannot be built on this host
+
+`./scripts/docker-build.sh --game zh` provisions its image successfully and then dies in `wineboot`, before
+compiling anything:
+
+```text
+wine: dlls/ntdll/unix/virtual.c:267: anon_mmap_fixed: Assertion `!((UINT_PTR)start & host_page_mask)' failed.
+qemu: uncaught target signal 6 (Aborted) - core dumped
+```
+
+Wine's 4 KiB page assumption under qemu-x86-64 emulation on a 16 KiB-page arm64 host, i.e. the emulation
+layer, not the change under test. On this machine the Windows oracle is therefore GenCI, not the local
+gate — the replay-compatibility check depends on that same VC6 build and is equally unavailable here.
