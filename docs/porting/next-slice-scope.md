@@ -45,11 +45,17 @@ At the time of measurement the remaining **376 call sites bypassed `DX8Wrapper` 
 `W3DVolumetricShadow.cpp` (38) and `W3DProjectedShadow.cpp` (25) — effectively a second renderer
 beside the wrapper.
 
-**Since superseded: that routing is done.** The direct (non-wrapper, non-backend) count is now **0**,
-and `scripts/ci/check-d3d8-surface.py` enforces a budget of exactly 0 in both directions. The 64
-remaining D3D8 call sites live inside the seam implementation, `WW3D2/d3d8renderbackend.cpp`. What is
-left of the renderer job is backend coverage of the 62 methods, not re-routing call sites. See
-[`STATUS.md`](STATUS.md) for the current figure.
+**Since superseded: that routing is done.** The direct (non-wrapper, non-backend) count is now **4**,
+all in `WW3D2/d3dx8texcreate.cpp` — d3dx8.lib's own creation entry points reimplemented off Windows,
+calling back out on the device their caller passes in — and `scripts/ci/check-d3d8-surface.py`
+enforces that allowlist exactly in both directions. A further **66** D3D8 call sites live inside the
+seam implementation, `WW3D2/d3d8renderbackend.cpp`. What is left of the renderer job is backend
+coverage of the 62 methods, not re-routing call sites. See [`STATUS.md`](STATUS.md) for the current
+figure.
+
+> Measured 2026-08-17 at commit `3098ef1`: 4 direct / 4 allowlisted, 66 seam-owned. The earlier
+> "0 direct, 64 seam-owned" in this paragraph is superseded — the allowlist went 3 → 4 in the D3DX
+> routing slice (`renderer-first-frame.md`).
 
 Full enumeration, Vulkan mapping and working proof-of-concept: `docs/porting/renderer-surface.md`
 and `spikes/renderer/`.
