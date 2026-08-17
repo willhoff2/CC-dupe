@@ -72,6 +72,29 @@ TRIMMED_GENERALSMD_ARCHIVE = "zerohour104_gamedata_trimmed.7z"
 # separate from the trimmed pair, whose pinned hashes must keep matching.
 FULL_ARCHIVE = "zerohour104_gamedata_full.7z"
 
+# The .bik movies, which are not in any .big - they are loose files under these directories.
+# Zero Hour's own tree holds the two menu backgrounds and the campaign cutscenes; the base
+# Generals tree holds 29 more, and Zero Hour reads them.
+MOVIES_ARCHIVE = "zerohour104_movies.7z"
+MOVIE_SUFFIX = ".bik"
+
+# -mx=9 for the trimmed pair, because the hashes CI pins were produced with it and repacking
+# must keep reproducing them.
+#
+# -mx=5 for the full archive, measured rather than assumed. On a 216 MB slice of the real
+# payload (one highly compressible .big, one incompressible, one very compressible), -mx=5
+# packed it in 78s; -mx=9 had not finished the same slice after 510s. Extrapolated over the
+# ~2.4 GB the full archive holds that is ~15 minutes against 96+, to land ~1% smaller.
+#
+# -mx=1 for the movies, because Bink is already-compressed video and does not deflate: measured
+# on a retail cutscene, -mx=1 gives 1.018x and -mx=5 gives 1.020x. Anything above 1 buys nothing
+# and costs time.
+#
+# The level is part of what the SHA256 covers, so changing any of these re-hashes that object.
+TRIMMED_COMPRESSION_LEVEL = 9
+FULL_COMPRESSION_LEVEL = 5
+MOVIES_COMPRESSION_LEVEL = 1
+
 
 def find_seven_zip() -> str:
     for candidate in ("7z", "7zz", "7za"):
@@ -152,17 +175,21 @@ def sha256(path: Path) -> str:
     return digest.hexdigest().upper()
 
 
-def pack_stage_dir(label: str, stage: Path, archive: Path, seven_zip: str) -> None:
+def pack_stage_dir(label: str, stage: Path, archive: Path, seven_zip: str,
+                   level: int) -> None:
     if archive.exists():
         archive.unlink()
 
-    # Archive the staged tree's *contents*, so paths inside are relative exactly as the
-    # workflow's `7z x -o<install path>` expects. Timestamps are not stored, which makes
-    # the archive - and therefore the SHA256 the workflow pins - reproducible: repacking
-    # the same install twice would otherwise produce two different hashes, because the
-    # staging directory entries carry the time they were created.
+    # Archive the staged tree's *contents*, not the staging directory itself, so entry paths
+    # are exactly what the caller laid out. For the trimmed pair that is the install layout the
+    # workflow's `7z x -o<install path>` expects; callers that stage under a per-root directory
+    # (the full and movies objects) get that directory as a prefix, and unpack accordingly.
+    #
+    # Timestamps are not stored, which makes the archive - and therefore the SHA256 the workflow
+    # pins - reproducible: repacking the same install twice would otherwise produce two different
+    # hashes, because the staging directory entries carry the time they were created.
     result = subprocess.run(
-        [seven_zip, "a", "-t7z", "-mx=9", "-mtm=off", "-mtc=off", "-mta=off",
+        [seven_zip, "a", "-t7z", f"-mx={level}", "-mtm=off", "-mtc=off", "-mta=off",
          str(archive), "."],
         cwd=stage, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
@@ -177,7 +204,7 @@ def build_archive(label: str, root: Path, files: list[str], archive: Path, seven
     with tempfile.TemporaryDirectory(prefix="packgamedata-") as temp:
         stage = Path(temp)
         stage_files(label, root, files, stage, dll_source)
-        pack_stage_dir(label, stage, archive, seven_zip)
+        pack_stage_dir(label, stage, archive, seven_zip, TRIMMED_COMPRESSION_LEVEL)
 
     return sha256(archive)
 
@@ -225,7 +252,66 @@ def build_full_archive(generals: Path, generalsmd: Path, archive: Path,
         staged_bytes = sum(size for _, _, size in manifest)
         print(f"Packing {len(manifest)} .big files ({staged_bytes / 1024**3:.2f} GiB) from "
               f"{generals} and {generalsmd}", flush=True)
-        pack_stage_dir("full game data", stage, archive, seven_zip)
+        pack_stage_dir("full game data", stage, archive, seven_zip,
+                       FULL_COMPRESSION_LEVEL)
+
+    return sha256(archive), manifest
+
+
+def collect_movies(label: str, root: Path, exclude: Path | None) -> list[Path]:
+    """Every .bik under an install root, at whatever depth, sorted for a stable manifest.
+
+    `exclude` is the other install root. It matters because a depot copied for its data often
+    nests the Generals tree *inside* the Zero Hour one, and a recursive sweep of the Zero Hour
+    root would then claim Generals' movies as well - packing them twice, under the wrong root.
+    """
+    if not root.is_dir():
+        raise SystemExit(f"{label} path is not a directory: {root}")
+
+    excluded_root = exclude.resolve() if exclude is not None else None
+    found = [path for path in sorted(root.rglob("*"))
+             if path.suffix.lower() == MOVIE_SUFFIX and path.is_file()
+             and not (excluded_root is not None and excluded_root in path.resolve().parents)]
+
+    if not found:
+        raise SystemExit(f"{label} install has no {MOVIE_SUFFIX} files under {root}")
+    return found
+
+
+def build_movies_archive(generals: Path, generalsmd: Path, archive: Path,
+                         seven_zip: str) -> tuple[str, list[tuple[str, Path, int]]]:
+    """Pack every .bik from both install roots, preserving each one's path within its root.
+
+    The movies are loose files, not entries in a .big, so they are absent from every other
+    object this script produces.
+
+    Layout matches the full archive: each install root gets its own top-level directory
+    (`Generals/`, `GeneralsMD/`), and paths below it are relative to that root - so an entry
+    reads `GeneralsMD/Data/English/Movies/MD_USA02_0.bik`. Extract to a staging directory and
+    copy each top-level directory's contents into the install path it belongs to. Extracting
+    straight over an install with `7z x -o<install path>` would bury them a level deep, where
+    the game does not look.
+    """
+    trees = [("Generals", generals, None), ("GeneralsMD", generalsmd, generals)]
+    manifest: list[tuple[str, Path, int]] = []
+
+    with tempfile.TemporaryDirectory(prefix="packgamedata-movies-") as temp:
+        stage = Path(temp)
+        for tree_name, root, exclude in trees:
+            for source in collect_movies(tree_name, root, exclude):
+                relative = source.relative_to(root)
+                manifest.append((tree_name, relative, source.stat().st_size))
+                target = stage / tree_name / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.link(source, target)
+                except OSError:
+                    shutil.copy2(source, target)
+
+        staged_bytes = sum(size for _, _, size in manifest)
+        print(f"Packing {len(manifest)} {MOVIE_SUFFIX} files "
+              f"({staged_bytes / 1024**2:.1f} MiB) from {generals} and {generalsmd}", flush=True)
+        pack_stage_dir("movies", stage, archive, seven_zip, MOVIES_COMPRESSION_LEVEL)
 
     return sha256(archive), manifest
 
@@ -243,10 +329,12 @@ def main() -> int:
     parser.add_argument("--no-dll-fallback", action="store_true",
                         help="Fail instead of taking a missing BINKW32.DLL or mss32.dll for the "
                              "Generals archive from the Zero Hour install.")
-    parser.add_argument("--archives", choices=("trimmed", "full", "both"), default="trimmed",
+    parser.add_argument("--archives", choices=("trimmed", "full", "movies", "all"),
+                        default="trimmed",
                         help="Which objects to pack: the replay gate's trimmed pair (default), "
                              f"the {FULL_ARCHIVE} object holding every .big from both installs, "
-                             "or both.")
+                             f"the {MOVIES_ARCHIVE} object holding every loose .bik, or all "
+                             "three.")
     args = parser.parse_args()
 
     seven_zip = find_seven_zip()
@@ -261,7 +349,7 @@ def main() -> int:
     uploads: list[Path] = []
     variables: list[tuple[str, str]] = []
 
-    if args.archives in ("trimmed", "both"):
+    if args.archives in ("trimmed", "all"):
         generals_archive = output_dir / TRIMMED_GENERALS_ARCHIVE
         generalsmd_archive = output_dir / TRIMMED_GENERALSMD_ARCHIVE
         generals_hash = build_archive(
@@ -275,7 +363,7 @@ def main() -> int:
         variables += [("GAMEDATA_GENERALS_SHA256", generals_hash),
                       ("GAMEDATA_GENERALSMD_SHA256", generalsmd_hash)]
 
-    if args.archives in ("full", "both"):
+    if args.archives in ("full", "all"):
         full_archive = output_dir / FULL_ARCHIVE
         full_hash, manifest = build_full_archive(generals, generalsmd, full_archive, seven_zip)
         uploads.append(full_archive)
@@ -284,6 +372,20 @@ def main() -> int:
         print(f"\n{FULL_ARCHIVE} holds:")
         for tree_name, source, size in manifest:
             print(f"  {tree_name}/{source.name:<24} {size:>12,} bytes")
+
+    if args.archives in ("movies", "all"):
+        movies_archive = output_dir / MOVIES_ARCHIVE
+        movies_hash, movies_manifest = build_movies_archive(
+            generals, generalsmd, movies_archive, seven_zip)
+        uploads.append(movies_archive)
+        variables.append(("GAMEDATA_MOVIES_SHA256", movies_hash))
+
+        print(f"\n{MOVIES_ARCHIVE} holds, by directory:")
+        by_directory: dict[str, list[int]] = {}
+        for tree_name, relative, size in movies_manifest:
+            by_directory.setdefault(f"{tree_name}/{relative.parent}", []).append(size)
+        for directory, sizes in sorted(by_directory.items()):
+            print(f"  {directory:<40} {len(sizes):>3} files  {sum(sizes):>12,} bytes")
 
     print(f"\nArchives written to {output_dir}")
     for archive in uploads:

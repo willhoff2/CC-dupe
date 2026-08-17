@@ -70,8 +70,48 @@ Two structural facts about it:
   `generals108_gamedata_trimmed.7z` and `zerohour104_gamedata_trimmed.7z` against hashes pinned in
   repository variables; repacking either would break that comparison for no gain.
 
-`.bik` movies are *not* in any `.big` — they are loose under `Data/Movies` (452 KB, the two menu
-backgrounds) and `Data/English/Movies` (281 MB of campaign cutscenes). Neither is in this object.
+`.bik` movies are *not* in any `.big`, so none of them are in this object. They have their own,
+below.
+
+### The fourth object: `zerohour104_movies.7z`
+
+Retail video is loose files, not `.big` entries, which is why a slice that downloaded the full
+archive, hash-verified it and parsed all 35 `.big` found no video at all. `--archives movies` packs
+the 70 `.bik` both installs carry, 589.5 MiB:
+
+| Directory | Files | Bytes |
+|---|---:|---:|
+| `Generals/Data/Movies` | 29 | 322,622,656 |
+| `GeneralsMD/Data/English/Movies` | 39 | 295,002,048 |
+| `GeneralsMD/Data/Movies` | 2 | 459,828 |
+
+Note where the weight is. `Data/Movies` holds only the two menu backgrounds
+(`GC_Background.bik`, `VS_small.bik`); the campaign cutscenes are under `Data/English/Movies`, and
+**29 more live in the base Generals tree**, which Zero Hour reads. Looking only at
+`GeneralsMD/Data/Movies` undercounts the video data by three orders of magnitude.
+
+The layout matches the full archive: two top-level directories, `Generals/` and `GeneralsMD/`, with
+paths below each one relative to that install root — so an entry reads
+`GeneralsMD/Data/English/Movies/MD_USA02_0.bik`. Extract to a staging directory and copy each
+top-level directory's contents into the install path it belongs to. Extracting straight over an
+install with `7z x -o<install path>` buries them one level deep, where the game does not look.
+
+> One trap worth knowing if you re-derive this: a depot copied for its data often nests the
+> Generals tree *inside* the Zero Hour one (`zh-data/ZH_Generals`), so a recursive `.bik` sweep of
+> the Zero Hour root claims Generals' movies too and packs them twice, under the wrong root.
+> `collect_movies()` takes the other root as `exclude` for exactly this reason.
+
+### Compression levels are per-object, and measured
+
+| Object | Level | Why |
+|---|---|---|
+| trimmed pair | `-mx=9` | the hashes CI pins were produced with it; repacking must reproduce them |
+| full | `-mx=5` | on a 216 MB slice of the real payload, `-mx=5` finished in 78 s and `-mx=9` had not finished after 510 s — ~15 min against 96+ over the whole object, to land ~1% smaller |
+| movies | `-mx=1` | Bink is already-compressed video: `-mx=1` gives 1.018x, `-mx=5` gives 1.020x. The whole 589.5 MiB packs in 18 s |
+
+The level is part of what the SHA256 covers, so changing one re-hashes that object. A first attempt
+at packing the full archive at `-mx=9` was abandoned after 40 minutes, having written 184 MB with
+its output offset frozen.
 
 ## Running it manually
 
@@ -218,9 +258,10 @@ Packing does **not** need Windows; only running the check does.
    those two from the Zero Hour install, saying so. Pass `--no-dll-fallback` to forbid that.
 
    `--archives` selects what to pack: `trimmed` (the default, the replay gate's pair), `full`
-   ([the probe object](#the-third-object-zerohour104_gamedata_full7z)), or `both`. Packing `full`
-   does not touch the trimmed pair, so their pinned hashes keep matching. Only the Python packer
-   has this; `pack-gamedata.ps1` still packs the trimmed pair alone.
+   ([the probe object](#the-third-object-zerohour104_gamedata_full7z)), `movies`
+   ([the video object](#the-fourth-object-zerohour104_movies7z)), or `all`. Nothing but `trimmed`
+   touches the trimmed pair, so their pinned hashes keep matching. Only the Python packer has
+   this; `pack-gamedata.ps1` still packs the trimmed pair alone.
 
 2. **Upload both files** to a private bucket, keeping the file names
    (`generals108_gamedata_trimmed.7z`, `zerohour104_gamedata_trimmed.7z`). Plain AWS S3 and any
@@ -252,6 +293,7 @@ Packing does **not** need Windows; only running the check does.
    | `GAMEDATA_GENERALS_SHA256` | hash printed for `generals108_gamedata_trimmed.7z` |
    | `GAMEDATA_GENERALSMD_SHA256` | hash printed for `zerohour104_gamedata_trimmed.7z` |
    | `GAMEDATA_FULL_SHA256` | hash printed for `zerohour104_gamedata_full.7z`, if that object is hosted |
+   | `GAMEDATA_MOVIES_SHA256` | hash printed for `zerohour104_movies.7z`, if that object is hosted |
 
 4. **Set repository secrets** (same page, *Secrets* tab):
 
