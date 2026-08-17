@@ -165,6 +165,31 @@ code **segfaults** reading such an entry (probe exit `-11`); new code reads it a
 the key is canonicalized before that line. Classification: **port defect**, mutation-verified by the
 control failing on old code.
 
+### Where a key stops being an identifier: the host prefix
+
+A *user* map's key begins with the user data directory, and off Windows that prefix is a genuine host
+path — `GlobalData::BuildUserDataPathFromRegistry()` builds it with `/`, `getUserMapDir()` hands it
+out that way, and code outside the cache still matches a key against it:
+`GameState::realMapPathToPortableMapPath()` tests `in.startsWithNoCase(TheMapCache->getUserMapDir())`
+(separator-sensitive), `portableMapPathToRealMapPath()` rebuilds a name as
+`getUserMapDir()` + `\` + the map's folder and file, and the map preview name is derived from
+`getPath_UserData()`. So canonicalization stops at that prefix: `makeCanonicalMapCacheKey()` keeps a
+leading `getPath_UserData()` exactly as it arrived and respells only the part that *names the map
+inside it*, which is the identifier. That is what the rule in §1 means by "keeps the host prefix it
+arrived with", and it is what makes the key produced by enumeration equal to the name rebuilt by
+`portableMapPathToRealMapPath()` and to the ones the direct `find(lowerName)` call sites in
+`GameNetwork/GameInfo.cpp` and `WOLGameSetupMenu.cpp` pass — none of which had to change.
+
+Respelling the whole key instead would have been silent in exactly the seam's own style: the portable
+path conversion would fall into its `DEBUG_CRASH("this is impossible")` branch for every user map and
+return a bogus path into save games, map transfer and the preview image name, and a rebuilt real path
+would no longer equal its cache entry, so a user map would report as unavailable with
+`getMaxPlayers() == -1`. That is a third fixture in the control, not an argument: it seeds a user map
+key under the user data directory, requires the stored key to still read
+`<user data>/.../maps\fixture delta\fixture delta.map` — host prefix intact, suffix canonical — and
+requires it to resolve under both suffix spellings. It fails on a build that respells the whole key
+(`entry key=\tmp\...\maps\fixture delta\fixture delta.map`) and passes on this one.
+
 ## 5. What changed, and the retail before/after
 
 | File | Change |

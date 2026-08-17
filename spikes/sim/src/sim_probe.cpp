@@ -250,6 +250,10 @@ static int modeMapCacheKeys(const char *dir, char **names, int nameCount)
 
 	TheWritableGlobalData = MSGNEW("SimProbe") GlobalData;
 
+	// A user map key begins with this, and canonicalization has to leave that part alone, so the
+	// gate needs to see which prefix the run actually resolved.
+	printf("userDataDir=%s\n", TheGlobalData->getPath_UserData().str());
+
 	// Reached for any entry that carries a localized name tag, and it asserts if the string manager
 	// was never brought up. Its table lives in the retail archives, which this mode does not need,
 	// so a failure to read one is reported and the run continues with the tag unresolved.

@@ -315,15 +315,34 @@ AsciiString makeCanonicalMapCacheKey(AsciiString mapPath)
 {
 	mapPath.toLower();
 
-	// The lower casing above is what the shipped build already does; this is the separator half of
-	// the same idea. Nothing produces '/' on Windows, so this leaves the Windows build's keys alone.
+	// TheSuperHackers @port The lower casing above is what the shipped build already does; the
+	// separator half below is the addition. Nothing produces '/' on Windows, so the Windows build's
+	// keys are untouched.
 	if (mapPath.find('/') == nullptr)
 	{
 		return mapPath;
 	}
 
+	// TheSuperHackers @port A user map path begins with the user data directory, which off Windows is
+	// a genuine host path and is spelled the host way by everything that builds it -- getUserMapDir(),
+	// GameState's portable path conversion, the map preview name. That prefix is a path, not part of
+	// the identifier, so it is kept exactly as it arrived and only the part naming the map inside it
+	// is respelled. See docs/porting/path-separator-seam.md.
+	Int index = 0;
+	if (TheGlobalData != nullptr)
+	{
+		AsciiString userDataPath = TheGlobalData->getPath_UserData();
+		userDataPath.toLower();
+		if (mapPath.startsWith(userDataPath.str()))
+		{
+			index = userDataPath.getLength();
+		}
+	}
+
 	AsciiString key;
-	for (Int index = 0; index < mapPath.getLength(); ++index)
+	key.set(mapPath.str(), index);
+
+	for (; index < mapPath.getLength(); ++index)
 	{
 		const char c = mapPath.getCharAt(index);
 		key.concat(c == '/' ? '\\' : c);
@@ -486,7 +505,8 @@ void MapCache::updateCache()
 
 void MapCache::prepareUnseenMaps( const AsciiString &mapDir )
 {
-	// Keys are canonical, so the directory they are matched against has to be canonical too.
+	// TheSuperHackers @port Keys are canonical, so the directory they are matched against has to be
+	// canonical too.
 	const AsciiString mapDirKey = makeCanonicalMapCacheKey(mapDir);
 
 	MapCache::iterator it = begin();
@@ -974,7 +994,8 @@ Int populateMapListboxNoReset( GameWindow *listbox, Bool useSystemMaps, Bool isM
 		mapDir = TheGlobalData->getPath_UserData();
 		mapDir.concat(TheMapCache->getMapDir());
 	}
-	// This is matched against cache keys further down, so it is spelled the way they are.
+	// TheSuperHackers @port This is matched against cache keys further down, so it is spelled the way
+	// they are.
 	mapDir = makeCanonicalMapCacheKey(mapDir);
 
 	MapNameList mapNames;

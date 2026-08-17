@@ -21,6 +21,12 @@ A second fixture covers the same seam's other silent consequence: `INI::parseMap
 derives a display name for an entry with no localization tag with `name.reverseFind('\\') + 1`,
 which on a `/`-spelled key adds one to a null pointer. That entry has to survive the read.
 
+A third fixture is a *user* map, whose key begins with the user data directory -- a genuine host
+path off Windows. That prefix is a path, not part of the identifier, so canonicalization must
+leave it exactly as it arrived: code outside the cache (`GameState::realMapPathToPortableMapPath`,
+the map preview name) still matches a key against the host-spelled `getUserMapDir()`, and one whose
+prefix had been respelled would silently stop matching the player's own map folder.
+
     python3 scripts/ci/check-path-separator-keys.py --build-dir build/native-debug
 
 No retail data is used: the fixture is generated here, so this gate runs anywhere the headless
@@ -40,6 +46,10 @@ MAGIC_CHAR = "_"
 # The two entries of the key fixture: (map path as the cache would have keyed it, players).
 WINDOWS_SPELLED = "Maps\\Fixture Beta\\Fixture Beta.map"
 POSIX_SPELLED = "Maps/Fixture Alpha/Fixture Alpha.map"
+
+# The leaf GlobalData::BuildUserDataPathFromRegistry() appends under the user data root.
+USER_DATA_LEAF = "Command and Conquer Generals Zero Hour Data"
+USER_MAP_SUFFIX = "Maps/Fixture Delta/Fixture Delta.map"
 
 
 def to_quoted_printable(text):
@@ -158,6 +168,31 @@ def check_untagged_entry_survives(probe, workdir, failures):
     return output
 
 
+def check_user_map_key_keeps_host_prefix(probe, workdir, failures):
+    """A user map key keeps its host path prefix, and resolves under either suffix spelling."""
+    directory = workdir / "usermap"
+    user_data_dir = "{}/{}/".format(directory / "userdata", USER_DATA_LEAF)
+    key = user_data_dir + USER_MAP_SUFFIX
+    write_fixture(directory, [cache_entry(key, 4, True, "MAP:FixtureDelta")])
+
+    lookups = [key, user_data_dir + USER_MAP_SUFFIX.replace("/", "\\")]
+    result = run_probe(probe, directory, lookups)
+    output = result.stdout + result.stderr
+
+    expected_key = user_data_dir.lower() + USER_MAP_SUFFIX.replace("/", "\\").lower()
+    require(result.returncode == 0,
+            "the probe exited {} on a user map key".format(result.returncode), failures)
+    require("RESULT entry key={} multiplayer=yes players=4".format(expected_key) in output,
+            "the stored user map key is not '{}' -- the host path prefix has to survive "
+            "canonicalization or it stops matching getUserMapDir()".format(expected_key), failures)
+    for name in lookups:
+        expected = "RESULT lookup name={} found=yes multiplayer=yes players=4".format(name)
+        require(expected in output,
+                "no line '{}' -- that spelling of a user map did not resolve".format(expected),
+                failures)
+    return output
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -178,6 +213,7 @@ def main():
     try:
         key_output = check_key_resolution(probe, workdir, failures)
         untagged_output = check_untagged_entry_survives(probe, workdir, failures)
+        user_map_output = check_user_map_key_keeps_host_prefix(probe, workdir, failures)
     finally:
         if args.keep:
             print("fixtures kept in {}".format(workdir))
@@ -188,6 +224,9 @@ def main():
         if line.startswith("RESULT") or "ASSERTION" in line:
             print(line)
     for line in untagged_output.splitlines():
+        if line.startswith("RESULT") or "ASSERTION" in line:
+            print(line)
+    for line in user_map_output.splitlines():
         if line.startswith("RESULT") or "ASSERTION" in line:
             print(line)
 
