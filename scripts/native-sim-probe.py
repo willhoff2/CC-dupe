@@ -65,6 +65,9 @@ def reference_flags():
     # The device layer's own include root: the probe constructs StdLocalFileSystem, which the engine
     # normally only reaches through createLocalFileSystem() inside that layer.
     flags += ["-isystem", str(REPO / "Core" / "GameEngineDevice" / "Include")]
+    # The game-specific device layer, for the modes that call a W3D class directly (the shroud's
+    # world-position lookup). The reference unit is in Core, which does not see this root.
+    flags += ["-isystem", str(REPO / "GeneralsMD" / "Code" / "GameEngineDevice" / "Include")]
     return compiler, flags
 
 

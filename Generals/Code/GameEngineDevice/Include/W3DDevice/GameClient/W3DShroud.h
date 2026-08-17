@@ -92,6 +92,7 @@ public:
 	Int	 getTextureWidth()		{return m_dstTextureWidth;}	///<internal use by the shader system.
 	Int	 getTextureHeight()		{return m_dstTextureHeight;}
 	W3DShroudLevel getShroudLevel(Int x, Int y);
+	W3DShroudLevel getShroudLevelAtWorldPos(Real x, Real y);	///<level the shroud pass shows at a world position, inside the grid or in the map's border.
 	void setShroudLevel(Int x, Int y, W3DShroudLevel,Bool textureOnly=FALSE);
 	void setShroudFilter(Bool enable);	///<turns on bilinear filtering of shroud cells.
 	void setBorderShroudLevel(W3DShroudLevel level);	///<color that will appear in unused border terrain.

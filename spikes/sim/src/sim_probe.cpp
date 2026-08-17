@@ -33,12 +33,16 @@
 //   filecrc  <file> [runs]       the engine CRC class over a file, repeatedly
 //   xfercrc  <file> [runs]       XferCRC (the desync check's CRC) over the same bytes
 //   replayhdr <file>             RecorderClass::readReplayHeader over a retail replay
+//   rivers   <file> [cellSize]   the river water vertices of a .map against the shroud grid
+//   shroudbounds <cellsX> <cellsY> <cellSize> <border> <wx> <wy> ...
+//                                W3DShroud::getShroudLevelAtWorldPos over a guarded shroud grid
 
 #include "PreRTS.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -57,8 +61,11 @@
 #include "Common/Xfer.h"
 #include "Common/XferCRC.h"
 #include "Common/ThingFactory.h"
+#include "Common/MapObject.h"
+#include "GameLogic/PolygonTrigger.h"
 #include "GameClient/GameText.h"
 #include "GameClient/MapUtil.h"
+#include "W3DDevice/GameClient/W3DShroud.h"
 #include "StdDevice/Common/StdBIGFileSystem.h"
 #include "StdDevice/Common/StdLocalFileSystem.h"
 #include "Win32Device/Common/Win32LocalFileSystem.h"
@@ -476,6 +483,229 @@ static int modeReplayHeader(const char *path)
 }
 
 //----------------------------------------------------------------------------------------------
+// rivers: where a map's river water vertices fall relative to the shroud grid.
+//
+// WaterRenderObjClass::drawRiverWater() hands each river polygon vertex to W3DShroud, so the
+// question this mode answers is arithmetic on map data: the vertices are the integers the map file
+// stores, the shroud grid is derived from the height map header the same file stores, and the
+// conversion is the one the water path performs. Nothing is renderered and no retail archive is
+// needed, so the numbers here are reproducible on any box holding a `.map`.
+//
+// The shroud grid covers the playable extent only -- W3DShroud::init() subtracts the height map's
+// border from the extent -- while world coordinates put the playable area's corner at (0,0) and the
+// border ring at negative coordinates (BaseHeightMap.cpp's ADJUST_FROM_INDEX_TO_REAL). A river
+// polygon drawn into the border ring therefore has vertices legitimately outside the grid.
+//----------------------------------------------------------------------------------------------
+
+// The version at which the height map header gained its border field; WorldHeightMap.cpp's
+// K_HEIGHT_MAP_VERSION_3, repeated because that header pulls in the renderer's texture classes.
+static const DataChunkVersionType K_HEIGHT_MAP_BORDER_VERSION = 3;
+
+struct ShroudGridProbe
+{
+	Int width;
+	Int height;
+	Int borderSize;
+	Bool sawHeightMap;
+};
+
+static Bool parseHeightMapHeaderChunk(DataChunkInput &file, DataChunkInfo *info, void *userData)
+{
+	ShroudGridProbe *grid = (ShroudGridProbe *)userData;
+
+	grid->width = file.readInt();
+	grid->height = file.readInt();
+	grid->borderSize = (info->version >= K_HEIGHT_MAP_BORDER_VERSION) ? file.readInt() : 0;
+	grid->sawHeightMap = TRUE;
+
+	// The rest of the chunk is the height data itself, which this mode does not measure; the chunk
+	// reader seeks past whatever the parser left.
+	return TRUE;
+}
+
+static int modeRivers(const char *path, Real cellSize)
+{
+	CachedFileInputStream stream;
+	if (!stream.open(AsciiString(path)))
+	{
+		printf("RESULT rivers open=FAIL path=%s\n", path);
+		return 2;
+	}
+
+	ChunkInputStream *pStrm = &stream;
+	DataChunkInput file(pStrm);
+
+	ShroudGridProbe grid;
+	grid.width = 0;
+	grid.height = 0;
+	grid.borderSize = 0;
+	grid.sawHeightMap = FALSE;
+
+	file.registerParser(AsciiString("HeightMapData"), AsciiString::TheEmptyString,
+		parseHeightMapHeaderChunk, &grid);
+	file.registerParser(AsciiString("PolygonTriggers"), AsciiString::TheEmptyString,
+		PolygonTrigger::ParsePolygonTriggersDataChunk);
+
+	// parse() hands its own userData to every parser it dispatches; the polygon trigger parser
+	// ignores it, so the grid parser's is what gets passed.
+	if (!file.parse(&grid))
+	{
+		printf("RESULT rivers parse=FAIL path=%s\n", path);
+		return 3;
+	}
+
+	if (!grid.sawHeightMap)
+	{
+		printf("RESULT rivers heightMap=ABSENT path=%s\n", path);
+		return 3;
+	}
+
+	// W3DShroud::init(): the grid spans the playable extent, one cell per cellSize of world.
+	const Int numCellsX = REAL_TO_INT_CEIL(
+		(Real)(grid.width - 1 - grid.borderSize * 2) * MAP_XY_FACTOR / cellSize);
+	const Int numCellsY = REAL_TO_INT_CEIL(
+		(Real)(grid.height - 1 - grid.borderSize * 2) * MAP_XY_FACTOR / cellSize);
+	const Real borderWorld = (Real)grid.borderSize * MAP_XY_FACTOR;
+
+	Int rivers = 0;
+	Int points = 0;
+	Int outOfGrid = 0;
+	Int outsideBorderRing = 0;
+
+	for (PolygonTrigger *pTrig = PolygonTrigger::getFirstPolygonTrigger(); pTrig;
+			pTrig = pTrig->getNext())
+	{
+		if (!pTrig->isWaterArea() || !pTrig->isRiver())
+			continue;
+
+		++rivers;
+		for (Int i = 0; i < pTrig->getNumPoints(); i++)
+		{
+			const ICoord3D *pt = pTrig->getPoint(i);
+			++points;
+
+			// The conversion getRiverVertexDiffuse() performs, spelled the same way.
+			const Int cellX = (Int)((Real)pt->x / cellSize);
+			const Int cellY = (Int)((Real)pt->y / cellSize);
+			const Bool inGrid = (cellX >= 0 && cellY >= 0 && cellX < numCellsX && cellY < numCellsY);
+			if (inGrid)
+				continue;
+
+			++outOfGrid;
+			// Inside the border ring the map itself drew there; further out is a vertex no part of
+			// the map's own extent covers, which would be a different finding.
+			const Bool inBorderRing =
+				(Real)pt->x >= -borderWorld && (Real)pt->y >= -borderWorld &&
+				(Real)pt->x < (Real)numCellsX * cellSize + borderWorld &&
+				(Real)pt->y < (Real)numCellsY * cellSize + borderWorld;
+			if (!inBorderRing)
+				++outsideBorderRing;
+
+			printf("RESULT riverpoint map=%s trigger='%s' point=%d world=(%d,%d) cell=(%d,%d) "
+				"inBorderRing=%s\n", path, pTrig->getTriggerName().str(), i, pt->x, pt->y,
+				cellX, cellY, inBorderRing ? "yes" : "no");
+		}
+	}
+
+	printf("RESULT rivers map=%s width=%d height=%d border=%d cellSize=%.2f numCellsX=%d "
+		"numCellsY=%d rivers=%d points=%d outOfGrid=%d outsideBorderRing=%d\n", path, grid.width,
+		grid.height, grid.borderSize, cellSize, numCellsX, numCellsY, rivers, points, outOfGrid,
+		outsideBorderRing);
+
+	PolygonTrigger::deleteTriggers();
+	return 0;
+}
+
+//----------------------------------------------------------------------------------------------
+// shroudbounds: W3DShroud's own world-position lookup, over a grid whose neighbouring pages are
+// unmapped.
+//
+// The shroud data the game hands the lookup is a locked D3D surface, so an index outside the grid
+// reads whatever the driver's allocator put next to it -- silently on Windows, fatally on this port.
+// Here the grid is mmap'ed between two PROT_NONE pages, so any such index faults on every platform
+// and the lookup's bounds are measured rather than assumed. The engine's own code runs: only the
+// members W3DShroud::init() would have filled from a map are set here, and no method is replaced.
+//----------------------------------------------------------------------------------------------
+
+// The grid is filled with this 6-bit green value, which getShroudLevel() reports as 255. Any level
+// the border produces is therefore distinguishable from a level read out of the grid.
+static const UnsignedShort K_GRID_PIXEL = (UnsignedShort)(0x3f << 5);
+
+class ShroudBoundsProbe : public W3DShroud
+{
+public:
+	Bool configure(Int cellsX, Int cellsY, Real cellSize, W3DShroudLevel borderLevel);
+};
+
+Bool ShroudBoundsProbe::configure(Int cellsX, Int cellsY, Real cellSize, W3DShroudLevel borderLevel)
+{
+	const long pageSize = sysconf(_SC_PAGESIZE);
+	const size_t pitch = (size_t)cellsX * 2;
+	if (pitch > (size_t)pageSize)
+		return FALSE;	//a row must fit in a page for a single guard page to catch a row underrun
+
+	const size_t dataBytes = pitch * (size_t)(cellsY + 1);	//+1: the row render() fills with border
+	const size_t dataPages = (dataBytes + (size_t)pageSize - 1) / (size_t)pageSize;
+	const size_t span = (size_t)pageSize * (dataPages + 2);
+
+	Byte *base = (Byte *)mmap(nullptr, span, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (base == (Byte *)MAP_FAILED)
+		return FALSE;
+
+	Byte *data = base + pageSize;
+	if (mprotect(data, (size_t)pageSize * dataPages, PROT_READ | PROT_WRITE) != 0)
+		return FALSE;
+
+	for (Int y = 0; y < cellsY; y++)
+		for (Int x = 0; x < cellsX; x++)
+			*(UnsignedShort *)(data + (size_t)x * 2 + (size_t)y * pitch) = K_GRID_PIXEL;
+
+	m_srcTextureData = data;
+	m_srcTexturePitch = (UnsignedInt)pitch;
+	m_numCellsX = cellsX;
+	m_numCellsY = cellsY;
+	m_cellWidth = cellSize;
+	m_cellHeight = cellSize;
+	setBorderShroudLevel(borderLevel);
+	return TRUE;
+}
+
+static int modeShroudBounds(Int cellsX, Int cellsY, Real cellSize, Int borderLevel,
+	char **coords, int numCoords)
+{
+	TheWritableGlobalData = MSGNEW("SimProbe") GlobalData;
+
+	ShroudBoundsProbe shroud;
+	if (!shroud.configure(cellsX, cellsY, cellSize, (W3DShroudLevel)borderLevel))
+	{
+		printf("RESULT shroudbounds configure=FAIL\n");
+		return 2;
+	}
+
+	printf("RESULT shroudbounds cellsX=%d cellsY=%d cellSize=%.2f borderLevel=%d gridLevel=%d\n",
+		shroud.getNumShroudCellsX(), shroud.getNumShroudCellsY(), shroud.getCellWidth(),
+		(Int)borderLevel, (Int)shroud.getShroudLevel(0, 0));
+
+	for (int i = 0; i + 1 < numCoords; i += 2)
+	{
+		const Real wx = (Real)atof(coords[i]);
+		const Real wy = (Real)atof(coords[i + 1]);
+		const Int cellX = REAL_TO_INT_FLOOR(wx / shroud.getCellWidth());
+		const Int cellY = REAL_TO_INT_FLOOR(wy / shroud.getCellHeight());
+		const Bool inGrid = (cellX >= 0 && cellY >= 0 &&
+			cellX < shroud.getNumShroudCellsX() && cellY < shroud.getNumShroudCellsY());
+
+		const W3DShroudLevel level = shroud.getShroudLevelAtWorldPos(wx, wy);
+
+		printf("RESULT shroudpoint world=(%.2f,%.2f) cell=(%d,%d) inGrid=%s level=%d\n",
+			wx, wy, cellX, cellY, inGrid ? "yes" : "no", (Int)level);
+	}
+
+	printf("RESULT shroudbounds points=%d survived=yes\n", numCoords / 2);
+	return 0;
+}
+
+//----------------------------------------------------------------------------------------------
 
 static void usage(void)
 {
@@ -486,7 +716,9 @@ static void usage(void)
 		"  mapcachekeys <dir> [map name ...]\n"
 		"  filecrc   <file> [runs]\n"
 		"  xfercrc   <file> [runs]\n"
-		"  replayhdr <file>\n");
+		"  replayhdr <file>\n"
+		"  rivers    <file> [cellSize]\n"
+		"  shroudbounds <cellsX> <cellsY> <cellSize> <borderLevel> [wx wy ...]\n");
 }
 
 int main(int argc, char **argv)
@@ -513,6 +745,20 @@ int main(int argc, char **argv)
 		return modeXferCRC(argv[2], argc > 3 ? atoi(argv[3]) : 3);
 	if (strcmp(mode, "replayhdr") == 0)
 		return modeReplayHeader(argv[2]);
+	// The default is the retail GameData.ini PartitionCellSize, which is what BaseHeightMap passes
+	// W3DShroud::init(); a run that wants to measure another value names it.
+	if (strcmp(mode, "rivers") == 0)
+		return modeRivers(argv[2], argc > 3 ? (Real)atof(argv[3]) : 40.0f);
+	if (strcmp(mode, "shroudbounds") == 0)
+	{
+		if (argc < 6)
+		{
+			usage();
+			return 1;
+		}
+		return modeShroudBounds(atoi(argv[2]), atoi(argv[3]), (Real)atof(argv[4]), atoi(argv[5]),
+			argv + 6, argc - 6);
+	}
 
 	usage();
 	return 1;

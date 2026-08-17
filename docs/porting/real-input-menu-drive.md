@@ -211,6 +211,12 @@ RTS3DScene::Flush(RenderInfoClass&) → RTS3DScene::Render → WW3D::Render → 
 reach it, so it did not block this slice and is left alone: it is a shroud/water bounds defect, and fixing
 it needs the shroud slice's context rather than a second guard bolted on from here.
 
+*Superseded — [shroud-river-water-bounds.md](shroud-river-water-bounds.md). The map that reaches it is
+`MapsZH/Maps/MD_USA01/MD_USA01.map`, whose `Water Area 5` trigger has 13 vertices in the map's border ring;
+the cell is right (VC6 and this port agree digit for digit) and the geometry is legitimately outside the
+shroud grid, so the lookup now answers with `m_boderShroudLevel` — the level the shroud pass already shows
+out there — instead of indexing 140 bytes before its own allocation.*
+
 ### 4.3 Intermittent recursive death in early startup — port defect
 
 Nine crash reports from this session share one shape: an allocation takes a `CriticalSection`,
@@ -317,6 +323,7 @@ because the accessors are inlined away.
    the errno, the section and the mutex's bytes instead of overflowing the stack, so the next occurrence on
    that hardware is classified from its output.*
 3. **`W3DShroud::getShroudLevel` bounds under river water** (§4.2), with a map that reaches it.
+   *Done — [shroud-river-water-bounds.md](shroud-river-water-bounds.md).*
 4. **Selection semantics** (§4.5): drive a drag with a known selectable object under it, with the renderer
    slice's fix in, and settle whether in-game selection works.
 5. **Init failure diagnostics** (§4.4): say why the process is leaving. *Done for the instance lock —

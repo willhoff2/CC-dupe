@@ -175,9 +175,9 @@ static Int getRiverVertexDiffuse(W3DShroud *shroud, Real x, Real y, Real shadeR,
 	if (!shroud)
 		return diffuse;
 
-	Int cellX = (Int)(x / shroud->getCellWidth());
-	Int cellY = (Int)(y / shroud->getCellHeight());
-	W3DShroudLevel level = shroud->getShroudLevel(cellX, cellY);
+	// River polygons are authored into the map's border ring, so a vertex can sit outside the shroud
+	// grid; the shroud answers for a world position rather than this converting to a cell itself.
+	W3DShroudLevel level = shroud->getShroudLevelAtWorldPos(x, y);
 	Real shroudScale = (Real)level / 255.0f;
 	return GameMakeColor(
 		(Int)(shadeR * shroudScale),
