@@ -579,6 +579,21 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The negative control for the base-game install-path diagnostic: Zero Hour mounts the base
+      # game's archives from the InstallPath setting, and a failure there used to be silent in a
+      # release build. Needs no game data. See docs/porting/base-game-install-path.md.
+      - name: Run the base-game install-path negative control
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Base-game install path reporting'
+            echo '```'
+            python3 scripts/native-base-game-install-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The GDI font seam draws the text the WND GUI measures its layout against, so "text appears"
       # is not the acceptance criterion: the advance widths and the line height are. This compares
       # the port's CreateFont/GetTextMetrics/GetTextExtentPoint32W against recorded GDI metrics --

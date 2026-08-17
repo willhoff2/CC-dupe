@@ -42,7 +42,42 @@
 #include "StdDevice/Common/StdBIGFileSystem.h"
 #include "Utility/endian_compat.h"
 
+#if RTS_ZEROHOUR
+#include "Common/BaseGameInstallReport.h"
+#endif
+
 static const char *BIGFileIdentifier = "BIGF";
+
+#if RTS_ZEROHOUR
+/**
+	TheSuperHackers @port Says why the base game's archives were not mounted, in every
+	configuration, without ending the process. A release build used to report nothing at all: the
+	only diagnostic was the debug-build assertion on the empty setting, and the symptom the player
+	got instead was placeholder art and a crash in a sky-drawing map. See BaseGameInstallReport.h.
+
+	Off Windows this goes to stderr, for the same reason Debug.cpp's assertion output does: the log
+	file does not exist in a release build and the "console" half of the debug output is a printf to
+	stdout, indistinguishable from the game's ordinary chatter. Windows is unchanged -- the registry
+	key is present on a real install there, and this is the one place where an added report would be
+	a behaviour change against the oracle.
+*/
+static void reportBaseGameInstall(const AsciiString& installPath, Bool pathReadable,
+	Bool archivesMounted)
+{
+	const rts::BaseGameInstallStatus status = rts::classifyBaseGameInstall(installPath.str(),
+		pathReadable != FALSE, archivesMounted != FALSE);
+
+	char message[512];
+	if (!rts::describeBaseGameInstall(status, installPath.str(), message, sizeof(message)))
+		return;
+
+	DEBUG_LOG(("StdBIGFileSystem::init - %s", message));
+#if !defined(_WIN32)
+	fprintf(stderr, "%s\n", message);
+	fflush(stderr);
+#endif
+}
+#endif
 
 StdBIGFileSystem::StdBIGFileSystem() : ArchiveFileSystem() {
 }
@@ -62,10 +97,19 @@ void StdBIGFileSystem::init() {
     // load original Generals assets
     AsciiString installPath;
     GetStringFromGeneralsRegistry("", "InstallPath", installPath );
-    //@todo this will need to be ramped up to a crash for release
     DEBUG_ASSERTCRASH(!installPath.isEmpty(), ("Be 1337! Go install Generals!"));
-    if (!installPath.isEmpty())
-      loadBigFilesFromDirectory(installPath, "*.big");
+
+    const Bool pathReadable = !installPath.isEmpty() && TheLocalFileSystem->doesFileExist(installPath.str());
+
+    // TheSuperHackers @fix The mask is concatenated straight onto this directory, so it needs the
+    // separator the Windows registry value already carries. See BaseGameInstallReport.h.
+    AsciiString mountPath = installPath;
+    if (rts::baseGameInstallNeedsSeparator(mountPath.str()))
+      mountPath.concat('\\');
+
+    const Bool archivesMounted = pathReadable && loadBigFilesFromDirectory(mountPath, "*.big");
+
+    reportBaseGameInstall(installPath, pathReadable, archivesMounted);
 #endif
 }
 
