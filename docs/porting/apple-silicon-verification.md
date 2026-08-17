@@ -31,7 +31,8 @@ own `CGWindowListCopyWindowInfo` record. Where a claim would need a photograph, 
 ## 1. Q1 — does the tree still build here?
 
 ```sh
-scripts/native-build.py --level 1..4 --with-shims --strict-link
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
+  --with-shims --strict-link
 ```
 
 Raw tail of the harness:
@@ -597,10 +598,10 @@ around, not fixed.
 ## 9. Reproducing this
 
 ```sh
-scripts/native-build.py --level 1..4 --with-shims --strict-link
+python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims --strict-link
 python3 scripts/ci/check-swapchain-compiled.py --archive build/native/libsupport_renderbackend.a
 python3 scripts/ci/check-d3d8-surface.py && python3 scripts/ci/check-backend-coverage.py
-scripts/native-render-backend-run.py     # 3 frames on MoltenVK + readback + validation count
+python3 scripts/native-render-backend-run.py   # 3 frames on MoltenVK + readback + validation count
 
 cmake -S spikes/renderer -B build/spike-mac -G Ninja -DCMAKE_BUILD_TYPE=Release -DSPIKE_USE_SDL2=OFF
 cmake --build build/spike-mac
