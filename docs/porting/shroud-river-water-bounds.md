@@ -170,6 +170,17 @@ CRC input. The replay gate agrees — see §5.
   the flooring conversion, the border return, and the water path's use of the world accessor rather
   than its own conversion.
 
+The grid is handed to the shroud the way `init()` gets it — off a `LockRect` of the surface it holds —
+so the shroud is in the state it is in during a frame, including the debug configuration's assertion
+that it has a source surface at all. The surface is the only thing in the harness standing in for the
+platform, and its pages are the point of the exercise. `shroudbounds` also opens no file and therefore
+does not bring the archive file system up: `StdBIGFileSystem::init()` asserts on the empty install path
+of a machine with no retail install, which is every CI runner, and this gate needs neither.
+
+CI runs it in the **debug** configuration (`native-port-ci.yml`), where the engine's assertions are
+live, so a fixture that lied about the shroud's state would be stopped by the engine rather than
+measured.
+
 Passing, with the fix:
 
 ```text
@@ -185,7 +196,7 @@ tree's bound or flooring conversion is missing
 ```
 
 **Negative control.** With `GeneralsMD`'s implementation put back the way it shipped — upper bounds
-only, truncating conversion, no border return — rebuilt and re-run:
+only, truncating conversion, no border return — rebuilt and re-run (in both configurations):
 
 ```text
 RESULT shroudbounds cellsX=118 cellsY=80 cellSize=40.00 borderLevel=60 gridLevel=255
@@ -198,6 +209,11 @@ FAIL: the shroud's out-of-grid lookup is not bounded
 
 `SIGSEGV` on the first out-of-grid vertex, before any point is answered: the same read, the same
 vertex, the same signal as the reported crash, and the gate fails.
+
+The two bounds fail differently, which is why the gate has both halves. Removing only
+`getShroudLevel`'s own bound leaves the accessor's, so nothing faults and the *source* half is what
+fails — the latent read is back for any future caller that indexes cells directly, which is exactly
+how this bug shipped. Removing the accessor's is what reaches the guard pages.
 
 ### In the game, on the map that crashed
 

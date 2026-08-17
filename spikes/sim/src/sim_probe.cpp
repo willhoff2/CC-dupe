@@ -103,10 +103,8 @@ static LocalFileSystem *createSelectedLocalFileSystem(void)
 	return MSGNEW("SimProbe") StdLocalFileSystem;
 }
 
-// The engine's own file system, in the order GameEngine::init brings it up. The archive file system
-// finds whatever `.big` archives are in the working directory and is content with none, so a missing
-// retail archive is not a reason a mode here cannot run.
-static void bringUpFileSystem(void)
+// The critical sections and the memory pools every mode needs, whether or not it opens a file.
+static void bringUpMemory(void)
 {
 	TheAsciiStringCriticalSection = critSec1.get();
 	TheUnicodeStringCriticalSection = critSec2.get();
@@ -116,9 +114,18 @@ static void bringUpFileSystem(void)
 
 	initMemoryManager();
 
-	TheFileSystem = MSGNEW("SimProbe") FileSystem;
+	// GlobalData's own construction interns names, so the generator is not part of the file system.
 	TheNameKeyGenerator = MSGNEW("SimProbe") NameKeyGenerator;
 	TheNameKeyGenerator->init();
+}
+
+// The engine's own file system, in the order GameEngine::init brings it up. The archive file system
+// finds whatever `.big` archives are in the working directory and is content with none, so a missing
+// retail archive is not a reason a mode here cannot run -- but it does assert on an empty install
+// path, so a mode that opens no file must not ask for it.
+static void bringUpFileSystem(void)
+{
+	TheFileSystem = MSGNEW("SimProbe") FileSystem;
 	TheLocalFileSystem = createSelectedLocalFileSystem();
 	TheLocalFileSystem->init();
 	TheArchiveFileSystem = MSGNEW("SimProbe") StdBIGFileSystem;
@@ -623,13 +630,47 @@ static int modeRivers(const char *path, Real cellSize)
 // The shroud data the game hands the lookup is a locked D3D surface, so an index outside the grid
 // reads whatever the driver's allocator put next to it -- silently on Windows, fatally on this port.
 // Here the grid is mmap'ed between two PROT_NONE pages, so any such index faults on every platform
-// and the lookup's bounds are measured rather than assumed. The engine's own code runs: only the
-// members W3DShroud::init() would have filled from a map are set here, and no method is replaced.
+// and the lookup's bounds are measured rather than assumed. The engine's own code runs: no method of
+// W3DShroud is replaced, and the only thing standing in for the platform is the D3D surface the
+// shroud locks, whose pages are the point of the exercise.
 //----------------------------------------------------------------------------------------------
 
 // The grid is filled with this 6-bit green value, which getShroudLevel() reports as 255. Any level
 // the border produces is therefore distinguishable from a level read out of the grid.
 static const UnsignedShort K_GRID_PIXEL = (UnsignedShort)(0x3f << 5);
+
+// The surface W3DShroud::init() locks, with the guard pages in place of a driver allocation. Only
+// the two methods init() calls do anything; the rest of the interface is not on the path being
+// measured and says so rather than pretending to succeed. The shroud only ever holds the pointer and
+// asks whether it exists, so this keeps the object it holds a real one.
+class GuardedShroudSurface : public IDirect3DSurface8
+{
+public:
+	GuardedShroudSurface(void *bits, Int pitch) : m_bits(bits), m_pitch(pitch) {}
+
+	STDMETHOD(QueryInterface)(REFIID, void **) { return E_NOTIMPL; }
+	STDMETHOD_(ULONG, AddRef)(void) { return ++m_refs; }
+	STDMETHOD_(ULONG, Release)(void) { return --m_refs; }
+	STDMETHOD(GetDevice)(IDirect3DDevice8 **) { return E_NOTIMPL; }
+	STDMETHOD(SetPrivateData)(REFGUID, const void *, DWORD, DWORD) { return E_NOTIMPL; }
+	STDMETHOD(GetPrivateData)(REFGUID, void *, DWORD *) { return E_NOTIMPL; }
+	STDMETHOD(FreePrivateData)(REFGUID) { return E_NOTIMPL; }
+	STDMETHOD(GetContainer)(REFIID, void **) { return E_NOTIMPL; }
+	STDMETHOD(GetDesc)(D3DSURFACE_DESC *) { return E_NOTIMPL; }
+
+	STDMETHOD(LockRect)(D3DLOCKED_RECT *pLockedRect, const RECT *, DWORD)
+	{
+		pLockedRect->pBits = m_bits;
+		pLockedRect->Pitch = m_pitch;
+		return D3D_OK;
+	}
+	STDMETHOD(UnlockRect)(void) { return D3D_OK; }
+
+private:
+	void *m_bits;
+	Int m_pitch;
+	ULONG m_refs = 1;
+};
 
 class ShroudBoundsProbe : public W3DShroud
 {
@@ -660,8 +701,18 @@ Bool ShroudBoundsProbe::configure(Int cellsX, Int cellsY, Real cellSize, W3DShro
 		for (Int x = 0; x < cellsX; x++)
 			*(UnsignedShort *)(data + (size_t)x * 2 + (size_t)y * pitch) = K_GRID_PIXEL;
 
-	m_srcTextureData = data;
-	m_srcTexturePitch = (UnsignedInt)pitch;
+	// The pointer and the pitch come off a lock of that surface, the way init() gets them, so the
+	// shroud is in the state it is in during a frame -- including the debug configuration's
+	// assertion that it has a source surface at all.
+	m_pSrcTexture = new GuardedShroudSurface(data, (Int)pitch);
+
+	D3DLOCKED_RECT rect;
+	if (m_pSrcTexture->LockRect(&rect, nullptr, D3DLOCK_NO_DIRTY_UPDATE) != D3D_OK)
+		return FALSE;
+	m_pSrcTexture->UnlockRect();
+
+	m_srcTextureData = rect.pBits;
+	m_srcTexturePitch = (UnsignedInt)rect.Pitch;
 	m_numCellsX = cellsX;
 	m_numCellsY = cellsY;
 	m_cellWidth = cellSize;
@@ -730,9 +781,14 @@ int main(int argc, char **argv)
 	}
 
 	setvbuf(stdout, nullptr, _IONBF, 0);
-	bringUpFileSystem();
+	bringUpMemory();
 
 	const char *mode = argv[1];
+	// shroudbounds builds the grid it measures and opens nothing, so it skips the file system: in a
+	// debug configuration StdBIGFileSystem::init() asserts on the empty install path of a machine
+	// with no retail install, which is every CI runner.
+	if (strcmp(mode, "shroudbounds") != 0)
+		bringUpFileSystem();
 	if (strcmp(mode, "chunks") == 0)
 		return modeChunks(argv[2]);
 	if (strcmp(mode, "mapcache") == 0)
