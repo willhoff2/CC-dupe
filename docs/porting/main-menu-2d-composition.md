@@ -228,6 +228,25 @@ device (re)acquire, and the menu never draws from them. Serving them means imple
 declaration-driven vertex path (`SetVertexShader` with a declaration), which is a seam of its own and
 deliberately not attempted here. **Unimplemented path**, owner: a future renderer slice.
 
+## 5.1 How this sits with the HiDPI slice's point/pixel rule (#113)
+
+#113 landed on the same seam and gave the backend two size units: `width_`/`height_` in points, which
+is what every surface advertises, and `device_width_`/`device_height_` in pixels, which is what the
+default target's image actually holds. Because a rectangle copy cannot resample, it refuses
+`Copy_Rects` (and the default back-buffer lock paths) whenever the default target is scaled. That
+refusal now runs *before* the format comparison and the conversion dispatch, so any surface that
+reaches the conversion advertises exactly the pixels its image holds: the rectangles the conversion
+walks are in one unit and there is no point/pixel ambiguity to reintroduce.
+
+The two rules also cannot both apply to one copy, for a second, independent reason. The only surfaces
+whose `Surface_Render_Scale` can differ from 1 are the device's own default colour and depth targets,
+and those are `A8R8G8B8`/`B8G8R8A8` — not one of the CPU-expanded formats (`X8R8G8B8` without a view
+swizzle, `A4R4G4B4`, `L8`, `A8`, `A8L8`) that `Plan_For(...).expand_to_bgra8` selects, and the
+conversion dispatches on exactly that. Render-to-texture surfaces, which are what a conversion copy
+touches, always have scale 1. So a scaled copy is refused and never converted, and a converted copy is
+never scaled; neither slice's tests were dropped, and both suites plus `check-hidpi-scale.py` pass on
+the rebased tree.
+
 ## 6. What was found in the 2D/shell path and deliberately left
 
 - **`Copy_Rects: source and destination formats differ` on the reporter's Mac** — once per run there,
@@ -237,8 +256,8 @@ deliberately not attempted here. **Unimplemented path**, owner: a future rendere
 - **The image-to-host direction of the conversion** is implemented and unit-tested but no retail call
   site reaches it (all 313 are host→image). Treat its retail behaviour as unmeasured.
 - **HiDPI point-versus-pixel sizing of the colour target and viewport** (§8.4 of
-  `apple-silicon-verification.md`) — a different slice owns `VulkanBackend`'s swapchain/`Present`
-  sizing; nothing here touches it.
+  `apple-silicon-verification.md`) — #113 owns `VulkanBackend`'s swapchain/`Present` sizing; nothing
+  here touches it, and §5.1 records how the two rules meet.
 - **GUI callbacks driven by real clicks** — another slice, on the reporter's Mac. This one asserts on
   a rendered frame, not on input.
 - **`missingtexture.cpp`'s `CopyRects`** (A8R8G8B8 texture level → image surface) goes through the
