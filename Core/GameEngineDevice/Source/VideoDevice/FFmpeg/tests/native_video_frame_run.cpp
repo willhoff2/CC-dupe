@@ -595,7 +595,10 @@ int main(int argc, char ** argv)
 			if (bytes != NULL) {
 				for (unsigned row = 0; row < buffer->height(); row++) {
 					const unsigned char * line = bytes + (size_t)row * buffer->pitch();
-					for (unsigned byte = 0; byte < buffer->width() * 4; byte++) {
+					// The row is as wide as the lock said it was: --format can select a 16- or
+					// 24-bit buffer, where a fixed 4 bytes per pixel would read the next row and,
+					// on the last row, past the mapping.
+					for (unsigned byte = 0; byte < buffer->pitch(); byte++) {
 						if (line[byte] != 0) nonzero++;
 						if (line[byte] > maximum) maximum = line[byte];
 					}

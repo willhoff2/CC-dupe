@@ -104,7 +104,7 @@ def ffprobe_truth(movie):
     """The independent reading of the same file: frame rate, duration and a real frame count.
 
     `-count_frames` walks the stream, so `nb_read_frames` is a count and not a product of duration
-    and rate -- which is the exact arithmetic the engine's `getNumFrames()` is being checked against.
+    and rate -- which is the arithmetic the engine's `getNumFrames()` is being checked against.
     """
     result = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
@@ -215,8 +215,8 @@ def measure(movie, engine, truth, audio_built):
         findings.append({
             "gap": "frameGoto() / seek",
             "kind": "unimplemented path",
-            "measured": f"frameGoto({goto['asked']}) left frameIndex() at {goto['index']}, and four "
-                        f"frameNext() calls after it the index is {goto['afterFourNext']}"
+            "measured": f"frameGoto({goto['asked']}) left frameIndex() at {goto['index']}, and "
+                        f"four frameNext() calls after it the index is {goto['afterFourNext']}"
                         + ("" if landed else " -- the stream did not land on the frame asked for")
                         + ("" if survived else " and stopped delivering frames"),
             "bad": not landed or not survived,
