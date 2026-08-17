@@ -1153,6 +1153,15 @@ add_library(z_gameengine STATIC)
 
 target_sources(z_gameengine PRIVATE ${GAMEENGINE_SRC})
 
+# TheSuperHackers @bugfix Devin 17/08/2026 The allocator's non-allocating critical-section failure
+# report. Off Windows only: a Win32 CRITICAL_SECTION has no failure to report, and a translation
+# unit that compiles to no symbols at all is a link warning on VC6.
+if(NOT WIN32)
+    target_sources(z_gameengine PRIVATE
+    Source/Common/System/CriticalSectionFailure.cpp
+    )
+endif()
+
 target_include_directories(z_gameengine PUBLIC
     Include
 )

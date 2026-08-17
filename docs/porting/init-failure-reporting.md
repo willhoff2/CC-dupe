@@ -214,6 +214,50 @@ it through the shape the engine uses — `initSubsystem()` calling a `void init(
   classifies as `silent-return` and the current one as `throws`. A gate that says `throws` about
   everything would pass without this.
 
+## The single instance lock
+
+The same defect one step earlier than `GameEngine::init()`, and found the same way — by a session
+losing a dozen launches to it (`real-input-menu-drive.md` §4.4). Off Windows the single instance test
+is an `flock()` on `$XDG_RUNTIME_DIR/<guid>.lock`; a process still holding it makes
+`ClientInstance::initialize()` return `false`, `main` returns 1, and **nothing is printed on stdout or
+stderr**. The launch looks like the game deciding not to run. `lsof` on the lock file eventually named
+a leftover client, pid 23569.
+
+The refusal is correct and is unchanged — a second instance must not start, and
+`initialize()` still returns `false` in every case below. What was missing is the sentence. On POSIX
+`ClientInstance::initialize()` now writes one to stderr, and `Instance_Lock_Acquire()` records what it
+needs for that: the lock path, which call failed (`open` or `flock`), its errno, the pid the holder
+wrote into the file, and whether that pid still exists (`kill(pid, 0)`).
+
+| What happened | What is printed | `initialize()` |
+|---|---|---|
+| Another process holds the lock and recorded its pid | `Generals is already running: <path> is locked by pid <pid>. Close that process (or ``kill <pid>``) and start again.` | `false` |
+| Held, holder's pid unknown | `… is locked by another process, which did not record its pid. ``lsof <path>`` will name it.` | `false` |
+| Held by a pid that no longer exists | as the first row, plus `, which no longer exists` | `false` |
+| The lock file cannot be opened or locked at all | `Cannot take the single instance lock <path>: open failed with Permission denied (13). Refusing to start rather than risk a second instance.` | `false` |
+| Nothing holds it | nothing | `true` |
+
+The last two rows are the ones worth separating: an unreadable runtime directory used to be reported
+— to the extent that silence is a report — as "already running", which sends the reader looking for a
+process that does not exist. And the success path stays silent, because a diagnostic on every normal
+launch is a diagnostic nobody reads.
+
+Windows is untouched: `CreateMutex`/`FindWindow` there raise the running instance's window, which is
+a report of its own, and `WinMain` has no console to write to.
+
+`python3 scripts/native-instance-lock-test.py` (CI: a step of the levels 1-4 job; no game data). It
+links the real `ClientInstance` and the real allocator against a scratch `XDG_RUNTIME_DIR` and runs
+three cases: `free` — `initialize()` succeeds *and stderr is empty*, which is the control against a
+fix that reports on every launch; `held` — the harness takes the `flock` itself, writes its own pid,
+and requires the refusal to name that path and that pid; `unusable` — a runtime directory with no
+write permission has to be reported as an unusable lock and **not** as a running game. The `unusable`
+case skips itself under `root` — which can write to a `0500` directory, so the case would pass without
+measuring anything — and says so instead of passing. CI's container runs as root, so that row is
+measured by non-root runs; it was measured here as `ubuntu`, and the output is in
+[allocator-lock-failure.md](allocator-lock-failure.md) §8's companion run.
+
+Classification: **port defect** (the Windows path reports, the POSIX one did not), fixed here.
+
 ## Findings, not fixed
 
 * **`INIException` cannot be copied safely.** It owns its message through a raw `char*` with a

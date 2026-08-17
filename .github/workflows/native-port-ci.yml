@@ -760,6 +760,39 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Reporting a failed lock used to allocate, and the allocator is what holds the lock, so a
+      # recoverable errno became an unbounded recursion at both ends of the process lifetime. This
+      # makes the lock fail on purpose and requires one bounded diagnostic and an abort, against a
+      # negative control that links the pre-fix path and has to die of the recursion. Without the
+      # control the case would pass on a platform where the lock cannot fail at all. See
+      # docs/porting/allocator-lock-failure.md.
+      - name: Prove a failed lock reports without allocating (with the pre-fix control)
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## A lock failure in the allocator'"'"'s critical section'
+            echo '```'
+            python3 scripts/native-lock-failure-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # A leftover process holding the instance lock made every launch return from main in silence.
+      # This holds the lock and requires the refusal to name the file and the holder, and requires
+      # the successful path to stay quiet. See docs/porting/init-failure-reporting.md.
+      - name: Prove a refused launch says why
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## The single instance lock refusing a launch'
+            echo '```'
+            python3 scripts/native-instance-lock-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the build report
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0

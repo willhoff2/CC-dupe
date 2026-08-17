@@ -83,19 +83,26 @@ int Failures = 0;
 // main()'s prologue in GeneralsMD/Code/Main/PlatformMain.cpp, which every allocation in the engine
 // -- and, because the engine replaces the global operator new, every allocation the Vulkan driver
 // makes on this thread -- depends on having run.
-CriticalSection AsciiStringSection;
-CriticalSection UnicodeStringSection;
-CriticalSection DmaSection;
-CriticalSection MemoryPoolSection;
-CriticalSection DebugLogSection;
+//
+// TheSuperHackers @bugfix Devin 17/08/2026 Immortal, the way PlatformMain.cpp's are: plain statics
+// here are destroyed while the Vulkan driver's and OpenAL's statics are still being destroyed, and
+// those destructors allocate through the engine's operator new. That is the -11 every rendering run
+// on Apple Silicon exited with (docs/porting/apple-silicon-verification.md 6): #113 gave the game's
+// entry point immortal sections, and this harness -- the binary that exit crash was actually
+// observed in -- kept the arrangement the crash came from.
+ImmortalCriticalSection AsciiStringSection;
+ImmortalCriticalSection UnicodeStringSection;
+ImmortalCriticalSection DmaSection;
+ImmortalCriticalSection MemoryPoolSection;
+ImmortalCriticalSection DebugLogSection;
 
 void Engine_Prologue()
 {
-	TheAsciiStringCriticalSection = &AsciiStringSection;
-	TheUnicodeStringCriticalSection = &UnicodeStringSection;
-	TheDmaCriticalSection = &DmaSection;
-	TheMemoryPoolCriticalSection = &MemoryPoolSection;
-	TheDebugLogCriticalSection = &DebugLogSection;
+	TheAsciiStringCriticalSection = AsciiStringSection.get();
+	TheUnicodeStringCriticalSection = UnicodeStringSection.get();
+	TheDmaCriticalSection = DmaSection.get();
+	TheMemoryPoolCriticalSection = MemoryPoolSection.get();
+	TheDebugLogCriticalSection = DebugLogSection.get();
 	initMemoryManager();
 }
 

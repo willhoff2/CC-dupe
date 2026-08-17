@@ -103,19 +103,24 @@ int Failures = 0;
 // main()'s prologue in GeneralsMD/Code/Main/PlatformMain.cpp. Same reason as
 // WW3D2/tests/native_render_run.cpp: every engine allocation, and every allocation the Vulkan
 // driver makes on this thread, depends on it having run.
-CriticalSection AsciiStringSection;
-CriticalSection UnicodeStringSection;
-CriticalSection DmaSection;
-CriticalSection MemoryPoolSection;
-CriticalSection DebugLogSection;
+//
+// TheSuperHackers @bugfix Devin 17/08/2026 Immortal, for the reason
+// WW3D2/tests/native_render_run.cpp is: FFmpeg's and the driver's static destructors free through
+// the engine's operator new after these statics would have been destroyed
+// (docs/porting/allocator-lock-failure.md).
+ImmortalCriticalSection AsciiStringSection;
+ImmortalCriticalSection UnicodeStringSection;
+ImmortalCriticalSection DmaSection;
+ImmortalCriticalSection MemoryPoolSection;
+ImmortalCriticalSection DebugLogSection;
 
 void Engine_Prologue()
 {
-	TheAsciiStringCriticalSection = &AsciiStringSection;
-	TheUnicodeStringCriticalSection = &UnicodeStringSection;
-	TheDmaCriticalSection = &DmaSection;
-	TheMemoryPoolCriticalSection = &MemoryPoolSection;
-	TheDebugLogCriticalSection = &DebugLogSection;
+	TheAsciiStringCriticalSection = AsciiStringSection.get();
+	TheUnicodeStringCriticalSection = UnicodeStringSection.get();
+	TheDmaCriticalSection = DmaSection.get();
+	TheMemoryPoolCriticalSection = MemoryPoolSection.get();
+	TheDebugLogCriticalSection = DebugLogSection.get();
 	initMemoryManager();
 }
 

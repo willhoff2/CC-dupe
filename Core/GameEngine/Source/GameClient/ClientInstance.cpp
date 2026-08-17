@@ -57,6 +57,61 @@ void* acquireInstanceLock(const char* name, bool& alreadyExists)
 	return lock;
 #endif
 }
+
+#ifndef _WIN32
+// TheSuperHackers @bugfix Devin 17/08/2026 Say why the process is not starting.
+//
+// Off Windows the single instance test is an flock() on a file in the per user runtime directory,
+// and a process that is still holding it - a leftover client, a hung one, a debugger's inferior -
+// makes every launch return from main having printed nothing at all on stdout or stderr. That cost
+// a session a dozen launches that looked like the game silently refusing to run, until lsof found
+// PID 23569 still on the descriptor (docs/porting/real-input-menu-drive.md 4.4). The lock is right;
+// what was missing is a sentence naming the file and the holder, so the next person can look.
+//
+// stderr rather than DEBUG_LOG because the log file is what a release build does not write and what
+// nobody reads before knowing there is something to read. Windows is untouched: it raises the
+// running instance's window instead, which is a report of its own, and WinMain has no console.
+void reportInstanceLockRefusal(const char* name)
+{
+	WWPlatform::InstanceLockFailure failure;
+	if (!WWPlatform::Instance_Lock_Last_Failure(failure))
+	{
+		// The lock was refused without the platform recording why, which should not happen.
+		fprintf(stderr, "Generals is already running: the single instance lock for %s is held.\n",
+			name);
+		return;
+	}
+
+	if (strcmp(failure.Operation, "flock") == 0)
+	{
+		if (failure.Holder_Pid > 0)
+		{
+			// The actionable case, and the one that was mistaken for a silent failure.
+			fprintf(stderr, "Generals is already running: %s is locked by pid %ld%s. "
+				"Close that process (or `kill %ld`) and start again.\n",
+				failure.Path, failure.Holder_Pid,
+				failure.Holder_Is_Running ? "" : ", which no longer exists",
+				failure.Holder_Pid);
+		}
+		else
+		{
+			fprintf(stderr, "Generals is already running: %s is locked by another process, which "
+				"did not record its pid. `lsof %s` will name it.\n", failure.Path, failure.Path);
+		}
+	}
+	else
+	{
+		// Not another instance at all: the lock itself is unusable, and the refusal is the
+		// deliberately safe reading of that. Naming it keeps a permissions problem from looking
+		// like a running game.
+		fprintf(stderr, "Cannot take the single instance lock %s: %s failed with %s (%d). "
+			"Refusing to start rather than risk a second instance.\n",
+			failure.Path, failure.Operation, strerror(failure.Error), failure.Error);
+	}
+
+	fflush(stderr);
+}
+#endif // !_WIN32
 } // anonymous namespace
 
 void* ClientInstance::s_instanceLock = nullptr;
@@ -104,6 +159,9 @@ bool ClientInstance::initialize()
 			s_instanceLock = acquireInstanceLock(getFirstInstanceName(), alreadyExists);
 			if (alreadyExists)
 			{
+#ifndef _WIN32
+				reportInstanceLockRefusal(getFirstInstanceName());
+#endif
 				return false;
 			}
 		}

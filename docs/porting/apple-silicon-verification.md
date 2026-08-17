@@ -514,6 +514,17 @@ entered from OpenAL Soft's **static destructors** running after the engine's `Ga
 torn down: the allocator tries to allocate while shutting down, takes a lock it holds, and overflows
 the stack. Everything measured above happens before it. §8.5.
 
+> **Two fixes since, and one correction.** The lifetime is #113
+> ([memory-shutdown-order.md](memory-shutdown-order.md)); the recursion itself is
+> [allocator-lock-failure.md](allocator-lock-failure.md), which makes the lock failure report in one
+> line instead of allocating to report. The correction: the harnesses this document ran (the render
+> spike, the video frame harness, the simulation probe) had **plain static** critical sections of their
+> own, so they reproduced the pre-#113 arrangement no matter what `PlatformMain.cpp` did — that is why
+> the exit crash was still observed in #115's session. They are immortal now too. Re-run
+> `scripts/native-lock-failure-test.py` here and record its `platform` table: whether Apple's pthread
+> refuses a destroyed lock, and whether it locks a zeroed one, is measured on glibc and unknown on this
+> runtime.
+
 ## 7. Verified on real Apple Silicon versus still Linux-only
 
 | Claim | Real Apple Silicon | Linux/CI only | Notes |
@@ -588,6 +599,12 @@ gone. Affects exit status only; every measurement in this document precedes it. 
 **Fixed** by a lifetime: the five sections the allocator takes are now immortal on the non-Windows
 entry point, so static destructors that allocate find a live mutex. Evidence and the in-process
 control: `docs/porting/memory-shutdown-order.md`. Exit status 0 on hardware is still to be confirmed.
+
+**And the recursion is fixed separately**, because the lifetime alone left an intermittent mutex error
+fatal and undiagnosable: the failure path no longer allocates, so it prints one line naming the errno,
+the section and the mutex's own bytes and aborts. The three harnesses that still had plain static
+sections — which is why this crash survived #113 in the next session — are immortal now.
+`docs/porting/allocator-lock-failure.md`.
 
 ### 8.6 A background window receives no synthetic input — measurement limitation
 `CGEventPost`/`CGWarpMouseCursorPosition` succeed, `MouseIO` never changes, `Window_Is_Active` stays

@@ -63,7 +63,11 @@
 #include "StdDevice/Common/StdLocalFileSystem.h"
 #include "Win32Device/Common/Win32LocalFileSystem.h"
 
-static CriticalSection critSec1, critSec2, critSec3, critSec4, critSec5;
+// TheSuperHackers @bugfix Devin 17/08/2026 Immortal, the way PlatformMain.cpp's are: the
+// allocator takes these sections from static destructors that run after plain statics here would
+// have been destroyed (docs/porting/allocator-lock-failure.md,
+// docs/porting/memory-shutdown-order.md).
+static ImmortalCriticalSection critSec1, critSec2, critSec3, critSec4, critSec5;
 
 // The engine expects its entry point to supply these; the game's entry-point archive is deliberately
 // not linked here, so the harness repeats the spellings PlatformMain.cpp uses.
@@ -97,11 +101,11 @@ static LocalFileSystem *createSelectedLocalFileSystem(void)
 // retail archive is not a reason a mode here cannot run.
 static void bringUpFileSystem(void)
 {
-	TheAsciiStringCriticalSection = &critSec1;
-	TheUnicodeStringCriticalSection = &critSec2;
-	TheDmaCriticalSection = &critSec3;
-	TheMemoryPoolCriticalSection = &critSec4;
-	TheDebugLogCriticalSection = &critSec5;
+	TheAsciiStringCriticalSection = critSec1.get();
+	TheUnicodeStringCriticalSection = critSec2.get();
+	TheDmaCriticalSection = critSec3.get();
+	TheMemoryPoolCriticalSection = critSec4.get();
+	TheDebugLogCriticalSection = critSec5.get();
 
 	initMemoryManager();
 
