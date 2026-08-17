@@ -665,7 +665,12 @@ Stated plainly, because a spike that overstates itself is worthless:
 - No dynamic vertex buffer ring; buffers are static, host-visible, and allocated one
   `vkAllocateMemory` each. Fine for a spike, unacceptable in the game.
 - No `D3DPOOL_MANAGED` shadow-copy emulation, no device-loss handling.
-- Hard cap of 64 draws per frame (preallocated descriptor sets).
+- Draws per frame are no longer capped: descriptor sets and uniform slices are allocated in
+  blocks of 256 and grown on demand, one unique set and slice per draw, and a draw that cannot be
+  served is counted as dropped rather than reported as a successful frame. The measured sustained
+  number and its gate are in `docs/porting/draws-per-frame.md` and
+  `docs/porting/ci-baselines/draw-capacity.json`. The old preallocated cap of 64 dropped draws on
+  overflow (it did not alias a live descriptor set) and is kept as the gate's negative control.
 - Wireframe/point fill modes, multiple streams, and stencil ops are mapped in the tables but
   never exercised.
 

@@ -49,7 +49,10 @@ Matrix4x4 Matrix4x4::Identity() {
 
 namespace {
 
-constexpr uint32_t kMaxDrawsPerFrame = 64;
+// Descriptor sets and draw-uniform slices are allocated in blocks of this many draws. This
+// is a growth granularity, not a limit: a frame that needs more allocates more blocks and
+// keeps them for the frames that follow (docs/porting/draws-per-frame.md).
+constexpr uint32_t kDrawsPerBlock = 256;
 // Renamed copies behind one dynamic vertex buffer: one per frame that can be in
 // flight, plus the one being written. D3D8's DISCARD promises the driver hands back
 // memory the GPU is not reading, and this is how many copies that costs.
@@ -495,6 +498,8 @@ public:
 		out_height = device_height_;
 	}
 
+	void Get_Draw_Stats(DrawStats& out) const override { out = draw_stats_; }
+
 	uint32_t Validation_Message_Count() const override { return validation_messages_; }
 	bool Validation_Active() const override {
 		return validation_layer_loaded_ && messenger_ != VK_NULL_HANDLE;
@@ -518,6 +523,14 @@ private:
 	bool Pick_Device();
 	bool Create_Render_Targets();
 	bool Create_Descriptor_Machinery();
+	// Adds one block of kDrawsPerBlock draws' descriptor sets and uniform slices, or fails
+	// when the device is out of memory or a test limit forbids it.
+	bool Add_Draw_Block();
+	// The descriptor set and uniform-buffer slice belonging to draw `index`, growing the
+	// pool if this is the first frame to reach that far. False means the draw cannot be
+	// recorded at all, which is a dropped draw and is counted as one.
+	bool Draw_Slot(uint32_t index, VkDescriptorSet& out_set, VkBuffer& out_buffer,
+	               VkDeviceSize& out_offset, void*& out_mapped);
 	bool Create_Shaders();
 	bool Create_Swapchain(void* window_handle);
 	bool Build_Swapchain();
@@ -696,11 +709,30 @@ private:
 	VkShaderModule frag_module_ = VK_NULL_HANDLE;
 	VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;
 	VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
-	VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
-	std::vector<VkDescriptorSet> descriptor_sets_;
-	Buffer draw_uniforms_;   // kMaxDrawsPerFrame * aligned(DrawUniforms)
+	// Per-draw resources in blocks of kDrawsPerBlock draws, grown on demand: a real mission
+	// frame's draw count is unbounded, so it cannot be a constant. A block owns its own
+	// descriptor pool, its sets and the uniform buffer they point into, because neither a
+	// VkBuffer nor a VkDescriptorPool can be enlarged after creation.
+	struct DrawBlock {
+		VkDescriptorPool pool = VK_NULL_HANDLE;
+		std::vector<VkDescriptorSet> sets;
+		Buffer uniforms;
+		void* mapped = nullptr; // persistently mapped; the memory is host-coherent
+	};
+	std::vector<DrawBlock> draw_blocks_;
 	VkDeviceSize ubo_stride_ = 0;
 	uint32_t draw_index_ = 0;
+	// Per-frame draw accounting, published at End_Scene. A frame that could not allocate a
+	// draw's resources has lost geometry, and that has to be a number the caller can read
+	// rather than a line in a log.
+	uint32_t frame_draws_requested_ = 0;
+	uint32_t frame_draws_dropped_ = 0;
+	DrawStats draw_stats_;
+	// Test hook (ZH_RENDER_MAX_DRAWS): refuses to grow past this many draws in a frame, which
+	// is how a negative control reproduces the old fixed preallocation. 0 means no limit.
+	uint32_t draw_limit_ = 0;
+	// Test/diagnostic hook (ZH_RENDER_DRAW_REPORT): print the accounting every N frames.
+	uint32_t draw_report_interval_ = 0;
 
 	Buffer dummy_vertex_buffer_; // feeds attributes the FVF does not supply
 	TextureHandle* white_texture_ = nullptr;
@@ -1602,35 +1634,24 @@ bool VulkanBackend::Create_Descriptor_Machinery() {
 	plci.pSetLayouts = &set_layout_;
 	VK_CHECK(vkCreatePipelineLayout(device_, &plci, nullptr, &pipeline_layout_));
 
-	VkDescriptorPoolSize sizes[2]{};
-	sizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kMaxDrawsPerFrame};
-	sizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-	            kMaxDrawsPerFrame * kMaxTextureStages};
-	VkDescriptorPoolCreateInfo dpci{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-	dpci.maxSets = kMaxDrawsPerFrame;
-	dpci.poolSizeCount = 2;
-	dpci.pPoolSizes = sizes;
-	VK_CHECK(vkCreateDescriptorPool(device_, &dpci, nullptr, &descriptor_pool_));
-
-	std::vector<VkDescriptorSetLayout> layouts(kMaxDrawsPerFrame, set_layout_);
-	VkDescriptorSetAllocateInfo dsai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-	dsai.descriptorPool = descriptor_pool_;
-	dsai.descriptorSetCount = kMaxDrawsPerFrame;
-	dsai.pSetLayouts = layouts.data();
-	descriptor_sets_.resize(kMaxDrawsPerFrame);
-	VK_CHECK(vkAllocateDescriptorSets(device_, &dsai, descriptor_sets_.data()));
-
 	VkPhysicalDeviceProperties props;
 	vkGetPhysicalDeviceProperties(physical_, &props);
 	const VkDeviceSize align = props.limits.minUniformBufferOffsetAlignment;
 	ubo_stride_ = ((sizeof(DrawUniforms) + align - 1) / (align ? align : 1)) * (align ? align : 1);
 	if (ubo_stride_ == 0) ubo_stride_ = sizeof(DrawUniforms);
 
-	if (!Allocate_Buffer(ubo_stride_ * kMaxDrawsPerFrame, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-	                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-	                     draw_uniforms_)) {
-		return false;
+	// A test limit smaller than one block sizes the first block down to it, so the negative
+	// control allocates exactly what the old fixed preallocation did.
+	if (const char* limit = std::getenv("ZH_RENDER_MAX_DRAWS")) {
+		const long value = std::strtol(limit, nullptr, 10);
+		if (value > 0) draw_limit_ = static_cast<uint32_t>(value);
 	}
+	if (const char* report = std::getenv("ZH_RENDER_DRAW_REPORT")) {
+		const long value = std::strtol(report, nullptr, 10);
+		if (value > 0) draw_report_interval_ = static_cast<uint32_t>(value);
+	}
+	// One block up front, so the common frame allocates nothing at draw time.
+	if (!Add_Draw_Block()) return false;
 
 	// Backing store for the shader inputs an FVF does not supply, filled with the
 	// values D3D8 substitutes (see DummyVertex). A single element suffices because
@@ -1643,6 +1664,87 @@ bool VulkanBackend::Create_Descriptor_Machinery() {
 		}
 	}
 	return true;
+}
+
+bool VulkanBackend::Add_Draw_Block() {
+	// How many draws this block carries. Under a test limit the blocks stop exactly at it,
+	// so the negative control's capacity is the number it asked for and not a rounded-up one.
+	uint32_t draws = kDrawsPerBlock;
+	if (draw_limit_ != 0) {
+		if (draw_stats_.descriptor_capacity >= draw_limit_) return false;
+		draws = draw_limit_ - draw_stats_.descriptor_capacity;
+		if (draws > kDrawsPerBlock) draws = kDrawsPerBlock;
+	}
+
+	DrawBlock block;
+	VkDescriptorPoolSize sizes[2]{};
+	sizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, draws};
+	sizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, draws * kMaxTextureStages};
+	VkDescriptorPoolCreateInfo dpci{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+	dpci.maxSets = draws;
+	dpci.poolSizeCount = 2;
+	dpci.pPoolSizes = sizes;
+	if (vkCreateDescriptorPool(device_, &dpci, nullptr, &block.pool) != VK_SUCCESS) {
+		std::fprintf(stderr, "draw resources: vkCreateDescriptorPool failed for %u draws\n",
+		             draws);
+		return false;
+	}
+
+	std::vector<VkDescriptorSetLayout> layouts(draws, set_layout_);
+	VkDescriptorSetAllocateInfo dsai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+	dsai.descriptorPool = block.pool;
+	dsai.descriptorSetCount = draws;
+	dsai.pSetLayouts = layouts.data();
+	block.sets.resize(draws);
+	if (vkAllocateDescriptorSets(device_, &dsai, block.sets.data()) != VK_SUCCESS) {
+		std::fprintf(stderr, "draw resources: vkAllocateDescriptorSets failed for %u draws\n",
+		             draws);
+		vkDestroyDescriptorPool(device_, block.pool, nullptr);
+		return false;
+	}
+
+	if (!Allocate_Buffer(ubo_stride_ * draws, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+	                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+	                     block.uniforms)) {
+		vkDestroyDescriptorPool(device_, block.pool, nullptr);
+		return false;
+	}
+	// Mapped once for the block's lifetime rather than per draw: at a mission frame's draw
+	// count the map/unmap pair is thousands of calls a frame, and the memory is coherent, so
+	// the write needs no flush.
+	if (vkMapMemory(device_, block.uniforms.memory, 0, VK_WHOLE_SIZE, 0, &block.mapped) !=
+	    VK_SUCCESS) {
+		std::fprintf(stderr, "draw resources: vkMapMemory failed for %u draws\n", draws);
+		vkDestroyDescriptorPool(device_, block.pool, nullptr);
+		return false;
+	}
+
+	draw_blocks_.push_back(block);
+	draw_stats_.descriptor_capacity += draws;
+	draw_stats_.descriptor_blocks = static_cast<uint32_t>(draw_blocks_.size());
+	return true;
+}
+
+bool VulkanBackend::Draw_Slot(uint32_t index, VkDescriptorSet& out_set, VkBuffer& out_buffer,
+                              VkDeviceSize& out_offset, void*& out_mapped) {
+	while (index >= draw_stats_.descriptor_capacity) {
+		if (!Add_Draw_Block()) return false;
+	}
+	// Blocks are uniform in size except the last one under a test limit, and a draw only
+	// reaches a block once every earlier block is full, so the arithmetic is exact.
+	uint32_t remaining = index;
+	for (DrawBlock& block : draw_blocks_) {
+		const uint32_t draws = static_cast<uint32_t>(block.sets.size());
+		if (remaining < draws) {
+			out_set = block.sets[remaining];
+			out_buffer = block.uniforms.buffer;
+			out_offset = ubo_stride_ * remaining;
+			out_mapped = static_cast<uint8_t*>(block.mapped) + out_offset;
+			return true;
+		}
+		remaining -= draws;
+	}
+	return false;
 }
 
 bool VulkanBackend::Create_Shaders() {
@@ -1948,7 +2050,17 @@ void VulkanBackend::Shutdown() {
 	current_color_ = nullptr;
 	current_depth_ = nullptr;
 
-	free_buffer(draw_uniforms_);
+	for (DrawBlock& block : draw_blocks_) {
+		if (block.mapped != nullptr) {
+			vkUnmapMemory(device_, block.uniforms.memory);
+			block.mapped = nullptr;
+		}
+		free_buffer(block.uniforms);
+		if (block.pool) vkDestroyDescriptorPool(device_, block.pool, nullptr);
+	}
+	draw_blocks_.clear();
+	draw_stats_.descriptor_capacity = 0;
+	draw_stats_.descriptor_blocks = 0;
 	free_buffer(dummy_vertex_buffer_);
 	if (up_mapped_ != nullptr) {
 		vkUnmapMemory(device_, up_ring_.memory);
@@ -1964,7 +2076,6 @@ void VulkanBackend::Shutdown() {
 	framebuffers_.clear();
 	for (auto& rp : render_passes_) vkDestroyRenderPass(device_, rp.second, nullptr);
 	render_passes_.clear();
-	if (descriptor_pool_) vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
 	if (pipeline_layout_) vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
 	if (set_layout_) vkDestroyDescriptorSetLayout(device_, set_layout_, nullptr);
 	if (vert_module_) vkDestroyShaderModule(device_, vert_module_, nullptr);
@@ -3351,6 +3462,8 @@ void VulkanBackend::Begin_Scene() {
 	for (SurfaceHandle* surface : owned_surfaces_) surface->written_this_frame = false;
 
 	draw_index_ = 0;
+	frame_draws_requested_ = 0;
+	frame_draws_dropped_ = 0;
 	in_scene_ = true;
 	if (!Begin_Current_Pass()) {
 		in_scene_ = false;
@@ -3576,8 +3689,24 @@ void VulkanBackend::Fill_Draw_Uniforms(uint32_t primitive_type, const VertexLayo
 
 bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHandle& vb) {
 	if (!in_scene_) return false;
-	if (draw_index_ >= kMaxDrawsPerFrame) {
-		std::fprintf(stderr, "spike limit: more than %u draws per frame\n", kMaxDrawsPerFrame);
+	++frame_draws_requested_;
+
+	// The draw's own descriptor set and uniform slice, allocating a block if this frame is
+	// the first to get this far. Failure here is a *lost draw*, not a slow one: the frame
+	// will be missing geometry, so it is counted and reported rather than logged and
+	// forgotten (docs/porting/draws-per-frame.md).
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkBuffer ubo_buffer = VK_NULL_HANDLE;
+	VkDeviceSize ubo_offset = 0;
+	void* mapped = nullptr;
+	if (!Draw_Slot(draw_index_, set, ubo_buffer, ubo_offset, mapped)) {
+		if (frame_draws_dropped_ == 0) {
+			std::fprintf(stderr,
+			             "draw resources exhausted at draw %u (capacity %u): the frame will "
+			             "be missing geometry\n",
+			             draw_index_, draw_stats_.descriptor_capacity);
+		}
+		++frame_draws_dropped_;
 		return false;
 	}
 
@@ -3609,19 +3738,18 @@ bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHand
 	key.has_depth_attachment = current_depth_ != nullptr ? 1 : 0;
 
 	VkPipeline pipeline = Get_Or_Create_Pipeline(key, vb.layout);
-	if (pipeline == VK_NULL_HANDLE) return false;
+	if (pipeline == VK_NULL_HANDLE) {
+		// No pipeline is the same loss of geometry as no descriptor set.
+		++frame_draws_dropped_;
+		return false;
+	}
 
 	DrawUniforms uniforms;
 	Fill_Draw_Uniforms(primitive_type, vb.layout, uniforms);
 
-	const VkDeviceSize ubo_offset = ubo_stride_ * draw_index_;
-	void* mapped = nullptr;
-	vkMapMemory(device_, draw_uniforms_.memory, ubo_offset, sizeof(DrawUniforms), 0, &mapped);
 	std::memcpy(mapped, &uniforms, sizeof(DrawUniforms));
-	vkUnmapMemory(device_, draw_uniforms_.memory);
 
-	VkDescriptorSet set = descriptor_sets_[draw_index_];
-	VkDescriptorBufferInfo buffer_info{draw_uniforms_.buffer, ubo_offset, sizeof(DrawUniforms)};
+	VkDescriptorBufferInfo buffer_info{ubo_buffer, ubo_offset, sizeof(DrawUniforms)};
 	// Binding 1 is an array of kMaxTextureStages samplers written in one go. Stages
 	// with nothing bound get the 1x1 white texture: D3D8 lets a cascade name a stage
 	// with no texture, and Vulkan requires every descriptor in the array to be valid
@@ -3775,6 +3903,26 @@ void VulkanBackend::Draw_Primitive_UP(uint32_t primitive_type, uint32_t primitiv
 
 void VulkanBackend::End_Scene(bool flip_frame) {
 	if (!in_scene_) return;
+	// The frame's draw accounting, published before it is submitted so a caller that reads it
+	// after End_Scene sees the frame it just ended.
+	draw_stats_.draws_requested = frame_draws_requested_;
+	draw_stats_.draws_issued = draw_index_;
+	draw_stats_.draws_dropped = frame_draws_dropped_;
+	draw_stats_.draws_dropped_total += frame_draws_dropped_;
+	if (draw_index_ > draw_stats_.peak_draws_per_frame)
+		draw_stats_.peak_draws_per_frame = draw_index_;
+	// ZH_RENDER_DRAW_REPORT=N prints the accounting every N frames. The game has no way to
+	// read DrawStats, and a mission's real draws-per-frame is the number this slice exists
+	// for, so it has to be observable from a normal run rather than only from a spike.
+	if (draw_report_interval_ != 0 && (frame_counter_ % draw_report_interval_) == 0) {
+		std::fprintf(stderr,
+		             "draws/frame: requested %u issued %u dropped %u (peak %u, capacity %u in "
+		             "%u block(s), dropped total %llu)\n",
+		             draw_stats_.draws_requested, draw_stats_.draws_issued,
+		             draw_stats_.draws_dropped, draw_stats_.peak_draws_per_frame,
+		             draw_stats_.descriptor_capacity, draw_stats_.descriptor_blocks,
+		             static_cast<unsigned long long>(draw_stats_.draws_dropped_total));
+	}
 	End_Current_Pass();
 	vkEndCommandBuffer(frame_cmd_);
 

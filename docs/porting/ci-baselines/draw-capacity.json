@@ -1,0 +1,18 @@
+{
+  "_comment": "Draws per frame the renderer backend sustains with every draw's own texture and uniforms verified by pixel readback, enforced by scripts/ci/check-draw-capacity.py. Generated -- do not hand-edit; regenerate with --update.",
+  "draws_per_frame": 4096,
+  "frames": 3,
+  "measured": {
+    "descriptor_capacity": 4096,
+    "descriptor_blocks": 16,
+    "draws_issued": 4096,
+    "draws_dropped": 0,
+    "peak_draws_per_frame": 4096,
+    "tiles_correct_per_frame": [
+      4096,
+      4096,
+      4096
+    ]
+  },
+  "replaced_fixed_cap": 64
+}
