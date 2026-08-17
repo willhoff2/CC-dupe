@@ -912,6 +912,21 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The shroud half of the water path: a river vertex in the map's border ring converts to a
+      # shroud cell outside the source grid, and the shipped lookup indexed the surface with it --
+      # 140 bytes before its allocation on the mission #103 faulted on. The harness puts the valid
+      # cells between two PROT_NONE pages, so an out-of-grid read is a fault rather than a plausible
+      # number. Generated fixture, no retail data. docs/porting/shroud-river-water-bounds.md.
+      - name: Prove an out-of-grid shroud lookup answers with the border level instead of faulting
+        run: |
+          set -o pipefail
+          {
+            echo '## Shroud out-of-grid negative control (debug configuration)'
+            echo '```'
+            python3 scripts/ci/check-shroud-bounds.py --build-dir build/native-debug
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the debug build report
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0

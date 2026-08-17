@@ -264,7 +264,10 @@ W3DShroudLevel W3DShroud::getShroudLevel(Int x, Int y)
 {
 	DEBUG_ASSERTCRASH( m_pSrcTexture != nullptr, ("Reading empty shroud"));
 
-	if (x < m_numCellsX && y < m_numCellsY)
+	// TheSuperHackers @bugfix Devin 17/08/2026 Test both ends of the grid. A cell left of or above
+	// it indexed the shroud data from before its allocation; see
+	// docs/porting/shroud-river-water-bounds.md.
+	if (x >= 0 && y >= 0 && x < m_numCellsX && y < m_numCellsY)
 	{
 		UnsignedShort pixel=*(UnsignedShort *)((Byte *)m_srcTextureData + x*2 + y*m_srcTexturePitch);
 
@@ -278,6 +281,27 @@ W3DShroudLevel W3DShroud::getShroudLevel(Int x, Int y)
 			return (W3DShroudLevel)((Real)((pixel >> 5)&0x3f)/63.0f*255.0f);
 	}
 	return 0;
+}
+
+//-----------------------------------------------------------------------------
+/** Shroud level at a world position, for callers holding world coordinates rather than cells.
+
+	The grid covers the playable extent only -- init() takes the height map's border off the extent
+	-- while world coordinates put the playable area's corner at (0,0) and the map's border ring at
+	negative coordinates (BaseHeightMap.cpp's ADJUST_FROM_INDEX_TO_REAL). A position in the border
+	ring therefore has no cell, and what the shroud pass shows there is the border shroud level:
+	fillBorderShroudData() fills the destination texture with it and the texture is clamp addressed,
+	so that is what is returned rather than a level read from the nearest cell.
+*/
+W3DShroudLevel W3DShroud::getShroudLevelAtWorldPos(Real x, Real y)
+{
+	const Int cellX = REAL_TO_INT_FLOOR(x / m_cellWidth);
+	const Int cellY = REAL_TO_INT_FLOOR(y / m_cellHeight);
+
+	if (cellX < 0 || cellY < 0 || cellX >= m_numCellsX || cellY >= m_numCellsY)
+		return m_boderShroudLevel;
+
+	return getShroudLevel(cellX, cellY);
 }
 
 //-----------------------------------------------------------------------------
