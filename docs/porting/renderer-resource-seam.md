@@ -659,6 +659,13 @@ None. No engine file is modified by this slice: the changes are `docs/porting/`,
    correct-by-construction only once the surface path moves onto the seam. The audit that follows is
    unchanged and is what that move has to satisfy.
 
+   One consequence of that split has since been measured in the engine's own Vulkan backend, and it
+   was a real defect rather than a theoretical one: `VulkanD3DSurfaceClass::LockRect` sent *every*
+   surface lock through `Surface_Bits`, including level 0 of a lockable texture, so writes through a
+   `Get_Surface_Level` surface — which is how the video path uploads a frame — landed in the staging
+   copy, read back correctly, and never reached the image. The distinction this section draws between
+   `Surface_Bits` and `Lock_Texture` is the fix; see `docs/porting/video-frame-display.md` §2.
+
    **The audit.**
    `spikes/renderer/tools/surface-lock-audit.py` (`--check` in CI, counts committed in
    `surface-lock-audit.json`) counts every `SurfaceClass::Lock` caller: **26 sites, 5 inside the

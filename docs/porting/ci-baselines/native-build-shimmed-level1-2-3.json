@@ -4,9 +4,9 @@
   "compile_failures": {},
   "compiled": {
     "Core/GameEngine": {
-      "objects": 210,
-      "probe_clean": 210,
-      "total": 210
+      "objects": 211,
+      "probe_clean": 211,
+      "total": 211
     },
     "Core/GameEngineDevice": {
       "objects": 70,
@@ -55,6 +55,8 @@
     }
   },
   "compiler": "Ubuntu clang version 14.0.0-1ubuntu1.1",
+  "config": "release",
+  "config_defines": [],
   "divergence": {
     "probe_clean_compile_failed": [],
     "probe_failed_compile_ok": []
@@ -82,7 +84,7 @@
     "libgeneralsmd_code_main"
   ],
   "link_entry_point_stub": false,
-  "objects": 842,
+  "objects": 843,
   "pile_meaning": {
     "compile-blocked": "An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker.",
     "cut-scope-not-linked": "A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it.",
@@ -90,7 +92,7 @@
     "library-not-linked": "A library defines it and this configuration links no such library. A link line, not port work.",
     "no-definition-anywhere": "Nothing in the repository, the provisioned dependencies or a linkable library defines it. This is the remaining port work."
   },
-  "probe_clean": 842,
+  "probe_clean": 843,
   "providers": {
     "ffmpeg": {
       "evidence_files": 823,
@@ -586,7 +588,7 @@
     "vulkan (system)",
     "z (system)"
   ],
-  "translation_units": 842,
+  "translation_units": 843,
   "undefined_by_category": {
     "Defined in a built translation unit behind a disabled #if (build option / platform)": 6,
     "Defined in a layer not built here (renderer / audio)": 387

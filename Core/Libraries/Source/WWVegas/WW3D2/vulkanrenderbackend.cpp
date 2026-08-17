@@ -242,8 +242,13 @@ public:
 	STDMETHOD(UnlockRect)();
 
 private:
-	HRESULT Lock_Mip_Level(D3DLOCKED_RECT * locked_rect, CONST RECT * rect, DWORD flags);
-	HRESULT Unlock_Mip_Level();
+	// True when the surface names a level of a lockable texture - every level of such a texture,
+	// including level 0, whose handle exists only so that the surface can still be a render
+	// target and a CopyRects endpoint.  A lock of one of those has to go through the texture's
+	// own level funnel, because that is the funnel that uploads what the caller wrote.
+	bool Locks_Through_Texture() const;
+	HRESULT Lock_Texture_Level(D3DLOCKED_RECT * locked_rect, CONST RECT * rect, DWORD flags);
+	HRESULT Unlock_Texture_Level();
 
 	spike::RenderBackend * Backend;
 	spike::SurfaceHandle * Handle;
@@ -276,6 +281,10 @@ public:
 	virtual ~VulkanD3DTextureClass();
 
 	spike::TextureHandle * Peek_Handle() const { return Handle; }
+	// A render target texture's image is written by the GPU and its levels are not lockable, so a
+	// lock of one of its surfaces is a read-back and belongs on the surface path; every other
+	// texture the backend hands out is lockable level by level.
+	bool Is_Lockable() const { return (Usage & D3DUSAGE_RENDERTARGET) == 0; }
 
 	STDMETHOD(QueryInterface)(REFIID riid, void ** object);
 	STDMETHOD_(ULONG, AddRef)();
@@ -313,6 +322,21 @@ private:
 	// created once and kept.
 	std::vector<VulkanD3DSurfaceClass *> Surfaces;
 };
+
+bool VulkanD3DSurfaceClass::Locks_Through_Texture() const
+{
+	// A level above 0 has no handle and nothing else it could lock through.  Level 0 does have a
+	// handle - it has to, so that the surface can be a render target and a CopyRects endpoint -
+	// but Surface_Bits is a *read-back* mapping of the image: bytes written into it are never
+	// uploaded, so a caller that locks level 0 to write it (W3DVideoBuffer's frame upload, the
+	// texture loaders, W3DShroud, the radar) would see every HRESULT succeed, read its own bytes
+	// back, and still sample the image the texture was created with.  Those writes travel the
+	// texture's own level funnel instead - the same Lock_Texture/Unlock_Texture pair the mip
+	// levels use, so there is no second upload path.  A render target texture is excluded: its
+	// levels are not lockable, and reading one back through Surface_Bits is the C8 read hazard
+	// the seam already serves.
+	return Container != NULL && Container->Is_Lockable();
+}
 
 /*
 ** IDirect3DVertexBuffer8 / IDirect3DIndexBuffer8 over the spike's host-mapped buffers.  Class
@@ -513,9 +537,10 @@ HRESULT VulkanD3DSurfaceClass::LockRect(D3DLOCKED_RECT * locked_rect, CONST RECT
 	DWORD flags)
 {
 	if (locked_rect == NULL || Backend == NULL) return D3DERR_INVALIDCALL;
-	// A mip-level surface locks the level of its texture, which is the spike's own per-level lock
-	// (usage class C4) and therefore serves a sub-rect honestly, unlike Surface_Bits below.
-	if (Is_Mip_Level_Surface()) return Lock_Mip_Level(locked_rect, rect, flags);
+	// A surface that names a level of a lockable texture locks that level, which is the spike's
+	// own per-level lock (usage classes C1/C4) and therefore serves a sub-rect honestly, unlike
+	// Surface_Bits below - and, unlike Surface_Bits, uploads the bytes the caller writes.
+	if (Locks_Through_Texture()) return Lock_Texture_Level(locked_rect, rect, flags);
 	if (Handle == NULL) return D3DERR_INVALIDCALL;
 	if (rect != NULL) {
 		// Usage class C9 (the D3DX surface locks) and SurfaceClass::Lock both lock whole
@@ -534,23 +559,23 @@ HRESULT VulkanD3DSurfaceClass::LockRect(D3DLOCKED_RECT * locked_rect, CONST RECT
 
 HRESULT VulkanD3DSurfaceClass::UnlockRect()
 {
-	// A mip-level surface's unlock is its texture's, which is what uploads the level the caller
-	// just wrote: skipping it would leave the mip chain holding whatever the image was created
-	// with while every HRESULT said the write had landed.
-	if (Is_Mip_Level_Surface()) return Unlock_Mip_Level();
+	// A texture level's unlock is its texture's, which is what uploads the level the caller just
+	// wrote: skipping it would leave the image holding whatever it was created with while every
+	// HRESULT said the write had landed.
+	if (Locks_Through_Texture()) return Unlock_Texture_Level();
 	// Surface_Bits hands out a persistent host mapping (usage class C7: the engine keeps the
 	// pointer past the unlock), so there is nothing to undo.  Saying so is not the same as
 	// pretending: the mapping is still valid, which is exactly what the callers rely on.
 	return D3D_OK;
 }
 
-HRESULT VulkanD3DSurfaceClass::Lock_Mip_Level(D3DLOCKED_RECT * locked_rect, CONST RECT * rect,
+HRESULT VulkanD3DSurfaceClass::Lock_Texture_Level(D3DLOCKED_RECT * locked_rect, CONST RECT * rect,
 	DWORD flags)
 {
 	return Container->LockRect(Level, locked_rect, rect, flags);
 }
 
-HRESULT VulkanD3DSurfaceClass::Unlock_Mip_Level()
+HRESULT VulkanD3DSurfaceClass::Unlock_Texture_Level()
 {
 	return Container->UnlockRect(Level);
 }

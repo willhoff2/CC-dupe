@@ -79,7 +79,7 @@ GAME_MEMORY_MEMBER = "GameMemory.cpp.o"
 GLOBAL_NEW_SYMBOLS = ("_Znwm", "_Znam", "_ZdlPv", "_ZdaPv")
 
 
-def donor_command():
+def donor_command(donor=FLAG_DONOR):
     """The compile command native-build.py used, as an argument list."""
     database = BUILD_DIR / "compile_commands.json"
     if not database.is_file():
@@ -87,14 +87,19 @@ def donor_command():
                  "--level 3 --level 4 --with-shims --strict-link first.")
     entries = json.loads(database.read_text())
     for entry in entries:
-        if entry["file"].endswith(FLAG_DONOR):
+        if entry["file"].endswith(donor):
             return entry["command"].split(), pathlib.Path(entry["directory"])
-    sys.exit(f"no compile command for {FLAG_DONOR} in {database}")
+    sys.exit(f"no compile command for {donor} in {database}")
 
 
-def compile_harness(out_object):
-    """Compile the harness with the donor's flags, only the source and -o replaced."""
-    command, directory = donor_command()
+def compile_harness(out_object, harness=HARNESS, donor=FLAG_DONOR, extra_includes=()):
+    """Compile a harness with the donor's flags, only the source and -o replaced.
+
+    `harness`/`donor` are arguments so that a second harness -- the video one in
+    scripts/native-video-frame-run.py -- links against the same archives with the same flags
+    rather than growing its own idea of how the engine is compiled.
+    """
+    command, directory = donor_command(donor)
     # Everything except the donor's own output, its `-c source`, and the source path itself. The
     # `-include Utility/CppMacros.h` and `-isystem DIR` pairs must survive intact, so this drops
     # exactly the two arguments it knows about rather than filtering on a leading dash.
@@ -107,14 +112,15 @@ def compile_harness(out_object):
         if argument in ("-o", "-c"):
             skip_next = True
             continue
-        if argument.endswith(FLAG_DONOR):
+        if argument.endswith(donor):
             continue
         rebuilt.append(argument)
     # The harness performs main()'s prologue (the string critical sections and the memory
     # manager), which lives above WW3D2, so it gets the GameEngine include roots the WW3D2 target
     # does not have. It calls nothing else from there.
-    rebuilt += [f"-isystem{REPO_ROOT / directory_}" for directory_ in HARNESS_INCLUDES]
-    rebuilt += ["-g", "-o", str(out_object), "-c", str(HARNESS)]
+    rebuilt += [f"-isystem{REPO_ROOT / directory_}"
+                for directory_ in (*HARNESS_INCLUDES, *extra_includes)]
+    rebuilt += ["-g", "-o", str(out_object), "-c", str(harness)]
     proc = subprocess.run(rebuilt, cwd=directory, capture_output=True, text=True)
     if proc.returncode != 0:
         sys.stdout.write(proc.stdout + proc.stderr)
@@ -241,6 +247,63 @@ def link_libraries():
     return [p for p in found if p is not None] + list(module.ffmpeg_libraries(deps))
 
 
+def link_harness(objects, binary, archives):
+    """Link a harness object against the engine archives, the way the strict link loads them.
+
+    The engine archives are loaded whole: a harness references a handful of entry points and
+    everything else is reached through the engine's own static initialisers and vtables. ld64
+    spells that per-archive (-force_load) rather than as a mode with an off switch, and has no
+    -ldl (dlopen is in libSystem).
+    """
+    support = [a for a in archives if a.name.startswith("libsupport_")
+               or a.name == "libthirdparty_lzhl.a"]
+    engine = [a for a in archives if a not in support]
+    if MACOS:
+        whole = [flag for a in engine for flag in ("-Wl,-force_load", str(a))]
+        platform_libs = ["-lc++", "-lm", "-lpthread", "-lz",
+                         *[flag for f in MACOS_FRAMEWORKS for flag in ("-framework", f)]]
+    else:
+        whole = ["-Wl,--whole-archive", *[str(a) for a in engine], "-Wl,--no-whole-archive"]
+        platform_libs = ["-lstdc++", "-lm", "-lpthread", "-ldl", "-lz"]
+    command = [os.environ.get("CLANGXX", "clang++"), "-std=c++20", "-o", str(binary),
+               *[str(o) for o in objects], *whole,
+               *[str(a) for a in support], *platform_libs,
+               *[str(p) for p in link_libraries()]]
+    proc = subprocess.run(command, capture_output=True, text=True)
+    if proc.returncode != 0 or not binary.exists():
+        sys.stdout.write(proc.stdout + proc.stderr)
+        sys.exit("the harness did not link")
+    return proc.stdout + proc.stderr
+
+
+def run_environment(validation=False):
+    """The loader path, the ICD and the validation switch the harness has to be run with."""
+    environment = dict(os.environ)
+    # FFmpeg is linked by path from the deps tree, which has no entry in the loader cache.
+    ffmpeg_dir = REPO_ROOT / "build" / "docker" / "_deps" / "ffmpeg-lib" / "lib"
+    loader_path = "DYLD_LIBRARY_PATH" if MACOS else "LD_LIBRARY_PATH"
+    if ffmpeg_dir.is_dir():
+        existing = environment.get(loader_path, "")
+        environment[loader_path] = f"{ffmpeg_dir}:{existing}" if existing else str(ffmpeg_dir)
+    if MACOS:
+        # The loader opens the layer dylib by leaf name; see MACOS_LOADER_DIRS.
+        for directory in MACOS_LOADER_DIRS:
+            if pathlib.Path(directory).is_dir():
+                existing = environment.get(loader_path, "")
+                environment[loader_path] = f"{directory}:{existing}" if existing else directory
+    if "VK_ICD_FILENAMES" not in environment:
+        # Naming the ICD rather than trusting the loader's search is what the renderer-spike skill
+        # does, and on macOS it is what keeps a stray SDK loader from picking a different driver.
+        icds = MOLTENVK_ICDS if MACOS else (LAVAPIPE_ICD,)
+        for icd in icds:
+            if pathlib.Path(icd).is_file():
+                environment["VK_ICD_FILENAMES"] = icd
+                break
+    if validation:
+        environment["ZH_VULKAN_VALIDATION"] = "1"
+    return environment, loader_path
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -278,57 +341,14 @@ def main():
     print("== copying the archives")
     archives = scratch_archives(scratch, stdlib_new=args.stdlib_new)
     check_swapchain_compiled_in(archives)
-    support = [a for a in archives if a.name.startswith("libsupport_")
-               or a.name == "libthirdparty_lzhl.a"]
-    engine = [a for a in archives if a not in support]
 
     print("== linking")
     binary = scratch / "native_render_run"
-    # The engine archives are loaded whole, as the strict link loads them: the harness references a
-    # handful of DX8Wrapper entry points and everything else is reached through the engine's own
-    # static initialisers and vtables. ld64 spells that per-archive (-force_load) rather than as a
-    # mode with an off switch, and has no -ldl (dlopen is in libSystem).
-    if MACOS:
-        whole = [flag for a in engine for flag in ("-Wl,-force_load", str(a))]
-        platform_libs = ["-lc++", "-lm", "-lpthread", "-lz",
-                         *[flag for f in MACOS_FRAMEWORKS for flag in ("-framework", f)]]
-    else:
-        whole = ["-Wl,--whole-archive", *[str(a) for a in engine], "-Wl,--no-whole-archive"]
-        platform_libs = ["-lstdc++", "-lm", "-lpthread", "-ldl", "-lz"]
-    command = [os.environ.get("CLANGXX", "clang++"), "-std=c++20", "-o", str(binary),
-               str(scratch / "native_render_run.o"), *whole,
-               *[str(a) for a in support], *platform_libs,
-               *[str(p) for p in link_libraries()]]
-    proc = subprocess.run(command, capture_output=True, text=True)
-    if proc.returncode != 0 or not binary.exists():
-        sys.stdout.write(proc.stdout + proc.stderr)
-        sys.exit("the harness did not link")
+    link_harness([scratch / "native_render_run.o"], binary, archives)
     print(f"   {binary.relative_to(REPO_ROOT)}")
 
     print("== running")
-    environment = dict(os.environ)
-    # FFmpeg is linked by path from the deps tree, which has no entry in the loader cache.
-    ffmpeg_dir = REPO_ROOT / "build" / "docker" / "_deps" / "ffmpeg-lib" / "lib"
-    loader_path = "DYLD_LIBRARY_PATH" if MACOS else "LD_LIBRARY_PATH"
-    if ffmpeg_dir.is_dir():
-        existing = environment.get(loader_path, "")
-        environment[loader_path] = f"{ffmpeg_dir}:{existing}" if existing else str(ffmpeg_dir)
-    if MACOS:
-        # The loader opens the layer dylib by leaf name; see MACOS_LOADER_DIRS.
-        for directory in MACOS_LOADER_DIRS:
-            if pathlib.Path(directory).is_dir():
-                existing = environment.get(loader_path, "")
-                environment[loader_path] = f"{directory}:{existing}" if existing else directory
-    if "VK_ICD_FILENAMES" not in environment:
-        # Naming the ICD rather than trusting the loader's search is what the renderer-spike skill
-        # does, and on macOS it is what keeps a stray SDK loader from picking a different driver.
-        icds = MOLTENVK_ICDS if MACOS else (LAVAPIPE_ICD,)
-        for icd in icds:
-            if pathlib.Path(icd).is_file():
-                environment["VK_ICD_FILENAMES"] = icd
-                break
-    if args.validation:
-        environment["ZH_VULKAN_VALIDATION"] = "1"
+    environment, loader_path = run_environment(validation=args.validation)
     run = [str(binary)]
     if args.no_present:
         run.append("--no-present")

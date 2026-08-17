@@ -4,7 +4,7 @@
     "in_scope": {
       "cursor": 14,
       "message_pump": 7,
-      "mode_change": 12,
+      "mode_change": 13,
       "placement": 7,
       "polled_input": 12,
       "window_handle": 35,
@@ -477,6 +477,7 @@
       "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/ww3d.h"
     ],
     "Set_Render_Device": [
+      "Core/GameEngineDevice/Source/VideoDevice/FFmpeg/tests/native_video_frame_run.cpp",
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp",
       "Core/Libraries/Source/WWVegas/WW3D2/dx8wrapper.h",
       "Core/Libraries/Source/WWVegas/WW3D2/tests/native_render_run.cpp",
@@ -553,7 +554,7 @@
     "device": {
       "cursor": 30,
       "message_pump": 5,
-      "mode_change": 3,
+      "mode_change": 4,
       "polled_input": 18,
       "window_handle": 32,
       "wndproc": 18
@@ -678,7 +679,7 @@
       "SetForegroundWindow": 2,
       "SetWindowPos": 14,
       "Set_Device_Resolution": 9,
-      "Set_Render_Device": 20,
+      "Set_Render_Device": 21,
       "ShowCursor": 8,
       "ShowWindow": 7,
       "Toggle_Windowed": 5,
@@ -755,7 +756,7 @@
     "in_scope": {
       "cursor": 59,
       "message_pump": 25,
-      "mode_change": 64,
+      "mode_change": 65,
       "placement": 31,
       "polled_input": 32,
       "window_handle": 198,
