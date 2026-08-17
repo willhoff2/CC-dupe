@@ -950,20 +950,24 @@ void ChallengeLoadScreen::init( GameInfo *game )
 	// create the new background video stream
 	m_videoStream = TheVideoPlayer->open( TheCampaignManager->getCurrentMission()->m_movieLabel );
 
-	// Create the new buffer
-	m_videoBuffer = TheDisplay->createVideoBuffer();
-	if (m_videoBuffer == nullptr || !m_videoBuffer->allocate(	m_videoStream->width(), m_videoStream->height() ))
+	// TheSuperHackers @bugfix A movie label the video player cannot open leaves the stream null,
+	// and width() was read off it unconditionally, so the Challenge screen dereferenced null
+	// instead of coming up without its movie. Only the null-stream case is new behaviour: a stream
+	// that opens but whose buffer cannot be allocated still leaves the way it did.
+	if ( m_videoStream != nullptr )
 	{
-		delete m_videoBuffer;
-		m_videoBuffer = nullptr;
-
-		if ( m_videoStream )
+		// Create the new buffer
+		m_videoBuffer = TheDisplay->createVideoBuffer();
+		if (m_videoBuffer == nullptr || !m_videoBuffer->allocate(	m_videoStream->width(), m_videoStream->height() ))
 		{
+			delete m_videoBuffer;
+			m_videoBuffer = nullptr;
+
 			m_videoStream->close();
 			m_videoStream = nullptr;
-		}
 
-		return;
+			return;
+		}
 	}
 
 	// init overlays
@@ -1043,7 +1047,9 @@ void ChallengeLoadScreen::init( GameInfo *game )
 	m_wndVideoManager = NEW WindowVideoManager;
 	m_wndVideoManager->init();
 
-	if(TheGameLODManager && TheGameLODManager->didMemPass())
+	// Without a stream there are no frames to pace the screen with, so it takes the same static
+	// route the min-spec machines take.
+	if(m_videoStream != nullptr && TheGameLODManager && TheGameLODManager->didMemPass())
 	{
 		// TheSuperHackers @bugfix Originally this movie render loop stopped rendering when the game window was inactive.
 		// This either skipped the movie or caused decompression artifacts. Now the video just keeps playing until it done.
@@ -1095,20 +1101,23 @@ void ChallengeLoadScreen::init( GameInfo *game )
 	}
 	else
 	{
-		// if we're min speced
-		m_videoStream->frameGoto(m_videoStream->frameCount()); // zero based
-		while(!m_videoStream->isFrameReady())
+		// if we're min speced, or have no movie at all
+		if(m_videoStream != nullptr)
 		{
-			if (GameClient::isMovieAbortRequested())
+			m_videoStream->frameGoto(m_videoStream->frameCount()); // zero based
+			while(!m_videoStream->isFrameReady())
 			{
-				return;
+				if (GameClient::isMovieAbortRequested())
+				{
+					return;
+				}
+				Sleep(1);
 			}
-			Sleep(1);
+			m_videoStream->frameDecompress();
+			m_videoStream->frameRender(m_videoBuffer);
+			if(m_videoBuffer)
+				m_loadScreen->winGetInstanceData()->setVideoBuffer(m_videoBuffer);
 		}
-		m_videoStream->frameDecompress();
-		m_videoStream->frameRender(m_videoBuffer);
-		if(m_videoBuffer)
-			m_loadScreen->winGetInstanceData()->setVideoBuffer(m_videoBuffer);
 
 		activatePiecesMinSpec(generalPlayer, generalOpponent);
 

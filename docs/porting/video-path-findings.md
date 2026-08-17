@@ -1,5 +1,14 @@
 # The video path, executed off Windows at 64-bit
 
+> **Superseded in part.** Everything below stands as measured, but four of its open items are now
+> closed by `docs/porting/video-frame-display.md`, which drives retail movies through
+> decode → texture → draw and compares the drawn pixels against an independently decoded reference:
+> the retail movie bytes exist and were opened (§1's "one thing I could not measure" and §8 items 1-2),
+> the texture upload works once the Vulkan backend stops locking texture levels through the read-back
+> mapping (§3, §8 item 3), and the `ChallengeLoadScreen::init()` null dereference is fixed with a
+> negative control (§4, §8 item 4). The timing, `frameCount()` and audio findings below are
+> re-measured there over all 41 retail movies; quote those figures, not these.
+
 A probe slice, not an implementation. Everything below was measured on Linux/x86-64 with
 `clang++-14` — the same toolchain and the same object files the native build ratchet produces — or
 read out of the retail Zero Hour 1.04 `INIZH.big`. Where a claim is inference rather than

@@ -8,6 +8,8 @@ Toolchain: `Ubuntu clang version 14.0.0-1ubuntu1.1`, target `x86_64-pc-linux-gnu
 
 Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only stand-ins for the Win32 headers, so a missing platform layer shows up as an undefined symbol rather than as a failed compile. That is the point: it moves the blockers from §1 to §3, where they can be counted individually.
 
+Configuration: **release** — the engine's assertions and debug logging are compiled out, as in every figure published before `--config debug` existed.
+
 ## 1. Compilation
 
 | Library | Objects produced | Translation units | Probe-clean |
@@ -17,7 +19,7 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/Libraries/Source/WWVegas/WWLib` | 79 | 79 | 79 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 | 3 | 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
-| `Core/GameEngine` | 210 | 210 | 210 |
+| `Core/GameEngine` | 211 | 211 | 211 |
 | `GeneralsMD/Code/GameEngine` | 380 | 380 | 380 |
 | `Core/Libraries/Source/WWVegas/WW3D2` | 78 | 78 | 78 |
 | `Core/Libraries/Source/WWVegas/WWAudio` | 19 | 19 | 19 |
@@ -26,11 +28,11 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 | `Core/GameEngineDevice` | 70 | 70 | 70 |
 | `GeneralsMD/Code/GameEngineDevice` | 39 | 39 | 39 |
 | `GeneralsMD/Code/Main` | 1 | 1 | 1 |
-| **Total** | **978** | **978** | **978** |
+| **Total** | **979** | **979** | **979** |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 978 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 979 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
