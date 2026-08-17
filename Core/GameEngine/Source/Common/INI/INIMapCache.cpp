@@ -125,6 +125,10 @@ void INI::parseMapCacheDefinition( INI* ini )
 	c = ini->getNextToken(" \n\r\t");
 	name.set( c );
 	name = QuotedPrintableToAsciiString(name);
+	// TheSuperHackers @port A MapCache.ini written by a native build before the path seam landed
+	// spells its keys with '/', and the retail one spells them with '\'. Both name the same map, so
+	// both are read as the same key rather than as two maps.
+	name = makeCanonicalMapCacheKey(name);
 	md.m_waypoints.clear();
 
 	ini->initFromINI( &mdr, mdr.getFieldParse() );

@@ -90,6 +90,15 @@ public:
 	AsciiString m_fileName;
 };
 
+// TheSuperHackers @port A map cache key is an identifier, not a path: it is lower cased, it is
+// compared with the '\' spelled suffix the cache builds, it is written into MapCache.ini and it is
+// read back from an INI written by another run. Two spellings of the same map must therefore be the
+// same key, so a key is canonical: lower case, and separators spelled the Windows way, which is the
+// spelling the retail MapCache.ini and the map INI literals already use. This is deliberately not
+// the treatment paths get -- a path is translated at the filesystem boundary and keeps the host
+// prefix it came with. See docs/porting/path-separator-seam.md.
+AsciiString makeCanonicalMapCacheKey(AsciiString mapPath);
+
 // TheSuperHackers @performance xezon 02/11/2025 Simplifies and improves the implementation of MapCache
 // to prevent expensive reoccurring redundant map cache reads.
 

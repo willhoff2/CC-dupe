@@ -77,6 +77,15 @@ bool Create_Directory(const char * path)
 }
 
 
+FILE * Open_Stream(const char * path, const char * mode)
+{
+	if (path == nullptr || *path == 0 || mode == nullptr) {
+		return nullptr;
+	}
+	return ::fopen(path, mode);
+}
+
+
 bool Delete_File(const char * path)
 {
 	if (path == nullptr || *path == 0) {
@@ -384,6 +393,27 @@ bool Create_Directory(const char * path)
 	**	way to get "make it if the parents happen to be missing too" without a hand rolled walk.
 	*/
 	return std::filesystem::create_directories(std::filesystem::path(resolved.Peek_Buffer()), ec) && !ec;
+}
+
+
+FILE * Open_Stream(const char * path, const char * mode)
+{
+	if (path == nullptr || *path == 0 || mode == nullptr) {
+		return nullptr;
+	}
+
+	/*
+	**	A writing mode is allowed to name a file that does not exist yet, so only the directory
+	**	holding it has to resolve. A reading mode needs the file itself.
+	*/
+	const bool writing = (::strpbrk(mode, "wa+") != nullptr);
+
+	StringClass resolved;
+	if (!Resolve(path, resolved, writing) && !writing) {
+		return nullptr;
+	}
+
+	return ::fopen(resolved.Peek_Buffer(), mode);
 }
 
 

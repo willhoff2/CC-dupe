@@ -58,6 +58,7 @@
 #include "GameClient/MapUtil.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/FPUControl.h"
+#include "WWLib/platform/platform_path.h"
 #include "GameNetwork/GameInfo.h"
 #include "GameNetwork/NetworkDefs.h"
 
@@ -310,6 +311,46 @@ void WaypointMap::update()
 	m_numStartSpots = max(1, m_numStartSpots);
 }
 
+AsciiString makeCanonicalMapCacheKey(AsciiString mapPath)
+{
+	mapPath.toLower();
+
+	// TheSuperHackers @port The lower casing above is what the shipped build already does; the
+	// separator half below is the addition. Nothing produces '/' on Windows, so the Windows build's
+	// keys are untouched.
+	if (mapPath.find('/') == nullptr)
+	{
+		return mapPath;
+	}
+
+	// TheSuperHackers @port A user map path begins with the user data directory, which off Windows is
+	// a genuine host path and is spelled the host way by everything that builds it -- getUserMapDir(),
+	// GameState's portable path conversion, the map preview name. That prefix is a path, not part of
+	// the identifier, so it is kept exactly as it arrived and only the part naming the map inside it
+	// is respelled. See docs/porting/path-separator-seam.md.
+	Int index = 0;
+	if (TheGlobalData != nullptr)
+	{
+		AsciiString userDataPath = TheGlobalData->getPath_UserData();
+		userDataPath.toLower();
+		if (mapPath.startsWith(userDataPath.str()))
+		{
+			index = userDataPath.getLength();
+		}
+	}
+
+	AsciiString key;
+	key.set(mapPath.str(), index);
+
+	for (; index < mapPath.getLength(); ++index)
+	{
+		const char c = mapPath.getCharAt(index);
+		key.concat(c == '/' ? '\\' : c);
+	}
+
+	return key;
+}
+
 const char *const MapCache::m_mapCacheName = "MapCache.ini";
 
 AsciiString MapCache::getMapDir() const
@@ -337,7 +378,10 @@ void MapCache::writeCacheINI( const AsciiString &mapDir )
 	TheFileSystem->createDirectory(mapDir);
 
 	filepath.concat(m_mapCacheName);
-	FILE *fp = fopen(filepath.str(), "w");
+	// TheSuperHackers @port filepath is Windows spelled, and the C runtime off Windows would take
+	// the backslash as part of the file name and write "Maps\MapCache.ini" *beside* the Maps folder,
+	// where nothing ever reads it again. Open_Stream() is fopen() on Windows.
+	FILE *fp = WWPlatform::Path::Open_Stream(filepath.str(), "w");
 	DEBUG_ASSERTCRASH(fp != nullptr, ("Failed to create %s", filepath.str()));
 	if (fp == nullptr) {
 		return;
@@ -347,10 +391,12 @@ void MapCache::writeCacheINI( const AsciiString &mapDir )
 	fprintf(fp, "; This INI file is auto-generated - do not modify\n");
 	fprintf(fp, "; /////////////////////////////////////////////////////////////////////////////\n");
 
+	const AsciiString mapDirKey = makeCanonicalMapCacheKey(mapDir);
+
 	MapCache::iterator it = begin();
 	for (; it != end(); ++it)
 	{
-		if (it->first.startsWithNoCase(mapDir.str()))
+		if (it->first.startsWithNoCase(mapDirKey.str()))
 		{
 			const MapMetaData &md = it->second;
 			fprintf(fp, "\nMapCache %s\n", AsciiStringToQuotedPrintable(it->first.str()).str());
@@ -459,12 +505,16 @@ void MapCache::updateCache()
 
 void MapCache::prepareUnseenMaps( const AsciiString &mapDir )
 {
+	// TheSuperHackers @port Keys are canonical, so the directory they are matched against has to be
+	// canonical too.
+	const AsciiString mapDirKey = makeCanonicalMapCacheKey(mapDir);
+
 	MapCache::iterator it = begin();
 	for (; it != end(); ++it)
 	{
 		const AsciiString &mapName = it->first;
 
-		if (mapName.startsWithNoCase(mapDir.str()))
+		if (mapName.startsWithNoCase(mapDirKey.str()))
 		{
 			it->second.m_doesExist = FALSE;
 		}
@@ -474,6 +524,7 @@ void MapCache::prepareUnseenMaps( const AsciiString &mapDir )
 Bool MapCache::clearUnseenMaps( const AsciiString &mapDir )
 {
 	Bool erasedSomething = FALSE;
+	const AsciiString mapDirKey = makeCanonicalMapCacheKey(mapDir);
 
 	MapCache::iterator it = begin();
 	while (it != end())
@@ -484,7 +535,7 @@ Bool MapCache::clearUnseenMaps( const AsciiString &mapDir )
 		const AsciiString &mapName = it->first;
 		const MapMetaData &mapData = it->second;
 
-		if (mapName.startsWithNoCase(mapDir.str()) && !mapData.m_doesExist)
+		if (mapName.startsWithNoCase(mapDirKey.str()) && !mapData.m_doesExist)
 		{
 			erase(it);
 			erasedSomething = TRUE;
@@ -527,8 +578,7 @@ Bool MapCache::loadMapsFromDisk( const AsciiString &mapDir, Bool isOfficial, Boo
 	for (; filepathIt != filepathList.end(); ++filepathIt)
 	{
 		FileInfo fileInfo;
-		AsciiString filepathLower = *filepathIt;
-		filepathLower.toLower();
+		const AsciiString filepathLower = makeCanonicalMapCacheKey(*filepathIt);
 
 		const char *szFilenameLower = filepathLower.reverseFind('\\');
 		if (!szFilenameLower)
@@ -718,7 +768,8 @@ MapCache *TheMapCache = nullptr;
 
 Bool WouldMapTransfer( const AsciiString& mapName )
 {
-	return mapName.startsWithNoCase(TheMapCache->getUserMapDir());
+	return makeCanonicalMapCacheKey(mapName).startsWithNoCase(
+		makeCanonicalMapCacheKey(TheMapCache->getUserMapDir()).str());
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -943,7 +994,9 @@ Int populateMapListboxNoReset( GameWindow *listbox, Bool useSystemMaps, Bool isM
 		mapDir = TheGlobalData->getPath_UserData();
 		mapDir.concat(TheMapCache->getMapDir());
 	}
-	mapDir.toLower();
+	// TheSuperHackers @port This is matched against cache keys further down, so it is spelled the way
+	// they are.
+	mapDir = makeCanonicalMapCacheKey(mapDir);
 
 	MapNameList mapNames;
 	MapDisplayToFileNameList fileNames;
@@ -1012,7 +1065,7 @@ Bool isValidMap( AsciiString mapName, Bool isMultiplayer )
 		return FALSE;
 	TheMapCache->updateCache();
 
-	mapName.toLower();
+	mapName = makeCanonicalMapCacheKey(mapName);
 	MapCache::iterator it = TheMapCache->find(mapName);
 	if (it != TheMapCache->end())
 	{
@@ -1070,7 +1123,7 @@ Bool isOfficialMap( AsciiString mapName )
 	if(!TheMapCache || mapName.isEmpty())
 		return FALSE;
 	TheMapCache->updateCache();
-	mapName.toLower();
+	mapName = makeCanonicalMapCacheKey(mapName);
 	MapCache::iterator it = TheMapCache->find(mapName);
 	if (it != TheMapCache->end())
 		return it->second.m_isOfficial;
@@ -1080,7 +1133,7 @@ Bool isOfficialMap( AsciiString mapName )
 
 const MapMetaData *MapCache::findMap(AsciiString mapName)
 {
-	mapName.toLower();
+	mapName = makeCanonicalMapCacheKey(mapName);
 	MapCache::iterator it = find(mapName);
 	if (it == end())
 		return nullptr;

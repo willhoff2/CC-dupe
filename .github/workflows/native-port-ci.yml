@@ -831,6 +831,21 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The map cache half of the path-separator seam, and the only one of its three defects that
+      # does not announce itself: a key that misses is not an error, it is wrong state --
+      # `m_isMultiplayer` among it. This fails on the code before that seam landed, which is what
+      # makes it worth running. Generated fixture, no retail data.
+      # docs/porting/path-separator-seam.md.
+      - name: Prove both spellings of a map resolve to one map cache entry
+        run: |
+          set -o pipefail
+          {
+            echo '## Map cache key negative control (debug configuration)'
+            echo '```'
+            python3 scripts/ci/check-path-separator-keys.py --build-dir build/native-debug
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the debug build report
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
