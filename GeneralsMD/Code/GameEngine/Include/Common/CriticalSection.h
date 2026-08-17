@@ -45,7 +45,9 @@
 
 #include "Common/PerfTimer.h"
 
+#ifndef _WIN32
 #include <new>
+#endif
 
 #ifdef PERF_TIMERS
 extern PerfGather TheCritSecPerfGather;
@@ -106,8 +108,9 @@ class CriticalSection
 		}
 };
 
+#ifndef _WIN32
 // TheSuperHackers @bugfix Devin 17/08/2026 A CriticalSection with static storage duration that is
-// never destroyed.
+// never destroyed. Not compiled on Windows: VC6 has neither alignas nor this problem.
 //
 // Off Windows the five critical sections below are entered by the allocator itself, and static
 // destructors keep allocating and freeing after main has returned: a library's static destructor
@@ -141,6 +144,7 @@ class ImmortalCriticalSection
 		alignas(CriticalSection) unsigned char m_storage[sizeof(CriticalSection)];
 		CriticalSection *m_section;
 };
+#endif // !_WIN32
 
 class ScopedCriticalSection
 {
