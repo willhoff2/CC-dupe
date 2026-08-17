@@ -63,7 +63,12 @@ const Char *g_strFile = "data\\Generals.str";
 const Char *g_csfFile = "data\\%s\\Generals.csf";
 const char *gAppPrefix = ""; /// So WB can have a different debug log file name.
 
-static CriticalSection critSec1, critSec2, critSec3, critSec4, critSec5;
+// TheSuperHackers @bugfix Devin 17/08/2026 Immortal, not plain statics: the allocator enters these
+// sections from static destructors that run after main returned, and a destroyed one turns the
+// first late allocation into unbounded recursion. See ImmortalCriticalSection in
+// Common/CriticalSection.h and docs/porting/memory-shutdown-order.md. WinMain.cpp, which Windows
+// builds instead of this file, is unchanged.
+static ImmortalCriticalSection critSec1, critSec2, critSec3, critSec4, critSec5;
 
 
 // main =======================================================================
@@ -73,11 +78,11 @@ int main( int argc, char *argv[] )
 {
 	Int exitcode = 1;
 
-	TheAsciiStringCriticalSection = &critSec1;
-	TheUnicodeStringCriticalSection = &critSec2;
-	TheDmaCriticalSection = &critSec3;
-	TheMemoryPoolCriticalSection = &critSec4;
-	TheDebugLogCriticalSection = &critSec5;
+	TheAsciiStringCriticalSection = critSec1.get();
+	TheUnicodeStringCriticalSection = critSec2.get();
+	TheDmaCriticalSection = critSec3.get();
+	TheMemoryPoolCriticalSection = critSec4.get();
+	TheDebugLogCriticalSection = critSec5.get();
 
 	// initialize the memory manager early
 	initMemoryManager();
@@ -153,6 +158,9 @@ int main( int argc, char *argv[] )
 #ifdef RTS_ENABLE_CRASHDUMP
 	MiniDumper::shutdownMiniDumper();
 #endif
+	// WinMain.cpp clears these three and leaves the string and log ones set; kept identical here.
+	// Clearing them is safe either way now: the sections they pointed at are still alive, so a late
+	// allocation that does take one is serialised rather than racing an unlocked pool.
 	TheUnicodeStringCriticalSection = nullptr;
 	TheDmaCriticalSection = nullptr;
 	TheMemoryPoolCriticalSection = nullptr;

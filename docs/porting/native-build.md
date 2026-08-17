@@ -686,6 +686,28 @@ header), `wcslcpy`/`wcslcat` behind `HAVE_*` because the platform declares both 
 `const path&`, and this file's own §"the one macOS compile failure", which is now
 [`regexpr-posix-port.md`](regexpr-posix-port.md).
 
+### 2a. The Vulkan validation layer on macOS: manifests, not `DYLD_LIBRARY_PATH`
+
+Any gate here that launches a Vulkan binary needs the layer, and the recipe this file used to imply —
+put Homebrew's layer directory on `DYLD_LIBRARY_PATH`, because its manifest names the dylib
+relatively — cannot work through the repo's Python gates: **SIP strips every `DYLD_*` variable when
+it execs a protected binary** such as `/usr/bin/python3` or `/bin/bash`, so the loader could not find
+the layer and the run either failed with `VK_ERROR_LAYER_NOT_PRESENT` (-6) or, worse, ran unvalidated
+and reported `validation messages: 0`.
+
+```sh
+brew install vulkan-loader vulkan-validationlayers molten-vk
+eval "$(python3 scripts/ci/vulkan_manifests.py --require-layer --print-env)"
+```
+
+That writes copies of the validation-layer and MoltenVK manifests carrying **absolute**
+`library_path` values under `build/vulkan-manifests/` and exports `VK_LAYER_PATH` and
+`VK_ICD_FILENAMES`, neither of which SIP touches. The Python gates call
+`vulkan_manifests.child_environment()` themselves, so `python3 scripts/ci/check-*.py` is already
+correct without the `eval`. `validation messages: 0` counts as evidence only when the same run
+printed `validation layer: loaded`; a `--validation` run that did not get the layer now fails. See
+`docs/porting/hidpi-scale.md` §5.
+
 ### 3. Prove it is arm64 and not x86-64 under Rosetta
 
 A build that silently comes out x86-64 invalidates every conclusion drawn from it, and nothing about

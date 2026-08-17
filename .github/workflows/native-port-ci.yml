@@ -742,6 +742,24 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The allocator's critical sections have to outlive static destruction: OpenAL Soft frees
+      # memory from a static destructor, the engine's operator delete enters TheDmaCriticalSection,
+      # and a destroyed section turned that into unbounded recursion and a SIGSEGV after a clean
+      # exit. This links the real archives and asserts the order in one process, with a control that
+      # fails the run if the late destructor did not actually run after plain statics were gone. See
+      # docs/porting/memory-shutdown-order.md.
+      - name: Prove the allocator's critical sections outlive static destruction
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Static destruction order for the allocator'"'"'s critical sections'
+            echo '```'
+            python3 scripts/native-memory-shutdown-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the build report
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -1082,6 +1100,25 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The HiDPI rule at a backing scale no Linux display has. Headless with an injected scale,
+      # which is the only honest way to run the Retina path here: at scale 1 the source and
+      # destination extents of the presentation blit are equal and the pre-fix code passes, which is
+      # exactly why the half-resolution defect survived Linux CI (docs/porting/hidpi-scale.md).
+      - name: HiDPI points/pixels assertions at scale 2.00 and 1.25
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+          XDG_RUNTIME_DIR: /tmp/xdgrt
+        run: |
+          set -o pipefail
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          unset DISPLAY
+          {
+            echo '## HiDPI points/pixels (Linux, lavapipe, injected backing scale)'
+            echo '```'
+            python3 scripts/ci/check-hidpi-scale.py --binary build/spike/zh-hidpi-tests
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: D3D8 Lock/Unlock assertions
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
@@ -1299,9 +1336,10 @@ jobs:
   #    1/255). This job therefore asserts:
   #      * vkCreateInstance succeeds against a portability driver, which is precisely the
   #        VK_ERROR_INCOMPATIBLE_DRIVER failure the opt-in exists to prevent;
-  #      * the validation layer is loaded and silent (DYLD_LIBRARY_PATH below is load-bearing:
-  #        Homebrew's layer manifest names its dylib relatively, and without it the run silently
-  #        proceeds unvalidated);
+  #      * the validation layer is loaded and silent, which the gates now assert rather than
+  #        assume: the "Resolve the Vulkan manifests" step below rewrites Homebrew's manifests with
+  #        absolute library_paths, because the DYLD_LIBRARY_PATH this used to rely on does not
+  #        survive SIP's exec of /usr/bin/python3 and its absence reads as a clean run;
   #      * the readback is within a loose tolerance of the same reference image.
   #    It does NOT assert pixel equality with the Linux reference: the Linux job owns that.
   renderer-spike-macos:
@@ -1335,18 +1373,22 @@ jobs:
             -DCMAKE_PREFIX_PATH="$BREW"
           cmake --build build/spike -j3
 
+      # The loader environment for every step below, resolved once. Both formulae are kegs whose
+      # manifests name their dylib by leaf name, so the loader used to need DYLD_LIBRARY_PATH --
+      # which SIP strips when /bin/bash or /usr/bin/python3 is exec'd, leaving a gate that either
+      # dies with VK_ERROR_LAYER_NOT_PRESENT or, worse, runs unvalidated and reports zero
+      # validation messages (docs/porting/apple-silicon-verification.md 8.1). The manifests are
+      # rewritten with absolute library_paths instead, and VK_LAYER_PATH / VK_ICD_FILENAMES are not
+      # DYLD_* and survive. --require-layer means a missing layer fails here rather than silently
+      # later.
+      - name: Resolve the Vulkan manifests with absolute library paths
+        run: |
+          set -eux -o pipefail
+          python3 scripts/ci/vulkan_manifests.py --github-env --require-layer
+
       - name: Render headless through MoltenVK and compare the readback
         run: |
           set -eux -o pipefail
-          # Both formulae are kegs: their manifests are not linked into $(brew --prefix)/share,
-          # and molten-vk has moved the manifest between releases, so locate it rather than
-          # hard-coding a path that silently leaves the loader with no driver at all.
-          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
-          export VK_ICD_FILENAMES
-          export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
-          # Load-bearing: Homebrew's layer manifest names its dylib relatively, so without this
-          # the loader cannot find it and the run proceeds silently unvalidated.
-          export DYLD_LIBRARY_PATH="$(brew --prefix vulkan-validationlayers)/lib:$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
           test -f "$VK_ICD_FILENAMES"
           vulkaninfo --summary | head -30 || true
           {
@@ -1363,15 +1405,24 @@ jobs:
       - name: Fixed-function pixel assertions through MoltenVK
         run: |
           set -eux -o pipefail
-          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
-          export VK_ICD_FILENAMES
-          export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
-          export DYLD_LIBRARY_PATH="$(brew --prefix vulkan-validationlayers)/lib:$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
           {
             echo '## Fixed-function pixel assertions (macOS arm64, MoltenVK)'
             echo '```'
             build/spike/zh-feature-probe
             build/spike/zh-fixedfunc-tests
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The same injected-scale assertions through MoltenVK, where the point-to-pixel arithmetic
+      # actually has to hold. Still not a Retina answer: the runner has no display, so the real
+      # backingScaleFactor path is spikes/renderer/tools/macos-window-check.sh on a Mac session.
+      - name: HiDPI points/pixels assertions through MoltenVK
+        run: |
+          set -eux -o pipefail
+          {
+            echo '## HiDPI points/pixels (macOS arm64, MoltenVK, injected backing scale)'
+            echo '```'
+            python3 scripts/ci/check-hidpi-scale.py --binary build/spike/zh-hidpi-tests
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -1381,10 +1432,6 @@ jobs:
       - name: D3D8 Lock/Unlock assertions through MoltenVK
         run: |
           set -eux -o pipefail
-          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
-          export VK_ICD_FILENAMES
-          export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
-          export DYLD_LIBRARY_PATH="$(brew --prefix vulkan-validationlayers)/lib:$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
           {
             echo '## D3D8 Lock/Unlock usage classes (macOS arm64, MoltenVK)'
             echo '```'
@@ -1398,10 +1445,6 @@ jobs:
       - name: Staging cost (numbers only, not gated)
         run: |
           set -eux -o pipefail
-          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
-          export VK_ICD_FILENAMES
-          export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
-          export DYLD_LIBRARY_PATH="$(brew --prefix vulkan-validationlayers)/lib:$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
           {
             echo '## Staging cost (macOS arm64, MoltenVK) -- reported, not gated'
             echo '```'
@@ -1521,6 +1564,14 @@ jobs:
           command -v cmake > /dev/null || brew install cmake
           brew list --versions molten-vk vulkan-loader vulkan-headers glslang
 
+      # As in the renderer spike job: the ICD manifest is rewritten with an absolute library_path,
+      # so the loader finds MoltenVK without a DYLD_* variable SIP would strip. No --require-layer
+      # here, because this job does not install the validation layer.
+      - name: Resolve the Vulkan manifests with absolute library paths
+        run: |
+          set -eux -o pipefail
+          python3 scripts/ci/vulkan_manifests.py --github-env
+
       - name: Check both backends' scan-code tables against KeyScanCodes.h
         run: |
           set -o pipefail
@@ -1556,9 +1607,6 @@ jobs:
       - name: Create a VkSurfaceKHR from a CAMetalLayer through MoltenVK
         run: |
           set -o pipefail
-          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
-          export VK_ICD_FILENAMES
-          export DYLD_LIBRARY_PATH="$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
           test -f "$VK_ICD_FILENAMES"
           {
             echo '## VK_EXT_metal_surface on this runner'
@@ -1574,9 +1622,6 @@ jobs:
       - name: Present to an NSWindow's CAMetalLayer
         run: |
           set -o pipefail
-          VK_ICD_FILENAMES=$(find "$(brew --prefix molten-vk)/" -name 'MoltenVK_icd.json' | head -1)
-          export VK_ICD_FILENAMES
-          export DYLD_LIBRARY_PATH="$(brew --prefix molten-vk)/lib:$(brew --prefix)/lib"
           {
             echo '## Cocoa NSWindow run'
             echo '```'

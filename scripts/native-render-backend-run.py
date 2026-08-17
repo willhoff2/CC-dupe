@@ -19,8 +19,10 @@ ELF flags and lavapipe's, and the entry-point rename needs llvm-objcopy and llvm
 (`brew install llvm`), because Apple's cctools have no --redefine-sym. That path has now been run on
 an Apple Silicon outpost (docs/porting/renderer-integration-arm64.md): the link half was right as
 written, and the two things it got wrong were both runtime environment -- Homebrew's MoltenVK ICD
-lives under the keg's `etc/vulkan/icd.d`, and the validation layer's dylib is named relatively so
-DYLD_LIBRARY_PATH has to carry the keg's lib directory. Both are corrected here.
+lives under the keg's `etc/vulkan/icd.d`, and the validation layer's dylib is named relatively.
+Both are corrected here -- the layer through a manifest rewritten with an absolute library path
+(scripts/ci/vulkan_manifests.py), because SIP strips DYLD_* when it execs this script's interpreter,
+so a DYLD_LIBRARY_PATH recipe cannot reach the child at all.
 
 Usage:
     python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \\
@@ -40,6 +42,9 @@ import re
 import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "ci"))
+import vulkan_manifests  # noqa: E402  (the path above has to be set first)
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 BUILD_DIR = REPO_ROOT / "build" / "native"
@@ -286,11 +291,17 @@ def run_environment(validation=False):
         existing = environment.get(loader_path, "")
         environment[loader_path] = f"{ffmpeg_dir}:{existing}" if existing else str(ffmpeg_dir)
     if MACOS:
-        # The loader opens the layer dylib by leaf name; see MACOS_LOADER_DIRS.
+        # DYLD_LIBRARY_PATH is not a recipe a Python wrapper can use -- SIP strips every DYLD_*
+        # variable when it execs /usr/bin/python3 or a SIP-protected shell, so the leaf-named layer
+        # dylib went unfound and --validation either failed with -6 or ran unvalidated. The layer
+        # and the driver are reached through manifests rewritten with absolute library paths
+        # instead (scripts/ci/vulkan_manifests.py, docs/porting/hidpi-scale.md 5). The keg lib
+        # directories stay on the loader path for the non-layer dylibs the harness links by name.
         for directory in MACOS_LOADER_DIRS:
             if pathlib.Path(directory).is_dir():
                 existing = environment.get(loader_path, "")
                 environment[loader_path] = f"{directory}:{existing}" if existing else directory
+        environment = vulkan_manifests.child_environment(environment)
     if "VK_ICD_FILENAMES" not in environment:
         # Naming the ICD rather than trusting the loader's search is what the renderer-spike skill
         # does, and on macOS it is what keeps a stray SDK loader from picking a different driver.
@@ -361,7 +372,7 @@ def main():
         # inherit the loader path the layer needs; target.env-vars is set inside the session, which
         # is where the launched process reads it from.
         exported = [f"{name}={environment[name]}" for name in
-                    (loader_path, "VK_ICD_FILENAMES", "ZH_VULKAN_VALIDATION")
+                    (loader_path, "VK_ICD_FILENAMES", "VK_LAYER_PATH", "ZH_VULKAN_VALIDATION")
                     if name in environment]
         # A command file, not a series of -o: with -o, lldb stops executing the remaining commands
         # once the process stops on a signal, so `bt` never runs and the crash is reported without

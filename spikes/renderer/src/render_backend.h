@@ -417,12 +417,34 @@ public:
 
 	// --- windowed presentation: the DX8Wrapper::Reset_Device shape ------------
 	// The window's client area changed size, so the swapchain no longer matches it. The
-	// colour target keeps its own resolution and is scaled on present, which is the cheap
-	// half of a device reset. A headless backend has nothing to do.
+	// colour target keeps its own resolution in points and is scaled on present, which is the
+	// cheap half of a device reset; what it does not keep is its *pixel* size, because the
+	// window may have moved to a display with a different backing scale, so this re-reads the
+	// scale and rebuilds the targets when it changed. A headless backend has nothing to do.
 	virtual bool Resize_Presentation(uint32_t width, uint32_t height) {
 		(void)width;
 		(void)height;
 		return true;
+	}
+
+	// --- HiDPI: points in, pixels out (docs/porting/hidpi-scale.md) ----------
+	// Every size in this interface is in D3D8's own units - the client area's points - and the
+	// backend multiplies by the backing scale at its own boundary: the colour target, the
+	// viewport, the scissor and the readback are in pixels, the coordinates the engine passes
+	// are not. At scale 1 the two are the same number and nothing below changes.
+	//
+	// Init() takes the scale from the window seam (Window_Backing_Scale) when it has one.
+	// Set_Render_Scale() overrides it, which is how a headless run - CI, on Linux, at a scale no
+	// Linux display has - exercises the pixel path; called before Init() it chooses the initial
+	// scale, and after Init() it rebuilds the targets at the new one, which is what a window
+	// dragged between a Retina and a non-Retina display needs.
+	virtual bool Set_Render_Scale(float scale) { return scale == 1.0f; }
+	virtual float Render_Scale() const { return 1.0f; }
+	// The colour target's real size in pixels: client size x scale, rounded the way the
+	// platform rounds its drawable. Zero before Init().
+	virtual void Device_Pixel_Size(uint32_t& out_width, uint32_t& out_height) const {
+		out_width = 0;
+		out_height = 0;
 	}
 
 	// --- spike-only: prove what was rasterised -------------------------------
@@ -439,6 +461,12 @@ public:
 
 	// Number of validation-layer warnings/errors seen. Zero is the point.
 	virtual uint32_t Validation_Message_Count() const = 0;
+	// Whether validation was actually running: the layer was found, the instance was created
+	// with it, and the debug messenger that counts its messages exists. Without this,
+	// Validation_Message_Count() == 0 cannot be told apart from "the layer never loaded", which
+	// is the failure SIP produces on macOS (apple-silicon-verification.md 8.1). False when
+	// validation was not requested.
+	virtual bool Validation_Active() const = 0;
 };
 
 // Backing implementation lives in vulkan_backend.cpp.

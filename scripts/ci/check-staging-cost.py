@@ -28,10 +28,12 @@ diff, and is refreshed with --update in the PR that earns it.
 """
 import argparse
 import json
-import os
 import pathlib
 import subprocess
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import vulkan_manifests  # noqa: E402  (the path above has to be set first)
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CEILING_PATH = REPO_ROOT / "docs" / "porting" / "ci-baselines" / "staging-cost-ceiling.json"
@@ -49,7 +51,10 @@ MAX_ALLOCATIONS_PER_LOCK = 0.05
 
 
 def run_workload(binary, frames, no_swizzle, validation, retain=False):
-    env = dict(os.environ)
+    # DYLD_LIBRARY_PATH cannot be handed to the child on macOS -- dyld strips it when a
+    # SIP-protected binary is exec'd, this script included -- so the layer and the driver are
+    # reached through manifests rewritten with absolute library paths instead.
+    env = vulkan_manifests.child_environment()
     if no_swizzle:
         env["ZH_SPIKE_NO_VIEW_SWIZZLE"] = "1"
     else:
@@ -105,7 +110,7 @@ def ceiling_from(result):
     }
 
 
-def check_mode(name, result, ceiling, failures):
+def check_mode(name, result, ceiling, failures, validation=True):
     print(f"\n  {name}")
     print(f"    {'metric':32s} {'measured':>12s} {'ceiling':>12s}")
     for key in ("staging_allocations", "staging_resident_bytes", "staging_peak_bytes",
@@ -138,6 +143,11 @@ def check_mode(name, result, ceiling, failures):
         failures.append(f"{name}: the probe texture read back wrong, so the pool is not correct")
     if result["validation_messages"]:
         failures.append(f"{name}: {result['validation_messages']} validation message(s)")
+    # Zero messages from a run the loader never gave a layer is not a clean run, and on macOS that
+    # is exactly what the old DYLD_LIBRARY_PATH recipe produced.
+    if validation and not result.get("validation_active"):
+        failures.append(f"{name}: the validation layer was not loaded, so zero messages says "
+                        "nothing -- see scripts/ci/vulkan_manifests.py")
 
     # A read that finds the resource clean must cost nothing, which is the whole point
     # of the GPU-dirty bit: if every read is a transfer again, this is 0.
@@ -209,7 +219,8 @@ def main():
         if name not in ceiling["modes"]:
             failures.append(f"{name}: no ceiling for this mode")
             continue
-        check_mode(name, result, ceiling["modes"][name], failures)
+        check_mode(name, result, ceiling["modes"][name], failures,
+                   validation=not args.no_validation)
 
     if args.self_check and not failures:
         # The regression this gate exists for, reintroduced deliberately: every resource

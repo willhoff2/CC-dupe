@@ -88,6 +88,9 @@ struct Report {
 	uint32_t buffer_locks = 0;
 	uint64_t steady_state_bytes = 0; // staging checked out at a frame boundary
 	uint32_t validation_messages = 0;
+	// Whether the layer really loaded: zero messages from an unvalidated run proves nothing
+	// (docs/porting/apple-silicon-verification.md 8.1).
+	bool validation_active = false;
 	bool pixels_ok = false;
 	bool retain_mode = false;
 	bool view_swizzle = true;
@@ -450,6 +453,7 @@ void Print_Json(const Report& r) {
 	            static_cast<unsigned long long>(r.stats.ring_bytes));
 	std::printf("  \"ring_wrap_waits\": %u,\n", r.stats.ring_wrap_waits);
 	std::printf("  \"validation_messages\": %u,\n", r.validation_messages);
+	std::printf("  \"validation_active\": %s,\n", r.validation_active ? "true" : "false");
 	std::printf("  \"pixels_ok\": %s\n", r.pixels_ok ? "true" : "false");
 	std::printf("}\n");
 }
@@ -500,11 +504,16 @@ int main(int argc, char** argv) {
 	report.texture_locks = workload.texture_locks;
 	report.buffer_locks = workload.buffer_locks;
 	report.validation_messages = backend->Validation_Message_Count();
+	report.validation_active = backend->Validation_Active();
 	Print_Json(report);
 
 	backend->Shutdown();
 	delete backend;
 	if (!report.pixels_ok) return 1;
 	if (validation && report.validation_messages != 0) return 1;
+	if (validation && !report.validation_active) {
+		std::fprintf(stderr, "FAIL: validation was requested but no layer was loaded\n");
+		return 1;
+	}
 	return 0;
 }

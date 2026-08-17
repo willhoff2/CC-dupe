@@ -509,6 +509,28 @@ void Window_Client_Size(void * window, int & width, int & height)
 	height = state->Height;
 }
 
+float Window_Backing_Scale(void * window)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return 1.0f;
+
+	/*
+	**	SDL has no backingScaleFactor call: the factor is the ratio between the drawable, which
+	**	is in pixels, and the window, which is in points. On X11 and on a non-Retina display the
+	**	two are equal and this is exactly 1.
+	*/
+	int window_width = 0;
+	int window_height = 0;
+	SDL_GetWindowSize(state->Sdl_Window, &window_width, &window_height);
+	int drawable_width = 0;
+	int drawable_height = 0;
+	SDL_Vulkan_GetDrawableSize(state->Sdl_Window, &drawable_width, &drawable_height);
+	if (window_width <= 0 || window_height <= 0 || drawable_width <= 0 || drawable_height <= 0) {
+		return 1.0f;
+	}
+	return static_cast<float>(drawable_width) / static_cast<float>(window_width);
+}
+
 bool Window_Set_Mode(void * window, int width, int height, bool fullscreen)
 {
 	WindowState * state = State(window);

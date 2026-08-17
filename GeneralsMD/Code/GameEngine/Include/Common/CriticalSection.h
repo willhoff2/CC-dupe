@@ -45,6 +45,10 @@
 
 #include "Common/PerfTimer.h"
 
+#ifndef _WIN32
+#include <new>
+#endif
+
 #ifdef PERF_TIMERS
 extern PerfGather TheCritSecPerfGather;
 #endif
@@ -103,6 +107,44 @@ class CriticalSection
 			#endif
 		}
 };
+
+#ifndef _WIN32
+// TheSuperHackers @bugfix Devin 17/08/2026 A CriticalSection with static storage duration that is
+// never destroyed. Not compiled on Windows: VC6 has neither alignas nor this problem.
+//
+// Off Windows the five critical sections below are entered by the allocator itself, and static
+// destructors keep allocating and freeing after main has returned: a library's static destructor
+// builds a std::string, that reaches the engine's operator new, and the allocator takes
+// TheDmaCriticalSection on the way. Plain statics are already destroyed by then. Locking a
+// destroyed std::recursive_mutex reports an error, std::system_error's message allocates, that
+// allocation takes the same dead section, and the process recurses until the stack is gone -- the
+// SIGSEGV that ended every clean Apple Silicon shutdown
+// (docs/porting/apple-silicon-verification.md 8.5, docs/porting/memory-shutdown-order.md).
+//
+// The lifetime is the fix: the section is constructed in this object's own storage and its
+// destructor is never run, so the pointers the allocator holds stay valid for as long as any
+// destructor can allocate. Nothing leaks that the process does not release on exit anyway, and
+// Windows is untouched: WinMain.cpp keeps its plain statics and its DeleteCriticalSection.
+class ImmortalCriticalSection
+{
+	public:
+		ImmortalCriticalSection() : m_section(new (m_storage) CriticalSection())
+		{
+		}
+
+		// No destructor on purpose. Declaring one, even an empty one, would register this object
+		// for destruction and defeat the point.
+
+		CriticalSection *get() { return m_section; }
+
+	private:
+		ImmortalCriticalSection(const ImmortalCriticalSection &);
+		ImmortalCriticalSection &operator=(const ImmortalCriticalSection &);
+
+		alignas(CriticalSection) unsigned char m_storage[sizeof(CriticalSection)];
+		CriticalSection *m_section;
+};
+#endif // !_WIN32
 
 class ScopedCriticalSection
 {
