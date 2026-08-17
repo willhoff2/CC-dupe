@@ -248,6 +248,13 @@ build (`loadscreen_video_null_test.cpp`, which follows the existing `tests/` con
 64 → 65 because the video harness calls `WW3D::Set_Render_Device`. Baselines regenerated, never
 hand-edited.
 
+The Windows oracle: `./scripts/docker-build.sh --game zh` (VC6 under wine) completed **1363/1363**
+with `generalszh.exe` and all six tools linked, on this commit. The authoritative replay gate is
+`Replay Check GeneralsMD` on `windows-2022` in CI — per `replay-check-gamedata.md` a wine replay
+verdict is differential only and is never quoted as the gate, so this slice does not quote one. The
+engine files it touches are `LoadScreen.cpp` (in the Windows build; the guard changes only the
+null-stream case) and `vulkanrenderbackend.cpp` (not compiled on Windows).
+
 `check-lanmessage-layout.py` fails its two 32-bit cases on this box for lack of 32-bit libraries; it
 fails identically on unmodified `main` (verified in a clean worktree), so it is an environment gap
 and not this change.
