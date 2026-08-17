@@ -180,11 +180,14 @@ def pack_stage_dir(label: str, stage: Path, archive: Path, seven_zip: str,
     if archive.exists():
         archive.unlink()
 
-    # Archive the staged tree's *contents*, so paths inside are relative exactly as the
-    # workflow's `7z x -o<install path>` expects. Timestamps are not stored, which makes
-    # the archive - and therefore the SHA256 the workflow pins - reproducible: repacking
-    # the same install twice would otherwise produce two different hashes, because the
-    # staging directory entries carry the time they were created.
+    # Archive the staged tree's *contents*, not the staging directory itself, so entry paths
+    # are exactly what the caller laid out. For the trimmed pair that is the install layout the
+    # workflow's `7z x -o<install path>` expects; callers that stage under a per-root directory
+    # (the full and movies objects) get that directory as a prefix, and unpack accordingly.
+    #
+    # Timestamps are not stored, which makes the archive - and therefore the SHA256 the workflow
+    # pins - reproducible: repacking the same install twice would otherwise produce two different
+    # hashes, because the staging directory entries carry the time they were created.
     result = subprocess.run(
         [seven_zip, "a", "-t7z", f"-mx={level}", "-mtm=off", "-mtc=off", "-mta=off",
          str(archive), "."],
@@ -280,8 +283,14 @@ def build_movies_archive(generals: Path, generalsmd: Path, archive: Path,
     """Pack every .bik from both install roots, preserving each one's path within its root.
 
     The movies are loose files, not entries in a .big, so they are absent from every other
-    object this script produces. Paths are kept relative to the install root (`Data/Movies`,
-    `Data/English/Movies`) so `7z x -o<install path>` puts them back where the game looks.
+    object this script produces.
+
+    Layout matches the full archive: each install root gets its own top-level directory
+    (`Generals/`, `GeneralsMD/`), and paths below it are relative to that root - so an entry
+    reads `GeneralsMD/Data/English/Movies/MD_USA02_0.bik`. Extract to a staging directory and
+    copy each top-level directory's contents into the install path it belongs to. Extracting
+    straight over an install with `7z x -o<install path>` would bury them a level deep, where
+    the game does not look.
     """
     trees = [("Generals", generals, None), ("GeneralsMD", generalsmd, generals)]
     manifest: list[tuple[str, Path, int]] = []

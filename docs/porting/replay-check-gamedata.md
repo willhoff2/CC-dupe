@@ -90,8 +90,11 @@ Note where the weight is. `Data/Movies` holds only the two menu backgrounds
 **29 more live in the base Generals tree**, which Zero Hour reads. Looking only at
 `GeneralsMD/Data/Movies` undercounts the video data by three orders of magnitude.
 
-Paths are kept relative to each install root so `7z x -o<install path>` puts them back where the
-game looks for them.
+The layout matches the full archive: two top-level directories, `Generals/` and `GeneralsMD/`, with
+paths below each one relative to that install root — so an entry reads
+`GeneralsMD/Data/English/Movies/MD_USA02_0.bik`. Extract to a staging directory and copy each
+top-level directory's contents into the install path it belongs to. Extracting straight over an
+install with `7z x -o<install path>` buries them one level deep, where the game does not look.
 
 > One trap worth knowing if you re-derive this: a depot copied for its data often nests the
 > Generals tree *inside* the Zero Hour one (`zh-data/ZH_Generals`), so a recursive `.bik` sweep of
