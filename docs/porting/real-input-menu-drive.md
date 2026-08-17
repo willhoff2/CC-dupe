@@ -168,17 +168,27 @@ base Generals install:
 `Art\W3D\new_skybox.W3D` does exist inside the base game's `W3D.big`. So the guard is what makes the
 campaign mission run, and the sky is simply not drawn — the mission above ran with the guard exercised.
 
+**Superseded:** the lookup above failed because the base game's archives were not mounted at all, not
+because the depot lacks the asset. See
+[`base-game-install-path.md`](base-game-install-path.md) §1: `loadBigFilesFromDirectory` concatenates
+the search mask onto the install path, so a value without a trailing separator mounts nothing. With
+that fixed the asset resolves and `m_skyBox` is non-null.
+
 ## 4. The walls that were not fixed, classified
 
-### 4.1 `new_skybox.W3D` from the base game is not mounted — missing data
+### 4.1 `new_skybox.W3D` from the base game is not mounted — resolved, and it was a code defect
 
 Zero Hour mounts the base game's archives via `STRING_InstallPath` (`StdBIGFileSystem::init`, `RTS_ZEROHOUR`
 block). The setting was written to the portable store
 (`~/Library/Application Support/Command and Conquer Generals Zero Hour/Registry.ini`, section
 `[SOFTWARE\Electronic Arts\EA Games\Generals]`, key `STRING_InstallPath`) and Zero Hour's own archives
 resolve (`Data\INI\GameData.ini` → 1), but the base game's do not. Whether that is the settings key, the
-depot layout, or `loadBigFilesFromDirectory` off Windows is the next slice's question; it is data/config,
-not a code defect, and the guard above means it no longer costs a mission.
+depot layout, or `loadBigFilesFromDirectory` off Windows is the next slice's question; the guard above means
+it no longer costs a mission.
+
+That question is answered in [`base-game-install-path.md`](base-game-install-path.md): it was
+`loadBigFilesFromDirectory`, and the classification here — data/config rather than a code defect — was
+wrong.
 
 ### 4.2 `W3DShroud::getShroudLevel` under river water — port defect, not this slice
 

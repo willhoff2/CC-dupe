@@ -12,6 +12,7 @@ set(GAMEENGINE_SRC
     Include/Common/AudioRandomValue.h
     Include/Common/AudioRequest.h
     Include/Common/AudioSettings.h
+    Include/Common/BaseGameInstallReport.h
 #    Include/Common/BattleHonors.h
 #    Include/Common/BezFwdIterator.h
 #    Include/Common/BezierSegment.h

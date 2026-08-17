@@ -12,6 +12,8 @@
 *.user
 *.ncb
 /build*
+# macos-window-check.sh builds beside the spike, not under /build
+spikes/renderer/build-macos-window/
 nbproject/
 project/
 doxygen/

@@ -109,6 +109,11 @@ MoltenVK as well as lavapipe.
 
 ## 3. What is Linux-only, and what a Mac session must run
 
+**Since confirmed on real hardware.** An M1 Pro run of every gate below, with the numbers, is in
+[`base-game-install-path.md`](base-game-install-path.md) §4: `backingScaleFactor` 2.00 read off the
+panel, a 100x80 point client rendering at 200x160 pixels, `9 checks, 0 failed`, and the retail menu's
+800x600 default at 1600x1200 pixels rather than upscaled.
+
 **Everything above was measured on Linux against lavapipe, plus MoltenVK on a display-less CI
 runner.** An injected scale is not a Retina display: it proves the arithmetic and the plumbing, and
 it cannot prove that `NSWindow.backingScaleFactor` reaches the backend on real hardware, that

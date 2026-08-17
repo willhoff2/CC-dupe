@@ -266,6 +266,11 @@ the rebased tree.
 
 ## 7. Linux-only, and what a Mac session must run
 
+**Since run on an M1 Pro** — see [`base-game-install-path.md`](base-game-install-path.md) §4. On
+MoltenVK, in both swizzle modes, the `CopyRects A4R4G4B4` case reports `mean |delta| 0.000` against
+controls of `117.2` (the defect: host bytes reinterpreted) and `65.9` (flat), and the retail menu draws
+each label once against real base-game backdrop art.
+
 Everything in §2, §4.2 and §6 is Linux/lavapipe. What a Mac session should run, in order:
 
 ```sh
