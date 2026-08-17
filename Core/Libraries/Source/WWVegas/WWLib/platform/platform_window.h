@@ -224,6 +224,20 @@ bool Window_Is_Active(void * window);
 void Window_Client_Size(void * window, int & width, int & height);
 
 /*
+**	How many device pixels one point is on the display this window is currently on:
+**	[NSWindow backingScaleFactor] on macOS, the drawable-size/window-size ratio on SDL2,
+**	1.0 wherever the platform has no notion of one or cannot say. It changes at run time when
+**	the window is dragged between a Retina and a non-Retina display.
+**
+**	This is the ONE place points become pixels, and the renderer is its only consumer: it sizes
+**	its colour target at client size x scale so the game rasterises every pixel of the panel
+**	(docs/porting/hidpi-scale.md). Everything else in this header stays in points - the mouse,
+**	the GUI and the window geometry - and multiplying any of those by this is the bug this
+**	function exists to fix, not a use of it.
+*/
+float Window_Backing_Scale(void * window);
+
+/*
 **	Placement and the mode change. Window_Set_Mode() covers what W3DDisplay's
 **	setDisplayMode does through SetWindowPos()/ShowWindow() plus D3D8's device reset:
 **	resize the client area and switch borderless-fullscreen on or off. It does *not* change

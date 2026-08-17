@@ -24,13 +24,18 @@
 #>>   5. runs zh-window-spike-cocoa, which additionally creates an NSWindow, pumps AppKit
 #>>      events, presents 240 frames and checks the read-back pixels. This is the step that
 #>>      needs a login session with a display;
-#>>   6. runs zh-window-spike (the SDL2 backend, if usable) for comparison, so that a failure
+#>>   6. runs zh-hidpi-tests-cocoa --window, which is the full-resolution check: it asserts that
+#>>      the colour target, the viewport, the scissor and the read-back followed this display's
+#>>      backingScaleFactor, and that the coverage edge is one pixel wide rather than smeared by
+#>>      an upscale. It FAILS on a scale-1 display (--min-scale 2.0) because a pass there would
+#>>      say nothing about Retina;
+#>>   7. runs zh-window-spike (the SDL2 backend, if usable) for comparison, so that a failure
 #>>      can be attributed to the Cocoa backend rather than to the Mac, the driver or the
 #>>      renderer.
 #>>
 #>> Requirements: Xcode command line tools, CMake 3.20+, glslangValidator or glslc, and a Vulkan
 #>> loader with MoltenVK (the LunarG macOS SDK, or `brew install molten-vk vulkan-headers
-#>> vulkan-loader glslang`). SDL2 (`brew install sdl2`) is optional and only used for step 6;
+#>> vulkan-loader glslang`). SDL2 (`brew install sdl2`) is optional and only used for step 7;
 #>> note that Homebrew's SDL2 has shipped x86-only headers on arm64 images, which is what
 #>> --no-sdl2 is for.
 #>>
@@ -209,6 +214,28 @@ elif [[ "${allow_no_display}" == "1" ]]; then
 NSWindow path remains unverified"
 else
 	fail "zh-window-spike-cocoa reported failures (see its PASS/FAIL lines above)"
+fi
+
+step "is the render full resolution on this display? (Retina, backing scale 2)"
+# The half-resolution defect (docs/porting/apple-silicon-verification.md 8.4,
+# docs/porting/hidpi-scale.md): the colour target used to be sized in points while the swapchain
+# was in pixels, so the game rendered a quarter of a Retina panel and the presentation blit
+# upscaled it. Linux CI runs the same assertions headless at an injected scale, which is honest but
+# is not this display: only a real NSWindow reports a real backingScaleFactor. This step needs the
+# Retina panel, and it FAILS rather than skips on a scale-1 display, because a pass there would
+# mean nothing.
+if cmake --build "${build_dir}" --target zh-hidpi-tests-cocoa; then
+	hidpi_args=(--window --min-scale 2.0)
+	if "${build_dir}/zh-hidpi-tests-cocoa" "${hidpi_args[@]}"; then
+		pass "the colour target, the viewport, the scissor and the read-back are the panel's pixels"
+	elif [[ "${allow_no_display}" == "1" ]]; then
+		skip "zh-hidpi-tests-cocoa needs a windowing session with a Retina display; \
+--allow-no-display, so this is not counted and the full-resolution claim is UNVERIFIED"
+	else
+		fail "the render is not full resolution on this display (see its PASS/FAIL lines above)"
+	fi
+else
+	fail "zh-hidpi-tests-cocoa does not build"
 fi
 
 step "control: the same driver on the SDL2 backend"

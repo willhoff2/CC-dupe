@@ -1216,6 +1216,12 @@ int main(int argc, char** argv) {
 	            stats.ring_discards, stats.ring_appends,
 	            static_cast<unsigned long long>(stats.ring_bytes), stats.ring_wrap_waits);
 
+	// A run that asked for validation and did not get it is a failed run, not a clean one
+	// (docs/porting/apple-silicon-verification.md 8.1).
+	if (validation && !backend->Validation_Active()) {
+		std::fprintf(stderr, "\nFAIL: validation was requested but no layer was loaded\n");
+		++failed;
+	}
 	const uint32_t validation_messages = backend->Validation_Message_Count();
 	std::printf("\nvalidation messages: %u\n", validation_messages);
 	std::printf("%d case(s) failed, %d skipped\n", failed, skipped);

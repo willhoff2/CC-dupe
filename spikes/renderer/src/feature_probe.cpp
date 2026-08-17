@@ -133,6 +133,11 @@ public:
 	void Shutdown();
 	int Run_Cases();
 	uint32_t Validation_Messages() const { return validation_messages_; }
+	// Whether the layer really loaded, as opposed to having been asked for: zero messages from
+	// an unvalidated instance proves nothing (docs/porting/apple-silicon-verification.md 8.1).
+	bool Validation_Active() const {
+		return validation_layer_loaded_ && messenger_ != VK_NULL_HANDLE;
+	}
 	const char* Device_Name() const { return device_name_.c_str(); }
 	const char* Depth_Format_Name() const { return depth_format_name_; }
 
@@ -216,6 +221,7 @@ private:
 	std::vector<Image> textures_;
 	std::string device_name_;
 	uint32_t validation_messages_ = 0;
+	bool validation_layer_loaded_ = false;
 };
 
 // --- setup ------------------------------------------------------------------
@@ -251,8 +257,11 @@ bool Probe::Create_Instance(bool validation) {
 			}
 		}
 		if (layers.empty()) {
+			std::printf("validation layer: absent\n");
 			std::fprintf(stderr, "note: validation layer not present, continuing without\n");
 		} else {
+			std::printf("validation layer: loaded\n");
+			validation_layer_loaded_ = true;
 			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 		}
 	}
@@ -1295,7 +1304,11 @@ int main(int argc, char** argv) {
 	std::printf("device: %s\n", probe.Device_Name());
 	std::printf("depth-stencil format chosen: %s\n", probe.Depth_Format_Name());
 
-	const int failures = probe.Run_Cases();
+	int failures = probe.Run_Cases();
+	if (validation && !probe.Validation_Active()) {
+		std::fprintf(stderr, "\nFAIL: validation was requested but no layer was loaded\n");
+		++failures;
+	}
 	std::printf("\nvalidation messages: %u\n", probe.Validation_Messages());
 	std::printf("%d case(s) failed\n", failures);
 	probe.Shutdown();

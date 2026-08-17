@@ -859,6 +859,20 @@ void Window_Client_Size(void * window, int & width, int & height)
 	height = static_cast<int>(bounds.size.height);
 }
 
+float Window_Backing_Scale(void * window)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return 1.0f;
+	/*
+	**	The window's own factor, not the main screen's: a window on a Retina display and a
+	**	window on an external 1x display report different numbers, and dragging one between
+	**	them changes this while the client size in points stays put.
+	*/
+	const CGFloat scale = [state->Window backingScaleFactor];
+	if (!(scale > 0.0)) return 1.0f;
+	return static_cast<float>(scale);
+}
+
 bool Window_Set_Mode(void * window, int width, int height, bool fullscreen)
 {
 	WindowState * state = State(window);

@@ -549,6 +549,10 @@ with an absolute `library_path` plus `VK_LAYER_PATH` (§2.5), and update the rec
 `native-build.md` / the `renderer-spike-verify` skill. Dangerous because the same absence reads as
 `validation messages: 0`.
 
+**Fixed** by `scripts/ci/vulkan_manifests.py`, which rewrites both manifests with absolute paths and
+hands the gates `VK_LAYER_PATH`/`VK_ICD_FILENAMES`; a `--validation` run that did not load the layer
+now fails instead of reporting zero messages. `docs/porting/hidpi-scale.md` §5.
+
 ### 8.2 `Copy_Rects: source and destination formats differ` — unimplemented path
 The shell's 2D composition blit declines when the formats differ, leaving the destination
 unwritten — which is the magenta/noise field behind the retail menu, and (drawn twice at two
@@ -565,10 +569,20 @@ swapchain is the drawable in **pixels** (1600x1200); `Present` reconciles them w
 `VK_FILTER_LINEAR` blit, so the game renders a quarter of the panel's pixels and is upscaled. Fix
 direction and why it is not a small fix: §4.2. Invisible to CI because Linux asserts scale 1.00.
 
+**Fixed** — the default colour target and everything device-side now follow the backing scale in
+pixels while the mouse, the GUI and the D3D8 logical viewport stay in points, and the presentation
+blit stays because it is what makes a resized window fill. The rule, the injected-scale CI gate that
+fails on the pre-fix code, and the Retina check a Mac session still has to run are in
+`docs/porting/hidpi-scale.md`. Full resolution on a real Retina panel remains **unverified** here.
+
 ### 8.5 Exit-time stack overflow in OpenAL's static destructors — port defect
 `SIGSEGV` (`-11`) after a clean shutdown, recursing `CriticalSection::enter` →
 `DynamicMemoryAllocator::allocateBytes` from OpenAL Soft's static destructors, after `GameMemory` is
 gone. Affects exit status only; every measurement in this document precedes it. §6.
+
+**Fixed** by a lifetime: the five sections the allocator takes are now immortal on the non-Windows
+entry point, so static destructors that allocate find a live mutex. Evidence and the in-process
+control: `docs/porting/memory-shutdown-order.md`. Exit status 0 on hardware is still to be confirmed.
 
 ### 8.6 A background window receives no synthetic input — measurement limitation
 `CGEventPost`/`CGWarpMouseCursorPosition` succeed, `MouseIO` never changes, `Window_Is_Active` stays

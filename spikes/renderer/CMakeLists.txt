@@ -138,6 +138,14 @@ add_executable(zh-resource-lock-tests src/resource_lock_tests.cpp)
 add_dependencies(zh-resource-lock-tests spike-shaders)
 target_link_libraries(zh-resource-lock-tests PRIVATE zh-render-backend Threads::Threads)
 
+# HiDPI tests: the points/pixels rule, asserted on read-back pixels at an injected backing
+# scale of 2.00 and 1.25. Headless, so Linux CI can run the Retina path no Linux display has;
+# scripts/ci/check-hidpi-scale.py runs it and additionally proves the assertions still reject
+# rendering at point size.
+add_executable(zh-hidpi-tests src/hidpi_tests.cpp)
+add_dependencies(zh-hidpi-tests spike-shaders)
+target_link_libraries(zh-hidpi-tests PRIVATE zh-render-backend)
+
 # Staging workload: replays a frame's worth of locks in the measured usage-class mix
 # and prints the host-visible cost as JSON. scripts/ci/check-staging-cost.py enforces a
 # ceiling on it, and threads need pthreads on Linux.
@@ -205,6 +213,25 @@ if(SPIKE_HAVE_SDL2)
     if(SDL2_INCLUDE_DIRS)
         target_include_directories(zh-window-spike PRIVATE ${SDL2_INCLUDE_DIRS})
     endif()
+
+    # zh-hidpi-tests-sdl2: the --window form of the HiDPI check over the SDL2 seam. Its reason to
+    # exist on Linux is that it compiles the window-mode code the Mac target runs -- a check written
+    # blind is a check that does not build on the day it is needed -- and it can be run at
+    # --min-scale 1.0 on an ordinary display as a smoke test. It cannot answer the Retina question:
+    # every display Linux CI has is scale 1, which is exactly the scale the pre-fix code passed at.
+    add_executable(zh-hidpi-tests-sdl2
+        src/hidpi_tests.cpp
+        "${WWLIB_PLATFORM_DIR}/platform/platform_window_sdl2.cpp")
+    add_dependencies(zh-hidpi-tests-sdl2 spike-shaders)
+    target_include_directories(zh-hidpi-tests-sdl2 PRIVATE "${WWLIB_PLATFORM_DIR}")
+    target_link_libraries(zh-hidpi-tests-sdl2 PRIVATE zh-render-backend-window)
+    target_compile_definitions(zh-hidpi-tests-sdl2 PRIVATE SPIKE_WITH_PLATFORM_WINDOW)
+    if(TARGET SDL2::SDL2)
+        target_link_libraries(zh-hidpi-tests-sdl2 PRIVATE SDL2::SDL2)
+    else()
+        target_include_directories(zh-hidpi-tests-sdl2 PRIVATE ${SDL2_INCLUDE_DIRS})
+        target_link_libraries(zh-hidpi-tests-sdl2 PRIVATE ${SDL2_LIBRARIES})
+    endif()
 endif()
 
 # zh-window-spike-cocoa: the same driver against the native Cocoa/CAMetalLayer backend, and
@@ -249,6 +276,22 @@ if(APPLE)
             "-framework CoreGraphics" "-framework ApplicationServices"
             "-framework Foundation" "-framework Carbon")
         target_compile_definitions(zh-macos-window-metrics PRIVATE WWLIB_COCOA_VERIFY_KVK)
+
+        # zh-hidpi-tests-cocoa: the points/pixels assertions of zh-hidpi-tests against a real
+        # NSWindow, so the scale is the display's rather than an injected one. `--window` is the
+        # only form of the check that can say whether the render is full resolution on a Retina
+        # panel, and it is the one a Mac session runs (spikes/renderer/tools/macos-window-check.sh
+        # step 7). Linux CI runs the headless target instead, at an injected scale.
+        add_executable(zh-hidpi-tests-cocoa
+            src/hidpi_tests.cpp
+            "${WWLIB_PLATFORM_DIR}/platform/platform_window_cocoa.mm")
+        add_dependencies(zh-hidpi-tests-cocoa spike-shaders)
+        target_include_directories(zh-hidpi-tests-cocoa PRIVATE "${WWLIB_PLATFORM_DIR}")
+        target_link_libraries(zh-hidpi-tests-cocoa PRIVATE zh-render-backend-window
+            "-framework AppKit" "-framework QuartzCore" "-framework Metal"
+            "-framework CoreGraphics" "-framework Foundation" "-framework Carbon")
+        target_compile_definitions(zh-hidpi-tests-cocoa PRIVATE
+            SPIKE_WITH_PLATFORM_WINDOW WWLIB_COCOA_VERIFY_KVK)
     else()
         message(STATUS "no Objective-C++ compiler: zh-window-spike-cocoa not built")
     endif()
@@ -256,11 +299,12 @@ endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     foreach(target zh-render-backend zh-renderer-spike zh-caps-probe zh-feature-probe
-                   zh-fixedfunc-tests zh-resource-lock-tests zh-staging-workload zh-throughput)
+                   zh-fixedfunc-tests zh-resource-lock-tests zh-hidpi-tests
+                   zh-staging-workload zh-throughput)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
     foreach(target zh-window-spike zh-window-spike-cocoa zh-metal-surface-probe
-                   zh-macos-window-metrics)
+                   zh-macos-window-metrics zh-hidpi-tests-cocoa zh-hidpi-tests-sdl2)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE
                 -Wall -Wextra -Wno-missing-field-initializers)

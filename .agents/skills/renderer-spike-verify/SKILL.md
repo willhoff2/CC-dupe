@@ -54,7 +54,20 @@ build/spike/zh-fixedfunc-tests --validation
 build/spike/zh-resource-lock-tests --validation
 ZH_SPIKE_NO_VIEW_SWIZZLE=1 build/spike/zh-fixedfunc-tests --validation
 ZH_SPIKE_NO_VIEW_SWIZZLE=1 build/spike/zh-resource-lock-tests --validation
+python3 scripts/ci/check-hidpi-scale.py --binary build/spike/zh-hidpi-tests
 python3 scripts/ci/check-backend-coverage.py
+```
+
+`check-hidpi-scale.py` is the HiDPI rule: the default colour target, the viewport, the scissor and
+the readback follow the window's backing scale in pixels while the mouse and the GUI stay in points
+(`docs/porting/hidpi-scale.md`). It injects scales of 2.00, 1.00 and 1.25 because no Linux display
+has one — at scale 1 the presentation blit is an identity copy and the pre-fix half-resolution code
+passes. **The injected scale is not a Retina answer.** On a Mac with a Retina panel run the real
+thing, which reads `NSWindow.backingScaleFactor` off the actual display:
+
+```sh
+spikes/renderer/tools/macos-window-check.sh          # includes zh-hidpi-tests-cocoa --window
+build/spike/zh-hidpi-tests-cocoa --window --min-scale 2.0    # or on its own
 ```
 
 The spike also carries a measured ceiling and two derived counts, all three gated in the
@@ -104,10 +117,24 @@ entry points off Windows and is budgeted with that reason.
 
 The `renderer-spike-macos` CI job runs on `macos-15` — `macos-14` aborts inside
 `MVKPhysicalDevice::initMetalFeatures` against the runner's paravirtualised Metal device. Locally:
-build with `-DSPIKE_USE_SDL2=OFF`, locate the ICD manifest rather than hard-coding it
-(`find "$(brew --prefix molten-vk)/" -name MoltenVK_icd.json`), and set `DYLD_LIBRARY_PATH` to the
-validation-layer and MoltenVK lib directories — Homebrew's layer manifest names its dylib relatively,
-so without it the loader cannot find the layer.
+build with `-DSPIKE_USE_SDL2=OFF`, then
+
+```sh
+eval "$(python3 scripts/ci/vulkan_manifests.py --require-layer --print-env)"
+```
+
+which writes copies of Homebrew's validation-layer and MoltenVK manifests with **absolute**
+`library_path` values under `build/vulkan-manifests/` and prints the `VK_LAYER_PATH` and
+`VK_ICD_FILENAMES` that select them. `--require-layer` fails loudly when the layer is not installed.
+
+`DYLD_LIBRARY_PATH` is not the recipe and must not be used as one: SIP strips `DYLD_*` from the
+environment when it execs `/bin/bash` or `/usr/bin/python3`, so every `scripts/ci/*.py` gate that
+launches a spike binary lost the layer, and Homebrew's manifest naming its dylib relatively then
+either failed with `VK_ERROR_LAYER_NOT_PRESENT` (-6) or, worse, ran unvalidated and reported
+`validation messages: 0`. `VK_LAYER_PATH`/`VK_ICD_FILENAMES` survive the exec, and the Python gates
+call `vulkan_manifests.child_environment()` themselves so a direct `python3 scripts/ci/...` run is
+already correct. `validation messages: 0` is only evidence when the same run also printed
+`validation layer: loaded` — the spikes print it, and the gates require it.
 
 **The CI macOS runner has a paravirtualised GPU.** Its check asserts that `vkCreateInstance` succeeds
 against a portability driver and that the readback is within a loose tolerance. It does **not** prove

@@ -232,6 +232,14 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
+	// Requested is not loaded: on macOS the loader silently hands back an unvalidated
+	// instance when it cannot find the layer's dylib, and then zero messages is the answer to
+	// a question nobody asked (docs/porting/apple-silicon-verification.md 8.1).
+	if (validation && !gfx->Validation_Active()) {
+		std::fprintf(stderr, "FAIL: validation was requested but no layer was loaded, so this "
+		                     "run says nothing about validation cleanliness\n");
+		return 1;
+	}
 	const uint32_t validation_messages = gfx->Validation_Message_Count();
 	std::printf("validation messages: %u\n", validation_messages);
 	if (validation && validation_messages != 0) {

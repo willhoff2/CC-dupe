@@ -483,7 +483,17 @@ public:
 
 	bool Resize_Presentation(uint32_t width, uint32_t height) override;
 
+	bool Set_Render_Scale(float scale) override;
+	float Render_Scale() const override { return render_scale_; }
+	void Device_Pixel_Size(uint32_t& out_width, uint32_t& out_height) const override {
+		out_width = device_width_;
+		out_height = device_height_;
+	}
+
 	uint32_t Validation_Message_Count() const override { return validation_messages_; }
+	bool Validation_Active() const override {
+		return validation_layer_loaded_ && messenger_ != VK_NULL_HANDLE;
+	}
 
 private:
 	static VKAPI_ATTR VkBool32 VKAPI_CALL Debug_Callback(
@@ -507,6 +517,27 @@ private:
 	bool Create_Swapchain(void* window_handle);
 	bool Build_Swapchain();
 	void Destroy_Swapchain();
+	// --- HiDPI (docs/porting/hidpi-scale.md) ------------------------------------
+	// The scale to render at: the one Set_Render_Scale() was given before Init(), else the
+	// window seam's backing scale, else 1. `window_handle` may be null (headless).
+	float Initial_Render_Scale(void* window_handle) const;
+	// A point extent in pixels, rounded up so an odd client size at a fractional scale keeps
+	// covering the whole drawable rather than leaving a column short.
+	static uint32_t Scale_Extent(uint32_t points, float scale);
+	// The factor between a surface's advertised (D3D8, points) size and the pixels its image
+	// really holds: render_scale_ for the device's own targets, 1 for everything else. A
+	// surface whose two sizes differ cannot be read or copied by a path that works in its
+	// advertised units, which Resolve_Surface_Read() and Copy_Rects() refuse rather than
+	// silently handing back the top-left corner.
+	float Surface_Render_Scale(const SurfaceHandle* surface) const;
+	void Destroy_Render_Targets();
+	// Rebuilds the device's colour and depth targets at the current scale, dropping the
+	// framebuffers that named the old images. Refuses while a scene is open, because the
+	// engine holds the old target as its render target inside a frame.
+	bool Rebuild_Render_Targets();
+	// Re-reads the window's backing scale and rebuilds the targets when it changed, which is
+	// what dragging a window between a Retina and a non-Retina display produces.
+	bool Follow_Window_Scale(void* window_handle);
 
 	bool Allocate_Buffer(VkDeviceSize size, VkBufferUsageFlags usage,
 	                     VkMemoryPropertyFlags props, Buffer& out);
@@ -595,7 +626,24 @@ private:
 	// the native engine build was measured "presenting" on Apple Silicon while showing nothing.
 	bool presentation_required_ = false;
 	bool present_refusal_reported_ = false;
+	// The back buffer in D3D8's units: the window's client area, in points. Every size that
+	// crosses this interface is in these units, the width/height Init() is given included.
 	uint32_t width_ = 0, height_ = 0;
+	// Device pixels per point, and the back buffer's real size in pixels. On a Retina display
+	// the two differ by a factor of 2, and rendering at width_ x height_ paints a quarter of
+	// the panel's pixels for the presentation blit to upscale, which is the defect this pair
+	// exists to fix (docs/porting/hidpi-scale.md).
+	float render_scale_ = 1.0f;
+	uint32_t device_width_ = 0, device_height_ = 0;
+	// A scale asked for through Set_Render_Scale() before Init(), which is how a headless run
+	// picks one. Zero means "ask the window seam", which is what a real window does.
+	float requested_render_scale_ = 0.0f;
+	// Whether VK_LAYER_KHRONOS_validation was really enabled on the instance, as opposed to
+	// requested: zero messages from a layer that never loaded proves nothing.
+	bool validation_layer_loaded_ = false;
+	// The window Init() was given, kept so a resize can re-read its backing scale. Null for a
+	// headless backend, and not owned.
+	void* window_handle_ = nullptr;
 	std::string device_description_ = "<uninitialised>";
 
 	VkInstance instance_ = VK_NULL_HANDLE;
@@ -624,6 +672,11 @@ private:
 	// device's back-buffer size: a render-to-texture target is usually smaller, and
 	// the viewport, the scissor clamp and Clear all follow the *target*.
 	uint32_t target_width_ = 0, target_height_ = 0;
+	// The same target in pixels. Equal to target_width_/target_height_ for every
+	// render-to-texture target, because a texture is created in pixels and has no points to
+	// scale from; scaled only for the device's own colour target, the one whose size came from
+	// a window. This is the pair the viewport, the scissor, the render area and Clear use.
+	uint32_t device_target_width_ = 0, device_target_height_ = 0;
 	// {has depth, load colour} -> render pass, and attachment pair -> framebuffer.
 	std::unordered_map<uint32_t, VkRenderPass> render_passes_;
 	std::unordered_map<uint64_t, VkFramebuffer> framebuffers_;
@@ -820,9 +873,19 @@ bool VulkanBackend::Create_Instance(void* window_handle) {
 			}
 		}
 		if (layers.empty()) {
+			// Stated positively where a CI wrapper reads it: "validation messages: 0" from a run
+			// the loader never gave a layer is the failure mode
+			// docs/porting/apple-silicon-verification.md 8.1 measured on macOS, and it looks
+			// exactly like a clean run unless the run says which of the two it was. On stderr,
+			// because zh-staging-workload's stdout is JSON and nothing else.
+			std::fprintf(stderr, "validation layer: absent\n");
 			std::fprintf(stderr, "note: VK_LAYER_KHRONOS_validation not present, continuing without\n");
 		} else {
+			std::fprintf(stderr, "validation layer: loaded\n");
 			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+			// Recorded, not just noted: Validation_Active() is what lets a caller tell zero
+			// messages from an unvalidated run.
+			validation_layer_loaded_ = true;
 		}
 	}
 
@@ -1089,7 +1152,44 @@ void VulkanBackend::Transition(VkCommandBuffer cmd, VkImage image, VkImageLayout
 	                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
 }
 
+uint32_t VulkanBackend::Scale_Extent(uint32_t points, float scale) {
+	if (points == 0) return 0;
+	if (!(scale > 0.0f)) return points;
+	const float scaled = static_cast<float>(points) * scale;
+	const uint32_t pixels = static_cast<uint32_t>(std::ceil(scaled - 0.0001f));
+	return pixels == 0 ? 1u : pixels;
+}
+
+float VulkanBackend::Surface_Render_Scale(const SurfaceHandle* surface) const {
+	if (surface == &default_color_surface_ || surface == &default_depth_surface_) {
+		return render_scale_;
+	}
+	return 1.0f;
+}
+
+float VulkanBackend::Initial_Render_Scale(void* window_handle) const {
+	// An explicit request wins over the platform, so a headless run can render at a scale no
+	// display attached to the machine has -- which is the only way Linux CI can exercise this.
+	if (requested_render_scale_ > 0.0f) return requested_render_scale_;
+#ifdef SPIKE_WITH_PLATFORM_WINDOW
+	if (window_handle != nullptr) {
+		const float scale = WWPlatform::Window_Backing_Scale(window_handle);
+		if (scale > 0.0f) return scale;
+	}
+#else
+	(void)window_handle;
+#endif
+	return 1.0f;
+}
+
 bool VulkanBackend::Create_Render_Targets() {
+	device_width_ = Scale_Extent(width_, render_scale_);
+	device_height_ = Scale_Extent(height_, render_scale_);
+	// The images are in pixels: this is where a point becomes a pixel, and the only place.
+	color_target_.width = device_width_;
+	color_target_.height = device_height_;
+	depth_target_.width = device_width_;
+	depth_target_.height = device_height_;
 	auto make_image = [&](VkFormat format, VkImageUsageFlags usage,
 	                      VkImageAspectFlags aspect, Image& out) -> bool {
 		if (out.width == 0) out.width = width_;
@@ -1142,6 +1242,10 @@ bool VulkanBackend::Create_Render_Targets() {
 		return false;
 	}
 
+	// The surfaces keep advertising the back buffer's size in points, because that is what
+	// D3D8's GetDesc reports and what the engine compares against its own resolution; the
+	// pixels live in the Image they point at. The two differ only at a scale other than 1, and
+	// Surface_Render_Scale() is how every path that needs the difference asks for it.
 	default_color_surface_ = SurfaceHandle{};
 	default_color_surface_.image = &color_target_;
 	default_color_surface_.width = width_;
@@ -1157,7 +1261,88 @@ bool VulkanBackend::Create_Render_Targets() {
 	current_depth_ = &default_depth_surface_;
 	target_width_ = width_;
 	target_height_ = height_;
+	device_target_width_ = device_width_;
+	device_target_height_ = device_height_;
 	return true;
+}
+
+void VulkanBackend::Destroy_Render_Targets() {
+	auto free_image = [&](Image& i) {
+		if (i.view) vkDestroyImageView(device_, i.view, nullptr);
+		if (i.image) vkDestroyImage(device_, i.image, nullptr);
+		if (i.memory) vkFreeMemory(device_, i.memory, nullptr);
+		i = Image{};
+	};
+	// The host copy the default colour target grows on its first read describes the old size.
+	if (default_color_surface_.mapped != nullptr) {
+		vkUnmapMemory(device_, default_color_surface_.bits.memory);
+		default_color_surface_.mapped = nullptr;
+	}
+	if (default_color_surface_.bits.buffer) {
+		vkDestroyBuffer(device_, default_color_surface_.bits.buffer, nullptr);
+	}
+	if (default_color_surface_.bits.memory) {
+		vkFreeMemory(device_, default_color_surface_.bits.memory, nullptr);
+	}
+	default_color_surface_.bits = Buffer{};
+	free_image(color_target_);
+	free_image(depth_target_);
+}
+
+bool VulkanBackend::Rebuild_Render_Targets() {
+	if (device_ == VK_NULL_HANDLE) return false;
+	if (in_scene_) {
+		// Between Begin_Scene and End_Scene the engine holds the target it is drawing into;
+		// swapping the image under it would drop the frame's recorded commands.
+		std::fprintf(stderr,
+		             "Vulkan backend: the render scale cannot change inside a scene\n");
+		return false;
+	}
+	// Whether a render-to-texture target was bound or not, the device's targets are what is
+	// being replaced, so the state that named them has to go back to them.
+	const bool default_bound = (current_color_ == &default_color_surface_);
+	vkDeviceWaitIdle(device_);
+	for (auto& fb : framebuffers_) vkDestroyFramebuffer(device_, fb.second, nullptr);
+	framebuffers_.clear();
+	Destroy_Render_Targets();
+	if (!Create_Render_Targets()) return false;
+	viewport_ = ViewportRect{0, 0, target_width_, target_height_, 0.0f, 1.0f};
+	scissor_enabled_ = false;
+	if (!default_bound) {
+		std::fprintf(stderr,
+		             "Vulkan backend: the render scale changed while a render-to-texture "
+		             "target was bound; the device's targets are now current\n");
+	}
+	return true;
+}
+
+bool VulkanBackend::Follow_Window_Scale(void* window_handle) {
+	if (window_handle == nullptr) return true;
+	const float scale = Initial_Render_Scale(window_handle);
+	if (scale == render_scale_) return true;
+	std::fprintf(stderr, "Vulkan backend: backing scale %.2f -> %.2f, colour target %ux%u -> "
+	                     "%ux%u pixels for a %ux%u point client area\n",
+	             static_cast<double>(render_scale_), static_cast<double>(scale), device_width_,
+	             device_height_, Scale_Extent(width_, scale), Scale_Extent(height_, scale),
+	             width_, height_);
+	render_scale_ = scale;
+	return Rebuild_Render_Targets();
+}
+
+bool VulkanBackend::Set_Render_Scale(float scale) {
+	if (!(scale > 0.0f)) return false;
+	// Before Init() this only records the choice: there is no device to build targets on yet.
+	if (device_ == VK_NULL_HANDLE) {
+		requested_render_scale_ = scale;
+		render_scale_ = scale;
+		return true;
+	}
+	// An override after Init() pins the scale: Follow_Window_Scale() honours it too, so a test
+	// that asked for 2 does not lose it to the next resize event.
+	requested_render_scale_ = scale;
+	if (scale == render_scale_) return true;
+	render_scale_ = scale;
+	return Rebuild_Render_Targets();
 }
 
 // The render pass carries no clear: the engine clears with an explicit
@@ -1236,9 +1421,11 @@ VkFramebuffer VulkanBackend::Get_Or_Create_Framebuffer(VkRenderPass pass,
 	fbci.pAttachments = views;
 	// The colour target's size, not the device's: Vulkan allows an attachment larger
 	// than the framebuffer, which is what lets a small render-to-texture target keep
-	// using the device's depth buffer, the way D3D8 does.
-	fbci.width = color->width;
-	fbci.height = color->height;
+	// using the device's depth buffer, the way D3D8 does. In pixels, because that is
+	// what an attachment is measured in -- and a mip-level surface of a texture is
+	// smaller than the image it views, so this cannot come from the image.
+	fbci.width = Scale_Extent(color->width, Surface_Render_Scale(color));
+	fbci.height = Scale_Extent(color->height, Surface_Render_Scale(color));
 	fbci.layers = 1;
 	VkFramebuffer framebuffer = VK_NULL_HANDLE;
 	if (vkCreateFramebuffer(device_, &fbci, nullptr, &framebuffer) != VK_SUCCESS) {
@@ -1282,7 +1469,7 @@ bool VulkanBackend::Begin_Current_Pass() {
 	VkRenderPassBeginInfo rpbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
 	rpbi.renderPass = pass;
 	rpbi.framebuffer = framebuffer;
-	rpbi.renderArea = {{0, 0}, {target_width_, target_height_}};
+	rpbi.renderArea = {{0, 0}, {device_target_width_, device_target_height_}};
 	vkCmdBeginRenderPass(frame_cmd_, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 	// Anything the pass records lands in the target, so a later pass on it has to
 	// LOAD rather than discard.
@@ -1537,7 +1724,9 @@ bool VulkanBackend::Build_Swapchain() {
 	// its own resolution and is scaled on present, which is what lets the window be resized
 	// without re-creating every render target.
 	VkExtent2D extent = caps.currentExtent;
-	if (extent.width == 0xFFFFFFFFu) extent = {width_, height_};
+	// The swapchain is in pixels, so a surface that leaves the extent to the application
+	// gets the colour target's pixel size, not the client area's points.
+	if (extent.width == 0xFFFFFFFFu) extent = {device_width_, device_height_};
 	if (extent.width == 0 || extent.height == 0) return false;
 	swapchain_extent_ = extent;
 	sci.imageExtent = extent;
@@ -1563,6 +1752,7 @@ bool VulkanBackend::Build_Swapchain() {
 bool VulkanBackend::Init(void* window_handle, uint32_t width, uint32_t height) {
 	width_ = width;
 	height_ = height;
+	window_handle_ = window_handle;
 	presentation_required_ = (!headless_ && window_handle != nullptr);
 
 	if (!Create_Instance(window_handle)) return false;
@@ -1585,7 +1775,16 @@ bool VulkanBackend::Init(void* window_handle, uint32_t width, uint32_t height) {
 #endif
 
 	if (!Pick_Device()) return false;
+	// The scale has to be known before the targets are created, because it is their size.
+	render_scale_ = Initial_Render_Scale(window_handle);
 	if (!Create_Render_Targets()) return false;
+	if (render_scale_ != 1.0f) {
+		std::fprintf(stderr,
+		             "Vulkan backend: backing scale %.2f, so a %ux%u point back buffer renders "
+		             "at %ux%u pixels\n",
+		             static_cast<double>(render_scale_), width_, height_, device_width_,
+		             device_height_);
+	}
 	if (!Create_Descriptor_Machinery()) return false;
 	if (!Create_Shaders()) return false;
 	if (!Create_Swapchain(window_handle)) return false;
@@ -3011,8 +3210,11 @@ VkPipeline VulkanBackend::Get_Or_Create_Pipeline(const PipelineKey& key,
 		break;
 	}
 
-	VkViewport viewport{0.0f, 0.0f, static_cast<float>(width_), static_cast<float>(height_), 0.0f, 1.0f};
-	VkRect2D scissor{{0, 0}, {width_, height_}};
+	// Both are dynamic state, reset per draw in Prepare_Draw(); these only have to be legal.
+	// In pixels, like everything an attachment is measured in.
+	VkViewport viewport{0.0f, 0.0f, static_cast<float>(device_width_),
+	                    static_cast<float>(device_height_), 0.0f, 1.0f};
+	VkRect2D scissor{{0, 0}, {device_width_, device_height_}};
 	VkPipelineViewportStateCreateInfo viewport_state{
 	    VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
 	viewport_state.viewportCount = 1;
@@ -3163,8 +3365,10 @@ void VulkanBackend::Clear(bool clear_color, bool clear_z_stencil, float r, float
 		++count;
 	}
 	if (count == 0) return;
-	// The current target's extent, which after a SetRenderTarget is not the device's.
-	VkClearRect rect{{{0, 0}, {target_width_, target_height_}}, 0, 1};
+	// The current target's extent in pixels, which after a SetRenderTarget is not the
+	// device's. D3D8's Clear() has no rectangle here, so the whole target is cleared and
+	// there is nothing in point space to convert.
+	VkClearRect rect{{{0, 0}, {device_target_width_, device_target_height_}}, 0, 1};
 	vkCmdClearAttachments(frame_cmd_, count, clears, 1, &rect);
 	// Write funnel 2.
 	if (clear_color) Mark_Gpu_Write(current_color_);
@@ -3174,12 +3378,20 @@ void VulkanBackend::Clear(bool clear_color, bool clear_z_stencil, float r, float
 VkRect2D VulkanBackend::Clamp_Scissor(const VkRect2D& rect) const {
 	// D3D8's SetScissors rectangle is in the same space as the viewport but is not
 	// required to lie inside the render target; Vulkan requires that it does.
-	int32_t x0 = rect.offset.x < 0 ? 0 : rect.offset.x;
-	int32_t y0 = rect.offset.y < 0 ? 0 : rect.offset.y;
-	int64_t x1 = static_cast<int64_t>(rect.offset.x) + rect.extent.width;
-	int64_t y1 = static_cast<int64_t>(rect.offset.y) + rect.extent.height;
-	if (x1 > target_width_) x1 = target_width_;
-	if (y1 > target_height_) y1 = target_height_;
+	//
+	// The rectangle arrives in points, like the viewport, and is scaled to the target's
+	// pixels here: at scale 2 a 400x300 UI clip has to keep clipping the same half of the
+	// panel, not its top-left quarter.
+	const float scale = Surface_Render_Scale(current_color_);
+	const auto scale_coord = [scale](int64_t v) -> int64_t {
+		return static_cast<int64_t>(std::llround(static_cast<double>(v) * scale));
+	};
+	int32_t x0 = rect.offset.x < 0 ? 0 : static_cast<int32_t>(scale_coord(rect.offset.x));
+	int32_t y0 = rect.offset.y < 0 ? 0 : static_cast<int32_t>(scale_coord(rect.offset.y));
+	int64_t x1 = scale_coord(static_cast<int64_t>(rect.offset.x) + rect.extent.width);
+	int64_t y1 = scale_coord(static_cast<int64_t>(rect.offset.y) + rect.extent.height);
+	if (x1 > device_target_width_) x1 = device_target_width_;
+	if (y1 > device_target_height_) y1 = device_target_height_;
 	if (x1 < x0) x1 = x0;
 	if (y1 < y0) y1 = y0;
 	return VkRect2D{{x0, y0},
@@ -3428,15 +3640,20 @@ bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHand
 	// here; baking them in would give every rectangle its own VkPipeline.
 	const VkRect2D scissor = scissor_enabled_
 	                             ? Clamp_Scissor(scissor_)
-	                             : VkRect2D{{0, 0}, {target_width_, target_height_}};
+	                             : VkRect2D{{0, 0}, {device_target_width_, device_target_height_}};
 	vkCmdSetScissor(frame_cmd_, 0, 1, &scissor);
 	// D3D8's viewport is y-down from the top-left of the target and so is Vulkan's,
 	// so the rectangle carries over unchanged; the y flip lives in the projection
 	// matrix, not here.
-	const VkViewport vk_viewport{static_cast<float>(viewport_.x),
-	                             static_cast<float>(viewport_.y),
-	                             static_cast<float>(viewport_.width),
-	                             static_cast<float>(viewport_.height),
+	//
+	// It arrives in points and is scaled to the target's pixels, which is the whole of the
+	// HiDPI fix at the draw level: the same triangles, rasterised over every pixel of the
+	// panel rather than a quarter of them (docs/porting/hidpi-scale.md).
+	const float viewport_scale = Surface_Render_Scale(current_color_);
+	const VkViewport vk_viewport{static_cast<float>(viewport_.x) * viewport_scale,
+	                             static_cast<float>(viewport_.y) * viewport_scale,
+	                             static_cast<float>(viewport_.width) * viewport_scale,
+	                             static_cast<float>(viewport_.height) * viewport_scale,
 	                             viewport_.min_z,
 	                             viewport_.max_z};
 	vkCmdSetViewport(frame_cmd_, 0, 1, &vk_viewport);
@@ -3558,6 +3775,10 @@ bool VulkanBackend::Resize_Presentation(uint32_t width, uint32_t height) {
 	if (swapchain_ == VK_NULL_HANDLE) return !presentation_required_;
 	(void)width;
 	(void)height;
+	// A resize is also how a window arrives on a display with a different backing scale, and
+	// the client area in points can come back unchanged across that move, so the scale is
+	// re-read here rather than compared against the reported size.
+	if (!Follow_Window_Scale(window_handle_)) return false;
 	// The surface's own currentExtent is authoritative; the reported size is only the trigger.
 	Destroy_Swapchain();
 	return Build_Swapchain();
@@ -3602,7 +3823,11 @@ bool VulkanBackend::Present() {
 	VkImageBlit blit{};
 	blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
 	blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-	blit.srcOffsets[1] = {static_cast<int32_t>(width_), static_cast<int32_t>(height_), 1};
+	// The colour target's pixels, which at a backing scale of 2 are the swapchain's own
+	// count: the blit stays, but it now copies 1:1 instead of upscaling a quarter-resolution
+	// image (docs/porting/hidpi-scale.md).
+	blit.srcOffsets[1] = {static_cast<int32_t>(device_width_),
+	                      static_cast<int32_t>(device_height_), 1};
 	// Stretched to the window, so a resized window is filled rather than painted in one corner.
 	blit.dstOffsets[1] = {static_cast<int32_t>(swapchain_extent_.width),
 	                      static_cast<int32_t>(swapchain_extent_.height), 1};
@@ -3624,7 +3849,11 @@ bool VulkanBackend::Present() {
 }
 
 bool VulkanBackend::Read_Back_Color_Target(std::string& out_rgba, SurfaceFormat& out_format) {
-	const VkDeviceSize bytes = static_cast<VkDeviceSize>(width_) * height_ * 4;
+	// The pixels that exist, not the points they are addressed in: a caller that asks for the
+	// frame at a backing scale of 2 gets the 1600x1200 it was rendered at, with the format
+	// saying so, rather than a 800x600 crop of its top-left corner. The spike's PNG writer and
+	// the pixel-comparison gate read the size from out_format for exactly this reason.
+	const VkDeviceSize bytes = static_cast<VkDeviceSize>(device_width_) * device_height_ * 4;
 	Buffer staging;
 	if (!Allocate_Buffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 	                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -3637,7 +3866,7 @@ bool VulkanBackend::Read_Back_Color_Target(std::string& out_rgba, SurfaceFormat&
 	Transition_Surface(cmd, &default_color_surface_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	VkBufferImageCopy copy{};
 	copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-	copy.imageExtent = {width_, height_, 1};
+	copy.imageExtent = {device_width_, device_height_, 1};
 	vkCmdCopyImageToBuffer(cmd, color_target_.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 	                       staging.buffer, 1, &copy);
 	if (!End_One_Shot(cmd)) return false;
@@ -3650,8 +3879,8 @@ bool VulkanBackend::Read_Back_Color_Target(std::string& out_rgba, SurfaceFormat&
 	vkDestroyBuffer(device_, staging.buffer, nullptr);
 	vkFreeMemory(device_, staging.memory, nullptr);
 
-	out_format.width = width_;
-	out_format.height = height_;
+	out_format.width = device_width_;
+	out_format.height = device_height_;
 	return true;
 }
 
@@ -3802,6 +4031,8 @@ bool VulkanBackend::Set_Render_Target(SurfaceHandle* color, SurfaceHandle* depth
 	current_depth_ = depth_stencil;
 	target_width_ = new_color->width;
 	target_height_ = new_color->height;
+	device_target_width_ = Scale_Extent(target_width_, Surface_Render_Scale(new_color));
+	device_target_height_ = Scale_Extent(target_height_, Surface_Render_Scale(new_color));
 	// D3D8 resets the viewport to the whole of the new target.
 	viewport_ = ViewportRect{0, 0, target_width_, target_height_, 0.0f, 1.0f};
 	scissor_enabled_ = false;
@@ -3848,6 +4079,17 @@ SurfaceHandle* VulkanBackend::Create_Image_Surface(uint32_t width, uint32_t heig
 // -- and its signature is not changing, because that would edit 21 call sites -- so
 // every lock is treated as a read and the dirty bit decides what that costs.
 bool VulkanBackend::Resolve_Surface_Read(SurfaceHandle* surface) {
+	if (Surface_Render_Scale(surface) != 1.0f) {
+		// The device's back buffer at a backing scale other than 1: its pitch and height
+		// describe points and its image holds pixels, so a copy driven by either would hand
+		// back a crop or overrun the buffer. Read_Back_Color_Target(), which reports the
+		// pixel size alongside the bytes, is the path for this surface
+		// (docs/porting/hidpi-scale.md).
+		std::fprintf(stderr, "Resolve_Surface_Read: the back buffer is %ux%u pixels for a %ux%u "
+		                     "point surface; use Read_Back_Color_Target\n",
+		             device_width_, device_height_, surface->width, surface->height);
+		return false;
+	}
 	// A video-memory surface with no host buffer yet has to be copied out whatever
 	// its dirty bit says: there is no host copy of it at all to hand back.
 	const bool have_host_copy = surface->system_memory() || surface->mapped != nullptr;
@@ -3935,6 +4177,16 @@ bool VulkanBackend::Copy_Rects(SurfaceHandle* source, const LockRect* rects,
                                uint32_t rect_count, SurfaceHandle* destination,
                                const SurfacePoint* points) {
 	if (source == nullptr || destination == nullptr || source == destination) return false;
+	if (Surface_Render_Scale(source) != 1.0f || Surface_Render_Scale(destination) != 1.0f) {
+		// Every rectangle here is in the surface's advertised units, and for the device's
+		// back buffer at a scale other than 1 those are points while the image is in pixels.
+		// Scaling the rectangles would resample the copy, which CopyRects does not do, so
+		// this refuses instead (docs/porting/hidpi-scale.md).
+		std::fprintf(stderr, "Copy_Rects: the back buffer at backing scale %.2f cannot take a "
+		                     "rectangle copy in points\n",
+		             static_cast<double>(render_scale_));
+		return false;
+	}
 	if (source->vk_format != destination->vk_format) {
 		// D3D8 requires matching formats too; a mismatch here would silently
 		// reinterpret bytes.

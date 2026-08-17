@@ -15,18 +15,14 @@ library. Only the 8-bit non-interlaced RGB/RGBA subset both the spike and optipn
 supported, which is checked explicitly rather than assumed.
 """
 import argparse
-import os
 import pathlib
 import struct
 import subprocess
 import sys
 import zlib
 
-# Homebrew's validation manifest names its dylib by leaf name, so the loader only finds it with
-# these on DYLD_LIBRARY_PATH. Passing them in from the shell does not survive: this script is
-# usually reached through an interpreter shim that /bin/bash runs, and /bin/bash is SIP-protected,
-# so dyld drops every DYLD_* variable before python starts. The child's environment is built here.
-MACOS_LOADER_DIRS = ("/opt/homebrew/lib", "/usr/local/lib")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import vulkan_manifests  # noqa: E402
 
 
 def decode_png(path):
@@ -140,26 +136,26 @@ def main():
                     help="permitted fraction of differing pixels, 0..1")
     args = ap.parse_args()
 
-    environment = dict(os.environ)
-    if sys.platform == "darwin":
-        for directory in MACOS_LOADER_DIRS:
-            if pathlib.Path(directory).is_dir():
-                existing = environment.get("DYLD_LIBRARY_PATH", "")
-                environment["DYLD_LIBRARY_PATH"] = \
-                    f"{directory}:{existing}" if existing else directory
+    # DYLD_LIBRARY_PATH cannot be handed to the child on macOS -- dyld strips it when a
+    # SIP-protected binary is exec'd, this script included -- so the layer and the driver are
+    # reached through manifests rewritten with absolute library paths instead.
+    environment = vulkan_manifests.child_environment()
 
     proc = subprocess.run([args.binary, "--out", args.out], capture_output=True, text=True,
                           env=environment)
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
-    combined = proc.stdout + proc.stderr
 
     failures = []
     if proc.returncode != 0:
         failures.append(f"the spike exited {proc.returncode}")
     # The spike degrades gracefully when the layer is missing; in CI that must be an error,
-    # otherwise "validation messages: 0" means "nothing was validated".
-    if "VK_LAYER_KHRONOS_validation not present" in combined:
+    # otherwise "validation messages: 0" means "nothing was validated". Asserted on the positive
+    # statement, so a spike that stops reporting its layer status fails here too rather than
+    # passing by silence.
+    # On stderr, because zh-staging-workload's stdout is JSON and the backend says it the same way
+    # for every spike.
+    if "validation layer: loaded" not in proc.stdout + proc.stderr:
         failures.append("the validation layer was not loaded, so the run proves nothing about "
                         "validation cleanliness")
     if "validation messages: 0" not in proc.stdout:
