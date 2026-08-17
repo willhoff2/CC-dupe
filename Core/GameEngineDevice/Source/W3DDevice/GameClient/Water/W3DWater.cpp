@@ -1730,7 +1730,10 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 			break;
 	}
 
-	if (TheGlobalData && TheGlobalData->m_drawSkyBox)
+	// TheSuperHackers @bugfix Guard the skybox render object: a map script can enable the skybox
+	// (ScriptActions SKYBOX_ENABLE) while "new_skybox" failed to load, and the unconditional
+	// dereference then crashes instead of drawing no sky.
+	if (m_skyBox && TheGlobalData && TheGlobalData->m_drawSkyBox)
 	{	//center skybox around camera
 		Vector3 pos=rinfo.Camera.Get_Position();
 		pos.Z = TheGlobalData->m_skyBoxPositionZ;
