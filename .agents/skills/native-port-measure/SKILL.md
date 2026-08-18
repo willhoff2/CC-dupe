@@ -68,8 +68,9 @@ python3 scripts/ci/check-window-seam-wiring.py
 ```
 
 The native build and its gate, whose denominator must equal the probe's for the two to be
-comparable. CI measures it at two depths and there is a checked-in baseline for each. Measure into a
-scratch path first and copy over the baseline only after classifying the change — writing straight
+comparable. CI measures it at two depths and in two configurations, and there is a checked-in
+baseline for each. Measure into a scratch path first and copy over the baseline only after
+classifying the change — writing straight
 into `docs/porting/ci-baselines/` destroys the before-state you are supposed to compare against:
 
 ```sh
@@ -93,10 +94,30 @@ python3 scripts/ci/check-audio-backend-linked.py --results /tmp/nb1234.json
 python3 scripts/ci/check-video-headers.py --results /tmp/nb1234.json
 ```
 
+The debug configuration is a measured configuration of its own (CI job `native-build-debug`), with
+its own baseline: it compiles different code (`-DRTS_DEBUG -DWWDEBUG -DDEBUG`), so
+`check-native-build-baseline.py` refuses to compare it against the release numbers. A sweep runs it,
+and runs the negative control that makes it worth having — a debug build whose asserts are compiled
+out or swallowed by the portable dialog stub would pass every other check. The control generates its
+own bad input, so it needs no retail data:
+
+```sh
+CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
+  --with-shims --config debug --strict-link --build-dir build/native-debug \
+  --report /tmp/nbdebug.md --json /tmp/nbdebug.json
+python3 scripts/ci/check-native-build-baseline.py --results /tmp/nbdebug.json
+CLANGXX=clang++-14 python3 scripts/native-sim-probe.py --build-dir build/native-debug --build
+python3 scripts/ci/check-assert-fires.py --build-dir build/native-debug
+```
+
+Use `--build-dir build/native-debug`: the default `build/native` holds the release configuration and
+reusing it mixes the two.
+
 The reports and baselines those replace when a measurement is accepted are
 `docs/porting/native-build-report.md`,
-`docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json` and
-`docs/porting/ci-baselines/native-build-shimmed-level1-2-3-4.json`.
+`docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json`,
+`docs/porting/ci-baselines/native-build-shimmed-level1-2-3-4.json` and
+`docs/porting/ci-baselines/native-build-shimmed-debug-level1-2-3-4.json`.
 
 At levels 1-3 `--strict-link` is not optional even though it exits non-zero: the strict link is
 expected to fail today, and the checker refuses to compare a result measured without it — the
@@ -188,6 +209,12 @@ tree.
   whose default is plain `clang++`. On a box that only has `clang++-14` they die with
   `FileNotFoundError: 'clang++'`, which is a missing env var and not a gate failure — set
   `CLANGXX=clang++-14` as CI does. `check-lanmessage-layout.py` takes `--clangxx` instead.
+- The linked binary's `bytes` and `file_output` are recorded but not ratcheted, and neither is stable
+  between boxes: two runs on the same tree give the same byte count but a different `BuildID`, and a
+  box without `file(1)` installed records `file_output: null` while every gate still passes. A byte
+  count that differs from the baseline by a few tens of KiB is build environment, not drift — do not
+  rebaseline it and do not chase it in the prose. `apt-get install file` if you want the field
+  populated the way CI records it.
 - The layout test's 32-bit check needs `g++-multilib`; without it that check is skipped, not failed,
   and the sweep is incomplete until you install it and see the ILP32 assertions actually pass.
 - Opt-in backends (`probe.OPTIONAL_BACKENDS`, currently the SDL2 window backend) are excluded from
