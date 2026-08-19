@@ -70,19 +70,25 @@ spikes/renderer/tools/macos-window-check.sh          # includes zh-hidpi-tests-c
 build/spike/zh-hidpi-tests-cocoa --window --min-scale 2.0    # or on its own
 ```
 
-The spike also carries a measured ceiling and two derived counts, all three gated in the
-`renderer-spike-linux` job and all three part of a measurement sweep. The staging gate needs
-`XDG_RUNTIME_DIR` set to a private directory and no `DISPLAY`, and its `--self-check` additionally
-proves the ceiling *rejects* the pre-pool per-resource-staging behaviour, so a pass means the gate
-can still catch a regression:
+The spike also carries a measured ceiling, a draw-capacity floor and two derived counts, all gated
+in the `renderer-spike-linux` job and all part of a measurement sweep. The staging and draw-capacity
+gates need `XDG_RUNTIME_DIR` set to a private directory and no `DISPLAY`, and their `--self-check`
+additionally proves each gate *rejects* the defect it was written for (per-resource staging, the old
+fixed 64-draw preallocation that silently dropped the 65th draw), so a pass means the gate can still
+catch a regression:
 
 ```sh
 mkdir -p /tmp/xdgrt && chmod 700 /tmp/xdgrt
 XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-staging-cost.py \
   --binary build/spike/zh-staging-workload --self-check
+XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-draw-capacity.py \
+  --binary build/spike/zh-draw-capacity --self-check
 python3 spikes/renderer/tools/d3d8-lock-scan.py --check
 python3 spikes/renderer/tools/surface-lock-audit.py --check
 ```
+
+`check-draw-capacity.py`'s floor lives in `docs/porting/ci-baselines/draw-capacity.json`; regenerate
+it with `--update`, never by hand (`docs/porting/draws-per-frame.md`).
 
 A validation message is a failure even when the pixels are right. The failure class to expect:
 a texture's image and a `GetSurfaceLevel` surface viewing it are two names for one image, so any
