@@ -104,6 +104,19 @@ executable figure it ratchets simply went unmeasured, so it reports `regressed` 
 identical tree. Read the non-zero exit of `native-build.py` as the strict link's own status and the
 checker's exit as the gate.
 
+The shroud out-of-grid gate runs the engine's own lookup in the sim-probe harness, so it needs the
+levels 1-4 build above (its `compile_commands.json`) and then a probe build; CI runs it against
+`build/native-debug`, but any directory `native-sim-probe.py --build` accepts works:
+
+```sh
+python3 scripts/native-sim-probe.py --build          # builds build/native/sim_probe
+python3 scripts/ci/check-shroud-bounds.py --build-dir build/native
+```
+
+The draw-capacity gate (`scripts/ci/check-draw-capacity.py`, floor in
+`ci-baselines/draw-capacity.json`) needs the renderer spike built and a Vulkan driver, so it lives
+with the spike gates — see the `renderer-spike-verify` skill.
+
 The remaining source-only gates a sweep runs, none of which need a build:
 
 ```sh
