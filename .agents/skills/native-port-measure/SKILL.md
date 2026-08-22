@@ -113,7 +113,13 @@ CLANGXX=clang++-14 python3 scripts/ci/check-stackwalk-symbols.py
 python3 scripts/ci/check-lanmessage-layout.py --clangxx clang++-14
 python3 spikes/renderer/tools/d3d8-lock-scan.py --check
 python3 spikes/renderer/tools/surface-lock-audit.py --check
+CLANGXX=clang++-14 python3 scripts/ci/check-font-metrics.py
 ```
+
+`check-font-metrics.py` builds `gdi_font_metrics_dump.cpp` against the GDI font seam and compares its
+advance widths and line height against `scripts/ci/font-metrics-reference.json`; CI runs it as the
+last step of the `native-build` job. It needs the `fonts-dejavu-core` font both sides are pointed at,
+and it needs the stb headers `fetch-probe-deps.sh` provisions.
 
 The audio gates need the backend *built*, so they need the top-level CMake build (CMake >= 3.25,
 `libopenal-dev`), and `check-openal-symbols.py` needs both of its paths. Use a build directory other
@@ -183,8 +189,9 @@ tree.
   Without it the VC6 compatibility macros are undefined everywhere.
 - Keep `-fms-extensions`. Dropping it costs ~65 errors from `__int64` and `__forceinline` alone.
 - Report `clean / total`, never a bare percentage.
-- `scripts/ci/check-crt-compat.py`, `scripts/ci/check-bool-pointer.py` and
-  `scripts/ci/check-stackwalk-symbols.py` take their compiler from the probe, i.e. from `CLANGXX`,
+- `scripts/ci/check-crt-compat.py`, `scripts/ci/check-bool-pointer.py`,
+  `scripts/ci/check-stackwalk-symbols.py` and `scripts/ci/check-font-metrics.py` take their compiler
+  from the probe, i.e. from `CLANGXX`,
   whose default is plain `clang++`. On a box that only has `clang++-14` they die with
   `FileNotFoundError: 'clang++'`, which is a missing env var and not a gate failure — set
   `CLANGXX=clang++-14` as CI does. `check-lanmessage-layout.py` takes `--clangxx` instead.
