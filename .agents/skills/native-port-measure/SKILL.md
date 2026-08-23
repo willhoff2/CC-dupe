@@ -87,6 +87,7 @@ python3 scripts/ci/check-online-absent-seam.py --results /tmp/nb123.json
 CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
   --with-shims --strict-link --report /tmp/nb1234.md --json /tmp/nb1234.json
 python3 scripts/ci/check-native-build-baseline.py --results /tmp/nb1234.json
+python3 scripts/ci/check-swapchain-compiled.py   # reads build/native's libsupport_renderbackend.a
 python3 scripts/ci/check-win32-undefined.py --results /tmp/nb1234.json
 python3 scripts/ci/check-download-seam.py --results /tmp/nb1234.json
 python3 scripts/ci/check-audio-backend-linked.py --results /tmp/nb1234.json
@@ -111,6 +112,8 @@ python3 scripts/ci/check-generated-baselines.py           # every baseline still
 CLANGXX=clang++-14 python3 scripts/ci/check-bool-pointer.py
 CLANGXX=clang++-14 python3 scripts/ci/check-stackwalk-symbols.py
 python3 scripts/ci/check-lanmessage-layout.py --clangxx clang++-14
+python3 scripts/ci/check-widechar-wire.py --clangxx clang++-14   # lanmessage-layout job's second gate
+python3 scripts/init-reporting-scan.py --check                   # ci-baselines/init-reporting.json
 python3 spikes/renderer/tools/d3d8-lock-scan.py --check
 python3 spikes/renderer/tools/surface-lock-audit.py --check
 ```

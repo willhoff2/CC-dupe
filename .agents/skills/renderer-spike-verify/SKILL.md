@@ -29,15 +29,21 @@ cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_COMPILER=clang++-14 -DVulkan_INCLUDE_DIR=$HOME/vk-headers/include
 ```
 
-On a box whose blueprint already provisioned the pinned headers, `$VULKAN_HEADERS_INCLUDE` points at
-them and passing them as a flag configures and builds the same way:
+On a box whose blueprint already provisioned the pinned headers, passing their include directory as a
+flag configures and builds the same way — check `$VULKAN_HEADERS_INCLUDE` first and fall back to the
+checked-out path, because the variable is not exported in every shell:
 
 ```sh
-cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release \
+/usr/bin/cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DSPIKE_USE_SDL2=OFF -DCMAKE_CXX_COMPILER=clang++-14 \
-  -DCMAKE_CXX_FLAGS="-I$VULKAN_HEADERS_INCLUDE"
-cmake --build build/spike
+  -DCMAKE_CXX_FLAGS="-I${VULKAN_HEADERS_INCLUDE:-$HOME/vulkan-headers/include}"
+/usr/bin/cmake --build build/spike
 ```
+
+Use `/usr/bin/cmake` explicitly here. If a session installed the pip `cmake==4.1.2` that the audio
+gate needs (see `native-port-measure`), it shadows the system one on `PATH` and its `FindVulkan`
+fails with `Could NOT find Vulkan (missing: Vulkan_LIBRARY) (found version "1.3.204")` even though
+`/usr/lib/x86_64-linux-gnu/libvulkan.so` is installed; jammy's 3.22 configures the spike fine.
 
 On jammy the lavapipe manifest is `lvp_icd.x86_64.json`, not `lvp_icd.json`:
 `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`.
@@ -70,19 +76,27 @@ spikes/renderer/tools/macos-window-check.sh          # includes zh-hidpi-tests-c
 build/spike/zh-hidpi-tests-cocoa --window --min-scale 2.0    # or on its own
 ```
 
-The spike also carries a measured ceiling and two derived counts, all three gated in the
-`renderer-spike-linux` job and all three part of a measurement sweep. The staging gate needs
-`XDG_RUNTIME_DIR` set to a private directory and no `DISPLAY`, and its `--self-check` additionally
-proves the ceiling *rejects* the pre-pool per-resource-staging behaviour, so a pass means the gate
-can still catch a regression:
+The spike also carries two measured ceilings and two derived counts, all four gated in the
+`renderer-spike-linux` job and all four part of a measurement sweep. Both binary gates need
+`XDG_RUNTIME_DIR` set to a private directory and no `DISPLAY`, and their `--self-check` additionally
+proves the ceiling *rejects* the behaviour it was written against (per-resource staging before the
+pool; the fixed 64-draw descriptor cap before the growable allocator), so a pass means the gate can
+still catch a regression:
 
 ```sh
 mkdir -p /tmp/xdgrt && chmod 700 /tmp/xdgrt
 XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-staging-cost.py \
   --binary build/spike/zh-staging-workload --self-check
+XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-draw-capacity.py \
+  --binary build/spike/zh-draw-capacity --self-check
 python3 spikes/renderer/tools/d3d8-lock-scan.py --check
 python3 spikes/renderer/tools/surface-lock-audit.py --check
 ```
+
+`check-draw-capacity.py` is the per-frame draw resource limit (`ci-baselines/draw-capacity.json`):
+every draw gets its own descriptor set and uniform slice, and before the growable allocator the 65th
+draw was dropped while the frame still reported success. A pass reads `4096 draws per frame ... 0
+dropped and 0 aliased` with the validation layer loaded and silent.
 
 A validation message is a failure even when the pixels are right. The failure class to expect:
 a texture's image and a `GetSurfaceLevel` surface viewing it are two names for one image, so any
