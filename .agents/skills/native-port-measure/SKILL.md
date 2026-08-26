@@ -111,9 +111,24 @@ python3 scripts/ci/check-generated-baselines.py           # every baseline still
 CLANGXX=clang++-14 python3 scripts/ci/check-bool-pointer.py
 CLANGXX=clang++-14 python3 scripts/ci/check-stackwalk-symbols.py
 python3 scripts/ci/check-lanmessage-layout.py --clangxx clang++-14
+python3 scripts/ci/check-widechar-wire.py
+CLANGXX=clang++-14 python3 scripts/ci/check-font-metrics.py
+python3 scripts/init-reporting-scan.py --check
 python3 spikes/renderer/tools/d3d8-lock-scan.py --check
 python3 spikes/renderer/tools/surface-lock-audit.py --check
 ```
+
+The gates that take `--binary` (`check-draw-capacity.py`, `check-staging-cost.py`,
+`check-hidpi-scale.py`) and the ones that need `build/native/sim_probe`
+(`check-shroud-bounds.py`, `check-path-separator-keys.py`) are runtime gates, not part of a
+measurement sweep: without their binary they print a usage error or a "not found" hint and tell you
+nothing. Build the spike or the sim probe first (see `renderer-spike-verify`) if you actually need
+them.
+
+`native-build.py` records the `file(1)` output of the strict-link binary in `strict_link.binary`.
+A box without `/usr/bin/file` (this one, by default) simply omits `file_output`, which is not a gate
+failure — `check-native-build-baseline.py` reads `word_size`/`machine` — but the field then
+disappears from a refreshed baseline, so `apt-get install -y file` before overwriting one.
 
 The audio gates need the backend *built*, so they need the top-level CMake build (CMake >= 3.25,
 `libopenal-dev`), and `check-openal-symbols.py` needs both of its paths. Use a build directory other
@@ -183,8 +198,9 @@ tree.
   Without it the VC6 compatibility macros are undefined everywhere.
 - Keep `-fms-extensions`. Dropping it costs ~65 errors from `__int64` and `__forceinline` alone.
 - Report `clean / total`, never a bare percentage.
-- `scripts/ci/check-crt-compat.py`, `scripts/ci/check-bool-pointer.py` and
-  `scripts/ci/check-stackwalk-symbols.py` take their compiler from the probe, i.e. from `CLANGXX`,
+- `scripts/ci/check-crt-compat.py`, `scripts/ci/check-bool-pointer.py`,
+  `scripts/ci/check-stackwalk-symbols.py` and `scripts/ci/check-font-metrics.py`
+  take their compiler from the probe, i.e. from `CLANGXX`,
   whose default is plain `clang++`. On a box that only has `clang++-14` they die with
   `FileNotFoundError: 'clang++'`, which is a missing env var and not a gate failure — set
   `CLANGXX=clang++-14` as CI does. `check-lanmessage-layout.py` takes `--clangxx` instead.
