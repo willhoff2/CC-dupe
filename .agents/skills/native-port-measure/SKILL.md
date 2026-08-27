@@ -93,10 +93,23 @@ python3 scripts/ci/check-audio-backend-linked.py --results /tmp/nb1234.json
 python3 scripts/ci/check-video-headers.py --results /tmp/nb1234.json
 ```
 
+The debug configuration is a third checked-in baseline with a CI job of its own
+(`native-build-debug`), so a sweep measures it too. It compiles the assertions and logging the
+release build compiles out, so its figures are not comparable with the release build's in either
+direction, and it needs its own build directory:
+
+```sh
+CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
+  --with-shims --config debug --strict-link --build-dir build/native-debug \
+  --report /tmp/nbdbg.md --json /tmp/nbdbg.json
+python3 scripts/ci/check-native-build-baseline.py --results /tmp/nbdbg.json
+```
+
 The reports and baselines those replace when a measurement is accepted are
 `docs/porting/native-build-report.md`,
-`docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json` and
-`docs/porting/ci-baselines/native-build-shimmed-level1-2-3-4.json`.
+`docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json`,
+`docs/porting/ci-baselines/native-build-shimmed-level1-2-3-4.json` and
+`docs/porting/ci-baselines/native-build-shimmed-debug-level1-2-3-4.json`.
 
 At levels 1-3 `--strict-link` is not optional even though it exits non-zero: the strict link is
 expected to fail today, and the checker refuses to compare a result measured without it — the
@@ -188,6 +201,10 @@ tree.
   whose default is plain `clang++`. On a box that only has `clang++-14` they die with
   `FileNotFoundError: 'clang++'`, which is a missing env var and not a gate failure — set
   `CLANGXX=clang++-14` as CI does. `check-lanmessage-layout.py` takes `--clangxx` instead.
+- `native-build.py` records the strict link's binary as `file` describes it
+  (`strict_link.binary.file_output`). Without the `file` package installed that key is `null`, which
+  no gate rejects but which makes an otherwise identical measurement differ from the baseline;
+  `sudo apt-get install -y file` before comparing JSONs field by field.
 - The layout test's 32-bit check needs `g++-multilib`; without it that check is skipped, not failed,
   and the sweep is incomplete until you install it and see the ILP32 assertions actually pass.
 - Opt-in backends (`probe.OPTIONAL_BACKENDS`, currently the SDL2 window backend) are excluded from
