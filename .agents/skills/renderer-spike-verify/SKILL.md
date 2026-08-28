@@ -42,6 +42,18 @@ cmake --build build/spike
 On jammy the lavapipe manifest is `lvp_icd.x86_64.json`, not `lvp_icd.json`:
 `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`.
 
+Two things that make the command above fail on a box where it should work:
+
+- `$VULKAN_HEADERS_INCLUDE` may be empty even where the headers are provisioned; then
+  `-I$VULKAN_HEADERS_INCLUDE` expands to a bare `-I` and configure dies in `find_package(Vulkan)`.
+  Echo it first, and fall back to the checkout itself (`$HOME/vulkan-headers/include`).
+- Configure the spike with **`/usr/bin/cmake`** explicitly. The `native-port-measure` skill has you
+  `pip install --user 'cmake==4.1.2'` for the OpenAL symbol gate, and that puts a CMake 4 ahead of
+  the system one on `PATH`; its `FindVulkan` then reports
+  `Could NOT find Vulkan (missing: Vulkan_LIBRARY) (found version "1.3.204")` on jammy even with
+  `libvulkan-dev` installed. CMake 3.22 configures the same tree without a flag change. Delete
+  `build/spike` before retrying so no CMake 4 cache is left behind.
+
 ## Assert on pixels
 
 ```sh

@@ -137,6 +137,11 @@ Ubuntu 22.04 ships CMake 3.22, which the top-level `cmake_minimum_required(3.25)
 not. `pip install --user 'cmake==4.1.2'` provides a new enough `~/.local/bin/cmake` without touching
 the system one; that is the version the audio CI job pins, so it configures the same way.
 
+It does, however, shadow `/usr/bin/cmake` on `PATH` for the rest of the session, and CMake 4's
+`FindVulkan` fails on jammy with `Could NOT find Vulkan (missing: Vulkan_LIBRARY)` even though
+`libvulkan-dev` is installed. So configure the renderer spike with an explicit `/usr/bin/cmake`
+(see the `renderer-spike-verify` skill) once you have installed this one.
+
 ## 6. On a Mac, and only on a Mac
 
 The procedure, the Homebrew keg paths macOS needs and what each shim is for live in
