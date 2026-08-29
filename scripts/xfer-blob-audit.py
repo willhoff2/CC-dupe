@@ -179,9 +179,9 @@ class Index:
 _LOCAL_DECLS = {}
 
 
-def local_decl_type(text: str, pos: int, name: str):
+def local_decl_type(text: str, pos: int, name: str, source: str):
     """Type of the nearest preceding declaration of `name` in the same file."""
-    key = (id(text), name)
+    key = (source, name)
     decls = _LOCAL_DECLS.get(key)
     if decls is None:
         pat = re.compile(r"\b([A-Za-z_][\w:]*)\s+" + re.escape(name) +
@@ -197,7 +197,7 @@ def local_decl_type(text: str, pos: int, name: str):
     return best
 
 
-def classify(operand: str, idx: Index, text: str = "", pos: int = 0):
+def classify(operand: str, idx: Index, text: str = "", pos: int = 0, source: str = ""):
     """Return (category, detail) for a sizeof operand."""
     op = operand.strip()
     if not op:
@@ -229,9 +229,9 @@ def classify(operand: str, idx: Index, text: str = "", pos: int = 0):
     tail = re.split(r"\.|->", base)[-1].strip()
     tail = tail.split("[")[0].strip()
     if text and re.match(r"^\w+$", tail):
-        ty = local_decl_type(text, pos, tail)
+        ty = local_decl_type(text, pos, tail, source)
         if ty:
-            cat, detail = classify(ty, idx)
+            cat, detail = classify(ty, idx, source=source)
             if cat != "unknown":
                 return cat, f"{detail} ({tail})"
     if tail in idx.members:
@@ -298,7 +298,7 @@ def main():
                 continue          # the declaration of xferUser itself, not a call
             operands = sizeof_operands(parts[1])
             if operands:
-                cats = [classify(o, idx, text, m.start()) for o in operands]
+                cats = [classify(o, idx, text, m.start(), rel) for o in operands]
                 # the widest hazard wins
                 order = ["pointer", "unstable-scalar", "enum-open", "record",
                          "unknown", "expression", "enum-fixed", "stable-scalar"]
