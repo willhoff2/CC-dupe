@@ -100,5 +100,6 @@ on where settings live on macOS.
    both have working solutions. Verified on Linux only — running it through MoltenVK on macOS is
    the one open item.
 3. ~~**Route the 376 direct D3D8 call sites through `DX8Wrapper`, while still on D3D8.**~~ — **done**:
-   the direct count is 0 and `scripts/ci/check-d3d8-surface.py` holds it there. The next renderer
+   the direct count is 4 of 4 allowlisted (all in `WW3D2/d3dx8texcreate.cpp`, measured at commit
+   `632ba20`) and `scripts/ci/check-d3d8-surface.py` holds it there exactly. The next renderer
    slice is Vulkan backend coverage behind `RenderBackendClass`, measured method by method.

@@ -113,7 +113,19 @@ CLANGXX=clang++-14 python3 scripts/ci/check-stackwalk-symbols.py
 python3 scripts/ci/check-lanmessage-layout.py --clangxx clang++-14
 python3 spikes/renderer/tools/d3d8-lock-scan.py --check
 python3 spikes/renderer/tools/surface-lock-audit.py --check
+python3 scripts/init-reporting-scan.py --check --quiet
+python3 scripts/ci/check-widechar-wire.py --clangxx clang++-14
 ```
+
+The last two are gates `native-port-ci.yml` runs and a sweep can run without any build, so they
+belong here: `init-reporting-scan.py` ratchets how loudly each init entry point reports failure (46
+entry points on main) and takes a couple of minutes with no output until it finishes, and
+`check-widechar-wire.py` takes its compiler through `--clangxx`, not `CLANGXX`. The rest of CI's
+gates that this list omits need a build the sweep does not do: `check-assert-fires.py`,
+`check-path-separator-keys.py` and `check-shroud-bounds.py` want `--build-dir build/native-debug`,
+and `check-hidpi-scale.py`, `check-draw-capacity.py`, `check-staging-cost.py`,
+`check-swapchain-compiled.py` and `check-spike-render.py` want spike binaries — those belong to the
+`renderer-spike-verify` skill.
 
 The audio gates need the backend *built*, so they need the top-level CMake build (CMake >= 3.25,
 `libopenal-dev`), and `check-openal-symbols.py` needs both of its paths. Use a build directory other
@@ -176,6 +188,10 @@ tree.
 
 ## Pitfalls that have each cost a session
 
+- The probe always writes its markdown report, even when you only asked for `--json`: it leaves an
+  untracked `native-port-probe.md` in the repo root, whose content is whichever mode ran last. It is
+  not the checked-in report and must not be committed — delete it, and never `git add .` after a
+  sweep.
 - Never add `Core/Libraries/Source` as a blanket `-I`: its `debug/` and `profile/` subdirectories
   shadow libstdc++'s internal `<debug/...>` and `<profile/...>` headers and produce ~6,000 spurious
   errors inside the standard library.
