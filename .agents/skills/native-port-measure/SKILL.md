@@ -93,10 +93,26 @@ python3 scripts/ci/check-audio-backend-linked.py --results /tmp/nb1234.json
 python3 scripts/ci/check-video-headers.py --results /tmp/nb1234.json
 ```
 
+There is a third native-build measurement with a baseline of its own, the debug configuration, and it
+is the one whose negative controls prove the debug build still fails loudly. It needs its own build
+directory, and the three controls run out of that directory:
+
+```sh
+CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
+  --with-shims --config debug --strict-link --build-dir build/native-debug \
+  --report /tmp/nbdebug.md --json /tmp/nbdebug.json
+python3 scripts/ci/check-native-build-baseline.py --results /tmp/nbdebug.json
+CLANGXX=clang++-14 python3 scripts/native-sim-probe.py --build-dir build/native-debug --build
+python3 scripts/ci/check-assert-fires.py --build-dir build/native-debug
+python3 scripts/ci/check-path-separator-keys.py --build-dir build/native-debug
+python3 scripts/ci/check-shroud-bounds.py --build-dir build/native-debug
+```
+
 The reports and baselines those replace when a measurement is accepted are
 `docs/porting/native-build-report.md`,
-`docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json` and
-`docs/porting/ci-baselines/native-build-shimmed-level1-2-3-4.json`.
+`docs/porting/ci-baselines/native-build-shimmed-level1-2-3.json`,
+`docs/porting/ci-baselines/native-build-shimmed-level1-2-3-4.json` and
+`docs/porting/ci-baselines/native-build-shimmed-debug-level1-2-3-4.json`.
 
 At levels 1-3 `--strict-link` is not optional even though it exits non-zero: the strict link is
 expected to fail today, and the checker refuses to compare a result measured without it — the
@@ -113,7 +129,13 @@ CLANGXX=clang++-14 python3 scripts/ci/check-stackwalk-symbols.py
 python3 scripts/ci/check-lanmessage-layout.py --clangxx clang++-14
 python3 spikes/renderer/tools/d3d8-lock-scan.py --check
 python3 spikes/renderer/tools/surface-lock-audit.py --check
+python3 scripts/init-reporting-scan.py --check --quiet   # ci-baselines/init-reporting.json
 ```
+
+Two of the checked-in baselines are neither source scans nor build measurements:
+`draw-capacity.json` and `staging-cost-ceiling.json` are measured by running the renderer spike under
+lavapipe, so a sweep that skips the spike leaves them unmeasured. The build and the exact gate
+invocations are in `.agents/skills/renderer-spike-verify/SKILL.md`.
 
 The audio gates need the backend *built*, so they need the top-level CMake build (CMake >= 3.25,
 `libopenal-dev`), and `check-openal-symbols.py` needs both of its paths. Use a build directory other
