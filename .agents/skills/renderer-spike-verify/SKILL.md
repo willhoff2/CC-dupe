@@ -13,7 +13,7 @@ validation layer are.
 ```sh
 sudo apt-get install -y clang cmake ninja-build libvulkan-dev vulkan-validationlayers \
     glslang-tools mesa-vulkan-drivers
-test -f /usr/share/vulkan/icd.d/lvp_icd.json                                  # lavapipe present
+ls /usr/share/vulkan/icd.d/lvp_icd*.json                                      # lavapipe present
 test -f /usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json    # layer present
 cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/spike
