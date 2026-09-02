@@ -121,9 +121,27 @@ enum D3DShaderOpcode {
 
 // D3DVSD_* declaration tokens (IDirect3DDevice8::CreateVertexShader's pDeclaration).
 constexpr uint32_t kD3DVSD_TokenTypeShift = 29;
+constexpr uint32_t kD3DVSD_TokenNop = 0;
+constexpr uint32_t kD3DVSD_TokenStream = 1;
 constexpr uint32_t kD3DVSD_TokenStreamData = 2;
 constexpr uint32_t kD3DVSD_TokenEnd = 7;
 constexpr uint32_t kD3DVSD_VertexRegMask = 0x0000001fu;
+constexpr uint32_t kD3DVSD_StreamNumberMask = 0x0000000fu;
+constexpr uint32_t kD3DVSD_StreamTessMask = 0x10000000u;
+// D3DVSD_REG's data type, D3DVSDT_*, in bits 16..19; D3DVSD_SKIP sets bit 28 instead
+// and carries a DWORD count in the same bits.
+constexpr uint32_t kD3DVSD_DataTypeShift = 16;
+constexpr uint32_t kD3DVSD_DataTypeMask = 0x000f0000u;
+constexpr uint32_t kD3DVSD_DataLoadMask = 0x10000000u;
+constexpr uint32_t kD3DVSD_SkipCountMask = 0x000f0000u;
+constexpr uint32_t kD3DVSDT_Float1 = 0;
+constexpr uint32_t kD3DVSDT_Float2 = 1;
+constexpr uint32_t kD3DVSDT_Float3 = 2;
+constexpr uint32_t kD3DVSDT_Float4 = 3;
+constexpr uint32_t kD3DVSDT_D3dColor = 4;
+constexpr uint32_t kD3DVSDT_Ubyte4 = 5;
+constexpr uint32_t kD3DVSDT_Short2 = 6;
+constexpr uint32_t kD3DVSDT_Short4 = 7;
 constexpr uint32_t kD3DVSD_End = 0xffffffffu;
 
 // Only the render states the engine actually sets (53 of them; see

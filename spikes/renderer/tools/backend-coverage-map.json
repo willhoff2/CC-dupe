@@ -42,10 +42,13 @@
    "note": "the 16 in-repo ps.1.1/vs.1.1 shaders; not started"
   },
   "CreateTexture": {"category": "backend", "entry": ["Create_Texture"]},
-  "CreateVertexBuffer": {"category": "backend", "entry": ["Create_Vertex_Buffer"]},
+  "CreateVertexBuffer": {
+   "category": "backend", "entry": ["Create_Vertex_Buffer"],
+   "note": "FVF 0 creates an untyped buffer whose layout is the FVF bound at draw time"
+  },
   "CreateVertexShader": {
    "category": "backend", "entry": ["Create_Vertex_Shader"],
-   "note": "declaration-only FVF handles are served by Set_Vertex_Buffer's fvf; real vs.1.1 not started"
+   "note": "vs.1.1 token stream translated; the D3DVSD_* declaration is decoded to the stream layout untyped (FVF 0) buffers are drawn with under the program (one stream, FLOAT1-4/D3DCOLOR; SKIP, UBYTE4, SHORT2/4 and extra streams refused loudly)"
   },
   "CreateVolumeTexture": {
    "category": "backend", "entry": ["Create_Volume_Texture"],
@@ -105,7 +108,10 @@
    "note": "per-state coverage is the render_states table, not this one method"
   },
   "SetRenderTarget": {"category": "backend", "entry": ["Set_Render_Target"]},
-  "SetStreamSource": {"category": "backend", "entry": ["Set_Vertex_Buffer"]},
+  "SetStreamSource": {
+   "category": "backend", "entry": ["Set_Vertex_Buffer"],
+   "note": "the explicit stride is honoured for untyped (FVF 0) buffers"
+  },
   "SetTexture": {"category": "backend", "entry": ["Set_Texture"]},
   "SetTextureStageState": {
    "category": "backend", "entry": ["Set_DX8_Texture_Stage_State"],
@@ -113,8 +119,8 @@
   },
   "SetTransform": {"category": "backend", "entry": ["Set_Transform"]},
   "SetVertexShader": {
-   "category": "backend", "entry": ["Set_Vertex_Buffer"],
-   "note": "the engine passes an FVF token here for the fixed-function pipeline; the buffer carries it"
+   "category": "backend", "entry": ["Set_Vertex_Buffer", "Set_Fixed_Function_Fvf"],
+   "note": "an FVF token here selects fixed function; a typed buffer carries its own FVF, an untyped one draws with this"
   },
   "SetVertexShaderConstant": {"category": "backend", "entry": ["Set_Vertex_Shader_Constant"]},
   "SetViewport": {"category": "backend", "entry": ["Set_Viewport"]},

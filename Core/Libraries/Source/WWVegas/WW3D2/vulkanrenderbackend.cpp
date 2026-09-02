@@ -1425,12 +1425,19 @@ HRESULT VulkanRenderBackendClass::SetVertexShader(DWORD handle)
 	if (Internals->Backend == NULL) return D3DERR_INVALIDCALL;
 	// D3D8 overloads this: an FVF bitfield selects the fixed-function pipeline, a handle from
 	// CreateVertexShader selects a program.  The engine uses both (15 of its 23 call sites pass
-	// an FVF), and the spike's Set_Vertex_Buffer carries the FVF, so an FVF here is the
-	// fixed-function path and needs no shader bound.
+	// an FVF), so an FVF here is the fixed-function path and needs no shader bound.  A typed
+	// vertex buffer carries its own FVF; the FVF set here is the layout of an *untyped* one
+	// (CreateVertexBuffer with FVF 0, the two shadow managers), read at draw time.
 	if ((handle & D3DFVF_RESERVED0) == 0 && handle >= D3DFVF_XYZ) {
 		Internals->Backend->Set_Vertex_Shader(spike::kNullShader);
+		Internals->Backend->Set_Fixed_Function_Fvf((uint32_t)handle);
 		return D3D_OK;
 	}
+	// Under a program the stream's layout is the program's D3DVSD_* declaration, which the
+	// backend decoded at Create_Vertex_Shader and applies to untyped buffers at draw time.
+	// No FVF is left bound so a program without a usable declaration is refused and counted
+	// rather than read with a stale FVF.
+	Internals->Backend->Set_Fixed_Function_Fvf(0);
 	Internals->Backend->Set_Vertex_Shader((spike::ShaderHandle)handle);
 	return D3D_OK;
 }
@@ -1677,15 +1684,14 @@ HRESULT VulkanRenderBackendClass::SetStreamSource(UINT stream_number,
 	IDirect3DVertexBuffer8* stream_data, UINT stride)
 {
 	if (Internals->Backend == NULL) return D3DERR_INVALIDCALL;
-	// The stride is implied by the FVF the buffer was created with, which is how the spike's
-	// vertex input state is built, so D3D8's explicit stride is only checked against it by the
-	// backend's own layout.  Passing it separately would give the pipeline two sources of truth.
-	(void)stride;
+	// A typed buffer's stride is implied by the FVF it was created with, which is how the
+	// spike's vertex input state is built; the explicit stride only decides anything for an
+	// untyped buffer, whose layout the backend resolves from the FVF bound at draw time.
 	spike::VertexBufferHandle * handle = NULL;
 	if (stream_data != NULL) {
 		handle = ((VulkanD3DVertexBufferClass *)stream_data)->Peek_Handle();
 	}
-	Internals->Backend->Set_Vertex_Buffer(handle, (uint32_t)stream_number);
+	Internals->Backend->Set_Vertex_Buffer(handle, (uint32_t)stream_number, (uint32_t)stride);
 	return D3D_OK;
 }
 

@@ -261,4 +261,132 @@ bool Decode_Fvf(uint32_t fvf, VertexLayout& out) {
 	return true;
 }
 
+namespace {
+
+// The shader inputs a declared register may be delivered through, in ascending
+// location order so that stream order and VertexAttribLocation order agree. The
+// fixed-function vertex shader reads a_position as .xyz with w = 1 and a_normal as a
+// vec3, so those two only take what fits; the vec4 inputs take anything.
+struct DeclarationSlot {
+	uint32_t location;
+	uint32_t max_components; // of a float register; D3DCOLOR always needs 4
+};
+constexpr DeclarationSlot kDeclarationSlots[] = {
+    {VA_POSITION, 3}, {VA_NORMAL, 3},    {VA_DIFFUSE, 4},   {VA_SPECULAR, 4},
+    {VA_TEXCOORD0, 4}, {VA_TEXCOORD1, 4}, {VA_TEXCOORD2, 4}, {VA_TEXCOORD3, 4},
+};
+constexpr uint32_t kDeclarationSlotCount = sizeof(kDeclarationSlots) / sizeof(kDeclarationSlots[0]);
+
+} // namespace
+
+bool Decode_Vertex_Declaration(const uint32_t* declaration, VertexLayout& out,
+                               uint32_t* out_regs, uint32_t& out_reg_count,
+                               const char*& reason) {
+	out = VertexLayout{};
+	out_reg_count = 0;
+	reason = nullptr;
+	if (declaration == nullptr) {
+		reason = "no declaration";
+		return false;
+	}
+	uint32_t offset = 0;
+	uint32_t next_slot = 0;
+	bool in_stream = false;
+	for (const uint32_t* p = declaration; *p != kD3DVSD_End; ++p) {
+		const uint32_t token = *p;
+		const uint32_t type = (token >> kD3DVSD_TokenTypeShift) & 7u;
+		if (type == kD3DVSD_TokenEnd) break;
+		if (type == kD3DVSD_TokenNop) continue;
+		if (type == kD3DVSD_TokenStream) {
+			if ((token & kD3DVSD_StreamTessMask) != 0) {
+				reason = "D3DVSD_STREAM_TESS";
+				return false;
+			}
+			if ((token & kD3DVSD_StreamNumberMask) != 0) {
+				reason = "a stream other than 0";
+				return false;
+			}
+			if (in_stream) {
+				reason = "a second stream";
+				return false;
+			}
+			in_stream = true;
+			continue;
+		}
+		if (type != kD3DVSD_TokenStreamData) {
+			reason = "a token other than STREAM/REG (tessellator or constant data)";
+			return false;
+		}
+		if (!in_stream) {
+			reason = "a D3DVSD_REG before any D3DVSD_STREAM";
+			return false;
+		}
+		if ((token & kD3DVSD_DataLoadMask) != 0) {
+			reason = "D3DVSD_SKIP";
+			return false;
+		}
+		VkFormat format;
+		uint32_t bytes;
+		uint32_t components;
+		switch ((token & kD3DVSD_DataTypeMask) >> kD3DVSD_DataTypeShift) {
+		case kD3DVSDT_Float1: format = VK_FORMAT_R32_SFLOAT; bytes = 4; components = 1; break;
+		case kD3DVSDT_Float2: format = VK_FORMAT_R32G32_SFLOAT; bytes = 8; components = 2; break;
+		case kD3DVSDT_Float3: format = VK_FORMAT_R32G32B32_SFLOAT; bytes = 12; components = 3; break;
+		case kD3DVSDT_Float4:
+			format = VK_FORMAT_R32G32B32A32_SFLOAT; bytes = 16; components = 4; break;
+		case kD3DVSDT_D3dColor: format = VK_FORMAT_B8G8R8A8_UNORM; bytes = 4; components = 4; break;
+		default:
+			reason = "a D3DVSDT_ type other than FLOAT1..4/D3DCOLOR (UBYTE4, SHORT2, SHORT4)";
+			return false;
+		}
+		if (out_reg_count >= kMaxVertexShaderInputs) {
+			reason = "more registers than vs.1.1 has inputs";
+			return false;
+		}
+		// The first register is what the vertex shader's a_position carries, and it is
+		// read as xyz/1: only a FLOAT3 arrives there unchanged.
+		while (next_slot < kDeclarationSlotCount &&
+		       (components > kDeclarationSlots[next_slot].max_components ||
+		        (next_slot == 0 && components != 3)))
+			++next_slot;
+		if (next_slot >= kDeclarationSlotCount) {
+			reason = "more registers than the layout has attribute locations for";
+			return false;
+		}
+		const uint32_t location = kDeclarationSlots[next_slot++].location;
+		out.attributes[out.attribute_count++] = {location, 0, format, offset};
+		out.supplies[location] = true;
+		out_regs[out_reg_count++] = token & kD3DVSD_VertexRegMask;
+		offset += bytes;
+	}
+	if (out_reg_count == 0) {
+		reason = "no D3DVSD_REG";
+		return false;
+	}
+	if (!out.supplies[VA_POSITION]) {
+		reason = "a first register that is not a FLOAT3";
+		return false;
+	}
+	out.stride = offset;
+	return true;
+}
+
+uint32_t Hash_Vertex_Layout(const VertexLayout& layout) {
+	uint32_t h = 2166136261u; // FNV-1a
+	auto mix = [&h](uint32_t v) {
+		for (uint32_t i = 0; i < 4; ++i) {
+			h ^= (v >> (i * 8)) & 0xffu;
+			h *= 16777619u;
+		}
+	};
+	mix(layout.stride);
+	mix(layout.attribute_count);
+	for (uint32_t i = 0; i < layout.attribute_count; ++i) {
+		mix(layout.attributes[i].location);
+		mix(static_cast<uint32_t>(layout.attributes[i].format));
+		mix(layout.attributes[i].offset);
+	}
+	return h == 0 ? 1u : h;
+}
+
 } // namespace spike

@@ -160,6 +160,14 @@ add_executable(zh-draw-capacity src/draw_capacity.cpp)
 add_dependencies(zh-draw-capacity spike-shaders)
 target_link_libraries(zh-draw-capacity PRIVATE zh-render-backend)
 
+# Vertex buffers created with FVF 0 (the shadow managers', static water), drawn with the FVF
+# or the D3DVSD_* declaration bound at draw time, every tile's id read back through the
+# attribute that layout supplies. scripts/ci/check-untyped-vertex-buffer.py gates it, with
+# ZH_RENDER_NO_UNTYPED_VB and ZH_RENDER_NO_VERTEX_DECLARATION as the negative controls.
+add_executable(zh-untyped-vb src/untyped_vertex_buffer.cpp)
+add_dependencies(zh-untyped-vb spike-shaders)
+target_link_libraries(zh-untyped-vb PRIVATE zh-render-backend)
+
 # Throughput baseline: draw calls/sec and state changes/sec, so the Mac has a Linux
 # number to be compared against.
 add_executable(zh-throughput src/throughput.cpp)
@@ -305,7 +313,7 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     foreach(target zh-render-backend zh-renderer-spike zh-caps-probe zh-feature-probe
                    zh-fixedfunc-tests zh-resource-lock-tests zh-hidpi-tests
-                   zh-staging-workload zh-throughput zh-draw-capacity)
+                   zh-staging-workload zh-throughput zh-draw-capacity zh-untyped-vb)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
     foreach(target zh-window-spike zh-window-spike-cocoa zh-metal-surface-probe
