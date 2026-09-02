@@ -187,6 +187,13 @@ struct DrawStats {
 	uint32_t draws_requested = 0;
 	uint32_t draws_issued = 0;
 	uint32_t draws_dropped = 0;
+	// Draws whose vertex buffer was created untyped (FVF 0) and took its layout from the
+	// fixed-function FVF bound at draw time. Counted so a frame that was supposed to
+	// contain such geometry can be told apart from one that never asked for it.
+	uint32_t untyped_draws_issued = 0;
+	// Untyped draws refused because no decodable fixed-function FVF was bound. Part of
+	// draws_dropped as well; listed separately so the cause is named.
+	uint32_t untyped_draws_dropped = 0;
 	uint32_t peak_draws_per_frame = 0;
 	uint64_t draws_dropped_total = 0;
 	// Descriptor sets allocated, and the number of pool allocations they came from: the
@@ -416,7 +423,17 @@ public:
 	virtual void Set_Vertex_Shader_Constant(uint32_t start_register, const void* data,
 	                                        uint32_t vector4_count) = 0;
 
-	virtual void Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream = 0) = 0;
+	// D3D8 also overloads SetVertexShader with a D3DFVF_* bitfield, which selects the
+	// fixed-function pipeline and names the layout of stream 0 from then on. It is the
+	// only layout an *untyped* vertex buffer (CreateVertexBuffer with FVF 0) has, so the
+	// backend keeps it, and reads it at draw time for such buffers.
+	virtual void Set_Fixed_Function_Fvf(uint32_t fvf) = 0;
+
+	// SetStreamSource. `stride` is D3D8's explicit vertex stride; 0 means "the FVF the
+	// buffer was created with". A typed buffer's layout carries its own stride, so the
+	// argument only decides anything for an untyped buffer.
+	virtual void Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream = 0,
+	                               uint32_t stride = 0) = 0;
 	virtual void Set_Index_Buffer(IndexBufferHandle* ib, uint32_t index_base_offset) = 0;
 
 	// --- draw: DX8Wrapper::Draw_Triangles -> DrawIndexedPrimitive ------------

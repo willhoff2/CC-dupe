@@ -45,6 +45,14 @@ uint32_t Vertex_Count_For_Primitives(uint32_t d3d_primitive_type, uint32_t primi
 // one of them means a different VkPipeline, which is why the cache exists.
 struct PipelineKey {
 	uint32_t fvf = 0;
+	// Non-zero for a layout that came from a vertex declaration rather than an FVF:
+	// Hash_Vertex_Layout of it. Two such layouts can have the same `fvf` (0), so the
+	// pipeline's vertex input state needs this to be told apart.
+	uint32_t declaration = 0;
+	// The vertex stride the pipeline's binding 0 is built with. Normally the FVF's own
+	// size; a UP draw or an untyped buffer may bind the same FVF at a larger stride,
+	// which is a different VkPipelineVertexInputStateCreateInfo.
+	uint32_t vertex_stride = 0;
 	uint32_t topology = D3DPT_TRIANGLELIST;
 
 	uint32_t z_enable = 1;
@@ -153,6 +161,23 @@ struct VertexLayout {
 // kMaxTexCoordSets coordinate sets, or a blend-weight count other than the
 // D3DFVF_XYZB4|D3DFVF_LASTBETA_UBYTE4 pairing dx8fvf.cpp emits.
 bool Decode_Fvf(uint32_t fvf, VertexLayout& out);
+
+// D3DVSD_* declaration (CreateVertexShader's pDeclaration) -> the layout of the one
+// stream it describes, plus the v-register each element feeds, in stream order. The
+// k-th D3DVSD_REG becomes the k-th attribute the layout supplies, in VertexAttribLocation
+// order, which is the mapping the draw-time vs_inputs resolution relies on.
+//
+// Bounded to what the engine's declarations contain (docs/porting/untyped-vertex-buffers.md):
+// one stream, stream 0, FLOAT1..4 and D3DCOLOR registers, no SKIP, no tessellator, no
+// constants. Anything else returns false with `reason` naming the token, so a
+// declaration outside the measured set is refused rather than drawn with a guess.
+bool Decode_Vertex_Declaration(const uint32_t* declaration, VertexLayout& out,
+                               uint32_t* out_regs, uint32_t& out_reg_count,
+                               const char*& reason);
+
+// FNV-1a over the attribute descriptions and stride: two declarations that describe the
+// same VkPipelineVertexInputStateCreateInfo share pipelines.
+uint32_t Hash_Vertex_Layout(const VertexLayout& layout);
 
 // --- category 3: state with no Vulkan equivalent ----------------------------
 // D3D8's texture-stage cascade plus its fixed-function transform, lighting and fog.

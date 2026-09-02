@@ -645,6 +645,11 @@ public:
 	*/
 	static IDirect3DDevice8* _Get_D3D_Device8() { return RenderBackend ? RenderBackend->Peek_D3D_Device8() : nullptr; }
 	static IDirect3D8* _Get_D3D8() { return RenderBackend ? RenderBackend->Peek_D3D8() : nullptr; }
+	/*
+	** The device-presence test.  On the D3D8 backend this is exactly `_Get_D3D_Device8() != nullptr`;
+	** on a backend without D3D8 objects it is the only form of the question that can answer yes.
+	*/
+	static bool Has_Device() { return RenderBackend != nullptr && RenderBackend->Has_Device(); }
 	/// Returns the display format - added by TR for video playback - not part of W3D
 	static WW3DFormat	getBackBufferFormat();
 	static bool Reset_Device(bool reload_assets=true);

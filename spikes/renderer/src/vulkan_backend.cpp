@@ -295,6 +295,11 @@ struct VertexBufferHandle {
 	Buffer buffer;
 	VertexLayout layout;
 	uint32_t fvf = 0;
+	// CreateVertexBuffer with FVF 0: D3D8 lets a buffer carry bytes whose layout is named
+	// later, by the FVF (or declaration) bound through SetVertexShader when it is drawn.
+	// `layout` and `fvf` are meaningless for such a buffer; Prepare_Draw resolves them from
+	// the fixed-function FVF in force at the draw.
+	bool untyped = false;
 
 	// --- dynamic ring (class C5) ----------------------------------------------
 	bool dynamic = false;
@@ -377,6 +382,11 @@ struct ShaderProgram {
 	// The v-registers the D3DVSD_* declaration names, in declaration order. The k-th
 	// one is fed by the k-th element the bound FVF supplies, which is D3D8's mapping.
 	std::vector<uint32_t> declared_inputs;
+	// The stream layout the same declaration describes, which is what an *untyped*
+	// (FVF 0) buffer is read with while this program is bound; a typed buffer keeps its
+	// own FVF's layout.
+	VertexLayout declared_layout;
+	uint32_t declared_layout_hash = 0;
 };
 
 class VulkanBackend final : public RenderBackend {
@@ -440,7 +450,8 @@ public:
 		return resource_stats_;
 	}
 
-	void Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream) override;
+	void Set_Fixed_Function_Fvf(uint32_t fvf) override;
+	void Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream, uint32_t stride) override;
 	void Set_Index_Buffer(IndexBufferHandle* ib, uint32_t index_base_offset) override;
 
 	void Draw_Triangles(uint32_t start_index, uint32_t polygon_count,
@@ -610,6 +621,14 @@ private:
 	// descriptors and the dynamic state D3D8 changes without a pipeline notion.
 	// False when the draw cannot be issued at all.
 	bool Prepare_Draw(uint32_t primitive_type, const VertexBufferHandle& vb);
+	// The layout a draw from `vb` uses: the buffer's own for a typed buffer, the
+	// fixed-function FVF's for an untyped one, at the stride SetStreamSource named if it
+	// named a larger one. False, with the reason counted, when there is none.
+	bool Resolve_Draw_Layout(const VertexBufferHandle& vb, uint32_t& out_fvf,
+	                         uint32_t& out_declaration, const VertexLayout*& out_layout);
+	// Fits `layout` to SetStreamSource's stride: refused when the stride cannot hold a
+	// vertex, widened when it is larger.
+	bool Apply_Stream_Stride(VertexLayout& layout, uint32_t stride, const char* what);
 	void Transition(VkCommandBuffer cmd, VkImage image, VkImageLayout from,
 	                VkImageLayout to, VkImageAspectFlags aspect,
 	                uint32_t mip_levels = 1);
@@ -727,7 +746,17 @@ private:
 	// rather than a line in a log.
 	uint32_t frame_draws_requested_ = 0;
 	uint32_t frame_draws_dropped_ = 0;
+	uint32_t frame_untyped_draws_issued_ = 0;
+	uint32_t frame_untyped_draws_dropped_ = 0;
 	DrawStats draw_stats_;
+	// Negative control (ZH_RENDER_NO_UNTYPED_VB): refuse FVF-0 buffers at creation, which is
+	// what the backend did before it had this path. Exists so the gate that proves the path
+	// draws can be shown to fail without it.
+	bool untyped_vertex_buffers_ = true;
+	// Negative control (ZH_RENDER_NO_VERTEX_DECLARATION): draw untyped buffers only through
+	// the fixed-function FVF, never through the bound program's declaration, which is what
+	// the backend did before it had a declaration path.
+	bool vertex_declarations_ = true;
 	// Test hook (ZH_RENDER_MAX_DRAWS): refuses to grow past this many draws in a frame, which
 	// is how a negative control reproduces the old fixed preallocation. 0 means no limit.
 	uint32_t draw_limit_ = 0;
@@ -785,13 +814,27 @@ private:
 	float max_anisotropy_ = 1.0f; // 1.0 when the device has no samplerAnisotropy
 	float max_point_size_ = 1.0f;
 	VertexBufferHandle* bound_vb_ = nullptr;
+	// SetStreamSource's explicit stride for stream 0; 0 when the caller left it to the FVF.
+	uint32_t bound_vb_stride_ = 0;
+	// The D3DFVF_* last passed to SetVertexShader: the layout every untyped buffer draws with.
+	uint32_t fixed_function_fvf_ = 0;
+	// Layouts resolved for untyped draws, keyed by (fvf << 32 | stride) for the
+	// fixed-function ones and (1 << 63 | declaration hash << 32 | stride) for the declared.
+	std::unordered_map<uint64_t, VertexLayout> untyped_layouts_;
 	IndexBufferHandle* bound_ib_ = nullptr;
 
 	// --- programmable shaders and clip planes ----------------------------------
 	// D3D8 shader handles are DWORDs the device hands out, so the backend owns the
-	// numbering. 0 is D3D8's "no shader", i.e. back to fixed function.
+	// numbering. 0 is D3D8's "no shader", i.e. back to fixed function. Handles keep bit 0
+	// (D3DFVF_RESERVED0) set, as D3D8's do, which is how SetVertexShader's caller tells a
+	// handle from an FVF bitfield.
 	std::unordered_map<ShaderHandle, ShaderProgram> shaders_;
 	ShaderHandle next_shader_ = 1;
+	ShaderHandle Allocate_Shader_Handle() {
+		const ShaderHandle handle = (next_shader_ << 1) | 1u;
+		++next_shader_;
+		return handle;
+	}
 	ShaderHandle bound_pixel_shader_ = kNullShader;
 	ShaderHandle bound_vertex_shader_ = kNullShader;
 	float pixel_shader_constants_[kMaxPixelShaderConstants][4]{};
@@ -1043,6 +1086,8 @@ bool VulkanBackend::Pick_Device() {
 	// C7 (pointer used after Unlock) and C8 (read-write hand-out to arbitrary engine
 	// code) rely on, and it is the "before" the pooled numbers are measured against.
 	staging_retain_ = std::getenv("ZH_SPIKE_STAGING_RETAIN") != nullptr;
+	untyped_vertex_buffers_ = std::getenv("ZH_RENDER_NO_UNTYPED_VB") == nullptr;
+	vertex_declarations_ = std::getenv("ZH_RENDER_NO_VERTEX_DECLARATION") == nullptr;
 
 	// D3D8 states that need a Vulkan *feature*, not just a pipeline field:
 	// D3DRS_POINTSIZE > 1 needs largePoints, D3DTSS_MAXANISOTROPY needs
@@ -3040,7 +3085,10 @@ VertexBufferHandle* VulkanBackend::Create_Lockable_Vertex_Buffer(size_t bytes, u
 	if (bytes == 0) return nullptr;
 	auto* handle = new VertexBufferHandle();
 	handle->fvf = fvf;
-	if (!Decode_Fvf(fvf, handle->layout)) {
+	if (fvf == 0 && untyped_vertex_buffers_) {
+		handle->untyped = true;
+		std::fprintf(stderr, "untyped vertex buffer: %zu bytes created with FVF 0\n", bytes);
+	} else if (!Decode_Fvf(fvf, handle->layout)) {
 		std::fprintf(stderr, "Decode_Fvf: unsupported FVF 0x%x\n", fvf);
 		delete handle;
 		return nullptr;
@@ -3206,8 +3254,95 @@ void VulkanBackend::Set_Viewport(const ViewportRect& viewport) {
 	}
 }
 
-void VulkanBackend::Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream) {
-	if (stream == 0) bound_vb_ = vb;
+void VulkanBackend::Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream, uint32_t stride) {
+	if (stream != 0) return;
+	bound_vb_ = vb;
+	bound_vb_stride_ = stride;
+}
+
+void VulkanBackend::Set_Fixed_Function_Fvf(uint32_t fvf) {
+	fixed_function_fvf_ = fvf;
+}
+
+bool VulkanBackend::Apply_Stream_Stride(VertexLayout& layout, uint32_t stride,
+                                        const char* what) {
+	// D3D8 reads the buffer at SetStreamSource's stride when one is given; a stride
+	// smaller than the layout's own vertex cannot hold the vertex and is refused rather
+	// than read past.
+	if (stride != 0 && stride < layout.stride) {
+		if (frame_untyped_draws_dropped_ == 0) {
+			std::fprintf(stderr,
+			             "untyped vertex buffer bound at stride %u, smaller than %s's %u bytes: "
+			             "the frame will be missing geometry\n",
+			             stride, what, layout.stride);
+		}
+		return false;
+	}
+	if (stride > layout.stride) layout.stride = stride;
+	return true;
+}
+
+bool VulkanBackend::Resolve_Draw_Layout(const VertexBufferHandle& vb, uint32_t& out_fvf,
+                                        uint32_t& out_declaration,
+                                        const VertexLayout*& out_layout) {
+	out_declaration = 0;
+	if (!vb.untyped) {
+		out_fvf = vb.fvf;
+		out_layout = &vb.layout;
+		return true;
+	}
+	const uint32_t stride = bound_vb_stride_;
+
+	// A bound program reads the buffer with its declaration's layout: that is what
+	// SetVertexShader(handle) means for a stream whose buffer has no FVF.
+	const ShaderProgram* vs =
+	    bound_vertex_shader_ != kNullShader ? Find_Shader(bound_vertex_shader_) : nullptr;
+	if (vs != nullptr && vs->declared_layout_hash != 0 && vertex_declarations_) {
+		const uint64_t cache_key = (1ull << 63) |
+		                           (static_cast<uint64_t>(vs->declared_layout_hash) << 32) | stride;
+		auto it = untyped_layouts_.find(cache_key);
+		if (it == untyped_layouts_.end()) {
+			VertexLayout layout = vs->declared_layout;
+			if (!Apply_Stream_Stride(layout, stride, "the vertex declaration")) return false;
+			it = untyped_layouts_.emplace(cache_key, layout).first;
+			std::fprintf(stderr,
+			             "untyped vertex buffer layout: declaration %08x stride %u "
+			             "(%u bytes/vertex)\n",
+			             vs->declared_layout_hash, stride, layout.stride);
+		}
+		out_fvf = 0;
+		out_declaration = vs->declared_layout_hash;
+		out_layout = &it->second;
+		return true;
+	}
+
+	const uint32_t fvf = fixed_function_fvf_;
+	const uint64_t cache_key = (static_cast<uint64_t>(fvf) << 32) | stride;
+	auto it = untyped_layouts_.find(cache_key);
+	if (it == untyped_layouts_.end()) {
+		VertexLayout layout;
+		if (!Decode_Fvf(fvf, layout)) {
+			if (frame_untyped_draws_dropped_ == 0) {
+				std::fprintf(stderr,
+				             "untyped vertex buffer drawn with no decodable fixed-function FVF "
+				             "bound (0x%x)%s: the frame will be missing geometry\n",
+				             fvf, vs != nullptr ? " and a program whose declaration is unusable"
+				                                : "");
+			}
+			return false;
+		}
+		char what[32];
+		std::snprintf(what, sizeof(what), "FVF 0x%x", fvf);
+		if (!Apply_Stream_Stride(layout, stride, what)) return false;
+		it = untyped_layouts_.emplace(cache_key, layout).first;
+		// Once per distinct layout: the runtime enumeration the source enumeration in
+		// docs/porting/untyped-vertex-buffers.md is checked against.
+		std::fprintf(stderr, "untyped vertex buffer layout: FVF 0x%x stride %u (%u bytes/vertex)\n",
+		             fvf, stride, layout.stride);
+	}
+	out_fvf = fvf;
+	out_layout = &it->second;
+	return true;
 }
 
 void VulkanBackend::Set_Index_Buffer(IndexBufferHandle* ib, uint32_t index_base_offset) {
@@ -3464,6 +3599,8 @@ void VulkanBackend::Begin_Scene() {
 	draw_index_ = 0;
 	frame_draws_requested_ = 0;
 	frame_draws_dropped_ = 0;
+	frame_untyped_draws_issued_ = 0;
+	frame_untyped_draws_dropped_ = 0;
 	in_scene_ = true;
 	if (!Begin_Current_Pass()) {
 		in_scene_ = false;
@@ -3691,6 +3828,17 @@ bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHand
 	if (!in_scene_) return false;
 	++frame_draws_requested_;
 
+	// An untyped buffer has no layout of its own; without one there is nothing to build a
+	// pipeline from, and that is a lost draw like any other, counted under its own name.
+	uint32_t fvf = 0;
+	uint32_t declaration = 0;
+	const VertexLayout* layout = nullptr;
+	if (!Resolve_Draw_Layout(vb, fvf, declaration, layout)) {
+		++frame_draws_dropped_;
+		++frame_untyped_draws_dropped_;
+		return false;
+	}
+
 	// The draw's own descriptor set and uniform slice, allocating a block if this frame is
 	// the first to get this far. Failure here is a *lost draw*, not a slow one: the frame
 	// will be missing geometry, so it is counted and reported rather than logged and
@@ -3713,7 +3861,9 @@ bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHand
 	// This is DX8Wrapper::Apply_Render_State_Changes' job, moved to draw time
 	// because Vulkan has no per-state setters.
 	PipelineKey key;
-	key.fvf = vb.fvf;
+	key.fvf = fvf;
+	key.declaration = declaration;
+	key.vertex_stride = layout->stride;
 	key.topology = primitive_type;
 	key.z_enable = render_states_[D3DRS_ZENABLE];
 	key.z_write_enable = render_states_[D3DRS_ZWRITEENABLE];
@@ -3737,15 +3887,16 @@ bool VulkanBackend::Prepare_Draw(uint32_t primitive_type, const VertexBufferHand
 	key.depth_bias_enable = render_states_[D3DRS_ZBIAS] != 0 ? 1 : 0;
 	key.has_depth_attachment = current_depth_ != nullptr ? 1 : 0;
 
-	VkPipeline pipeline = Get_Or_Create_Pipeline(key, vb.layout);
+	VkPipeline pipeline = Get_Or_Create_Pipeline(key, *layout);
 	if (pipeline == VK_NULL_HANDLE) {
 		// No pipeline is the same loss of geometry as no descriptor set.
 		++frame_draws_dropped_;
 		return false;
 	}
+	if (vb.untyped) ++frame_untyped_draws_issued_;
 
 	DrawUniforms uniforms;
-	Fill_Draw_Uniforms(primitive_type, vb.layout, uniforms);
+	Fill_Draw_Uniforms(primitive_type, *layout, uniforms);
 
 	std::memcpy(mapped, &uniforms, sizeof(DrawUniforms));
 
@@ -3908,6 +4059,8 @@ void VulkanBackend::End_Scene(bool flip_frame) {
 	draw_stats_.draws_requested = frame_draws_requested_;
 	draw_stats_.draws_issued = draw_index_;
 	draw_stats_.draws_dropped = frame_draws_dropped_;
+	draw_stats_.untyped_draws_issued = frame_untyped_draws_issued_;
+	draw_stats_.untyped_draws_dropped = frame_untyped_draws_dropped_;
 	draw_stats_.draws_dropped_total += frame_draws_dropped_;
 	if (draw_index_ > draw_stats_.peak_draws_per_frame)
 		draw_stats_.peak_draws_per_frame = draw_index_;
@@ -3916,10 +4069,11 @@ void VulkanBackend::End_Scene(bool flip_frame) {
 	// for, so it has to be observable from a normal run rather than only from a spike.
 	if (draw_report_interval_ != 0 && (frame_counter_ % draw_report_interval_) == 0) {
 		std::fprintf(stderr,
-		             "draws/frame: requested %u issued %u dropped %u (peak %u, capacity %u in "
-		             "%u block(s), dropped total %llu)\n",
+		             "draws/frame: requested %u issued %u dropped %u untyped %u/%u (peak %u, "
+		             "capacity %u in %u block(s), dropped total %llu)\n",
 		             draw_stats_.draws_requested, draw_stats_.draws_issued,
-		             draw_stats_.draws_dropped, draw_stats_.peak_draws_per_frame,
+		             draw_stats_.draws_dropped, draw_stats_.untyped_draws_issued,
+		             draw_stats_.untyped_draws_dropped, draw_stats_.peak_draws_per_frame,
 		             draw_stats_.descriptor_capacity, draw_stats_.descriptor_blocks,
 		             static_cast<unsigned long long>(draw_stats_.draws_dropped_total));
 	}
@@ -4832,7 +4986,7 @@ ShaderProgram* VulkanBackend::Find_Shader(ShaderHandle handle) {
 ShaderHandle VulkanBackend::Create_Pixel_Shader(const uint32_t* function) {
 	ShaderProgram program;
 	if (!Parse_D3d8_Shader(function, true, program)) return kNullShader;
-	const ShaderHandle handle = next_shader_++;
+	const ShaderHandle handle = Allocate_Shader_Handle();
 	shaders_[handle] = std::move(program);
 	return handle;
 }
@@ -4874,19 +5028,36 @@ ShaderHandle VulkanBackend::Create_Vertex_Shader(const uint32_t* declaration,
 	(void)usage;
 	ShaderProgram program;
 	if (!Parse_D3d8_Shader(function, false, program)) return kNullShader;
-	if (declaration != nullptr) {
-		for (const uint32_t* p = declaration; *p != kD3DVSD_End; ++p) {
-			const uint32_t type = (*p >> kD3DVSD_TokenTypeShift) & 7u;
-			if (type == kD3DVSD_TokenEnd) break;
-			if (type != kD3DVSD_TokenStreamData) continue;
-			program.declared_inputs.push_back(*p & kD3DVSD_VertexRegMask);
-		}
-	}
-	if (program.declared_inputs.empty()) {
-		std::fprintf(stderr, "Create_Vertex_Shader: the declaration names no inputs\n");
+	// The declaration is refused, not approximated, when it is outside the set the
+	// decoder is bounded to: a shader with a guessed layout would draw wrong geometry
+	// silently, which is the defect class this path exists to remove.
+	uint32_t regs[kMaxVertexShaderInputs];
+	uint32_t reg_count = 0;
+	const char* reason = nullptr;
+	if (!Decode_Vertex_Declaration(declaration, program.declared_layout, regs, reg_count,
+	                               reason)) {
+		std::fprintf(stderr, "Create_Vertex_Shader: refused, the declaration has %s\n", reason);
 		return kNullShader;
 	}
-	const ShaderHandle handle = next_shader_++;
+	program.declared_inputs.assign(regs, regs + reg_count);
+	program.declared_layout_hash = Hash_Vertex_Layout(program.declared_layout);
+	// Once per program: the declarations the engine actually creates, for the enumeration
+	// in docs/porting/untyped-vertex-buffers.md. Format: "vN:<vk format>@<offset>".
+	std::string elements;
+	for (uint32_t i = 0; i < reg_count; ++i) {
+		const VkVertexInputAttributeDescription& a = program.declared_layout.attributes[i];
+		const char* type = a.format == VK_FORMAT_R32_SFLOAT            ? "FLOAT1"
+		                   : a.format == VK_FORMAT_R32G32_SFLOAT       ? "FLOAT2"
+		                   : a.format == VK_FORMAT_R32G32B32_SFLOAT    ? "FLOAT3"
+		                   : a.format == VK_FORMAT_R32G32B32A32_SFLOAT ? "FLOAT4"
+		                                                               : "D3DCOLOR";
+		if (!elements.empty()) elements += ' ';
+		elements += 'v' + std::to_string(regs[i]) + ':' + type + '@' + std::to_string(a.offset);
+	}
+	std::fprintf(stderr, "vertex declaration %08x: %u input(s) stride %u [%s]\n",
+	             program.declared_layout_hash, reg_count, program.declared_layout.stride,
+	             elements.c_str());
+	const ShaderHandle handle = Allocate_Shader_Handle();
 	shaders_[handle] = std::move(program);
 	return handle;
 }
