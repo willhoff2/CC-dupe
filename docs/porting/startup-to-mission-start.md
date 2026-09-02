@@ -381,9 +381,9 @@ negative-`dataLeft` success (in the same blast radius, re-verified as no longer 
 
 * Whether the menu callbacks — including `MainMenu.cpp`'s GameSpy remnants — behave correctly, because
   no `.wnd` layout can be finished without a render device.
-* Whether the WND *slot controls* produce the same `TheSkirmishGameInfo` contents the §3 harness set by
-  hand. The harness used the real objects and the real call order, but a GUI-driven setup is still
-  unverified.
+* ~~Whether the WND *slot controls* produce the same `TheSkirmishGameInfo` contents the §3 harness set by
+  hand.~~ Answered in [skirmish-slot-controls.md](skirmish-slot-controls.md) §3: they do, and a side, colour
+  and AI difficulty chosen through the real controls reach `ThePlayerList`.
 * Whether a skirmish or campaign mission can be *won or lost correctly*: scripts run and a defeat path
   was observed (from the artefact in §3/#6), but no intentional victory/defeat condition was tested.
 * Mission progression between campaign missions, `MissionEnd`, movie playback, briefings, objectives,

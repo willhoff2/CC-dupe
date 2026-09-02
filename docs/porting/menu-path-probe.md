@@ -149,11 +149,13 @@ Each step below was a real mouse click delivered to the window, driving the real
 **Answer to #82's question, now measured rather than audited: the single-player menu route is intact off
 Windows.** Nothing on it reaches for anything the GameSpy excision cut.
 
-One incomplete area on the skirmish screen: the **player-slot controls do not populate**. Only one combo
-column renders, its entries read `None`, the other columns are blank, and opening the combo shows an
-empty list. Faction/colour/team combos therefore could not be exercised at all. Not classified — it is
-either missing initialisation of the slot list off Windows or a GUI-layout/data problem, and separating
-those needs a dedicated look.
+~~One incomplete area on the skirmish screen: the **player-slot controls do not populate**.~~ Superseded:
+the empty `Players`/`Color`/`Army` columns and the `None`-only `Team` column seen at this SHA were the
+renderer's 64-draw descriptor cap (removed in #119) truncating a 122-draw screen; the symptom is
+reproduced on demand with `ZH_RENDER_MAX_DRAWS=64` and a configuration chosen through the real controls
+is measured reaching `TheSkirmishGameInfo` and `ThePlayerList` in
+[skirmish-slot-controls.md](skirmish-slot-controls.md). Not missing data, not a GUI port defect, not the
+GameSpy excision.
 
 ## 4. Campaign: reaches the mission, dies rendering river water
 
@@ -248,8 +250,8 @@ Ordered by what blocks *visible* single-player play:
 2. **Shroud negative-index read** (`W3DShroud.cpp:269` via `W3DWater.cpp:180`). Deterministically kills a
    campaign mission in its first frames. A bounds check is the obvious fix but it changes the Windows
    build's behaviour on the same input, so it needs the oracle consulted, not a drive-by patch.
-3. **Skirmish player-slot controls empty.** Blocks side/colour/team selection; a skirmish can only start
-   with defaults today.
+3. ~~**Skirmish player-slot controls empty.**~~ Was the #119 draw cap; measured closed in
+   [skirmish-slot-controls.md](skirmish-slot-controls.md).
 4. **GUI text and button art** (doubled/clipped labels, missing button images). Cosmetic but pervasive.
 5. **Window size not honoured** (`-xres/-yres` vs. the 800x600 SDL window) — a real hit-testing hazard.
 6. Still open from the previous probe and untouched here: `StdLocalFileSystem` never instantiated,
