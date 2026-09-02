@@ -33,6 +33,7 @@
 #include "Common/Snapshot.h"
 #include "Common/GameMemory.h"
 #include "Common/WideCharWire.h"
+#include "WWLib/platform/platform_path.h"
 
 // PRIVATE TYPES //////////////////////////////////////////////////////////////////////////////////
 class XferBlockData : public MemoryPoolObject
@@ -121,7 +122,7 @@ void XferSave::open( AsciiString identifier )
 	Xfer::open( identifier );
 
 	// open the file
-	m_fileFP = fopen( identifier.str(), "w+b" );
+	m_fileFP = WWPlatform::Path::Open_Stream( identifier.str(), "w+b" );
 	if( m_fileFP == nullptr )
 	{
 

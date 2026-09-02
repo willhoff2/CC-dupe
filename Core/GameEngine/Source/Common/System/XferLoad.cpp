@@ -34,6 +34,7 @@
 #include "Common/Snapshot.h"
 #include "Common/XferLoad.h"
 #include "Common/WideCharWire.h"
+#include "WWLib/platform/platform_path.h"
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
@@ -81,7 +82,7 @@ void XferLoad::open( AsciiString identifier )
 	Xfer::open( identifier );
 
 	// open the file
-	m_fileFP = fopen( identifier.str(), "rb" );
+	m_fileFP = WWPlatform::Path::Open_Stream( identifier.str(), "rb" );
 	if( m_fileFP == nullptr )
 	{
 

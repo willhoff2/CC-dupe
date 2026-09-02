@@ -33,6 +33,7 @@
 //   filecrc  <file> [runs]       the engine CRC class over a file, repeatedly
 //   xfercrc  <file> [runs]       XferCRC (the desync check's CRC) over the same bytes
 //   replayhdr <file>             RecorderClass::readReplayHeader over a retail replay
+//   savepath                     GameState's save directory round trip: name, write, list, reopen
 //   rivers   <file> [cellSize]   the river water vertices of a .map against the shroud grid
 //   shroudbounds <cellsX> <cellsY> <cellSize> <border> <wx> <wy> ...
 //                                W3DShroud::getShroudLevelAtWorldPos over a guarded shroud grid
@@ -53,6 +54,7 @@
 #include "Common/Dict.h"
 #include "Common/FileSystem.h"
 #include "Common/GameMemory.h"
+#include "Common/GameState.h"
 #include "Common/GlobalData.h"
 #include "Common/INI.h"
 #include "Common/LocalFileSystem.h"
@@ -60,6 +62,8 @@
 #include "Common/Recorder.h"
 #include "Common/Xfer.h"
 #include "Common/XferCRC.h"
+#include "Common/XferLoad.h"
+#include "Common/XferSave.h"
 #include "Common/ThingFactory.h"
 #include "Common/MapObject.h"
 #include "GameLogic/PolygonTrigger.h"
@@ -69,6 +73,7 @@
 #include "StdDevice/Common/StdBIGFileSystem.h"
 #include "StdDevice/Common/StdLocalFileSystem.h"
 #include "Win32Device/Common/Win32LocalFileSystem.h"
+#include "WWLib/platform/platform_path.h"
 
 // TheSuperHackers @bugfix Devin 17/08/2026 Immortal, the way PlatformMain.cpp's are: the
 // allocator takes these sections from static destructors that run after plain statics here would
@@ -758,6 +763,101 @@ static int modeShroudBounds(Int cellsX, Int cellsY, Real cellSize, Int borderLev
 
 //----------------------------------------------------------------------------------------------
 
+//----------------------------------------------------------------------------------------------
+// savepath: the save game's path seam, end to end and without a game.
+//
+// GameState::getSaveDirectory() spells its result `<user data>Save\` on every platform because
+// that spelling is what the retail build writes and what a save file's portable map path carries.
+// Every filesystem call the save/load loop makes with that string therefore has to cross the path
+// seam: the next-free-name probe (findNextSaveFilename), the directory creation and the XferSave
+// that write the file, the FindFirstFile walk that lists it (iterateSaveFiles) and the XferLoad
+// that reopens it (doesSaveGameExist). One call that goes straight to the C runtime is enough to
+// put a `Save\00000000.sav` file beside an empty `Save/` directory, which is exactly what the
+// real Mac measured (docs/porting/playability-probe.md). This mode runs the engine's own functions
+// in that order and reports what each one saw; scripts/ci/check-save-path-seam.py checks the disk.
+//----------------------------------------------------------------------------------------------
+static void countSaveFile(AsciiString filename, void *userData)
+{
+	Int *count = (Int *)userData;
+	++*count;
+	printf("RESULT listed name=%s\n", filename.str());
+}
+
+static int modeSavePath(void)
+{
+	TheWritableGlobalData = MSGNEW("SimProbe") GlobalData;
+	TheGameState = MSGNEW("SimProbe") GameState;
+	printf("userDataDir=%s\n", TheGlobalData->getPath_UserData().str());
+
+	AsciiString saveDir = TheGameState->getSaveDirectory();
+	printf("RESULT savedir spelling=%s\n", saveDir.str());
+
+	char before[_MAX_PATH];
+	WWPlatform::Path::Get_Current_Directory(before, sizeof(before));
+
+	// 1. Name. On an empty directory this is the first name.
+	AsciiString first = TheGameState->findNextSaveFilename(UnicodeString(L"probe"));
+	printf("RESULT nextname before=%s\n", first.str());
+
+	// 2. Write, the way GameState::saveGame does it.
+	CreateDirectory(saveDir.str(), nullptr);
+	AsciiString path = TheGameState->getFilePathInSaveDirectory(first);
+	Bool wrote = FALSE;
+	try
+	{
+		XferSave xfer;
+		xfer.open(path);
+		AsciiString token = "SIM_PROBE";
+		xfer.xferAsciiString(&token);
+		Int payload = 0x5A5A5A5A;
+		xfer.xferInt(&payload);
+		xfer.close();
+		wrote = TRUE;
+	}
+	catch (...)
+	{
+	}
+	printf("RESULT write path=%s ok=%s\n", path.str(), wrote ? "yes" : "no");
+
+	// 3. The next name must move on, which is the existence probe seeing the file just written.
+	AsciiString second = TheGameState->findNextSaveFilename(UnicodeString(L"probe"));
+	printf("RESULT nextname after=%s\n", second.str());
+
+	// 4. List, the way the SELECT GAME screen does it.
+	Int listed = 0;
+	TheGameState->iterateSaveFiles(countSaveFile, &listed);
+	printf("RESULT listed count=%d\n", listed);
+
+	char after[_MAX_PATH];
+	WWPlatform::Path::Get_Current_Directory(after, sizeof(after));
+	Bool cwdRestored = strcmp(before, after) == 0;
+	printf("RESULT cwd restored=%s\n", cwdRestored ? "yes" : "no");
+
+	// 5. Reopen through the loader and read the payload back.
+	Bool exists = TheGameState->doesSaveGameExist(first);
+	Bool readBack = FALSE;
+	try
+	{
+		XferLoad xfer;
+		xfer.open(path);
+		AsciiString token;
+		xfer.xferAsciiString(&token);
+		Int payload = 0;
+		xfer.xferInt(&payload);
+		xfer.close();
+		readBack = token.compare("SIM_PROBE") == 0 && payload == 0x5A5A5A5A;
+	}
+	catch (...)
+	{
+	}
+	printf("RESULT reopen exists=%s readback=%s\n", exists ? "yes" : "no", readBack ? "yes" : "no");
+
+	Bool ok = wrote && first.compare("00000000.sav") == 0 && second.compare("00000001.sav") == 0
+		&& listed == 1 && cwdRestored && exists && readBack;
+	printf("RESULT savepath ok=%s\n", ok ? "yes" : "no");
+	return ok ? 0 : 3;
+}
+
 static void usage(void)
 {
 	fprintf(stderr,
@@ -768,13 +868,14 @@ static void usage(void)
 		"  filecrc   <file> [runs]\n"
 		"  xfercrc   <file> [runs]\n"
 		"  replayhdr <file>\n"
+		"  savepath\n"
 		"  rivers    <file> [cellSize]\n"
 		"  shroudbounds <cellsX> <cellsY> <cellSize> <borderLevel> [wx wy ...]\n");
 }
 
 int main(int argc, char **argv)
 {
-	if (argc < 3)
+	if (argc < 2 || (argc < 3 && strcmp(argv[1], "savepath") != 0))
 	{
 		usage();
 		return 1;
@@ -801,6 +902,8 @@ int main(int argc, char **argv)
 		return modeXferCRC(argv[2], argc > 3 ? atoi(argv[3]) : 3);
 	if (strcmp(mode, "replayhdr") == 0)
 		return modeReplayHeader(argv[2]);
+	if (strcmp(mode, "savepath") == 0)
+		return modeSavePath();
 	// The default is the retail GameData.ini PartitionCellSize, which is what BaseHeightMap passes
 	// W3DShroud::init(); a run that wants to measure another value names it.
 	if (strcmp(mode, "rivers") == 0)

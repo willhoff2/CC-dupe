@@ -172,6 +172,8 @@ public:
 	Bool doesSaveGameExist( AsciiString filename );							///< does the save file exist
 	void populateSaveGameListbox( GameWindow *listbox, SaveLoadLayoutType layoutType );	///< populate listbox with available save games
 	void getSaveGameInfoFromFile( AsciiString filename, SaveGameInfo *saveGameInfo );		///< get save game info from file
+	AsciiString findNextSaveFilename( UnicodeString desc );			///< find next acceptable filename for a new save game
+	void iterateSaveFiles( IterateSaveFileCallback callback, void *userData );	///< iterate save files on disk
 
 	void friend_xferSaveDataForCRC( Xfer *xfer, SnapshotType which );		///< This should only be called to DeepCRC sanity checking
 
@@ -197,9 +199,6 @@ protected:
 	virtual void loadPostProcess() override { }
 
 private:
-
-	AsciiString findNextSaveFilename( UnicodeString desc );			///< find next acceptable filename for a new save game
-	void iterateSaveFiles( IterateSaveFileCallback callback, void *userData );	///< iterate save files on disk
 
 	void xferSaveData( Xfer *xfer, SnapshotType which );				///< save/load the file data
 

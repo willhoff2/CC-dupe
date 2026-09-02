@@ -135,7 +135,7 @@ static void embedPristineMap( AsciiString map, Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 static void embedInUseMap( AsciiString map, Xfer *xfer )
 {
-	FILE *fp = fopen( map.str(), "rb" );
+	FILE *fp = WWPlatform::Path::Open_Stream( map.str(), "rb" );
 
 	// sanity
 	if( fp == nullptr )
@@ -195,7 +195,7 @@ static void extractAndSaveMap( AsciiString mapToSave, Xfer *xfer )
 	UnsignedInt dataSize;
 
 	// open handle to output file
-	FILE *fp = fopen( mapToSave.str(), "w+b" );
+	FILE *fp = WWPlatform::Path::Open_Stream( mapToSave.str(), "w+b" );
 	if( fp == nullptr )
 	{
 

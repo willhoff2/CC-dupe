@@ -35,6 +35,8 @@
 #include <windows.h>
 #include <io.h>
 
+#include "WWLib/platform/platform_path.h"
+
 #include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GameEngine.h"
@@ -481,7 +483,7 @@ AsciiString GameState::findNextSaveFilename( UnicodeString desc )
 		leaf.format("%s_%04d%s", adesc.str(), i, SAVE_GAME_EXTENSION);
 
 		AsciiString path = getFilePathInSaveDirectory(leaf);
-		if( _access( path.str(), 0 ) == -1 )
+		if( !WWPlatform::Path::Exists( path.str() ) )
 			return leaf;	// note that this returns the leaf, not the full path
 	}
 #else
@@ -528,7 +530,7 @@ AsciiString GameState::findNextSaveFilename( UnicodeString desc )
 			fullPath = getFilePathInSaveDirectory(filename);
 
 			// if file does not exist we're all good
-			if( _access( fullPath.str(), 0 ) == -1 )
+			if( !WWPlatform::Path::Exists( fullPath.str() ) )
 				return filename;
 
 			// test the text filename
