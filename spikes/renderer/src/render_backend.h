@@ -175,6 +175,10 @@ struct ResourceStats {
 	uint32_t ring_appends = 0;
 	uint64_t ring_bytes = 0;
 	uint32_t ring_wrap_waits = 0;
+	// DISCARDs that landed on a region a draw recorded earlier in the SAME frame reads.
+	// Nothing can wait for that draw, so unless the ring grows the new bytes overwrite
+	// its geometry before submission (docs/porting/mission-frame-corruption.md).
+	uint32_t ring_overruns = 0;
 };
 
 // Per-draw resource accounting (docs/porting/draws-per-frame.md). A draw costs a

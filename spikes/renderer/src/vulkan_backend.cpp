@@ -8,6 +8,7 @@
 // What this file does NOT do, and a real backend must: mipmap generation,
 // depth-stencil readback, DXT decode, device-lost handling, or multiple streams.
 
+#include "png_write.h"
 #include "render_backend.h"
 #include "state_translate.h"
 
@@ -30,6 +31,7 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -727,12 +729,50 @@ private:
 	// rather than a line in a log.
 	uint32_t frame_draws_requested_ = 0;
 	uint32_t frame_draws_dropped_ = 0;
+	uint32_t frame_ring_overruns_ = 0;
+	uint32_t frame_pass_breaks_ = 0;
+	// D3D8 permits Clear() outside BeginScene/EndScene, and WW3D::Begin_Render issues the
+	// frame's one colour+depth clear that way. There is no render pass to record it into
+	// yet, so it is held here and recorded first thing in Begin_Scene. Later flags OR in,
+	// later values win, which is what back-to-back Clears leave in a D3D8 target.
+	struct PendingClear {
+		bool color = false;
+		bool depth = false;
+		float r = 0.0f, g = 0.0f, b = 0.0f, a = 0.0f, z = 1.0f;
+		uint32_t stencil = 0;
+	};
+	PendingClear pending_clear_;
+	uint64_t clears_deferred_ = 0;
 	DrawStats draw_stats_;
 	// Test hook (ZH_RENDER_MAX_DRAWS): refuses to grow past this many draws in a frame, which
 	// is how a negative control reproduces the old fixed preallocation. 0 means no limit.
 	uint32_t draw_limit_ = 0;
 	// Test/diagnostic hook (ZH_RENDER_DRAW_REPORT): print the accounting every N frames.
 	uint32_t draw_report_interval_ = 0;
+	// Diagnostic hook (ZH_RENDER_TRACE=path, ZH_RENDER_TRACE_EVERY=N, ZH_RENDER_TRACE_PNG=dir):
+	// one line per target/viewport/scissor change, dynamic-buffer lock and draw for every
+	// N-th frame, one per resource creation, and the frame's colour target as a PNG, so
+	// what the engine asks for and what the backend binds can be diffed between a shell
+	// frame and a mission frame of one normal run (docs/porting/mission-frame-corruption.md).
+	FILE* trace_ = nullptr;
+	uint32_t trace_every_ = 0;
+	bool trace_frame_ = false;
+	std::string trace_png_dir_;
+	// ZH_RENDER_TRACE_PERDRAW=1: in a traced frame, submit after every draw and read the
+	// colour target back, reporting how many pixels the draw changed and where. Slow, and
+	// itself splits the frame's render pass at every draw, which is a variable under test.
+	bool trace_per_draw_ = false;
+	std::string trace_prev_rgba_;
+	void Trace_Per_Draw_Readback();
+	void Trace(const char* format, ...);
+	// Resource creation is traced whether or not the frame is: mission-only targets are made
+	// at load, between traced frames.
+	void Trace_Always(const char* format, ...);
+	void Trace_V(const char* format, va_list args);
+	void Trace_Draw(const char* kind, uint32_t primitive_type, uint32_t primitive_count,
+	                uint32_t start_vertex, uint32_t start_index, uint32_t fvf);
+	void Trace_Draw_Clip(const char* kind, uint32_t primitive_type, uint32_t primitive_count,
+	                     uint32_t start_vertex, uint32_t start_index, uint32_t fvf);
 
 	Buffer dummy_vertex_buffer_; // feeds attributes the FVF does not supply
 	TextureHandle* white_texture_ = nullptr;
@@ -1491,6 +1531,9 @@ void VulkanBackend::Transition_Surface(VkCommandBuffer cmd, SurfaceHandle* surfa
 void VulkanBackend::End_Current_Pass() {
 	if (!in_scene_) return;
 	vkCmdEndRenderPass(frame_cmd_);
+	++frame_pass_breaks_;
+	Trace("pass end after_draw=%u target=%p depth=%p depth_store=DONT_CARE", draw_index_,
+	      static_cast<void*>(current_color_), static_cast<void*>(current_depth_));
 }
 
 bool VulkanBackend::Begin_Current_Pass() {
@@ -1512,6 +1555,10 @@ bool VulkanBackend::Begin_Current_Pass() {
 	rpbi.renderPass = pass;
 	rpbi.framebuffer = framebuffer;
 	rpbi.renderArea = {{0, 0}, {device_target_width_, device_target_height_}};
+	Trace("pass begin before_draw=%u target=%p color_load=%s depth=%p depth_load=DONT_CARE",
+	      draw_index_, static_cast<void*>(current_color_),
+	      current_color_->written_this_frame ? "LOAD" : "DONT_CARE",
+	      static_cast<void*>(current_depth_));
 	vkCmdBeginRenderPass(frame_cmd_, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 	// Anything the pass records lands in the target, so a later pass on it has to
 	// LOAD rather than discard.
@@ -1649,6 +1696,19 @@ bool VulkanBackend::Create_Descriptor_Machinery() {
 	if (const char* report = std::getenv("ZH_RENDER_DRAW_REPORT")) {
 		const long value = std::strtol(report, nullptr, 10);
 		if (value > 0) draw_report_interval_ = static_cast<uint32_t>(value);
+	}
+	if (const char* trace = std::getenv("ZH_RENDER_TRACE")) {
+		trace_ = std::fopen(trace, "w");
+		if (trace_ == nullptr) std::fprintf(stderr, "ZH_RENDER_TRACE: cannot open %s\n", trace);
+		trace_every_ = 60;
+		if (const char* every = std::getenv("ZH_RENDER_TRACE_EVERY")) {
+			const long value = std::strtol(every, nullptr, 10);
+			if (value > 0) trace_every_ = static_cast<uint32_t>(value);
+		}
+		if (const char* png_dir = std::getenv("ZH_RENDER_TRACE_PNG")) trace_png_dir_ = png_dir;
+		if (const char* per_draw = std::getenv("ZH_RENDER_TRACE_PERDRAW")) {
+			trace_per_draw_ = std::strtoul(per_draw, nullptr, 10) != 0;
+		}
 	}
 	// One block up front, so the common frame allocates nothing at draw time.
 	if (!Add_Draw_Block()) return false;
@@ -2448,6 +2508,9 @@ TextureHandle* VulkanBackend::Create_Texture(const TextureDesc& desc) {
 		return nullptr;
 	}
 
+	Trace_Always("create texture=%p static %ux%u mips=%u fmt=%u vk=%d", static_cast<void*>(handle),
+	      handle->image.width, handle->image.height, handle->image.mip_levels,
+	      static_cast<unsigned>(handle->format), static_cast<int>(handle->vk_format));
 	owned_textures_.push_back(handle);
 	return handle;
 }
@@ -2852,6 +2915,11 @@ TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t h
 	handle->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	++resource_stats_.upload_submits;
 
+	Trace_Always("create texture=%p lockable %ux%u mips=%u fmt=%u vk=%d pitch0=%u expand=%d",
+	      static_cast<void*>(handle), handle->image.width, handle->image.height,
+	      handle->image.mip_levels, static_cast<unsigned>(handle->format),
+	      static_cast<int>(handle->vk_format), handle->levels.empty() ? 0u : handle->levels[0].pitch,
+	      handle->expand_on_unlock ? 1 : 0);
 	owned_textures_.push_back(handle);
 	return handle;
 }
@@ -3085,13 +3153,25 @@ bool VulkanBackend::Lock_Vertex_Buffer(VertexBufferHandle* vb, size_t offset, si
 			if (vb->region_last_use[vb->region] < frame_counter_) {
 				vkWaitForFences(device_, 1, &frame_fence_, VK_TRUE, UINT64_MAX);
 				completed_frame_ = frame_counter_ - 1;
+			} else {
+				// A draw recorded earlier in this very frame reads this region and has
+				// not been submitted: the bytes handed out now overwrite its geometry.
+				++resource_stats_.ring_overruns;
+				++frame_ring_overruns_;
 			}
 		}
 		++resource_stats_.ring_discards;
+		Trace("lock vb=%p discard region=%u/%u last_use=%llu frame=%llu overrun=%d", vb,
+		      vb->region, vb->region_count,
+		      static_cast<unsigned long long>(vb->region_last_use[vb->region]),
+		      static_cast<unsigned long long>(frame_counter_),
+		      vb->region_last_use[vb->region] == frame_counter_ ? 1 : 0);
 	} else if ((flags & LOCK_NOOVERWRITE) != 0) {
 		// Append: the earlier bytes of this region stay valid, because draws already
 		// recorded against them have not been submitted or have not finished.
 		++resource_stats_.ring_appends;
+	} else if (vb->dynamic) {
+		Trace("lock vb=%p plain region=%u offset=%zu size=%zu", vb, vb->region, offset, size);
 	}
 	vb->bind_offset = vb->capacity * vb->region;
 	resource_stats_.ring_bytes += size;
@@ -3149,6 +3229,19 @@ void VulkanBackend::Set_DX8_Texture_Stage_State(uint32_t stage,
 }
 
 void VulkanBackend::Set_Transform(D3DTRANSFORMSTATETYPE transform, const Matrix4x4& m) {
+	if (trace_frame_ && (transform == D3DTS_VIEW || transform == D3DTS_PROJECTION)) {
+		Trace("transform %s [%.4g %.4g %.4g %.4g | %.4g %.4g %.4g %.4g | %.4g %.4g %.4g %.4g | "
+		      "%.4g %.4g %.4g %.4g]",
+		      transform == D3DTS_VIEW ? "view" : "projection", static_cast<double>(m.m[0][0]),
+		      static_cast<double>(m.m[0][1]), static_cast<double>(m.m[0][2]),
+		      static_cast<double>(m.m[0][3]), static_cast<double>(m.m[1][0]),
+		      static_cast<double>(m.m[1][1]), static_cast<double>(m.m[1][2]),
+		      static_cast<double>(m.m[1][3]), static_cast<double>(m.m[2][0]),
+		      static_cast<double>(m.m[2][1]), static_cast<double>(m.m[2][2]),
+		      static_cast<double>(m.m[2][3]), static_cast<double>(m.m[3][0]),
+		      static_cast<double>(m.m[3][1]), static_cast<double>(m.m[3][2]),
+		      static_cast<double>(m.m[3][3]));
+	}
 	switch (transform) {
 	case D3DTS_WORLD: world_ = m; break;
 	case D3DTS_VIEW: view_ = m; break;
@@ -3195,6 +3288,7 @@ void VulkanBackend::Set_Scissor(bool enable, int32_t x, int32_t y, int32_t width
 	scissor_enabled_ = enable;
 	scissor_.offset = {x, y};
 	scissor_.extent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
+	Trace("scissor enable=%d %d,%d %dx%d", enable ? 1 : 0, x, y, width, height);
 }
 
 void VulkanBackend::Set_Viewport(const ViewportRect& viewport) {
@@ -3204,6 +3298,11 @@ void VulkanBackend::Set_Viewport(const ViewportRect& viewport) {
 	if (viewport_.width == 0 || viewport_.height == 0) {
 		viewport_ = ViewportRect{0, 0, width_, height_, viewport.min_z, viewport.max_z};
 	}
+	Trace("viewport engine=%d,%d %ux%u z=%.3f..%.3f used=%d,%d %ux%u target=%ux%u device=%ux%u",
+	      viewport.x, viewport.y, viewport.width, viewport.height,
+	      static_cast<double>(viewport.min_z), static_cast<double>(viewport.max_z), viewport_.x,
+	      viewport_.y, viewport_.width, viewport_.height, target_width_, target_height_,
+	      device_target_width_, device_target_height_);
 }
 
 void VulkanBackend::Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream) {
@@ -3464,16 +3563,46 @@ void VulkanBackend::Begin_Scene() {
 	draw_index_ = 0;
 	frame_draws_requested_ = 0;
 	frame_draws_dropped_ = 0;
+	frame_ring_overruns_ = 0;
+	frame_pass_breaks_ = 0;
+	trace_prev_rgba_.clear();
+	trace_frame_ = trace_ != nullptr && trace_every_ != 0 && (frame_counter_ % trace_every_) == 0;
+	Trace("frame %llu begin device=%ux%u points=%ux%u scale=%.3f",
+	      static_cast<unsigned long long>(frame_counter_), device_width_, device_height_, width_,
+	      height_, static_cast<double>(render_scale_));
 	in_scene_ = true;
 	if (!Begin_Current_Pass()) {
 		in_scene_ = false;
 		vkEndCommandBuffer(frame_cmd_);
+		return;
+	}
+	if (pending_clear_.color || pending_clear_.depth) {
+		const PendingClear pending = pending_clear_;
+		pending_clear_ = PendingClear{};
+		Trace("clear deferred_from_before_begin_scene");
+		Clear(pending.color, pending.depth, pending.r, pending.g, pending.b, pending.a,
+		      pending.z, pending.stencil);
 	}
 }
 
 void VulkanBackend::Clear(bool clear_color, bool clear_z_stencil, float r, float g,
                           float b, float dest_alpha, float z, uint32_t stencil) {
-	if (!in_scene_) return;
+	if (!in_scene_) {
+		if (clear_color) {
+			pending_clear_.color = true;
+			pending_clear_.r = r;
+			pending_clear_.g = g;
+			pending_clear_.b = b;
+			pending_clear_.a = dest_alpha;
+		}
+		if (clear_z_stencil) {
+			pending_clear_.depth = true;
+			pending_clear_.z = z;
+			pending_clear_.stencil = stencil;
+		}
+		if (clear_color || clear_z_stencil) ++clears_deferred_;
+		return;
+	}
 	// vkCmdClearAttachments, not a render-pass load op: D3D8's Clear() is a command
 	// the engine issues mid-frame with per-call flags, and it does so more than once
 	// per frame in the render-to-texture paths.
@@ -3498,6 +3627,9 @@ void VulkanBackend::Clear(bool clear_color, bool clear_z_stencil, float r, float
 	// device's. D3D8's Clear() has no rectangle here, so the whole target is cleared and
 	// there is nothing in point space to convert.
 	VkClearRect rect{{{0, 0}, {device_target_width_, device_target_height_}}, 0, 1};
+	Trace("clear color=%d z=%d target=%p %ux%u device=%ux%u", clear_color ? 1 : 0,
+	      clear_z_stencil ? 1 : 0, static_cast<void*>(current_color_), target_width_,
+	      target_height_, device_target_width_, device_target_height_);
 	vkCmdClearAttachments(frame_cmd_, count, clears, 1, &rect);
 	// Write funnel 2.
 	if (clear_color) Mark_Gpu_Write(current_color_);
@@ -3835,12 +3967,15 @@ void VulkanBackend::Draw_Indexed_Primitive(uint32_t primitive_type, uint32_t sta
 	if (bound_vb_ == nullptr || bound_ib_ == nullptr) return;
 	if (!Prepare_Draw(primitive_type, *bound_vb_)) return;
 	if (bound_vb_->dynamic) bound_vb_->region_last_use[bound_vb_->region] = frame_counter_;
+	Trace_Draw("indexed", primitive_type, primitive_count, min_vertex_index, start_index,
+	           bound_vb_->fvf);
 
 	vkCmdBindIndexBuffer(frame_cmd_, bound_ib_->buffer.buffer, bound_ib_->bind_offset,
 	                     VK_INDEX_TYPE_UINT16);
 	if (bound_ib_->dynamic) bound_ib_->region_last_use[bound_ib_->region] = frame_counter_;
 	vkCmdDrawIndexed(frame_cmd_, Vertex_Count_For_Primitives(primitive_type, primitive_count),
 	                 1, start_index, index_base_offset_, 0);
+	Trace_Per_Draw_Readback();
 	++draw_index_;
 }
 
@@ -3849,9 +3984,12 @@ void VulkanBackend::Draw_Primitive(uint32_t primitive_type, uint32_t start_verte
 	if (bound_vb_ == nullptr) return;
 	if (!Prepare_Draw(primitive_type, *bound_vb_)) return;
 	if (bound_vb_->dynamic) bound_vb_->region_last_use[bound_vb_->region] = frame_counter_;
+	Trace_Draw("primitive", primitive_type, primitive_count, start_vertex, 0,
+	           bound_vb_->fvf);
 
 	vkCmdDraw(frame_cmd_, Vertex_Count_For_Primitives(primitive_type, primitive_count), 1,
 	          start_vertex, 0);
+	Trace_Per_Draw_Readback();
 	++draw_index_;
 }
 
@@ -3891,9 +4029,11 @@ void VulkanBackend::Draw_Primitive_UP(uint32_t primitive_type, uint32_t primitiv
 	scratch.fvf = fvf;
 	scratch.bind_offset = offset;
 	if (!Prepare_Draw(primitive_type, scratch)) return;
+	Trace_Draw("up", primitive_type, primitive_count, 0, 0, fvf);
 	up_offset_ = offset + bytes;
 
 	vkCmdDraw(frame_cmd_, vertices, 1, 0, 0);
+	Trace_Per_Draw_Readback();
 	++draw_index_;
 	// D3D8's DrawPrimitiveUP leaves stream 0 unbound, so the engine must call
 	// SetStreamSource again before the next buffered draw. Matching that here means
@@ -3932,7 +4072,218 @@ void VulkanBackend::End_Scene(bool flip_frame) {
 	vkQueueSubmit(queue_, 1, &si, frame_fence_);
 
 	in_scene_ = false;
+	Trace("frame %llu end draws=%u dropped=%u ring_overruns=%u pass_breaks=%u "
+	      "ring_discards_total=%u ring_overruns_total=%u clears_deferred_total=%llu",
+	      static_cast<unsigned long long>(frame_counter_), draw_index_, frame_draws_dropped_,
+	      frame_ring_overruns_, frame_pass_breaks_, resource_stats_.ring_discards,
+	      resource_stats_.ring_overruns, static_cast<unsigned long long>(clears_deferred_));
+	if (trace_frame_ && !trace_png_dir_.empty()) {
+		std::string rgba;
+		SurfaceFormat format;
+		if (Read_Back_Color_Target(rgba, format)) {
+			char name[64];
+			std::snprintf(name, sizeof(name), "/frame-%08llu.png",
+			              static_cast<unsigned long long>(frame_counter_));
+			const std::string path = trace_png_dir_ + name;
+			Trace("frame %llu png=%s %ux%u", static_cast<unsigned long long>(frame_counter_),
+			      path.c_str(), format.width, format.height);
+			Write_Png(path, rgba, format.width, format.height);
+		}
+	}
+	if (trace_frame_) std::fflush(trace_);
 	if (flip_frame) Present();
+}
+
+void VulkanBackend::Trace_Per_Draw_Readback() {
+	if (!trace_per_draw_ || !trace_frame_ || current_color_ != &default_color_surface_) return;
+	// Only the default target is read back here; a render-to-texture draw is reported as
+	// such rather than measured against the wrong image.
+	if (!Flush_Frame_Commands(true)) return;
+	std::string rgba;
+	SurfaceFormat format;
+	if (!Read_Back_Color_Target(rgba, format)) return;
+	uint64_t changed = 0;
+	uint32_t min_x = format.width, min_y = format.height, max_x = 0, max_y = 0;
+	if (trace_prev_rgba_.size() == rgba.size()) {
+		const auto* prev = reinterpret_cast<const uint32_t*>(trace_prev_rgba_.data());
+		const auto* now = reinterpret_cast<const uint32_t*>(rgba.data());
+		for (uint32_t y = 0; y < format.height; ++y) {
+			for (uint32_t x = 0; x < format.width; ++x) {
+				const size_t i = static_cast<size_t>(y) * format.width + x;
+				if (prev[i] == now[i]) continue;
+				++changed;
+				if (x < min_x) min_x = x;
+				if (y < min_y) min_y = y;
+				if (x > max_x) max_x = x;
+				if (y > max_y) max_y = y;
+			}
+		}
+	}
+	if (changed == 0) {
+		Trace("perdraw %u changed=0", draw_index_);
+	} else {
+		Trace("perdraw %u changed=%llu bbox=%u,%u..%u,%u", draw_index_,
+		      static_cast<unsigned long long>(changed), min_x, min_y, max_x, max_y);
+	}
+	if (!trace_png_dir_.empty()) {
+		char name[96];
+		std::snprintf(name, sizeof(name), "/frame-%08llu-draw-%03u.png",
+		              static_cast<unsigned long long>(frame_counter_), draw_index_);
+		Write_Png(trace_png_dir_ + name, rgba, format.width, format.height);
+	}
+	trace_prev_rgba_.swap(rgba);
+}
+
+void VulkanBackend::Trace(const char* format, ...) {
+	if (trace_ == nullptr || !trace_frame_) return;
+	va_list args;
+	va_start(args, format);
+	Trace_V(format, args);
+	va_end(args);
+}
+
+void VulkanBackend::Trace_Always(const char* format, ...) {
+	if (trace_ == nullptr) return;
+	va_list args;
+	va_start(args, format);
+	Trace_V(format, args);
+	va_end(args);
+	std::fflush(trace_);
+}
+
+void VulkanBackend::Trace_V(const char* format, va_list args) {
+	std::fprintf(trace_, "%llu ", static_cast<unsigned long long>(frame_counter_));
+	std::vfprintf(trace_, format, args);
+	std::fputc('\n', trace_);
+}
+
+void VulkanBackend::Trace_Draw(const char* kind, uint32_t primitive_type, uint32_t primitive_count,
+                               uint32_t start_vertex, uint32_t start_index, uint32_t fvf) {
+	if (trace_ == nullptr || !trace_frame_) return;
+	const VertexBufferHandle* vb = bound_vb_;
+	const IndexBufferHandle* ib = bound_ib_;
+	const VkRect2D scissor =
+	    scissor_enabled_ ? Clamp_Scissor(scissor_)
+	                     : VkRect2D{{0, 0}, {device_target_width_, device_target_height_}};
+	const TextureHandle* tex0 = bound_textures_[0];
+	const TextureHandle* tex1 = bound_textures_[1];
+	Trace("draw %u %s type=%u prims=%u start_vertex=%u start_index=%u fvf=0x%x stride=%u "
+	      "vb=%p dyn=%d region=%u bind_offset=%llu ib=%p ib_region=%u target=%p %ux%u "
+	      "device=%ux%u vp=%d,%d %ux%u sc=%d,%d %ux%u tex0=%p(%ux%u f%u rt%d) tex1=%p vs=%u ps=%u "
+	      "zen=%u zwrite=%u zfunc=%u ablend=%u src=%u dst=%u cull=%u fill=%u "
+	      "world_t=%.4g,%.4g,%.4g proj_diag=%.4g,%.4g,%.4g,%.4g proj_w=%.4g,%.4g,%.4g,%.4g",
+	      draw_index_, kind, primitive_type, primitive_count, start_vertex, start_index, fvf,
+	      vb != nullptr ? vb->layout.stride : 0u, static_cast<const void*>(vb),
+	      vb != nullptr && vb->dynamic ? 1 : 0, vb != nullptr ? vb->region : 0u,
+	      static_cast<unsigned long long>(vb != nullptr ? vb->bind_offset : 0),
+	      static_cast<const void*>(ib), ib != nullptr ? ib->region : 0u,
+	      static_cast<void*>(current_color_), target_width_, target_height_, device_target_width_,
+	      device_target_height_, viewport_.x, viewport_.y, viewport_.width, viewport_.height,
+	      scissor.offset.x, scissor.offset.y, scissor.extent.width, scissor.extent.height,
+	      static_cast<const void*>(tex0), tex0 != nullptr ? tex0->image.width : 0u,
+	      tex0 != nullptr ? tex0->image.height : 0u,
+	      tex0 != nullptr ? static_cast<unsigned>(tex0->format) : 0u,
+	      tex0 != nullptr && tex0->render_target ? 1 : 0, static_cast<const void*>(tex1),
+	      static_cast<unsigned>(bound_vertex_shader_), static_cast<unsigned>(bound_pixel_shader_),
+	      render_states_[D3DRS_ZENABLE], render_states_[D3DRS_ZWRITEENABLE],
+	      render_states_[D3DRS_ZFUNC], render_states_[D3DRS_ALPHABLENDENABLE],
+	      render_states_[D3DRS_SRCBLEND],
+	      render_states_[D3DRS_DESTBLEND], render_states_[D3DRS_CULLMODE],
+	      render_states_[D3DRS_FILLMODE], static_cast<double>(world_.m[3][0]),
+	      static_cast<double>(world_.m[3][1]), static_cast<double>(world_.m[3][2]),
+	      static_cast<double>(projection_.m[0][0]), static_cast<double>(projection_.m[1][1]),
+	      static_cast<double>(projection_.m[2][2]), static_cast<double>(projection_.m[3][3]),
+	      static_cast<double>(projection_.m[0][3]), static_cast<double>(projection_.m[1][3]),
+	      static_cast<double>(projection_.m[2][3]), static_cast<double>(projection_.m[3][2]));
+	Trace_Draw_Clip(kind, primitive_type, primitive_count, start_vertex, start_index, fvf);
+}
+
+// Runs the draw's positions through the same world*view*projection the vertex shader
+// receives and reports how many land inside the clip volume, so a draw that changes
+// no pixels can be told apart as "culled by transform" versus "rasterised but lost".
+void VulkanBackend::Trace_Draw_Clip(const char* kind, uint32_t primitive_type,
+                                    uint32_t primitive_count, uint32_t start_vertex,
+                                    uint32_t start_index, uint32_t fvf) {
+	const VertexBufferHandle* vb = bound_vb_;
+	const IndexBufferHandle* ib = bound_ib_;
+	const bool indexed = std::strcmp(kind, "indexed") == 0;
+	const bool up = std::strcmp(kind, "up") == 0;
+	const uint8_t* vertex_bytes = nullptr;
+	uint32_t stride = 0;
+	if (up) {
+		// Draw_Primitive_UP traces before advancing the ring, so the aligned cursor is
+		// where it copied the vertices.
+		const VkDeviceSize aligned = (up_offset_ + 15u) & ~VkDeviceSize{15u};
+		vertex_bytes = static_cast<const uint8_t*>(up_mapped_) + aligned;
+		auto layout_it = up_layouts_.find(fvf);
+		if (layout_it == up_layouts_.end()) return;
+		stride = layout_it->second.stride;
+	} else {
+		if (vb == nullptr || vb->mapped == nullptr) {
+			Trace("clip %u unavailable (vertex buffer not host-mapped)", draw_index_);
+			return;
+		}
+		vertex_bytes = static_cast<const uint8_t*>(vb->mapped) + vb->bind_offset;
+		stride = vb->layout.stride;
+	}
+	if (stride < 12) return;
+	const uint16_t* indices = nullptr;
+	if (indexed) {
+		if (ib == nullptr || ib->mapped == nullptr) {
+			Trace("clip %u unavailable (index buffer not host-mapped)", draw_index_);
+			return;
+		}
+		indices = reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(ib->mapped) +
+		                                            ib->bind_offset) + start_index;
+	}
+	const uint32_t count = Vertex_Count_For_Primitives(primitive_type, primitive_count);
+	const bool rhw = (fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW;
+	const Matrix4x4 wvp = Multiply(Multiply(world_, view_), projection_);
+	uint32_t inside = 0, behind = 0;
+	float min_x = 1e30f, max_x = -1e30f, min_y = 1e30f, max_y = -1e30f;
+	float min_z = 1e30f, max_z = -1e30f, min_w = 1e30f, max_w = -1e30f;
+	for (uint32_t i = 0; i < count; ++i) {
+		uint32_t vertex = indexed ? index_base_offset_ + indices[i] : start_vertex + i;
+		if (!up && (vertex + 1) * static_cast<VkDeviceSize>(stride) > vb->capacity &&
+		    vb->capacity != 0) {
+			Trace("clip %u vertex %u past capacity %llu", draw_index_, vertex,
+			      static_cast<unsigned long long>(vb->capacity));
+			return;
+		}
+		float pos[4];
+		std::memcpy(pos, vertex_bytes + static_cast<size_t>(vertex) * stride, sizeof(pos[0]) * 3);
+		pos[3] = 1.0f;
+		float clip[4];
+		if (rhw) {
+			// Screen-space vertices carry no transform; report them in pixels.
+			clip[0] = pos[0]; clip[1] = pos[1]; clip[2] = pos[2]; clip[3] = 1.0f;
+		} else {
+			for (int c = 0; c < 4; ++c)
+				clip[c] = pos[0] * wvp.m[0][c] + pos[1] * wvp.m[1][c] + pos[2] * wvp.m[2][c] +
+				          wvp.m[3][c];
+		}
+		const float w = clip[3];
+		if (w <= 0.0f) ++behind;
+		if (rhw) {
+			if (clip[0] >= 0.0f && clip[0] <= static_cast<float>(target_width_) &&
+			    clip[1] >= 0.0f && clip[1] <= static_cast<float>(target_height_))
+				++inside;
+		} else if (w > 0.0f && clip[0] >= -w && clip[0] <= w && clip[1] >= -w && clip[1] <= w &&
+		           clip[2] >= 0.0f && clip[2] <= w) {
+			++inside;
+		}
+		const float inv = (rhw || w == 0.0f) ? 1.0f : 1.0f / w;
+		min_x = std::min(min_x, clip[0] * inv); max_x = std::max(max_x, clip[0] * inv);
+		min_y = std::min(min_y, clip[1] * inv); max_y = std::max(max_y, clip[1] * inv);
+		min_z = std::min(min_z, clip[2] * inv); max_z = std::max(max_z, clip[2] * inv);
+		min_w = std::min(min_w, w); max_w = std::max(max_w, w);
+	}
+	Trace("clip %u %s verts=%u inside=%u behind=%u ndc_x=%.3g..%.3g ndc_y=%.3g..%.3g "
+	      "ndc_z=%.3g..%.3g w=%.3g..%.3g",
+	      draw_index_, rhw ? "screen" : "ndc", count, inside, behind, static_cast<double>(min_x),
+	      static_cast<double>(max_x), static_cast<double>(min_y), static_cast<double>(max_y),
+	      static_cast<double>(min_z), static_cast<double>(max_z), static_cast<double>(min_w),
+	      static_cast<double>(max_w));
 }
 
 bool VulkanBackend::Resize_Presentation(uint32_t width, uint32_t height) {
@@ -4138,6 +4489,8 @@ TextureHandle* VulkanBackend::Create_Render_Target_Texture(uint32_t width, uint3
 	}
 	handle->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
+	Trace_Always("create texture=%p render_target %ux%u fmt=%u vk=%d", static_cast<void*>(handle),
+	      width, height, static_cast<unsigned>(handle->format), static_cast<int>(handle->vk_format));
 	owned_textures_.push_back(handle);
 	return handle;
 }
@@ -4166,6 +4519,9 @@ SurfaceHandle* VulkanBackend::Get_Surface_Level(TextureHandle* texture, uint32_t
 	surface->vk_format = texture->vk_format;
 	surface->layout = texture->layout;
 	surface->pitch = texture->image.width * 4;
+	Trace_Always("create surface=%p level0 of texture=%p %ux%u pitch=%u fmt=%u",
+	      static_cast<void*>(surface), static_cast<void*>(texture), surface->width,
+	      surface->height, surface->pitch, static_cast<unsigned>(surface->format));
 	owned_surfaces_.push_back(surface);
 	return surface;
 }
@@ -4203,6 +4559,11 @@ bool VulkanBackend::Set_Render_Target(SurfaceHandle* color, SurfaceHandle* depth
 	// D3D8 resets the viewport to the whole of the new target.
 	viewport_ = ViewportRect{0, 0, target_width_, target_height_, 0.0f, 1.0f};
 	scissor_enabled_ = false;
+	Trace("render_target color=%p%s %ux%u pitch=%u fmt=%u device=%ux%u depth=%p%s",
+	      static_cast<void*>(new_color), color == nullptr ? "(default)" : "", target_width_,
+	      target_height_, new_color->pitch, static_cast<unsigned>(new_color->format),
+	      device_target_width_, device_target_height_, static_cast<void*>(depth_stencil),
+	      depth_stencil == nullptr ? "(none)" : "");
 	// Write funnel 1: binding a target is what makes the draws that follow write it,
 	// and the engine's render-to-texture paths read those pixels back through
 	// SurfaceClass::Lock (screenshot, movie capture).
@@ -4239,6 +4600,9 @@ SurfaceHandle* VulkanBackend::Create_Image_Surface(uint32_t width, uint32_t heig
 		return nullptr;
 	}
 	std::memset(surface->mapped, 0, static_cast<size_t>(bytes));
+	Trace_Always("create surface=%p image_surface %ux%u pitch=%u fmt=%u vk=%d", static_cast<void*>(surface),
+	      width, height, surface->pitch, static_cast<unsigned>(format),
+	      static_cast<int>(surface->vk_format));
 	owned_surfaces_.push_back(surface);
 	return surface;
 }
@@ -4963,9 +5327,17 @@ bool VulkanBackend::Lock_Index_Buffer(IndexBufferHandle* ib, size_t offset_indic
 			if (ib->region_last_use[ib->region] < frame_counter_) {
 				vkWaitForFences(device_, 1, &frame_fence_, VK_TRUE, UINT64_MAX);
 				completed_frame_ = frame_counter_ - 1;
+			} else {
+				++resource_stats_.ring_overruns;
+				++frame_ring_overruns_;
 			}
 		}
 		++resource_stats_.ring_discards;
+		Trace("lock ib=%p discard region=%u/%u last_use=%llu frame=%llu overrun=%d", ib,
+		      ib->region, ib->region_count,
+		      static_cast<unsigned long long>(ib->region_last_use[ib->region]),
+		      static_cast<unsigned long long>(frame_counter_),
+		      ib->region_last_use[ib->region] == frame_counter_ ? 1 : 0);
 	} else if ((flags & LOCK_NOOVERWRITE) != 0) {
 		++resource_stats_.ring_appends;
 	}

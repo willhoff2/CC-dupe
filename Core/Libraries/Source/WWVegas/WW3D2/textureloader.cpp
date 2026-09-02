@@ -1281,6 +1281,12 @@ void TextureLoadTaskClass::Apply_Missing_Texture()
 	WWASSERT(!D3DTexture);
 
 	D3DTexture = MissingTexture::_Get_Missing_Texture();
+	// One line per fallback on stderr when the renderer trace is on, so a magenta frame can be
+	// told apart from a corrupt one (scripts/mission-frame-trace.py counts these).
+	if (getenv("ZH_RENDER_TRACE") != nullptr)
+		fprintf(stderr, "missing-texture name=%s path=%s compression_allowed=%d\n",
+			Texture->Get_Texture_Name().str(), Texture->Get_Full_Path().str(),
+			Texture->Is_Compression_Allowed() ? 1 : 0);
 	Apply(true);
 }
 
