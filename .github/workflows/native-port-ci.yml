@@ -928,6 +928,21 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The save game half of the same seam. `getSaveDirectory()` spells `Save\` on every platform
+      # and the loop hands it to five filesystem calls; one that reaches the C runtime untranslated
+      # writes a file *named* `Save\00000000.sav` and the next process lists nothing -- a silent
+      # success, which is why it gets a control that fails on the code before this seam landed.
+      # Generated fixture, no retail data. docs/porting/save-load-path-boundary.md.
+      - name: Prove a save lands in Save/ and is listed and reopened by the engine
+        run: |
+          set -o pipefail
+          {
+            echo '## Save path negative control (debug configuration)'
+            echo '```'
+            python3 scripts/ci/check-save-path-seam.py --build-dir build/native-debug
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The shroud half of the water path: a river vertex in the map's border ring converts to a
       # shroud cell outside the source grid, and the shipped lookup indexed the surface with it --
       # 140 bytes before its allocation on the mission #103 faulted on. The harness puts the valid
