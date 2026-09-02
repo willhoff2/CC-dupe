@@ -100,7 +100,7 @@ The debug configuration is a measured configuration of its own (CI job `native-b
 its own baseline: it compiles different code (`-DRTS_DEBUG -DWWDEBUG -DDEBUG`), so its numbers are
 not comparable with release's and `check-native-build-baseline.py` refuses to compare them. Use
 `--build-dir build/native-debug` — the default `build/native` holds the release configuration and
-reusing it mixes the two. The three negative controls run out of that directory; they are what make
+reusing it mixes the two. The four negative controls run out of that directory; they are what make
 the debug build worth measuring, because a debug build whose asserts are compiled out or swallowed
 by the portable dialog stub passes every other check. They generate their own bad input and need no
 retail data:
@@ -114,6 +114,7 @@ CLANGXX=clang++-14 python3 scripts/native-sim-probe.py --build-dir build/native-
 python3 scripts/ci/check-assert-fires.py --build-dir build/native-debug
 python3 scripts/ci/check-path-separator-keys.py --build-dir build/native-debug
 python3 scripts/ci/check-shroud-bounds.py --build-dir build/native-debug
+python3 scripts/ci/check-save-path-seam.py --build-dir build/native-debug   # save lands in Save/, listed, reopened
 ```
 
 Linking a seam says nothing about what it does, so the `native-build*` and `debug-profile-seam` CI
