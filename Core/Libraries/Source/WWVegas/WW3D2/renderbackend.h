@@ -121,6 +121,15 @@ public:
 	virtual bool Has_Device() const = 0;
 
 	/*
+	** A chosen fallback taken on the backend's behalf outside its own entry points - the
+	** off-Windows D3DX replacement creating a texture in a different format than the caller
+	** asked for - is reported here so the backend can count it alongside its own refusals.
+	** Real D3D8 has no such ledger, so the default does nothing.  Both strings must be
+	** literals: a backend that keeps them keeps the pointers.
+	*/
+	virtual void Record_Unserviceable(const char * name, const char * why) { (void)name; (void)why; }
+
+	/*
 	** Frame
 	*/
 	virtual HRESULT BeginScene() = 0;

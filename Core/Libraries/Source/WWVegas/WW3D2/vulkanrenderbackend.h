@@ -194,6 +194,8 @@ public:
 	static unsigned Unimplemented_Call_Kinds();
 	static const UnimplementedCallClass * Unimplemented_Call(unsigned index);
 	static void Log_Unimplemented_Calls();
+	// A chosen fallback reported from outside (RenderBackendClass) is a ledger entry too.
+	virtual void Record_Unserviceable(const char * name, const char * why);
 
 	/*
 	** Frame proof.  NOT a D3D8 entry point and never called by the engine: this reads the colour

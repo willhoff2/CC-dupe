@@ -108,6 +108,14 @@ readback, the layout-less draw refused and counted. It runs its own two negative
 (`ZH_RENDER_NO_UNTYPED_VB=1`, `ZH_RENDER_NO_VERTEX_DECLARATION=1`) and requires both to fail
 (`docs/porting/untyped-vertex-buffers.md`).
 
+`check-bc-textures.py --binary build/spike/zh-bc-textures` is the block-compressed texture path:
+DXT1/DXT3/DXT5 created as real BC1/BC2/BC3 images with five mip levels, written through the lock at
+block pitch (`ceil(w/4) * 8 or 16` bytes per row of blocks, on every level), a block-aligned sub-rect
+rewritten, a half-block sub-rect refused, one level read back byte-exact, nine draws classified from
+the readback. Its negative control is `ZH_RENDER_NO_BLOCK_COMPRESSED=1`, under which the device must
+report no BC format, creation must be refused, and the workload must fail for that reason
+(`docs/porting/block-compressed-textures.md`).
+
 A validation message is a failure even when the pixels are right. The failure class to expect:
 a texture's image and a `GetSurfaceLevel` surface viewing it are two names for one image, so any
 path that transitions the image directly (`Update_Texture`, the CopyRects upload) must record the

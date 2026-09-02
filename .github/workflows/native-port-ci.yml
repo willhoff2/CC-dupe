@@ -1294,6 +1294,27 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Block-compressed (DXT1/3/5 -> BC1/2/3) textures created, locked at BLOCK pitch, drawn
+      # and classified. Before this path the lockable texture path had no block layout, every
+      # DXT CreateTexture failed and D3DX substituted 8888, so not one compressed image was ever
+      # created (docs/porting/block-compressed-textures.md). The negative control -- the
+      # compressed formats refused -- runs inside the checker and must fail.
+      - name: Block-compressed textures created, locked at block pitch, drawn
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+          XDG_RUNTIME_DIR: /tmp/xdgrt
+        run: |
+          set -o pipefail
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          unset DISPLAY
+          {
+            echo '## Block-compressed textures (Linux, lavapipe)'
+            echo '```'
+            python3 scripts/ci/check-bc-textures.py \
+              --binary build/spike/zh-bc-textures
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Re-derive the resource-seam counts
         run: |
           set -o pipefail
@@ -1598,6 +1619,17 @@ jobs:
             echo '```'
             python3 scripts/ci/check-untyped-vertex-buffer.py \
               --binary build/spike/zh-untyped-vb
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Block-compressed textures through MoltenVK
+        run: |
+          set -eux -o pipefail
+          {
+            echo '## Block-compressed textures (macOS arm64, MoltenVK)'
+            echo '```'
+            python3 scripts/ci/check-bc-textures.py \
+              --binary build/spike/zh-bc-textures
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

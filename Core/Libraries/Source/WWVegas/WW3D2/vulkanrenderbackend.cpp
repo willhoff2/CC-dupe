@@ -228,6 +228,7 @@ public:
 	// True for a GetSurfaceLevel(n > 0) surface: it locks through its texture's mip level rather
 	// than through a surface handle, and it is not a target.
 	bool Is_Mip_Level_Surface() const { return Handle == NULL && Container != NULL; }
+	spike::TextureFormat Peek_Format() const { return Format; }
 
 	STDMETHOD(QueryInterface)(REFIID riid, void ** object);
 	STDMETHOD_(ULONG, AddRef)();
@@ -746,6 +747,21 @@ HRESULT VulkanD3DTextureClass::LockRect(UINT level, D3DLOCKED_RECT * locked_rect
 		lock_rect.right = (unsigned)rect->right;
 		lock_rect.bottom = (unsigned)rect->bottom;
 		lock_rect_pointer = &lock_rect;
+		if (Is_Compressed(Format)) {
+			// D3D8 requires a DXTn sub-rect to be 4x4-block aligned (the tail levels of a chain,
+			// smaller than a block, count as aligned at their own edge).  The backend refuses
+			// such a lock too; recording it here names the caller in the ledger.
+			const unsigned level_width = (Width >> level) > 0 ? (Width >> level) : 1;
+			const unsigned level_height = (Height >> level) > 0 ? (Height >> level) : 1;
+			const bool aligned = (lock_rect.left % 4) == 0 && (lock_rect.top % 4) == 0
+				&& ((lock_rect.right % 4) == 0 || lock_rect.right == level_width)
+				&& ((lock_rect.bottom % 4) == 0 || lock_rect.bottom == level_height);
+			if (!aligned) {
+				return Record_Unimplemented("IDirect3DTexture8::LockRect(compressed sub-rect)",
+					"a block-compressed sub-rect lock must be 4x4-block aligned",
+					D3DERR_INVALIDCALL);
+			}
+		}
 	}
 	spike::LockedRect locked;
 	if (!Backend->Lock_Texture(Handle, level, lock_rect_pointer, Translate_Lock_Flags(flags),
@@ -1670,6 +1686,15 @@ HRESULT VulkanRenderBackendClass::CopyRects(IDirect3DSurface8* source_surface,
 		return Record_Unimplemented("IDirect3DDevice8::CopyRects(mip level above 0)",
 			"a mip level surface has no image view, only a lockable level", D3DERR_INVALIDCALL);
 	}
+	if (Is_Compressed(((VulkanD3DSurfaceClass *)source_surface)->Peek_Format()) ||
+			Is_Compressed(((VulkanD3DSurfaceClass *)destination_surface)->Peek_Format())) {
+		// The spike's Copy_Rects is a texel copy (vkCmdCopyImage between 8888-class images); a
+		// block-compressed endpoint would need block-aligned rects and a same-format pair, and
+		// the engine's own compressed uploads go through LockRect, not through this.
+		return Record_Unimplemented("IDirect3DDevice8::CopyRects(block-compressed surface)",
+			"the backend's surface copy is texel-oriented; compressed levels upload via LockRect",
+			D3DERR_INVALIDCALL);
+	}
 	spike::SurfaceHandle * from = ((VulkanD3DSurfaceClass *)source_surface)->Peek_Handle();
 	spike::SurfaceHandle * to = ((VulkanD3DSurfaceClass *)destination_surface)->Peek_Handle();
 	const bool copied = Internals->Backend->Copy_Rects(from,
@@ -2250,6 +2275,11 @@ HRESULT VulkanRenderBackendClass::CheckDepthStencilMatch(UINT adapter, D3DDEVTYP
 unsigned VulkanRenderBackendClass::Unimplemented_Call_Kinds()
 {
 	return UnimplementedKindCount;
+}
+
+void VulkanRenderBackendClass::Record_Unserviceable(const char * name, const char * why)
+{
+	Record_Unimplemented(name, why, D3DERR_NOTAVAILABLE);
 }
 
 const VulkanRenderBackendClass::UnimplementedCallClass * VulkanRenderBackendClass::

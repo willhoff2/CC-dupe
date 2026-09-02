@@ -168,6 +168,9 @@ struct ResourceStats {
 	uint32_t staging_preserve_skips = 0;
 	// CPU channel expansions forced by the absence of view swizzle (MoltenVK).
 	uint32_t cpu_expansions = 0;
+	// Lockable textures created with a real block-compressed VkFormat (BC1/2/3). Zero in
+	// a run that loaded DDS art means every level was decoded on the CPU instead.
+	uint32_t block_compressed_textures = 0;
 	// Dynamic buffer ring: DISCARD renames, NOOVERWRITE appends, bytes handed out,
 	// and the times a DISCARD had to wait because the ring wrapped onto a region the
 	// GPU had not finished reading.

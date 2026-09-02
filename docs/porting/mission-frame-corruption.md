@@ -149,8 +149,13 @@ build every CI run and produced no warning, which is exactly the class of silent
 
 Ranked by how much of the current mission readback they affect.
 
-1. **Model textures decode to noise (PORT DEFECT or UNIMPLEMENTED PATH — not yet isolated).**
-   With DDS files now readable, every texture created in a mission frame is `vk=44`
+1. **Model textures decode to noise — RESOLVED IN ANALYSIS, fixed on the seam, real-game
+   confirmation owed** (`block-compressed-textures.md`). It was neither candidate below: the caps
+   were truthful, but `Create_Lockable_Texture` had no compressed layout, so `CreateTexture(DXTn)`
+   failed, off-Windows D3DX substituted 8888 with `D3D_OK`, and `Load_Compressed_Mipmap`
+   `memcpy`d compressed bytes into the 8888 lock (UNIMPLEMENTED PATH hidden by an uncounted
+   substitution). BC1/2/3 are now created for real and the substitution is a ledger entry. The
+   text that follows is the original analysis, kept for the record. With DDS files now readable, every texture created in a mission frame is `vk=44`
    (`B8G8R8A8_UNORM`), formats 0/1 (`A8R8G8B8`/`X8R8G8B8`), and *no* DXT texture is created
    (creation trace: 3,851 `vk=44` creations, 0 in BC formats). So `Get_Valid_Texture_Format()` is
    converting DXT1/5 to 8888 and the engine's software decoder `DDSFileClass::Get_4x4_Block` writes

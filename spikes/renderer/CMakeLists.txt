@@ -168,6 +168,14 @@ add_executable(zh-untyped-vb src/untyped_vertex_buffer.cpp)
 add_dependencies(zh-untyped-vb spike-shaders)
 target_link_libraries(zh-untyped-vb PRIVATE zh-render-backend)
 
+# Block-compressed textures (DXT1/3/5 -> BC1/2/3) created through the lockable path, filled
+# through Lock/Unlock at BLOCK pitch, drawn and read back per block; a misaligned sub-rect
+# lock must be refused. scripts/ci/check-bc-textures.py gates it, with
+# ZH_RENDER_NO_BLOCK_COMPRESSED as the negative control.
+add_executable(zh-bc-textures src/bc_textures.cpp)
+add_dependencies(zh-bc-textures spike-shaders)
+target_link_libraries(zh-bc-textures PRIVATE zh-render-backend)
+
 # Throughput baseline: draw calls/sec and state changes/sec, so the Mac has a Linux
 # number to be compared against.
 add_executable(zh-throughput src/throughput.cpp)
@@ -313,7 +321,8 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     foreach(target zh-render-backend zh-renderer-spike zh-caps-probe zh-feature-probe
                    zh-fixedfunc-tests zh-resource-lock-tests zh-hidpi-tests
-                   zh-staging-workload zh-throughput zh-draw-capacity zh-untyped-vb)
+                   zh-staging-workload zh-throughput zh-draw-capacity zh-untyped-vb
+                   zh-bc-textures)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
     foreach(target zh-window-spike zh-window-spike-cocoa zh-metal-surface-probe
