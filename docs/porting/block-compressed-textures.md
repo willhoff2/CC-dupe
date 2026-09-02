@@ -270,6 +270,29 @@ The same `check-bc-textures.py` step runs in the macOS job of `native-port-ci.ym
 "Block-compressed textures through MoltenVK"). Its output on the PR's CI run is the MoltenVK
 synthetic evidence; nothing about MoltenVK is inferred from lavapipe here.
 
+Measured on PR #141's run (GitHub `macos-15-arm64` runner, macOS 15.7.7, MoltenVK reporting
+`device: Apple Paravirtual device`, validation layer loaded) — SYNTHETIC-ONLY, not a real GPU
+name and not the retail game:
+
+```text
+format DXT1 (BC1): device samples it yes    16x16, 5 levels created through the lockable path
+format DXT3 (BC2): device samples it yes    16x16, 5 levels created through the lockable path
+format DXT5 (BC3): device samples it yes    16x16, 5 levels created through the lockable path
+misaligned sub-rect locks: refused
+orientation: pixel (8,8) = 33 32 24, DXT1 block 0 wants 33 32 24: top-left verified
+DXT1 (BC1) level 2 read back: 8 block bytes match
+DXT3 (BC2) level 2 read back: 16 block bytes match
+DXT5 (BC3) level 2 read back: 16 block bytes match
+validation messages: 0
+bc-textures: PASS
+OK: 3 block-compressed formats x 5 levels created, written at block pitch, a block-aligned
+sub-rect rewritten, a half-block sub-rect refused, a level read back byte-exact, 9 cases drawn
+and every block verified in the readback, the validation layer active and silent
+```
+
+So MoltenVK samples BC1/2/3 and the block-pitch lock contract holds on it; the M1 Pro
+real-game measurement in §5 remains owed.
+
 ## 5. Real-game evidence — macOS arm64, Apple M1 Pro, MoltenVK
 
 **Status at the time of this PR: NOT MEASURED ON THE BRANCH — MISSING DATA.** Two `will-mac` child
