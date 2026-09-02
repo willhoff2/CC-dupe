@@ -852,8 +852,18 @@ static int modeSavePath(void)
 	}
 	printf("RESULT reopen exists=%s readback=%s\n", exists ? "yes" : "no", readBack ? "yes" : "no");
 
+	// 6. The map-name round trip GameStateMap::xfer makes on load: the portable `save\leaf.map` the
+	// file carries becomes a lower-cased real path, which must still test as inside the save
+	// directory or the loader throws SC_INVALID_DATA before restoring anything.
+	AsciiString portable = TheGameState->realMapPathToPortableMapPath(
+		TheGameState->getFilePathInSaveDirectory("Alpine Assault.map"));
+	AsciiString real = TheGameState->portableMapPathToRealMapPath(portable);
+	Bool mapInSaveDir = !real.isEmpty() && TheGameState->isInSaveDirectory(real);
+	printf("RESULT mapname portable=%s real=%s insavedir=%s\n", portable.str(), real.str(),
+		mapInSaveDir ? "yes" : "no");
+
 	Bool ok = wrote && first.compare("00000000.sav") == 0 && second.compare("00000001.sav") == 0
-		&& listed == 1 && cwdRestored && exists && readBack;
+		&& listed == 1 && cwdRestored && exists && readBack && mapInSaveDir;
 	printf("RESULT savepath ok=%s\n", ok ? "yes" : "no");
 	return ok ? 0 : 3;
 }
