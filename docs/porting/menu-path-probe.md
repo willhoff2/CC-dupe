@@ -41,12 +41,15 @@ DISPLAY=:0 LD_LIBRARY_PATH=.../build/docker/_deps/ffmpeg-lib/lib \
   ./zh -win -noshellmap -nologo -noaudio -xres 800 -yres 600
 ```
 
-**Reproducibility trap — use `-xres 800 -yres 600`.** The SDL window is created at 800x600 regardless of
-`-xres/-yres`, but `TheDisplay` believes the requested size. At `-xres 1024 -yres 768` the GUI lays out
-for 1024x768 inside an 800x600 window: hit-testing no longer matches what is on screen and every control
-below logical y=600 — including skirmish's `Play Game` — is physically unreachable. That mismatch is a
-finding in its own right (the window seam does not honour the requested backbuffer size), but it is not
-chased here.
+**Superseded reproducibility trap (fixed; see [window-size-honoured.md](window-size-honoured.md)).**
+At the SHA this probe ran against, the SDL window was created at 800x600 regardless of `-xres/-yres`
+while `TheDisplay` believed the requested size, so at `-xres 1024 -yres 768` the GUI laid out for
+1024x768 inside an 800x600 window and every control below logical y=600 — including skirmish's
+`Play Game` — was physically unreachable; this probe therefore had to run at `-xres 800 -yres 600`. The
+cause was an `#ifdef _WIN32` around `DX8Wrapper::Resize_And_Position_Window()`, the call that applies
+the requested client size on Windows too. With it removed the window is measured at the requested
+size at 800x600, 1024x768 and 1280x720, and clicks reach the buttons drawn there. `-xres 800 -yres 600`
+is no longer required to reproduce anything below.
 
 ### 0.1 What presentation was and was not measured
 
@@ -253,7 +256,8 @@ Ordered by what blocks *visible* single-player play:
 3. ~~**Skirmish player-slot controls empty.**~~ Was the #119 draw cap; measured closed in
    [skirmish-slot-controls.md](skirmish-slot-controls.md).
 4. **GUI text and button art** (doubled/clipped labels, missing button images). Cosmetic but pervasive.
-5. **Window size not honoured** (`-xres/-yres` vs. the 800x600 SDL window) — a real hit-testing hazard.
+5. ~~**Window size not honoured**~~ (`-xres/-yres` vs. the 800x600 SDL window) — fixed and measured at
+   three sizes in [window-size-honoured.md](window-size-honoured.md).
 6. Still open from the previous probe and untouched here: `StdLocalFileSystem` never instantiated,
    `MapCache` POSIX-path misses.
 
