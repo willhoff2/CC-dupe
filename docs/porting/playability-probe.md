@@ -308,7 +308,9 @@ Ranked by what a player notices first, not by fix cost.
 
 1. **The mission viewport is corrupt** (`draws-per-frame.md` §5.1, owned by a parallel slice, not
    measured here). Ranked first because it is the first thing anyone sees; listed only so the ranking is
-   honest.
+   honest. Slice 5 (`block-compressed-textures.md`) names the mechanism behind the black/striped
+   models and decals and fixes it on the seam; the real-game re-measurement on the Mac is still owed,
+   so this item keeps its rank until it exists.
 2. **There are no sound effects, ever** (§3, PORT DEFECT). Music plays, so the game sounds *nearly*
    right, which is worse: every click, every unit, every weapon and all of EVA are silent. No voice
    object is ever allocated.
