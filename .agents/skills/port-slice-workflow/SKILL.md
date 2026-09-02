@@ -71,9 +71,9 @@ concurrent slice. **Never hand-merge them.** A hand resolution once concatenated
 ## Exit criteria
 
 A slice is not defined until its exit criterion is a number or a gate — "147/147 translation units
-clean", "the direct D3D8 budget stays at 0", "every declared `AIL_*` symbol is defined". Turn the
-improvement into a committed check under `scripts/ci/` so it cannot regress, and write
-`docs/porting/<slice>.md` recording what was measured, what is stubbed, and what is still open.
+clean", "the direct D3D8 budget stays at its allowlisted 4", "every declared `AIL_*` symbol is
+defined". Turn the improvement into a committed check under `scripts/ci/` so it cannot regress, and
+write `docs/porting/<slice>.md` recording what was measured, what is stubbed, and what is still open.
 
 ## Verification ladder
 
