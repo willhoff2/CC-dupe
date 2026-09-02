@@ -388,22 +388,37 @@ not from a per-draw trace on the branch; the per-draw isolation the prompt asked
 not needed for a *second* cause, but the measurement that the branch removes the first one is
 still owed.
 
-### 5.2 What the branch must show when the outpost is available (owed, not claimed)
+### 5.2 What `main` with #141 must show on the M1 Pro (owed, not claimed)
 
-From `scripts/mission-frame-trace.py` on the branch, in the same mission:
+Provenance to record with the numbers: git SHA built, `sw_vers`/`uname -m`, MoltenVK version,
+validation layer loaded and its message count, `uptime` load average at the start (the host has
+been swap-thrashed under other sessions), and that the base-game `.big` path was reachable.
 
-| Figure | `main` (#137, measured) | branch, predicted | branch, measured |
-|---|---|---|---|
-| `create texture` lines with `vk` in {133,135,137} | 0 | hundreds (every DXT DDS) | **not measured** |
-| `create texture` lines with `vk=44` | 3,851 | far fewer (TGA and 8888 DDS only) | **not measured** |
-| `pitch0` for BC creations vs width | — | `ceil(w/4)*8` (BC1) / `*16` (BC2/3) | **not measured** |
-| `missing-texture` lines in the mission | 1 | 1 (unchanged; unrelated to format) | **not measured** |
-| ledger: `D3DXCreateTexture(block-compressed format substituted)` | (did not exist) | 0 | **not measured** |
-| model/decal surfaces: black or 2-px striped | yes (human) | no (human) | **not looked at** |
-| negative control `ZH_RENDER_NO_BLOCK_COMPRESSED=1` | — | caps say no DXTC; engine software-decodes; substitution count 0, BC count 0 | **not measured** |
+From `scripts/mission-frame-trace.py run ... && summarize` in the same USA mission. Each row
+names the summary line that produces it, so the Mac window is spent measuring, not deriving:
 
-When those numbers exist they replace this table; until then the branch's real-game claim is:
-none.
+| Figure | summary line | `main` (#137, measured) | #141, predicted | #141 on M1 Pro, measured |
+|---|---|---|---|---|
+| `create texture` lines with `vk` in {133,135,137} | `texture creations by Vulkan format`, `block-compressed textures created` | 0 | hundreds (every DXT DDS) | **not measured** |
+| `create texture` lines with `vk=44` | same, `vk=44` | 3,851 | far fewer (TGA and 8888 DDS only) | **not measured** |
+| BC creations whose `pitch0` ≠ `ceil(w/4)*block_bytes` | `with a pitch0 that is not ...` | — | 0 | **not measured** |
+| `missing-texture` lines in the mission | `missing-texture fallbacks` | 1 | 1 (unchanged; unrelated to format) | **not measured** |
+| D3DX format substitutions (`D3DX texture creation: this device rejected format ...` on stderr) | `D3DX format substitutions` | every DXT DDS (uncounted) | 0 | **not measured** |
+| backend ledger entries reached (`ledger:` lines; counts from `macos-input-drive.py snapshot` → `render_ledger`) | `backend ledger entries reached` | (not emitted) | 0, in particular no `CopyRects(block-compressed surface)` / `LockRect(compressed sub-rect)` | **not measured** |
+| mission PNG: % black, % magenta, unique colours, local variance model region vs terrain | (pixel script on `<out>/png/`) | black regions, 0.00% magenta | structures not black; variance of skins ≈ terrain | **not measured** |
+| structures solid black? (playability-probe.md §8, pre-#141: yes) | human | yes | no | **not looked at** |
+| radar panel black? (playability-probe.md §8, pre-#141: yes) | human | yes | no | **not looked at** |
+| model/decal surfaces 2-px striped? | human | yes | no | **not looked at** |
+| negative control `ZH_RENDER_NO_BLOCK_COMPRESSED=1` | same summary | — | BC created 0; substitutions > 0, one per DXT DDS; black/striped skins return | **not measured** |
+
+The ledger and the substitution lines are only visible because the trace makes them so: the
+traced game is stopped with `SIGTERM`, so `Log_Unimplemented_Calls()` never runs, and
+`Record_Unimplemented`'s debug log is compiled out of the release-configured native build. Under
+`ZH_RENDER_TRACE` the seam writes each ledger entry's first occurrence to stderr (`game.log`),
+and `scripts/macos-input-drive.py snapshot` reads the live counts through LLDB
+(`VulkanRenderBackendClass::Unimplemented_Call_Kinds()` / `Unimplemented_Call(i)`).
+
+When those numbers exist they replace this table; until then the real-game claim is: none.
 
 ## 6. Ranked residuals
 
@@ -411,13 +426,16 @@ Ranked by what a player notices; classified.
 
 1. **Branch not yet measured in the real game on MoltenVK — MISSING DATA.** The synthetic
    evidence is complete on lavapipe and on the macOS arm64 CI runner (§4.3); the real-game table
-   in §5.2 is empty because the `will-mac` outpost disconnected three times during this slice
-   (two child sessions, no command run). This PR was landed on that evidence deliberately, with
-   no claim about the branch's mission frame. **Named follow-up, to run the moment the outpost
-   stays connected:** on the M1 Pro, with the merged SHA, `scripts/mission-frame-trace.py` into
-   the USA campaign — (a) BC creation count (`vk=133/135/137` traces, must be non-zero), (b)
-   `missing-texture` count from `game.log`, (c) the exit ledger (both substitution lines must be
-   0), (d) the mission-frame PNG classified per pixel and per draw, (e) a human looking at it.
+   in §5.2 is empty because the `will-mac` outpost disconnected on every attempt so far (three
+   child sessions — `0b5ed184…`, `24bbe3a8…`, `ad3b4257…` — no command run; the pool has one
+   machine and it was held by another wave). #141 was landed on that evidence deliberately, with
+   no claim about the mission frame. **Named follow-up, to run the moment the outpost is free:**
+   on the M1 Pro, on `main`, `scripts/mission-frame-trace.py` into the USA campaign — (a) BC
+   creation count (`vk=133/135/137` traces, must be non-zero), (b) `missing-texture` count from
+   `game.log`, (c) the D3DX substitution count and the `ledger:` lines in `game.log` plus the
+   snapshot's `render_ledger` (all must be 0), (d) the mission-frame PNG classified per pixel and
+   per draw, (e) a human looking at it, against playability-probe.md §8's black structures and
+   black radar panel.
    If (d)/(e) still show striped or black skins with (a) non-zero and (c) zero, the noise has a
    second cause and is isolated with `ZH_RENDER_TRACE_PERDRAW=1`. Cost: one working `will-mac`
    session (~1 h).
@@ -452,7 +470,8 @@ CLANGXX=clang++-14 python3 scripts/native-render-backend-run.py --validation
 
 # the real game (macOS, retail data; docs/porting/mission-frame-corruption.md §1)
 python3 scripts/mission-frame-trace.py run --run-dir <run-dir> --out <out>
-python3 scripts/mission-frame-trace.py summarize <out>/trace.log
+python3 scripts/mission-frame-trace.py summarize <out>/trace.log   # BC-by-format, pitch check, substitutions, ledger, missing-texture
+ZH_RENDER_NO_BLOCK_COMPRESSED=1 python3 scripts/mission-frame-trace.py run --run-dir <run-dir> --out <out>-nobc   # negative control
 grep -c 'create texture=.* vk=13[357] ' <out>/trace.log      # BC1/BC2/BC3 creations
 grep -c '^missing-texture' <out>/game.log
 ```

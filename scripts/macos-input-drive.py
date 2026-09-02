@@ -381,7 +381,23 @@ class EngineReader:
             for index in range(count)]
         if report["shell_stack"]:
             report["shell_top"] = report["shell_stack"][-1]
+        report["render_ledger"] = self.render_ledger()
         return report
+
+    def render_ledger(self):
+        """The Vulkan backend's unimplemented/unserviceable-call ledger with counts, read from the
+        live process; the game is stopped with a signal, so nothing dumps it at exit."""
+        kinds = self.integer("(unsigned)VulkanRenderBackendClass::Unimplemented_Call_Kinds()")
+        if kinds is None:
+            return None
+        entries = []
+        for index in range(kinds):
+            call = "VulkanRenderBackendClass::Unimplemented_Call(%d)" % index
+            entries.append({
+                "name": self.text("(const char*)%s->Name" % call),
+                "count": self.integer("(unsigned)%s->Count" % call),
+            })
+        return entries
 
     def named_windows(self, top_layout_only=False):
         """Walk the live `GameWindow` tree, reporting each named window's screen rect. This is what

@@ -40,6 +40,7 @@
 #include "platform/platform_window.h"
 #include "wwdebug.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -82,6 +83,11 @@ HRESULT Record_Unimplemented(const char * name, const char * why, HRESULT result
 	}
 	WWDEBUG_SAY(("VulkanRenderBackend: unimplemented D3D8 entry point %s (%s); returning 0x%x\n",
 		name, why, (unsigned)result));
+	// The traced game is stopped with a signal, so no exit-time dump ever runs: under the trace
+	// the first occurrence goes to stderr, where mission-frame-trace.py collects it as game.log.
+	if (getenv("ZH_RENDER_TRACE") != NULL) {
+		fprintf(stderr, "ledger: %s (%s); returning 0x%x\n", name, why, (unsigned)result);
+	}
 	return result;
 }
 
