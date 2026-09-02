@@ -22,8 +22,8 @@ Measured over the tracked `*.cpp`/`*.h`/`*.inl` in `Core/`, `Generals/` and `Gen
 | | All three trees | In ported scope |
 | --- | ---: | ---: |
 | `xferUser` / `xferImplementation` call sites | **480** in **146** files | **292** in **82** files |
-| `fwrite`/`fread` of an address | **31** in **8** files | **19** in **5** files |
-| `memcpy` call sites | **384** in **133** files | — |
+| `fwrite`/`fread` of an address | **33** in **10** files | **20** in **6** files |
+| `memcpy` call sites | **402** in **141** files | — |
 | `memcpy` inside the save/replay/CRC implementation | **0** | **0** |
 
 "Ported scope" is `Core/GameEngine`, `Core/GameEngineDevice`, `GeneralsMD/Code/GameEngine` and
@@ -31,7 +31,7 @@ Measured over the tracked `*.cpp`/`*.h`/`*.inl` in `Core/`, `Generals/` and `Gen
 excluded from the port and were deliberately not touched by this slice, but they are counted so
 the "how big is this really" question has an honest answer.
 
-The `memcpy` number deserves a note, because it is the one that looks alarming and is not: 384
+The `memcpy` number deserves a note, because it is the one that looks alarming and is not: 402
 call sites exist, but **none** of them are in `XferSave.cpp`, `XferLoad.cpp`, `XferCRC.cpp`,
 `XferDeepCRC.cpp`, `Snapshot.cpp`, `DataChunk.cpp`, `Recorder.cpp` or the `SaveGame/` directory.
 There is no "memcpy into a save buffer" problem to fix. The save path copies bytes exactly once,

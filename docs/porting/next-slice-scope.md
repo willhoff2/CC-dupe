@@ -53,7 +53,8 @@ seam implementation, `WW3D2/d3d8renderbackend.cpp`. What is left of the renderer
 coverage of the 62 methods, not re-routing call sites. See [`STATUS.md`](STATUS.md) for the current
 figure.
 
-> Measured 2026-08-17 at commit `3098ef1`: 4 direct / 4 allowlisted, 66 seam-owned. The earlier
+> Measured 2026-08-17 at commit `3098ef1`: 4 direct / 4 allowlisted, 66 seam-owned; re-measured
+> 2026-09-02 at commit `632ba201f`, unchanged. The earlier
 > "0 direct, 64 seam-owned" in this paragraph is superseded — the allowlist went 3 → 4 in the D3DX
 > routing slice (`renderer-first-frame.md`).
 
@@ -100,5 +101,6 @@ on where settings live on macOS.
    both have working solutions. Verified on Linux only — running it through MoltenVK on macOS is
    the one open item.
 3. ~~**Route the 376 direct D3D8 call sites through `DX8Wrapper`, while still on D3D8.**~~ — **done**:
-   the direct count is 0 and `scripts/ci/check-d3d8-surface.py` holds it there. The next renderer
+   the direct count is **4**, all allowlisted in `WW3D2/d3dx8texcreate.cpp` as the paragraph above
+   records, and `scripts/ci/check-d3d8-surface.py` holds it there exactly. The next renderer
    slice is Vulkan backend coverage behind `RenderBackendClass`, measured method by method.
