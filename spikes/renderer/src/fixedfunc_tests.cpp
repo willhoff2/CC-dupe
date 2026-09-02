@@ -143,6 +143,7 @@ public:
 	void End();
 
 	TextureHandle* Solid_Texture(uint32_t argb);
+	IndexBufferHandle* Quad_Ib() const { return quad_ib_; }
 
 private:
 	RenderBackend* gfx_ = nullptr;
@@ -1920,6 +1921,75 @@ Outcome Case_Render_Target_No_Depth(Harness& h) {
 	             "a depth-less render target draws");
 }
 
+// WW3D::Begin_Render's frame shape: SetViewport, Clear(colour+depth), *then* BeginScene.
+// D3D8 allows Clear outside BeginScene/EndScene and the engine relies on it for the
+// frame's only clear. The previous frame leaves a blue target and a depth buffer full of
+// 0.5; the cleared frame draws a red quad at z=0.75 with a LESSEQUAL test over the left
+// half. Every pixel is checked: left red (the depth clear to 1.0 let the quad through),
+// right green (the colour clear landed). A dropped clear fails both halves -- the right
+// stays blue or is undefined, the left is rejected by stale depth.
+Outcome Case_Clear_Before_Begin_Scene(Harness& h) {
+	RenderBackend& g = h.Gfx();
+	h.Reset_State();
+	Diffuse_Only(g);
+
+	h.Begin();
+	g.Set_DX8_Render_State(D3DRS_ZENABLE, 1);
+	g.Set_DX8_Render_State(D3DRS_ZWRITEENABLE, 1);
+	g.Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_ALWAYS);
+	h.Draw_Screen_Quad(Argb(0xff, 0x00, 0x00, 0xff)); // z = 0.5 everywhere
+	h.End();
+
+	g.Set_Viewport(ViewportRect{0, 0, kWidth, kHeight, 0.0f, 1.0f});
+	g.Clear(true, true, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0);
+	g.Begin_Scene();
+	g.Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+	g.Set_Viewport(ViewportRect{0, 0, kWidth / 2, kHeight, 0.0f, 1.0f});
+	const float w = static_cast<float>(kWidth);
+	const float hh = static_cast<float>(kHeight);
+	const uint32_t red = Argb(0xff, 0xff, 0x00, 0x00);
+	const ScreenVertex quad[4] = {{0.0f, 0.0f, 0.75f, 1.0f, red, 0.5f, 0.5f},
+	                              {w, 0.0f, 0.75f, 1.0f, red, 0.5f, 0.5f},
+	                              {w, hh, 0.75f, 1.0f, red, 0.5f, 0.5f},
+	                              {0.0f, hh, 0.75f, 1.0f, red, 0.5f, 0.5f}};
+	VertexBufferHandle* vb = g.Create_Vertex_Buffer(
+	    quad, sizeof(quad), D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	if (vb == nullptr) return Fail("Create_Vertex_Buffer failed");
+	h.Draw(vb, h.Quad_Ib(), 2);
+	g.End_Scene(false);
+	g.Set_Viewport(ViewportRect{0, 0, kWidth, kHeight, 0.0f, 1.0f});
+	g.Set_DX8_Render_State(D3DRS_ZENABLE, 0);
+	g.Set_DX8_Render_State(D3DRS_ZWRITEENABLE, 0);
+	g.Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+	if (!h.Read_Back()) return Fail("readback failed");
+
+	uint32_t wrong_left = 0, wrong_right = 0;
+	Rgba first_wrong_left{}, first_wrong_right{};
+	for (uint32_t y = 0; y < kHeight; ++y) {
+		for (uint32_t x = 0; x < kWidth; ++x) {
+			const Rgba got = h.Pixel(x, y);
+			if (x < kWidth / 2) {
+				if (!Near(got, Rgba{255, 0, 0, 255})) {
+					if (wrong_left++ == 0) first_wrong_left = got;
+				}
+			} else if (!Near(got, Rgba{0, 255, 0, 255})) {
+				if (wrong_right++ == 0) first_wrong_right = got;
+			}
+		}
+	}
+	if (wrong_left != 0 || wrong_right != 0) {
+		char detail[224];
+		std::snprintf(detail, sizeof(detail),
+		              "clear before BeginScene: %u/%u left pixels not red (first %s, depth "
+		              "not cleared), %u/%u right pixels not green (first %s, colour not "
+		              "cleared)",
+		              wrong_left, kWidth / 2 * kHeight, To_String(first_wrong_left).c_str(),
+		              wrong_right, kWidth / 2 * kHeight, To_String(first_wrong_right).c_str());
+		return Fail(detail);
+	}
+	return Pass("a Clear issued before BeginScene lands: all pixels cleared, depth reset");
+}
+
 // CreateImageSurface + LockRect + CopyRects, which is exactly what
 // missingtexture.cpp does: build the pattern in system memory, then blit it into a
 // texture's surface. Asserted by sampling the texture.
@@ -2404,6 +2474,7 @@ int main(int argc, char** argv) {
 	std::printf("\n== render targets, blits and shaders ==\n");
 	report("render target", Case_Render_Target(harness));
 	report("render target no depth", Case_Render_Target_No_Depth(harness));
+	report("clear before BeginScene", Case_Clear_Before_Begin_Scene(harness));
 	report("CopyRects host->image", Case_Copy_Rects_Host_To_Image(harness));
 	report("CopyRects image->image", Case_Copy_Rects_Image_To_Image(harness));
 	report("CopyRects image->host", Case_Copy_Rects_Image_To_Host(harness));

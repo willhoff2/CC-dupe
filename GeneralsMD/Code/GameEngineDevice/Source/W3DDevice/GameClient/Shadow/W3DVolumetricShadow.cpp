@@ -1328,7 +1328,7 @@ void W3DVolumetricShadow::RenderMeshVolume(Int meshIndex, Int lightIndex, const 
 	Geometry *geometry;
 	Int numVerts, numPolys, numIndex;
 
-	if (!DX8Wrapper::_Get_D3D_Device8())
+	if (!DX8Wrapper::Has_Render_Device())
 		return;
 
 	geometry = m_shadowVolume[lightIndex][ meshIndex ];
@@ -1385,7 +1385,7 @@ void W3DVolumetricShadow::RenderDynamicMeshVolume(Int meshIndex, Int lightIndex,
 	SHADOW_DYNAMIC_VOLUME_VERTEX* pvVertices;
 	UnsignedShort *pvIndices;
 
-	if (!DX8Wrapper::_Get_D3D_Device8())
+	if (!DX8Wrapper::Has_Render_Device())
 		return;
 
 
@@ -1519,7 +1519,7 @@ void W3DVolumetricShadow::RenderMeshVolumeBounds(Int meshIndex, Int lightIndex, 
 
 	static Vector3 verts[8];
 
-	if (!DX8Wrapper::_Get_D3D_Device8())
+	if (!DX8Wrapper::Has_Render_Device())
 		return;
 
 	Vector3 meshPosition;
@@ -3323,7 +3323,7 @@ void W3DVolumetricShadow::resetSilhouette( Int meshIndex )
 // ============================================================================
 void W3DVolumetricShadowManager::renderStencilShadows()
 {
-	if (!DX8Wrapper::_Get_D3D_Device8())
+	if (!DX8Wrapper::Has_Render_Device())
 		return;	//need device to render anything.
 
 	struct _TRANSLITVERTEX {
@@ -3408,7 +3408,7 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 	if (m_shadowList && TheGlobalData->m_useShadowVolumes)
 	{
 
-		if (!DX8Wrapper::_Get_D3D_Device8())
+		if (!DX8Wrapper::Has_Render_Device())
 			return;	//need device to render anything.
 
  		//According to Nvidia there's a D3D bug that happens if you don't start with a
@@ -3724,7 +3724,7 @@ Bool W3DVolumetricShadowManager::ReAcquireResources()
 {
 	ReleaseResources();
 
-	DEBUG_ASSERTCRASH(DX8Wrapper::_Get_D3D_Device8(), ("Trying to ReAcquireResources on W3DVolumetricShadowManager without device"));
+	DEBUG_ASSERTCRASH(DX8Wrapper::Has_Render_Device(), ("Trying to ReAcquireResources on W3DVolumetricShadowManager without device"));
 
 	if (FAILED(DX8Wrapper::Create_DX8_Index_Buffer(
 		SHADOW_INDEX_SIZE*sizeof(WORD),

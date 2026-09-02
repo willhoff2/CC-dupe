@@ -189,6 +189,19 @@ int main(int argc, char ** argv)
 	if (!stop_after_init) Stage("WW3D::Set_Render_Device", device);
 
 	if (device) {
+		// The engine's "is there a device" guards (W3DDisplay::draw -> updateViews, the shadow
+		// managers, the device-lost checks) must ask Has_Render_Device(): the D3D8 pointer is
+		// null off Windows even now that a device exists, and a guard on it skips the view update.
+		std::printf("\n== the device-presence guard\n");
+		std::printf("_Get_D3D_Device8() = %p, Has_Render_Device() = %d\n",
+			static_cast<void*>(DX8Wrapper::_Get_D3D_Device8()),
+			DX8Wrapper::Has_Render_Device() ? 1 : 0);
+		Stage("Has_Render_Device with a device", DX8Wrapper::Has_Render_Device());
+		Stage("_Get_D3D_Device8 is null off Windows", DX8Wrapper::_Get_D3D_Device8() == NULL,
+			"(so it cannot be the guard)");
+	}
+
+	if (device) {
 		std::printf("\n== %d frames of Begin_Scene / Clear / End_Scene%s\n", FRAMES,
 			present ? " with a flip" : " without a flip");
 		const unsigned long frames_before = DX8Wrapper::Get_FrameCount();
