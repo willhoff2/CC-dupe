@@ -64,6 +64,7 @@
     }
   ],
   "assignments": {
+    "Core/Libraries/Source/WWVegas/WW3D2/tests/native_render_run.cpp::Probe_Compressed_Textures": "C1",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/TerrainTex.cpp::TerrainTextureClass::update": "C1",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/TerrainTex.cpp::TerrainTextureClass::updateFlat": "C1",
     "Core/GameEngineDevice/Source/W3DDevice/GameClient/TerrainTex.cpp::AlphaEdgeTextureClass::update": "C1",
@@ -119,9 +120,9 @@
     "Core/Libraries/Source/WWVegas/WW3D2/d3dx8texture.cpp::D3DXLoadSurfaceFromSurface": "C9"
   },
   "expected": {
-    "total": 239,
-    "refcount": 74,
-    "lock_unlock": 100,
-    "files": 20
+    "total": 247,
+    "refcount": 75,
+    "lock_unlock": 104,
+    "files": 21
   }
 }
