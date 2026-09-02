@@ -91,6 +91,8 @@ XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-staging-cost.py \
   --binary build/spike/zh-staging-workload --self-check
 XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-draw-capacity.py \
   --binary build/spike/zh-draw-capacity --self-check
+XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-untyped-vertex-buffer.py \
+  --binary build/spike/zh-untyped-vb
 python3 spikes/renderer/tools/d3d8-lock-scan.py --check
 python3 spikes/renderer/tools/surface-lock-audit.py --check
 ```
@@ -99,6 +101,12 @@ python3 spikes/renderer/tools/surface-lock-audit.py --check
 set and uniform slice, and a pass reads `4096 draws per frame ... 0 dropped and 0 aliased` with the
 validation layer loaded and silent. Its floor lives in `docs/porting/ci-baselines/draw-capacity.json`;
 regenerate it with `--update`, never by hand (`docs/porting/draws-per-frame.md`).
+
+`check-untyped-vertex-buffer.py` is the FVF-0 / vertex-declaration path: one untyped vertex buffer
+drawn through 4 fixed-function FVFs and 3 `D3DVSD_*` declarations, every tile classified from the
+readback, the layout-less draw refused and counted. It runs its own two negative controls
+(`ZH_RENDER_NO_UNTYPED_VB=1`, `ZH_RENDER_NO_VERTEX_DECLARATION=1`) and requires both to fail
+(`docs/porting/untyped-vertex-buffers.md`).
 
 A validation message is a failure even when the pixels are right. The failure class to expect:
 a texture's image and a `GetSurfaceLevel` surface viewing it are two names for one image, so any
