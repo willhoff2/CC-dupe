@@ -747,6 +747,21 @@ HRESULT VulkanD3DTextureClass::LockRect(UINT level, D3DLOCKED_RECT * locked_rect
 		lock_rect.right = (unsigned)rect->right;
 		lock_rect.bottom = (unsigned)rect->bottom;
 		lock_rect_pointer = &lock_rect;
+		if (Is_Compressed(Format)) {
+			// D3D8 requires a DXTn sub-rect to be 4x4-block aligned (the tail levels of a chain,
+			// smaller than a block, count as aligned at their own edge).  The backend refuses
+			// such a lock too; recording it here names the caller in the ledger.
+			const unsigned level_width = (Width >> level) > 0 ? (Width >> level) : 1;
+			const unsigned level_height = (Height >> level) > 0 ? (Height >> level) : 1;
+			const bool aligned = (lock_rect.left % 4) == 0 && (lock_rect.top % 4) == 0
+				&& ((lock_rect.right % 4) == 0 || lock_rect.right == level_width)
+				&& ((lock_rect.bottom % 4) == 0 || lock_rect.bottom == level_height);
+			if (!aligned) {
+				return Record_Unimplemented("IDirect3DTexture8::LockRect(compressed sub-rect)",
+					"a block-compressed sub-rect lock must be 4x4-block aligned",
+					D3DERR_INVALIDCALL);
+			}
+		}
 	}
 	spike::LockedRect locked;
 	if (!Backend->Lock_Texture(Handle, level, lock_rect_pointer, Translate_Lock_Flags(flags),
