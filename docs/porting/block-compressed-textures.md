@@ -183,6 +183,66 @@ the mock backends are unchanged); the Vulkan backend forwards it to its ledger.
 | D3DX substituting a format the device refused | `D3D_OK` (D3DX's contract) | `D3DXCreateTexture(block-compressed format substituted)` / `(format substituted)` | **chosen fallback, recorded**: D3DX on Windows walks the same candidate list, so the behaviour is the oracle's; what was missing was the count |
 | `Create_Lockable_Texture(P8)` | null | (through `CreateTexture`) | UNIMPLEMENTED PATH, unchanged from before |
 
+### 3.1 The failure mode, named: silent format substitution
+
+The defect class here is more valuable than the fix and is easy to lose, so it is written down
+separately from the mechanism in §1.3.
+
+**A creation call that fails at the requested format and reports success at a different one.**
+`CreateTexture(DXT1)` failed; `D3DXCreateTexture` walked its candidate list, created `A8R8G8B8`,
+and returned `D3D_OK`. Every consumer downstream trusted the HRESULT and none re-read
+`GetLevelDesc`, so the engine held a texture whose *format, pitch and level sizes* were all
+different from what it believed, and wrote raw DXT bytes into it. Nothing failed, nothing was
+logged to the ledger, validation was silent (the writes were in-bounds), and the only symptom was
+pixels — the stripes-and-black in §5.1. It is #63's class (surface layout diverging from the image)
+arrived at through a *successful* call rather than a broken one.
+
+**Why `CheckDeviceFormat` was not the culprit, and both #137 candidates were wrong.**
+`DX8Caps::Support_DXTC()` measured 1 on lavapipe (§1.2): the sampled-feature mask was truthful and
+the engine kept the DXTn request. And no compressed `LockRect` ever executed, because creation
+had already failed and the lock that did run was an 8888 lock reporting an honest 8888 pitch. The
+pitch *mismatch* was real but it was between the engine's belief and the object, not inside the
+compressed lock path — that path did not exist. Candidate A (caps refusal → software decode) and
+candidate B (compressed pitch defect) both presuppose a texture created in the requested format.
+
+**How it was detectable, and how it is now.** Three observations, any one of which would have
+named it:
+
+1. `D3DX texture creation: this device rejected format 827611204, so the texture was created as
+   format 22 instead.` on stderr — one line per texture, present on `main`, drowned in the load
+   log and counted nowhere.
+2. `GetLevelDesc().Format != requested` after a successful `D3DXCreateTexture` — the check the
+   `native_render_run` probe now makes (`created as requested`, §4.2), which no engine site makes.
+3. The exit ledger: on `main` it had no entry for this, which is why it read as "0 BC textures
+   created" with nothing refused — the silence *was* the finding.
+
+**The regression barrier.** The ledger now counts substitutions. `Create_Fitted` in
+`d3dx8texcreate.cpp` calls `RenderBackendClass::Record_Unserviceable` whenever the format it
+succeeded with is not the format asked for, under
+`D3DXCreateTexture(block-compressed format substituted)` for DXTn and
+`D3DXCreateTexture(format substituted)` for everything else; both appear in the exit ledger and in
+the negative-control output (§1.4, §4.2). A run of the real game whose ledger shows a non-zero
+count on either line has taken a chosen fallback and says so. A run that creates zero BC textures
+with *neither* line present is now a different kind of failure (the engine never asked), not this
+one.
+
+**Can any other creation path in the seam substitute without being counted?** Audited on this
+branch (`vulkanrenderbackend.cpp`, `d3dx8texcreate.cpp`, `spikes/renderer/src/vulkan_backend.cpp`):
+
+| Path | Can it change the format? | Counted? |
+|---|---|---|
+| `IDirect3DDevice8::CreateTexture` / `CreateImageSurface` | No: untranslatable or unsampleable formats fail with `D3DERR_INVALIDCALL` | Yes, `Record_Unimplemented` (§3 table) |
+| `CreateCubeTexture` / `CreateVolumeTexture` | No: refused outright | Yes, `IDirect3DDevice8::CreateCubeTexture` / `CreateVolumeTexture` |
+| `D3DXCreateTexture` / `D3DXCreateCubeTexture` / `D3DXCreateVolumeTexture` (all three go through `Create_Fitted`) | Yes, by contract — the same candidate walk Windows D3DX performs | Yes, `Record_Substitution` on every non-first success. It records through `target.Backend`; off-Windows `target.Backend` is always the live seam (`Has_Device()`), and on Windows this file is not compiled |
+| `CreateRenderTarget` / `CreateDepthStencilSurface` | The backend owns one depth format (`Pick_Depth_Stencil_Format`: `D24S8` if the device has it, else `D32S8`) | Not a substitution as seen by the engine: `CheckDeviceFormat`/`CheckDepthStencilMatch` answer `D3D_OK` only for `D24S8`, the format the engine is told it has, and no engine site locks the depth buffer. If a site ever does, that is a new UNIMPLEMENTED PATH, not a silent one: `LockRect` on the depth surface is refused |
+| Backend host expansion (`FormatPlan::expand_to_bgra8` for `R8G8B8`, `P8`, `A4R4G4B4`, and `X8R8G8B8`/`A1R5G5B5`/`R5G6B5` when the device lacks view swizzle) | The *Vulkan image* is `B8G8R8A8`, but `GetLevelDesc`, `LockRect` pitch and level sizes all report the **requested** D3D8 format and the texels are converted on unlock (`expand_on_unlock`) | Not a substitution: the engine's view and the object agree, which is exactly the invariant the DXT case broke. It is not in the ledger and does not need to be; the write-through-the-pitch locks in `zh-resource-lock-tests` cover it |
+| `Create_Lockable_Texture(P8)` | No: returns null → `CreateTexture` fails | Yes, through `CreateTexture(unsupported format)` |
+
+So on this branch there is no path through the seam that returns success at a format other than
+the one asked for without a ledger line. That is the barrier; the synthetic checkers
+(`check-bc-textures.py` negative control, `native-render-backend-run.py` "created as requested")
+fail when it is crossed for DXTn, and the ledger line is the tell for every other format.
+
 No format is silently widened or silently decoded by the backend. When the engine's software
 decode *does* run — `TextureLoader` with `compression_allowed = 0`, thumbnails, the
 `Get_Valid_Texture_Format(..., false)` sites — that is the engine's own choice, taken on Windows
@@ -350,8 +410,17 @@ none.
 Ranked by what a player notices; classified.
 
 1. **Branch not yet measured in the real game on MoltenVK — MISSING DATA.** The synthetic
-   evidence is complete on lavapipe and will be on MoltenVK when CI runs the macOS job; the
-   real-game table in §5.2 is empty. Cost: one working `will-mac` session (~1 h).
+   evidence is complete on lavapipe and on the macOS arm64 CI runner (§4.3); the real-game table
+   in §5.2 is empty because the `will-mac` outpost disconnected three times during this slice
+   (two child sessions, no command run). This PR was landed on that evidence deliberately, with
+   no claim about the branch's mission frame. **Named follow-up, to run the moment the outpost
+   stays connected:** on the M1 Pro, with the merged SHA, `scripts/mission-frame-trace.py` into
+   the USA campaign — (a) BC creation count (`vk=133/135/137` traces, must be non-zero), (b)
+   `missing-texture` count from `game.log`, (c) the exit ledger (both substitution lines must be
+   0), (d) the mission-frame PNG classified per pixel and per draw, (e) a human looking at it.
+   If (d)/(e) still show striped or black skins with (a) non-zero and (c) zero, the noise has a
+   second cause and is isolated with `ZH_RENDER_TRACE_PERDRAW=1`. Cost: one working `will-mac`
+   session (~1 h).
 2. **`CopyRects` with a compressed endpoint is refused — UNIMPLEMENTED PATH.** No mission path
    is known to take it (the engine uploads compressed levels through `LockRect`); if the ledger on
    the Mac shows the entry, that is the next item. Cost: a block-granular `vkCmdCopyImage`, under a
