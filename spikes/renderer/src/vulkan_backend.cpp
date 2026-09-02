@@ -241,10 +241,14 @@ struct StagingBlock {
 // One mip level of a lockable texture: where in its staging block the texels live,
 // and the pitch handed to the caller. Tightly packed rows, so the pitch is the level
 // width in bytes -- D3D8 does not promise any particular pitch, only that the caller
-// uses the one it is given.
+// uses the one it is given. For a block-compressed level a "row" is a row of 4x4
+// blocks: `pitch` is bytes per block row and `rows` is the block-row count, which is
+// what D3D8's LockRect reports for DXTn and what the engine's memcpy of a whole DDS
+// level relies on.
 struct LockableLevel {
 	VkDeviceSize offset = 0;
 	uint32_t pitch = 0;
+	uint32_t rows = 0;
 	uint32_t width = 0;
 	uint32_t height = 0;
 	bool locked = false;
@@ -273,9 +277,11 @@ struct TextureHandle {
 	VkFormat vk_format = VK_FORMAT_B8G8R8A8_UNORM;
 	bool expand_on_unlock = false;
 	// Bytes per texel in the format the *caller* writes, which is the D3D8 format,
-	// not necessarily the VkFormat the image has.
+	// not necessarily the VkFormat the image has. For a block-compressed format these
+	// are per 4x4 block, and `block_size` is 4.
 	uint32_t src_texel_bytes = 4;
 	uint32_t dst_texel_bytes = 4;
+	uint32_t block_size = 1;
 	// Staging for the whole mip chain, taken from the pool at the first Lock and
 	// returned at the last matching Unlock, so a resource nobody is locking costs no
 	// host-visible memory. A D3D8 lock may hand out a pointer that outlives the Lock
@@ -2442,9 +2448,44 @@ bool Contract_From_Bgra8(TextureFormat format, const uint8_t* bgra, uint32_t wid
 	return true;
 }
 
+bool Is_Block_Compressed(TextureFormat format) {
+	switch (format) {
+	case TextureFormat::DXT1:
+	case TextureFormat::DXT2:
+	case TextureFormat::DXT3:
+	case TextureFormat::DXT4:
+	case TextureFormat::DXT5: return true;
+	default: return false;
+	}
+}
+
+// Negative control (ZH_RENDER_NO_BLOCK_COMPRESSED): the device reports no sampled BC
+// format and refuses to create one, which is what the backend did before the lockable
+// path served them -- so CheckDeviceFormat, creation and the gate that proves the path
+// can all be shown to fail without it.
+bool Block_Compressed_Enabled() {
+	static const bool enabled = std::getenv("ZH_RENDER_NO_BLOCK_COMPRESSED") == nullptr;
+	return enabled;
+}
+
+uint32_t Round_Up(uint32_t value, uint32_t multiple) {
+	return (value + multiple - 1) / multiple * multiple;
+}
+
+// A compressed sub-rect must start on a block boundary and end on one, or at the
+// level's edge (the tail levels of a chain are smaller than a block).
+bool Block_Aligned(const LockRect& r, const LockableLevel& l, uint32_t block_size) {
+	if (block_size == 1) return true;
+	if (r.left % block_size != 0 || r.top % block_size != 0) return false;
+	if (r.right % block_size != 0 && r.right != l.width) return false;
+	if (r.bottom % block_size != 0 && r.bottom != l.height) return false;
+	return true;
+}
+
 } // namespace
 
 bool VulkanBackend::Supports_Texture_Format(TextureFormat format) const {
+	if (Is_Block_Compressed(format) && !Block_Compressed_Enabled()) return false;
 	const FormatPlan plan = Plan_For(format, view_swizzle_);
 	VkFormatProperties props{};
 	vkGetPhysicalDeviceFormatProperties(physical_, plan.vk, &props);
@@ -2718,7 +2759,7 @@ bool VulkanBackend::Ensure_Texture_Staging(TextureHandle* texture) {
 	if (texture->staging.valid()) return true;
 	VkDeviceSize needed = 0;
 	for (const LockableLevel& l : texture->levels) {
-		needed += static_cast<VkDeviceSize>(l.pitch) * l.height;
+		needed += static_cast<VkDeviceSize>(l.pitch) * l.rows;
 	}
 	if (!Acquire_Staging(needed, texture->staging)) return false;
 	texture->staging_mapped = texture->staging.mapped;
@@ -2732,7 +2773,7 @@ bool VulkanBackend::Ensure_Texture_Staging(TextureHandle* texture) {
 // Caller holds resource_mutex_.
 bool VulkanBackend::Readback_Level(TextureHandle* texture, uint32_t level) {
 	LockableLevel& l = texture->levels[level];
-	const VkDeviceSize level_bytes = static_cast<VkDeviceSize>(l.pitch) * l.height;
+	const VkDeviceSize level_bytes = static_cast<VkDeviceSize>(l.pitch) * l.rows;
 
 	// On the no-view-swizzle path the image holds expanded B8G8R8A8, so the copy
 	// lands in a scratch block and is contracted back into the caller's format. The
@@ -2758,8 +2799,10 @@ bool VulkanBackend::Readback_Level(TextureHandle* texture, uint32_t level) {
 	           texture->image.mip_levels);
 	VkBufferImageCopy copy{};
 	copy.bufferOffset = target_offset;
-	copy.bufferRowLength = l.width;
-	copy.bufferImageHeight = l.height;
+	// In texels, and for a compressed image a multiple of the block size even when the
+	// level itself is smaller than one block (the 2x2 and 1x1 tail of a DXT chain).
+	copy.bufferRowLength = Round_Up(l.width, texture->block_size);
+	copy.bufferImageHeight = Round_Up(l.height, texture->block_size);
 	copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
 	copy.imageExtent = {l.width, l.height, 1};
 	vkCmdCopyImageToBuffer(cmd, texture->image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -2823,7 +2866,7 @@ bool VulkanBackend::Prepare_Lock_Contents(TextureHandle* texture, uint32_t level
 		// Zeroed rather than left holding the previous lock's texels: the block is
 		// pooled, and another resource's pixels are not "undefined contents".
 		std::memset(static_cast<uint8_t*>(texture->staging_mapped) + l.offset, 0,
-		            static_cast<size_t>(l.pitch) * l.height);
+		            static_cast<size_t>(l.pitch) * l.rows);
 		++resource_stats_.staging_preserve_skips;
 		return true;
 	}
@@ -2834,11 +2877,22 @@ TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t h
                                                       TextureFormat format,
                                                       uint32_t mip_count) {
 	std::lock_guard<std::mutex> guard(resource_mutex_);
-	const uint32_t src_texel_bytes = Source_Texel_Bytes(format);
-	if (width == 0 || height == 0 || mip_count == 0 || src_texel_bytes == 0) {
+	if (width == 0 || height == 0 || mip_count == 0) return nullptr;
+	const bool compressed = Is_Block_Compressed(format);
+	if (compressed && !Block_Compressed_Enabled()) {
 		std::fprintf(stderr,
-		             "Create_Lockable_Texture: block-compressed formats are not served "
-		             "by this path\n");
+		             "Create_Lockable_Texture: block-compressed formats refused "
+		             "(ZH_RENDER_NO_BLOCK_COMPRESSED)\n");
+		return nullptr;
+	}
+	// For a block-compressed format the unit the caller writes is the 4x4 block, and
+	// the D3D8 image is the block data itself: no expansion, no swizzle.
+	const FormatPlan plan = Plan_For(format, view_swizzle_);
+	const uint32_t block_size = compressed ? plan.block_size : 1u;
+	const uint32_t src_texel_bytes = compressed ? plan.block_bytes : Source_Texel_Bytes(format);
+	if (src_texel_bytes == 0) {
+		std::fprintf(stderr, "Create_Lockable_Texture: no host layout for format %u\n",
+		             static_cast<unsigned>(format));
 		return nullptr;
 	}
 	if (format == TextureFormat::P8) {
@@ -2848,11 +2902,15 @@ TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t h
 		std::fprintf(stderr, "Create_Lockable_Texture: P8 is not served by this path\n");
 		return nullptr;
 	}
-	if (!Supports_Texture_Format(format)) return nullptr;
+	if (!Supports_Texture_Format(format)) {
+		std::fprintf(stderr, "Create_Lockable_Texture: device cannot sample VkFormat %d\n",
+		             static_cast<int>(plan.vk));
+		return nullptr;
+	}
 
-	const FormatPlan plan = Plan_For(format, view_swizzle_);
 	auto* handle = new TextureHandle();
 	handle->lockable = true;
+	handle->block_size = block_size;
 	// So a write funnel holding only the image (a surface view of it, for instance)
 	// can invalidate this texture's staging copy.
 	handle->image.owner = handle;
@@ -2910,9 +2968,13 @@ TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t h
 		LockableLevel& l = handle->levels[level];
 		l.width = level_width;
 		l.height = level_height;
-		l.pitch = level_width * src_texel_bytes;
+		// Block-row pitch for DXTn: ceil(width/4) blocks of 8 or 16 bytes, which is the
+		// Pitch D3D8 reports for a compressed LockRect. A texel-row pitch here would
+		// put every block row after the first at the wrong offset -- the #63 class.
+		l.pitch = Round_Up(level_width, block_size) / block_size * src_texel_bytes;
+		l.rows = Round_Up(level_height, block_size) / block_size;
 		l.offset = staging_size;
-		staging_size += static_cast<VkDeviceSize>(l.pitch) * level_height;
+		staging_size += static_cast<VkDeviceSize>(l.pitch) * l.rows;
 		upload_size += static_cast<VkDeviceSize>(level_width) * level_height * 4;
 	}
 
@@ -2946,17 +3008,45 @@ TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t h
 	}
 	Transition(cmd, handle->image.image, VK_IMAGE_LAYOUT_UNDEFINED,
 	           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT, mip_count);
-	const VkClearColorValue black{{0.0f, 0.0f, 0.0f, 0.0f}};
-	const VkImageSubresourceRange all{VK_IMAGE_ASPECT_COLOR_BIT, 0, mip_count, 0, 1};
-	vkCmdClearColorImage(cmd, handle->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	                     &black, 1, &all);
+	StagingBlock zero_block;
+	if (compressed) {
+		// vkCmdClearColorImage is not allowed on a compressed image, so the chain is
+		// written from a zeroed staging block instead: an all-zero BC block is opaque
+		// black, which is what the clear below produces for the other formats.
+		if (!Acquire_Staging(staging_size, zero_block)) {
+			End_One_Shot(cmd);
+			delete handle;
+			return nullptr;
+		}
+		std::memset(zero_block.mapped, 0, static_cast<size_t>(staging_size));
+		std::vector<VkBufferImageCopy> copies(mip_count);
+		for (uint32_t level = 0; level < mip_count; ++level) {
+			const LockableLevel& l = handle->levels[level];
+			VkBufferImageCopy& copy = copies[level];
+			copy.bufferOffset = l.offset;
+			copy.bufferRowLength = Round_Up(l.width, block_size);
+			copy.bufferImageHeight = Round_Up(l.height, block_size);
+			copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+			copy.imageExtent = {l.width, l.height, 1};
+		}
+		vkCmdCopyBufferToImage(cmd, zero_block.buffer.buffer, handle->image.image,
+		                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mip_count, copies.data());
+	} else {
+		const VkClearColorValue black{{0.0f, 0.0f, 0.0f, 0.0f}};
+		const VkImageSubresourceRange all{VK_IMAGE_ASPECT_COLOR_BIT, 0, mip_count, 0, 1};
+		vkCmdClearColorImage(cmd, handle->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		                     &black, 1, &all);
+	}
 	Transition(cmd, handle->image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
 	           mip_count);
-	if (!End_One_Shot(cmd)) {
+	const bool initialised = End_One_Shot(cmd);
+	Release_Staging(zero_block);
+	if (!initialised) {
 		delete handle;
 		return nullptr;
 	}
+	if (compressed) ++resource_stats_.block_compressed_textures;
 	handle->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	++resource_stats_.upload_submits;
 
@@ -2981,6 +3071,14 @@ bool VulkanBackend::Lock_Texture(TextureHandle* texture, uint32_t level,
 	LockRect whole{0, 0, l.width, l.height};
 	const LockRect r = rect != nullptr ? *rect : whole;
 	if (r.right > l.width || r.bottom > l.height || r.left >= r.right || r.top >= r.bottom) {
+		return false;
+	}
+	if (!Block_Aligned(r, l, texture->block_size)) {
+		// D3D8 fails a DXTn sub-rect lock that does not fall on 4x4 block boundaries,
+		// and so does this: a half-block rectangle has no address in block storage.
+		std::fprintf(stderr,
+		             "Lock_Texture: compressed sub-rect %u,%u-%u,%u is not block-aligned\n",
+		             r.left, r.top, r.right, r.bottom);
 		return false;
 	}
 
@@ -3017,9 +3115,11 @@ bool VulkanBackend::Lock_Texture(TextureHandle* texture, uint32_t level,
 	++texture->locked_levels;
 	// The pointer is into the persistent mapping, offset to the rectangle's first
 	// texel, exactly as D3D8 documents pBits for a sub-rect lock.
+	// For a compressed level the rectangle is in texels but the storage is in
+	// blocks, so the offset is (top/4) block rows and (left/4) blocks.
 	out.bits = static_cast<uint8_t*>(texture->staging_mapped) + l.offset +
-	           static_cast<size_t>(r.top) * l.pitch +
-	           static_cast<size_t>(r.left) * texture->src_texel_bytes;
+	           static_cast<size_t>(r.top / texture->block_size) * l.pitch +
+	           static_cast<size_t>(r.left / texture->block_size) * texture->src_texel_bytes;
 	out.pitch = l.pitch;
 	return true;
 }
@@ -3062,9 +3162,14 @@ bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
 	const uint32_t rect_height = r.bottom - r.top;
 
 	VkBuffer source = texture->staging.buffer.buffer;
-	VkDeviceSize source_offset = l.offset + static_cast<VkDeviceSize>(r.top) * l.pitch +
-	                             static_cast<VkDeviceSize>(r.left) * texture->src_texel_bytes;
-	uint32_t row_length = l.pitch / texture->src_texel_bytes;
+	const uint32_t block_size = texture->block_size;
+	VkDeviceSize source_offset = l.offset +
+	                             static_cast<VkDeviceSize>(r.top / block_size) * l.pitch +
+	                             static_cast<VkDeviceSize>(r.left / block_size) *
+	                                 texture->src_texel_bytes;
+	// bufferRowLength is in texels: blocks per staging row times the block width.
+	uint32_t row_length = l.pitch / texture->src_texel_bytes * block_size;
+	uint32_t image_height = Round_Up(rect_height, block_size);
 
 	StagingBlock upload_block;
 	if (texture->expand_on_unlock) {
@@ -3097,6 +3202,7 @@ bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
 		source_offset = level_upload_offset +
 		                (static_cast<VkDeviceSize>(r.top) * l.width + r.left) * 4;
 		row_length = l.width;
+		image_height = rect_height;
 	}
 
 	VkCommandBuffer cmd = Begin_One_Shot();
@@ -3111,7 +3217,7 @@ bool VulkanBackend::Unlock_Texture(TextureHandle* texture, uint32_t level) {
 	VkBufferImageCopy copy{};
 	copy.bufferOffset = source_offset;
 	copy.bufferRowLength = row_length;
-	copy.bufferImageHeight = rect_height;
+	copy.bufferImageHeight = image_height;
 	copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
 	copy.imageOffset = {static_cast<int32_t>(r.left), static_cast<int32_t>(r.top), 0};
 	copy.imageExtent = {rect_width, rect_height, 1};
@@ -5041,6 +5147,13 @@ bool VulkanBackend::Copy_Rects(SurfaceHandle* source, const LockRect* rects,
 		             static_cast<int>(source->format), static_cast<int>(destination->format));
 		return false;
 	}
+	if (Is_Block_Compressed(source->format)) {
+		// A rectangle copy between compressed levels would need block-aligned rectangles on
+		// both sides and no engine CopyRects site copies DXTn, so it is refused rather than
+		// served with texel-addressed rectangles over block storage.
+		std::fprintf(stderr, "Copy_Rects: block-compressed surfaces are not copied\n");
+		return false;
+	}
 	const LockRect whole{0, 0, source->width, source->height};
 	const SurfacePoint origin{0, 0};
 	const uint32_t count = rects != nullptr ? rect_count : 1;
@@ -5540,6 +5653,7 @@ uint32_t Sampled_Format_Mask(VkPhysicalDevice physical, bool view_swizzle) {
 	};
 	uint32_t mask = 0;
 	for (TextureFormat format : kAll) {
+		if (Is_Block_Compressed(format) && !Block_Compressed_Enabled()) continue;
 		const FormatPlan plan = Plan_For(format, view_swizzle);
 		VkFormatProperties props{};
 		vkGetPhysicalDeviceFormatProperties(physical, plan.vk, &props);

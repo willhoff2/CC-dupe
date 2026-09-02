@@ -41,8 +41,11 @@
  *                                                                                             *
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
+#include "dx8caps.h"
 #include "dx8wrapper.h"
+#include "formconv.h"
 #include "ww3d.h"
+#include "ww3dformat.h"
 
 #include "Common/CriticalSection.h"
 #include "Common/GameMemory.h"
@@ -114,6 +117,88 @@ void Stage(const char * name, bool ok, const char * detail = NULL)
 	std::fflush(stdout);
 }
 
+// The measurement docs/porting/mission-frame-corruption.md asked for: does a DXTn texture asked
+// for through the engine's own DX8Wrapper::_Create_DX8_Texture come back as DXTn, and does its
+// LockRect report the block pitch D3D8 would? Each of #137's candidates fails a different line:
+// a caps refusal fails "caps say supported", a lock-pitch defect fails "lock pitch", and a
+// creation refusal fails "created as requested" while the caps line passes -- because D3DX then
+// substitutes A8R8G8B8 and the engine takes its software decode without any call failing.
+struct CompressedProbe {
+	const char * Name;
+	WW3DFormat Format;
+	D3DFORMAT D3DFormat;
+	unsigned BlockBytes;
+};
+
+const CompressedProbe COMPRESSED_PROBES[] = {
+	{ "DXT1", WW3D_FORMAT_DXT1, D3DFMT_DXT1, 8 },
+	{ "DXT3", WW3D_FORMAT_DXT3, D3DFMT_DXT3, 16 },
+	{ "DXT5", WW3D_FORMAT_DXT5, D3DFMT_DXT5, 16 },
+};
+const unsigned PROBE_EDGE = 64;
+
+void Probe_Compressed_Textures()
+{
+	std::printf("\n== block-compressed textures through DX8Wrapper::_Create_DX8_Texture\n");
+	const DX8Caps * caps = DX8Wrapper::Get_Current_Caps();
+	std::printf("DX8Caps::Support_DXTC() = %d\n", caps->Support_DXTC() ? 1 : 0);
+	std::printf("DX8Caps::Support_Texture_Format(A8R8G8B8) = %d\n",
+		caps->Support_Texture_Format(WW3D_FORMAT_A8R8G8B8) ? 1 : 0);
+	Stage("caps: DXTC supported", caps->Support_DXTC());
+	for (unsigned index = 0; index < sizeof(COMPRESSED_PROBES) / sizeof(COMPRESSED_PROBES[0]);
+			index++) {
+		const CompressedProbe & probe = COMPRESSED_PROBES[index];
+		char name[64];
+		char detail[160];
+		const bool supported = caps->Support_Texture_Format(probe.Format);
+		std::snprintf(name, sizeof(name), "%s: caps say supported", probe.Name);
+		Stage(name, supported);
+
+		IDirect3DTexture8 * texture = DX8Wrapper::_Create_DX8_Texture(PROBE_EDGE, PROBE_EDGE,
+			probe.Format, MIP_LEVELS_ALL);
+		std::snprintf(name, sizeof(name), "%s: texture created", probe.Name);
+		Stage(name, texture != NULL);
+		if (texture == NULL) continue;
+
+		D3DSURFACE_DESC desc;
+		memset(&desc, 0, sizeof(desc));
+		const bool described = SUCCEEDED(texture->GetLevelDesc(0, &desc));
+		std::snprintf(detail, sizeof(detail), "(asked D3DFMT %d, got %d, %u levels)",
+			(int)probe.D3DFormat, (int)desc.Format, (unsigned)texture->GetLevelCount());
+		std::snprintf(name, sizeof(name), "%s: created as requested", probe.Name);
+		Stage(name, described && desc.Format == probe.D3DFormat, detail);
+
+		// Level 0 and the 2x2 tail: the pitch of a compressed level is bytes per row of 4x4
+		// blocks, so a 64-wide level is 16 blocks and a 2-wide level is still one block.
+		const unsigned levels = texture->GetLevelCount();
+		const unsigned probes[2] = { 0, levels > 5 ? 5 : levels - 1 };
+		for (unsigned which = 0; which < 2; which++) {
+			const unsigned level = probes[which];
+			unsigned width = PROBE_EDGE >> level;
+			if (width == 0) width = 1;
+			const unsigned expected_pitch = ((width + 3) / 4) * probe.BlockBytes;
+			D3DLOCKED_RECT locked;
+			memset(&locked, 0, sizeof(locked));
+			const bool locked_ok = SUCCEEDED(texture->LockRect(level, &locked, NULL, 0));
+			if (locked_ok) texture->UnlockRect(level);
+			std::snprintf(detail, sizeof(detail), "(level %u, %u wide: pitch %d, block pitch %u)",
+				level, width, (int)locked.Pitch, expected_pitch);
+			std::snprintf(name, sizeof(name), "%s: lock pitch is the block pitch", probe.Name);
+			Stage(name, locked_ok && desc.Format == probe.D3DFormat &&
+				(unsigned)locked.Pitch == expected_pitch, detail);
+		}
+
+		// D3D8 fails a compressed sub-rect lock that is not on block boundaries; so must this.
+		RECT half_block = { 2, 0, 6, 4 };
+		D3DLOCKED_RECT locked;
+		const bool misaligned_refused = FAILED(texture->LockRect(0, &locked, &half_block, 0));
+		if (!misaligned_refused) texture->UnlockRect(0);
+		std::snprintf(name, sizeof(name), "%s: unaligned sub-rect lock refused", probe.Name);
+		Stage(name, misaligned_refused);
+		texture->Release();
+	}
+}
+
 }	// namespace
 
 int main(int argc, char ** argv)
@@ -151,6 +236,10 @@ int main(int argc, char ** argv)
 	WWPlatform::Window_Pump(window);
 
 	std::printf("\n== DX8Wrapper::Init -> RenderBackend->Open() -> Enumerate_Devices()\n");
+	// WW3D::Init() fills the D3DFORMAT -> WW3DFormat table before it calls DX8Wrapper::Init();
+	// without it DX8Caps sees the display format as WW3D_FORMAT_UNKNOWN and marks every texture
+	// format unsupported, which is a harness artefact and not the backend's answer.
+	Init_D3D_To_WW3_Conversion();
 	// This is the call that dereferenced null in #87. It is the whole point of the slice.
 	const bool initted = DX8Wrapper::Init(window, false);
 	Stage("DX8Wrapper::Init", initted);
@@ -200,6 +289,8 @@ int main(int argc, char ** argv)
 		Stage("_Get_D3D_Device8 is null off Windows", DX8Wrapper::_Get_D3D_Device8() == NULL,
 			"(so it cannot be the guard)");
 	}
+
+	if (device) Probe_Compressed_Textures();
 
 	if (device) {
 		std::printf("\n== %d frames of Begin_Scene / Clear / End_Scene%s\n", FRAMES,

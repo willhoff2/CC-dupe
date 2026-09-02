@@ -370,6 +370,32 @@ static TargetType Resolve_Target(LPDIRECT3DDEVICE8 device)
 }
 
 //
+//	A substitution is a chosen fallback, so it is counted in the backend's ledger under the class
+//	of format it replaced: a block-compressed request that came back uncompressed is the one the
+//	mission-frame work cares about (every level then takes the engine's software decode at 4x the
+//	memory), and it must not be confused with a plain 8888 request that came back 16-bit.
+//
+static void Record_Substitution(RenderBackendClass & backend, D3DFORMAT requested)
+{
+	switch (requested) {
+		case D3DFMT_DXT1:
+		case D3DFMT_DXT2:
+		case D3DFMT_DXT3:
+		case D3DFMT_DXT4:
+		case D3DFMT_DXT5:
+			backend.Record_Unserviceable(
+				"D3DXCreateTexture(block-compressed format substituted)",
+				"the device refused the DXTn format, so the texture was created uncompressed");
+			return;
+		default:
+			backend.Record_Unserviceable(
+				"D3DXCreateTexture(format substituted)",
+				"the device refused the requested format, so a fallback format was created");
+			return;
+	}
+}
+
+//
 //	The three creation helpers. Each one plans, then walks the candidate formats, and reports what
 //	it substituted. On failure the out-parameter is written null before anything else, so a caller
 //	that ignores the HRESULT cannot read a pointer that was never set.
@@ -395,6 +421,7 @@ static HRESULT Create_Fitted(const TargetType & target, D3DX8TexCreate::KindType
 				fprintf(stderr, "D3DX texture creation: this device rejected format %d, so the "
 					"texture was created as format %d instead.\n",
 					int(plan.Formats[0]), int(plan.Formats[i]));
+				if (target.Backend != nullptr) Record_Substitution(*target.Backend, plan.Formats[0]);
 			}
 			return result;
 		}
