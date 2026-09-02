@@ -41,6 +41,11 @@ After this slice, the same scan reports:
 | direct D3D8 calls inside `d3d8renderbackend.cpp` (seam-owned) | 64 |
 | direct D3D8 calls anywhere else | 0 |
 
+> **Superseded for the current tree.** Re-measured on `main` at commit `632ba201f`:
+> **4** direct calls outside the seam, all allowlisted in `WW3D2/d3dx8texcreate.cpp`, and **66**
+> seam-owned calls inside `d3d8renderbackend.cpp`. The table above is this slice's result, not
+> today's; `scripts/ci/check-d3d8-surface.py` and [`STATUS.md`](STATUS.md) are the live figures.
+
 The 155 macro sites did not move and their spelling did not change: the `DX8CALL*` macros now
 expand to `DX8Wrapper::Get_Render_Backend()->x` instead of
 `DX8Wrapper::_Get_D3D_Device8()->x`. That is deliberate — it keeps the diff to the ~13.5 kLOC

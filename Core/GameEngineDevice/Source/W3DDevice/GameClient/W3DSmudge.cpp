@@ -137,7 +137,7 @@ Int copyRect(unsigned char *buf, Int bufSize, int oX, int oY, int width, int hei
 	Int result = 0;
 	HRESULT hr = S_OK;
 
-	if (!DX8Wrapper::_Get_D3D_Device8())
+	if (!DX8Wrapper::Has_Render_Device())
 		goto error;
 
  	DX8Wrapper::Get_DX8_Render_Target_Surface(&surface);

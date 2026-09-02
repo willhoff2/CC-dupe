@@ -9,7 +9,10 @@ that quietly stops being true:
   * a WWPlatform::WindowEventType grows, or an existing one loses its case label, and the event
     is silently dropped instead of being triaged in docs/porting/window-event-loop.md;
   * a file on the wired path includes <windows.h> or reaches for a WndProc-era Win32 call
-    outside an #ifdef _WIN32, which breaks the native build for everyone.
+    outside an #ifdef _WIN32, which breaks the native build for everyone;
+  * the renderer's window-sizing call, DX8Wrapper::Resize_And_Position_Window(), is compiled
+    only on Windows, so the seam's GetClientRect/AdjustWindowRect/SetWindowPos implementations
+    exist but never run and the window stays at its creation size whatever -xres/-yres asked.
 
 None of these are visible in a Windows build, which is why this runs in CI. It is a text check:
 it does not compile anything, and it says nothing about whether the native behaviour is right -
@@ -70,6 +73,11 @@ WIN32_ONLY = re.compile(
     r"\b(?:<windows\.h>|PeekMessage|DispatchMessage|TranslateMessage|GetMessage|CreateWindow|"
     r"RegisterClass|ClipCursor|SetCursorPos|LoadCursorFromFile|IsIconic|GetKeyboardLayout|"
     r"GetKeyState|SetErrorMode|DirectInput8Create)\b")
+
+# The renderer resizes the window to the requested resolution through the seam's Win32 user
+# functions. Every call to it must be compiled off Windows too, or the seam is wired but idle.
+RESIZE_SOURCE = os.path.join("Core", "Libraries", "Source", "WWVegas", "WW3D2", "dx8wrapper.cpp")
+RESIZE_CALL = re.compile(r"\bResize_And_Position_Window\s*\(\s*\)\s*;")
 
 # MessageBox() and ShowWindow() are deliberately absent from WIN32_ONLY: Debug.cpp keeps calling
 # them under those names, and off Windows they resolve to the seam's own definitions. That is the
@@ -181,6 +189,27 @@ def main():
                 failures.append("%s:%d: %s outside an #ifdef _WIN32: %s"
                                 % (relative, number, found.group(0).strip(), line.strip()))
     print("guarded files: %d checked for unguarded Win32 calls" % len(GUARDED_FILES))
+
+    # 5. The window-sizing call runs off Windows: every Resize_And_Position_Window() call site
+    # in dx8wrapper.cpp is outside a Windows-only branch.
+    resize_path = os.path.join(ROOT, RESIZE_SOURCE)
+    if not os.path.isfile(resize_path):
+        failures.append("%s: missing" % RESIZE_SOURCE)
+    else:
+        resize_text = read(resize_path)
+        total = len(RESIZE_CALL.findall(resize_text))
+        reachable = sum(1 for _, line in unguarded_lines(resize_text)
+                        if RESIZE_CALL.search(line))
+        if total == 0:
+            failures.append("%s: no call to Resize_And_Position_Window(); the requested "
+                            "resolution is never applied to the window" % RESIZE_SOURCE)
+        elif reachable != total:
+            failures.append("%s: %d of %d Resize_And_Position_Window() calls are inside an "
+                            "#ifdef _WIN32; off Windows the window keeps its creation size "
+                            "while TheDisplay believes -xres/-yres"
+                            % (RESIZE_SOURCE, total - reachable, total))
+        print("dx8wrapper.cpp: %d of %d Resize_And_Position_Window() calls compiled off Windows"
+              % (reachable, total))
 
     if failures:
         print("", file=sys.stderr)

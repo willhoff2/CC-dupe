@@ -645,11 +645,9 @@ public:
 	*/
 	static IDirect3DDevice8* _Get_D3D_Device8() { return RenderBackend ? RenderBackend->Peek_D3D_Device8() : nullptr; }
 	static IDirect3D8* _Get_D3D8() { return RenderBackend ? RenderBackend->Peek_D3D8() : nullptr; }
-	/*
-	** The device-presence test.  On the D3D8 backend this is exactly `_Get_D3D_Device8() != nullptr`;
-	** on a backend without D3D8 objects it is the only form of the question that can answer yes.
-	*/
-	static bool Has_Device() { return RenderBackend != nullptr && RenderBackend->Has_Device(); }
+	// TheSuperHackers @port "Is there a device to draw with", asked of the installed backend.
+	// _Get_D3D_Device8() is null off Windows even when a device exists, so it cannot be the test.
+	static bool Has_Render_Device() { return RenderBackend != nullptr && RenderBackend->Has_Device(); }
 	/// Returns the display format - added by TR for video playback - not part of W3D
 	static WW3DFormat	getBackBufferFormat();
 	static bool Reset_Device(bool reload_assets=true);

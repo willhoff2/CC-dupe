@@ -41,12 +41,15 @@ DISPLAY=:0 LD_LIBRARY_PATH=.../build/docker/_deps/ffmpeg-lib/lib \
   ./zh -win -noshellmap -nologo -noaudio -xres 800 -yres 600
 ```
 
-**Reproducibility trap — use `-xres 800 -yres 600`.** The SDL window is created at 800x600 regardless of
-`-xres/-yres`, but `TheDisplay` believes the requested size. At `-xres 1024 -yres 768` the GUI lays out
-for 1024x768 inside an 800x600 window: hit-testing no longer matches what is on screen and every control
-below logical y=600 — including skirmish's `Play Game` — is physically unreachable. That mismatch is a
-finding in its own right (the window seam does not honour the requested backbuffer size), but it is not
-chased here.
+**Superseded reproducibility trap (fixed; see [window-size-honoured.md](window-size-honoured.md)).**
+At the SHA this probe ran against, the SDL window was created at 800x600 regardless of `-xres/-yres`
+while `TheDisplay` believed the requested size, so at `-xres 1024 -yres 768` the GUI laid out for
+1024x768 inside an 800x600 window and every control below logical y=600 — including skirmish's
+`Play Game` — was physically unreachable; this probe therefore had to run at `-xres 800 -yres 600`. The
+cause was an `#ifdef _WIN32` around `DX8Wrapper::Resize_And_Position_Window()`, the call that applies
+the requested client size on Windows too. With it removed the window is measured at the requested
+size at 800x600, 1024x768 and 1280x720, and clicks reach the buttons drawn there. `-xres 800 -yres 600`
+is no longer required to reproduce anything below.
 
 ### 0.1 What presentation was and was not measured
 
@@ -149,11 +152,13 @@ Each step below was a real mouse click delivered to the window, driving the real
 **Answer to #82's question, now measured rather than audited: the single-player menu route is intact off
 Windows.** Nothing on it reaches for anything the GameSpy excision cut.
 
-One incomplete area on the skirmish screen: the **player-slot controls do not populate**. Only one combo
-column renders, its entries read `None`, the other columns are blank, and opening the combo shows an
-empty list. Faction/colour/team combos therefore could not be exercised at all. Not classified — it is
-either missing initialisation of the slot list off Windows or a GUI-layout/data problem, and separating
-those needs a dedicated look.
+~~One incomplete area on the skirmish screen: the **player-slot controls do not populate**.~~ Superseded:
+the empty `Players`/`Color`/`Army` columns and the `None`-only `Team` column seen at this SHA were the
+renderer's 64-draw descriptor cap (removed in #119) truncating a 122-draw screen; the symptom is
+reproduced on demand with `ZH_RENDER_MAX_DRAWS=64` and a configuration chosen through the real controls
+is measured reaching `TheSkirmishGameInfo` and `ThePlayerList` in
+[skirmish-slot-controls.md](skirmish-slot-controls.md). Not missing data, not a GUI port defect, not the
+GameSpy excision.
 
 ## 4. Campaign: reaches the mission, dies rendering river water
 
@@ -248,10 +253,11 @@ Ordered by what blocks *visible* single-player play:
 2. **Shroud negative-index read** (`W3DShroud.cpp:269` via `W3DWater.cpp:180`). Deterministically kills a
    campaign mission in its first frames. A bounds check is the obvious fix but it changes the Windows
    build's behaviour on the same input, so it needs the oracle consulted, not a drive-by patch.
-3. **Skirmish player-slot controls empty.** Blocks side/colour/team selection; a skirmish can only start
-   with defaults today.
+3. ~~**Skirmish player-slot controls empty.**~~ Was the #119 draw cap; measured closed in
+   [skirmish-slot-controls.md](skirmish-slot-controls.md).
 4. **GUI text and button art** (doubled/clipped labels, missing button images). Cosmetic but pervasive.
-5. **Window size not honoured** (`-xres/-yres` vs. the 800x600 SDL window) — a real hit-testing hazard.
+5. ~~**Window size not honoured**~~ (`-xres/-yres` vs. the 800x600 SDL window) — fixed and measured at
+   three sizes in [window-size-honoured.md](window-size-honoured.md).
 6. Still open from the previous probe and untouched here: `StdLocalFileSystem` never instantiated,
    `MapCache` POSIX-path misses.
 

@@ -204,6 +204,22 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The two kinds of rot the nightly measurement sweep kept finding on an unchanged main --
+      # a headline figure in the prose that the baseline had moved past, and a gate this workflow
+      # runs that no skill names -- found thirteen nights running, in thirteen open PRs (#121-#133).
+      # Both are text-only comparisons against files already in the tree, so they belong here, on
+      # the push that makes them stale, not in a sweep a month later.
+      - name: Check prose figures against the baselines and gates against the skills
+        run: |
+          set -o pipefail
+          {
+            echo '## Prose figures vs baselines; workflow gates vs skills'
+            echo '```'
+            python3 scripts/ci/check-doc-figures.py
+            python3 scripts/ci/check-skill-coverage.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   # 0b. The gates that read the tree and nothing else: no toolchain, no container, no build, about a
   #     minute in total. Ungated for a reason -- window-input-scan.py walks the whole repository and
   #     compares the Win32 window/event/input surface against a checked-in baseline, so *any* engine

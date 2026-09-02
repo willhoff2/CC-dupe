@@ -145,6 +145,7 @@ picture they feed is the renderer spike's evidence, and `check-spike-render.py` 
 
 Unchanged and green after the change: `check-native-build-baseline.py` at both level sets (ratcheted
 to the new figures in this PR), `check-win32-undefined.py` (still the three cursor calls),
-`check-d3d8-surface.py` (direct D3D8 call sites still **0**, 64 inside the backend implementation),
+`check-d3d8-surface.py` (direct D3D8 call sites still **0** at the time of this slice, 64 inside the
+backend implementation; on `main` at `632ba201f` it is 4 allowlisted and 66 seam-owned),
 `check-video-headers.py`, `check-embedded-browser.py`, `check-online-absent-seam.py`, and
 `porting-status.py --check`.

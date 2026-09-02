@@ -93,7 +93,8 @@ add_custom_target(spike-shaders DEPENDS ${SPIRV_OUTPUTS})
 function(zh_add_render_backend name)
     add_library(${name} STATIC
         src/state_translate.cpp
-        src/vulkan_backend.cpp)
+        src/vulkan_backend.cpp
+        src/png_write.cpp)
     add_dependencies(${name} spike-shaders)
     target_include_directories(${name} PUBLIC src)
     target_link_libraries(${name} PUBLIC Vulkan::Vulkan)
@@ -108,8 +109,7 @@ zh_add_render_backend(zh-render-backend)
 
 # --- executable ---------------------------------------------------------------
 add_executable(zh-renderer-spike
-    src/main.cpp
-    src/png_write.cpp)
+    src/main.cpp)
 add_dependencies(zh-renderer-spike spike-shaders)
 target_link_libraries(zh-renderer-spike PRIVATE zh-render-backend)
 
@@ -211,7 +211,6 @@ target_include_directories(zh-render-backend-window PUBLIC "${WWLIB_PLATFORM_DIR
 if(SPIKE_HAVE_SDL2)
     add_executable(zh-window-spike
         src/window_spike.cpp
-        src/png_write.cpp
         "${WWLIB_PLATFORM_DIR}/platform/platform_window_sdl2.cpp")
     add_dependencies(zh-window-spike spike-shaders)
     target_include_directories(zh-window-spike PRIVATE "${WWLIB_PLATFORM_DIR}")
@@ -263,7 +262,6 @@ if(APPLE)
         enable_language(OBJCXX)
         add_executable(zh-window-spike-cocoa
             src/window_spike.cpp
-            src/png_write.cpp
             "${WWLIB_PLATFORM_DIR}/platform/platform_window_cocoa.mm")
         add_dependencies(zh-window-spike-cocoa spike-shaders)
         target_include_directories(zh-window-spike-cocoa PRIVATE "${WWLIB_PLATFORM_DIR}")

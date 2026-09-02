@@ -34,9 +34,9 @@ PATH**, **MISSING DATA**, **SYNTHETIC-ONLY**.
   **SYNTHETIC-ONLY.**
 - In the real game (§5) both buffers are now created and, when the shadow path executes, it
   issues up to 866 untyped draws per frame through the new path with 0 dropped. That is draw
-  accounting, not framebuffer proof: no retail frame with shadows has been read back, because
-  on the native build the shadow path is currently kept from running by an independent raw
-  `IDirect3DDevice8*` gate (§6) that belongs to another slice.
+  accounting, not framebuffer proof: no retail frame with shadows has been read back. Those
+  measurements predate #137, which independently removed the raw `IDirect3DDevice8*` gate
+  that had kept the shadow path from running natively (§6).
 
 ## 1. What was silently not drawn (measured)
 
@@ -126,10 +126,10 @@ synthetic (§4), against the byte-exact shapes from §2.1.
 
 Seam preserved: consumers call `DX8Wrapper`; the native bridge (`vulkanrenderbackend.cpp`)
 translates D3D8 into `spike::RenderBackendClass`; no new direct `IDirect3DDevice8` call site.
-Windows is untouched functionally: `d3d8renderbackend` already hands declarations to the real
-API. The only Windows-compiled change is `DX8Wrapper::Has_Device()` replacing raw
-`_Get_D3D_Device8()` null checks inside the two shadow managers, which on the D3D8 backend is
-`D3DDevice != nullptr`, the same predicate.
+Windows is untouched: `d3d8renderbackend` already hands declarations to the real API, and no
+Windows-compiled source changes in this slice. (The raw `_Get_D3D_Device8()` null checks in the
+shadow managers that kept the path from running natively were replaced by
+`DX8Wrapper::Has_Render_Device()` in #137, on which this slice now sits.)
 
 Backend (`spikes/renderer/src`):
 
@@ -216,16 +216,16 @@ declaration-backed draws. Retail proof of visible shadows is **not established**
 
 ## 6. What remains, classified
 
-1. **`W3DDisplay::draw` and `W3DScene` gate on the raw `IDirect3DDevice8*` — PORT DEFECT,
-   owned by the parallel mission-corruption slice, not changed here.**
-   `W3DDisplay.cpp`: `if (DX8Wrapper::_Get_D3D_Device8() && Test_Cooperative_Level() == D3D_OK)
-   { updateViews(); ... }` and `W3DScene.cpp`: `if (!DX8Wrapper::_Get_D3D_Device8()) return;`.
-   On the Vulkan backend `Peek_D3D_Device8()` returns `nullptr`, so `updateViews()` never runs
-   in a mission: the shadow managers are polled but never populated, and (measured in §1.3)
-   lifting the gate takes a mission frame from ~95 to ~1772 draws. This slice used that
-   experiment only to measure the shadow path and reverted it; it is recorded here because it
-   is the reason the real game currently issues 0 untyped draws, and because it is very likely
-   relevant to the parallel slice's mission-frame investigation.
+1. **`W3DDisplay::draw` and `W3DScene` gated on the raw `IDirect3DDevice8*` — PORT DEFECT,
+   fixed independently by #137 (`DX8Wrapper::Has_Render_Device()`), not by this slice.**
+   The measurements in §1.3 and §5 were taken before #137 landed, on a tree where
+   `updateViews()` never ran natively (`Peek_D3D_Device8()` is `nullptr` on the Vulkan
+   backend), which is why the as-committed row shows `untyped 0/0`: the shadow managers were
+   polled but never populated. The "gate lifted" rows are the configuration `main` now has.
+   With #137 merged the shadow path runs on every native mission frame, so the two FVF-0
+   buffers are drawn — through this slice's path — rather than crashing on a null `Lock`
+   (§1.3, row 2). The combined `main` + this branch state has not been re-measured in the
+   retail game; that is the first thing to do before quoting a draws/frame number for it.
 2. **Declaration decoder is a bounded subset — UNIMPLEMENTED PATH for anything outside §2.1.**
    Multiple streams, `D3DVSD_SKIP`, tessellator streams, `UBYTE4`/`SHORT*`, and semantic
    assignment beyond component-count order are refused with a reason. No engine source uses
@@ -246,5 +246,7 @@ declaration-backed draws. Retail proof of visible shadows is **not established**
 `check-untyped-vertex-buffer.py` (PASS, both negative controls fail as required), strict native
 build level 1-4 with shims (980/980, 0 unresolved, binary produced),
 `check-generated-baselines.py`, `porting-status.py`. The Wine/VC6 Windows build
-(`scripts/docker-build.sh --game zh`) was run because engine sources changed; the retail replay
-gate was not run: nothing here touches serialisation or simulation.
+(`scripts/docker-build.sh --game zh`) was run (rc 0) on the pre-merge commit, when this branch
+still carried its own shadow-manager edits; after merging #137 the branch changes no
+Windows-compiled source. The retail replay gate was not run: nothing here touches
+serialisation or simulation.
