@@ -19,9 +19,12 @@ slice is much closer to portable than the raw `windows.h` counts suggest.
 
 > **Superseded.** That 106/147 covered only the `Core/Libraries` slice, and later slices grew the
 > denominator; `review-and-decisions.md` records it as stale. The probe now covers nine targets:
-> **673 / 761** clean native and **717 / 761** shimmed (clang 14, commit `3098ef1`). Read
-> [`STATUS.md`](STATUS.md), which is generated from the committed baselines, rather than this
-> paragraph.
+> **674 / 762** clean native and **718 / 762** shimmed (clang 14, commit `632ba201f`). The
+> `761 -> 762` move since `3098ef1` (673 / 761 and 717 / 761) is a denominator change, not progress:
+> #117 added `Common/System/CriticalSectionFailure.cpp` to `GeneralsMD/Code/GameEngine`, and it
+> compiles clean in both modes. Read [`STATUS.md`](STATUS.md), which is generated from the committed
+> baselines, rather than this paragraph; `scripts/ci/check-doc-figures.py` fails CI when the pair
+> quoted here disagrees with them.
 
 Findings worth recording:
 
@@ -133,5 +136,13 @@ portability.
 ## Reproducing the measurement
 
 ```sh
-python3 scripts/native-port-probe.py --report docs/porting/native-port-probe-report.md
+./scripts/ci/fetch-probe-deps.sh
+CLANGXX=clang++-14 python3 scripts/native-port-probe.py --json probe-native.json
+CLANGXX=clang++-14 python3 scripts/native-port-probe.py --with-shims --json probe-shimmed.json
+python3 scripts/ci/check-probe-baseline.py --results probe-native.json
+python3 scripts/ci/check-probe-baseline.py --results probe-shimmed.json
 ```
+
+Do not point `--report` at [`native-port-probe-report.md`](native-port-probe-report.md): that file
+is the historical pre-`PreRTS.h` record and writing over it destroys it. The current per-target
+figures are in [`STATUS.md`](STATUS.md), generated from the committed baselines.

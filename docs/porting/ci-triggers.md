@@ -80,6 +80,42 @@ Require the single check named **`Native port CI`** (job `required-checks`). It 
 either block every docs-only pull request forever — a skipped required check never reports — or
 need editing every time a job is added or renamed.
 
+## The nightly measurement sweep
+
+A scheduled Devin automation ("CC-dupe nightly port measurement sweep", daily 07:00 UTC, playbook
+`port_measure`) re-measures `main` with the pinned toolchain and reconciles the prose and skills
+with the baselines. It is the only thing that opens measurement PRs; no workflow in
+`.github/workflows/` does.
+
+What went wrong, measured on PRs #121–#133: thirteen consecutive sweeps ran against the **same**
+commit (`632ba201f`, `main` had not moved), every one of them reported "no measurement drift", and
+every one of them opened a new PR titled `docs(port): Nightly measurement sweep`. The prompt's
+"open a PR only if something changed" test compared the tree against reality, and the tree was
+stale in the same three places every night because the previous night's PR was never merged — so
+"something changed" was true thirteen times for the same three findings. Nothing looked for an
+existing sweep PR, and the title was a constant.
+
+The contract now (enforced by the automation prompt; the repository side is the CI gates above):
+
+* **What moves goes to CI, not to a sweep.** A quoted figure that disagrees with its baseline
+  fails `check-doc-figures.py`; a gate the workflow runs that no skill names fails
+  `check-skill-coverage.py`; both in the ungated `lint` job, on the push that caused them. Of the
+  thirteen PRs' findings, every one was in one of those two classes or was a script bug — none was a
+  moved measurement.
+* **Nothing to say, nothing opened.** If `main` is the SHA the last sweep measured and its
+  `Native port CI` run is green, the sweep stops and reports the SHA. No branch, no PR.
+* **One long-lived branch.** Findings go on `nightly/measurement-sweep`, pushed to the existing
+  open PR from that branch if there is one; a new PR only when there is none.
+* **The title says what moved**: `docs(port): Sweep <sha7>: <what moved>` — e.g.
+  `docs(port): Sweep 632ba20: shimmed probe 718 -> 719 / 762`. The bare title is forbidden.
+* **A regression or a finding the sweep cannot land fails loudly**: the session ends reporting the
+  regression and the causing commit, and opens nothing. A regression is never baselined by a sweep.
+* **Coverage.** The sweep runs the same gates `native-port-ci.yml` runs on Linux — including the
+  debug build and its negative controls, draw capacity, staging cost, the spike render, backend
+  coverage, HiDPI, the swapchain check and the seam behaviour tests — as listed in
+  `.agents/skills/native-port-measure/SKILL.md` and `renderer-spike-verify/SKILL.md`. It cannot run
+  the macOS/arm64 jobs (no Mac runner in the automation); those stay CI-only, and the sweep says so.
+
 ## Also fixed here
 
 * The `lint` rung of the verification ladder (`flake8`, `actionlint`) was documented but wired into
