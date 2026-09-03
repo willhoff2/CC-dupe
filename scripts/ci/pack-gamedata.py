@@ -91,6 +91,7 @@ MOVIE_SUFFIX = ".bik"
 # mismatch, so packing it would ship ~17.8 MiB the engine ignores.
 LOOSE_ARCHIVE = "zerohour104_loose_data.7z"
 LOOSE_EXCLUDED_SUFFIXES = {MOVIE_SUFFIX, ".big"}
+CURSOR_SUFFIX = ".ani"
 
 # -mx=9 for the trimmed pair, because the hashes CI pins were produced with it and repacking
 # must keep reproducing them.
@@ -351,6 +352,20 @@ def collect_loose_data(label: str, root: Path) -> list[Path]:
 
     if not found:
         raise SystemExit(f"{label} install has no loose data files under {data_dir}")
+
+    # Data/Cursors is why this object exists, and a tree copied for its data can lack it. Without
+    # this check such a tree packs its WaterPlane and Scripts, hashes cleanly, and silently omits
+    # the cursors - a failure that would surface a long way from its cause, as a mouse seam still
+    # showing the default arrow. The names are not enumerated: the SKUs differ (see the INIZH.big
+    # note above), so a fixed list would reject installs that are perfectly good.
+    cursors = resolve_file(root, "Data/Cursors")
+    if cursors is None or not cursors.is_dir() or not any(
+            path.suffix.lower() == CURSOR_SUFFIX for path in cursors.iterdir()):
+        raise SystemExit(
+            f"{label} install has no {CURSOR_SUFFIX} cursors: {root}/Data/Cursors is missing or "
+            "holds none. They are installed loose, so a tree copied for its .big files alone will "
+            "not have them - point --generals/--generalsmd at a full install."
+        )
     return found
 
 

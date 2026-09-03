@@ -127,6 +127,11 @@ Two exclusions, both deliberate:
   duplicate `StdBIGFileSystem.cpp` skips by name to avoid a CRC mismatch (the English, Chinese and
   Korean SKUs shipped two). Packing it would ship 17.8 MiB the engine ignores.
 
+The packer refuses a root whose `Data/Cursors` is missing or holds no `.ani`, naming it. A tree
+copied for its `.big` files alone would otherwise pack its WaterPlane and Scripts, hash cleanly and
+silently omit the cursors — which would surface much later, as a mouse seam still showing the
+default arrow. The cursor *names* are not checked, because the SKUs differ.
+
 The 52 `.ani` per root are byte-identical between the two trees, and both are packed: the game
 resolves `data\cursors\` against whichever root it is running from, so dropping either would make
 the object depend on which install the reader points at. Note that 52 files back the **27** cursors
