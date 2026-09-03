@@ -93,6 +93,8 @@ XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-draw-capacity.py \
   --binary build/spike/zh-draw-capacity --self-check
 XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-untyped-vertex-buffer.py \
   --binary build/spike/zh-untyped-vb
+XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY= python3 scripts/ci/check-resource-lifetime.py \
+  --binary build/spike/zh-resource-lifetime
 python3 spikes/renderer/tools/d3d8-lock-scan.py --check
 python3 spikes/renderer/tools/surface-lock-audit.py --check
 ```
@@ -115,6 +117,14 @@ rewritten, a half-block sub-rect refused, one level read back byte-exact, nine d
 the readback. Its negative control is `ZH_RENDER_NO_BLOCK_COMPRESSED=1`, under which the device must
 report no BC format, creation must be refused, and the workload must fail for that reason
 (`docs/porting/block-compressed-textures.md`).
+
+`check-resource-lifetime.py --binary build/spike/zh-resource-lifetime` is the D3D8 lifetime
+contract: 300 frames of 8 text-like textures each (image surface, lockable texture,
+`Get_Surface_Level`, `Copy_Rects`, draw, texel readback, release), with `live_textures` /
+`live_surfaces` required back at their bound, created == destroyed, `retired_pending == 0`, and
+the `Get_Surface_Level` cost not growing. Its negative control is `ZH_RENDER_NO_RESOURCE_DESTROY=1`
+(no backend destroy at refcount zero, i.e. the leak), which must fail on live-count growth
+(`docs/porting/renderer-resource-lifetime.md`).
 
 A validation message is a failure even when the pixels are right. The failure class to expect:
 a texture's image and a `GetSurfaceLevel` surface viewing it are two names for one image, so any

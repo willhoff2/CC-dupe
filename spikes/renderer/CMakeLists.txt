@@ -168,6 +168,13 @@ add_executable(zh-untyped-vb src/untyped_vertex_buffer.cpp)
 add_dependencies(zh-untyped-vb spike-shaders)
 target_link_libraries(zh-untyped-vb PRIVATE zh-render-backend)
 
+# The text path's per-frame surface + texture, created and released every frame; the live
+# counts must return to their bound. scripts/ci/check-resource-lifetime.py gates it, with
+# ZH_RENDER_NO_RESOURCE_DESTROY as the negative control.
+add_executable(zh-resource-lifetime src/resource_lifetime.cpp)
+add_dependencies(zh-resource-lifetime spike-shaders)
+target_link_libraries(zh-resource-lifetime PRIVATE zh-render-backend)
+
 # Block-compressed textures (DXT1/3/5 -> BC1/2/3) created through the lockable path, filled
 # through Lock/Unlock at BLOCK pitch, drawn and read back per block; a misaligned sub-rect
 # lock must be refused. scripts/ci/check-bc-textures.py gates it, with
@@ -322,7 +329,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     foreach(target zh-render-backend zh-renderer-spike zh-caps-probe zh-feature-probe
                    zh-fixedfunc-tests zh-resource-lock-tests zh-hidpi-tests
                    zh-staging-workload zh-throughput zh-draw-capacity zh-untyped-vb
-                   zh-bc-textures)
+                   zh-bc-textures zh-resource-lifetime)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
     endforeach()
     foreach(target zh-window-spike zh-window-spike-cocoa zh-metal-surface-probe

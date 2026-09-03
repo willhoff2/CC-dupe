@@ -205,6 +205,17 @@ namespace
 
 class VulkanD3DTextureClass;
 
+// The backend a wrapper was created on, while it exists.  A D3D8 resource holds its device
+// alive; these wrappers do not, and the engine's static texture/buffer teardown can release them
+// after Release_Device().  A Release() reaching zero then frees the wrapper alone: the backend's
+// Shutdown() already freed every resource it owned.
+spike::RenderBackend * TheLiveBackend = NULL;
+
+spike::RenderBackend * Live_Backend(spike::RenderBackend * backend)
+{
+	return (backend != NULL && backend == TheLiveBackend) ? backend : NULL;
+}
+
 /*
 ** IDirect3DSurface8 over either a level of a spike texture (GetSurfaceLevel, the render target,
 ** the depth/stencil buffer) or a system-memory image surface (CreateImageSurface).  D3D8 hands
@@ -234,6 +245,9 @@ public:
 	// True for a GetSurfaceLevel(n > 0) surface: it locks through its texture's mip level rather
 	// than through a surface handle, and it is not a target.
 	bool Is_Mip_Level_Surface() const { return Handle == NULL && Container != NULL; }
+	// A CreateImageSurface surface owns its handle and destroys it when its last reference goes;
+	// the default targets' wrappers name backend-owned surfaces and destroy nothing.
+	void Own_Handle() { OwnsHandle = true; }
 	spike::TextureFormat Peek_Format() const { return Format; }
 
 	STDMETHOD(QueryInterface)(REFIID riid, void ** object);
@@ -268,6 +282,7 @@ private:
 	// The mip level this surface names, for a surface that has no handle of its own.
 	unsigned Level;
 	int RefCount;
+	bool OwnsHandle;
 };
 
 /*
@@ -432,16 +447,16 @@ VulkanD3DSurfaceClass::VulkanD3DSurfaceClass(spike::RenderBackend * backend,
 	Pool(pool),
 	Usage(usage),
 	Level(level),
-	RefCount(1)
+	RefCount(1),
+	OwnsHandle(false)
 {
 }
 
 VulkanD3DSurfaceClass::~VulkanD3DSurfaceClass()
 {
-	// A level surface and the default targets are owned by their texture or by the backend; an
-	// image surface's memory belongs to the backend's pool either way, and the spike frees all
-	// of it at Shutdown.  So there is nothing to release here, which is D3D8's ownership too:
-	// GetSurfaceLevel's surface does not own its level.
+	// A level surface is owned by its texture and the default targets by the backend, which is
+	// D3D8's ownership too: GetSurfaceLevel's surface does not own its level.  Only a
+	// CreateImageSurface surface has memory of its own, and Release() returned that already.
 }
 
 HRESULT VulkanD3DSurfaceClass::QueryInterface(REFIID, void ** object)
@@ -452,18 +467,26 @@ HRESULT VulkanD3DSurfaceClass::QueryInterface(REFIID, void ** object)
 	return E_NOINTERFACE;
 }
 
+// D3D8's level surface shares its texture's lifetime in both directions: the texture keeps its
+// levels alive, and a level surface the caller still holds keeps the texture alive (a surface
+// is a child of its container, and AddRef/Release on it count against the container).  Forwarding
+// the count is how both hold, and it is what lets the texture's last Release() free the level
+// wrappers with it.
 ULONG VulkanD3DSurfaceClass::AddRef()
 {
+	if (Container != NULL) return Container->AddRef();
 	return (ULONG)++RefCount;
 }
 
 ULONG VulkanD3DSurfaceClass::Release()
 {
+	if (Container != NULL) return Container->Release();
 	RefCount--;
 	if (RefCount > 0) return (ULONG)RefCount;
-	// A surface handed out by GetSurfaceLevel is owned by its texture, which keeps it alive for
-	// its own lifetime, so reaching zero here frees only the standalone surfaces.
-	if (Container == NULL) delete this;
+	// IDirect3DSurface8 from CreateImageSurface: the last Release frees the surface and its
+	// system memory.  The default targets are the device's own and outlive every wrapper.
+	if (OwnsHandle && Live_Backend(Backend) != NULL) Backend->Destroy_Surface(Handle);
+	delete this;
 	return 0;
 }
 
@@ -628,10 +651,9 @@ ULONG VulkanD3DTextureClass::Release()
 {
 	RefCount--;
 	if (RefCount > 0) return (ULONG)RefCount;
-	// The spike owns the image until Shutdown (it has no per-resource destroy entry point), so
-	// this frees the wrapper only.  That is a real difference from D3D8 and it is a leak of
-	// device memory across a long session, recorded in docs/porting/renderer-integration.md
-	// rather than papered over here.
+	// IDirect3DTexture8: the last Release frees the texture and every level surface with it.
+	// The level surfaces forward their count here, so none of them is still held.
+	if (Live_Backend(Backend) != NULL) Backend->Destroy_Texture(Handle);
 	delete this;
 	return 0;
 }
@@ -826,6 +848,7 @@ ULONG VulkanD3DVertexBufferClass::Release()
 {
 	RefCount--;
 	if (RefCount > 0) return (ULONG)RefCount;
+	if (Live_Backend(Backend) != NULL) Backend->Destroy_Vertex_Buffer(Handle);
 	delete this;
 	return 0;
 }
@@ -940,6 +963,7 @@ ULONG VulkanD3DIndexBufferClass::Release()
 {
 	RefCount--;
 	if (RefCount > 0) return (ULONG)RefCount;
+	if (Live_Backend(Backend) != NULL) Backend->Destroy_Index_Buffer(Handle);
 	delete this;
 	return 0;
 }
@@ -1154,6 +1178,7 @@ HRESULT VulkanRenderBackendClass::Create_Device(UINT adapter, D3DDEVTYPE device_
 		return D3DERR_NOTAVAILABLE;
 	}
 	Internals->Backend = backend;
+	TheLiveBackend = backend;
 	Internals->PresentParameters = *present_parameters;
 	Internals->HaveDeviceAdapter = backend->Get_Adapter_Info(Internals->DeviceAdapter);
 	if (Internals->HaveDeviceAdapter
@@ -1185,6 +1210,7 @@ void VulkanRenderBackendClass::Release_Device()
 		Internals->Backend->Shutdown();
 		delete Internals->Backend;
 		Internals->Backend = NULL;
+		TheLiveBackend = NULL;
 	}
 	Internals->HaveDeviceAdapter = false;
 }
@@ -1636,8 +1662,10 @@ HRESULT VulkanRenderBackendClass::CreateImageSurface(UINT width, UINT height, D3
 	spike::SurfaceHandle * handle = Internals->Backend->Create_Image_Surface(width, height,
 		translated);
 	if (handle == NULL) return D3DERR_INVALIDCALL;
-	*surface = new VulkanD3DSurfaceClass(Internals->Backend, handle, NULL, width, height,
-		translated, D3DPOOL_SYSTEMMEM, 0);
+	VulkanD3DSurfaceClass * wrapper = new VulkanD3DSurfaceClass(Internals->Backend, handle,
+		NULL, width, height, translated, D3DPOOL_SYSTEMMEM, 0);
+	wrapper->Own_Handle();
+	*surface = wrapper;
 	return D3D_OK;
 }
 

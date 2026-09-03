@@ -270,6 +270,8 @@ struct TextureHandle {
 	// D3DUSAGE_RENDERTARGET: the image can be a colour attachment as well as sampled,
 	// and Get_Surface_Level hands out a SurfaceHandle for it.
 	bool render_target = false;
+	// The level-0 surface once Get_Surface_Level has made it; owned by the texture.
+	SurfaceHandle* level0 = nullptr;
 
 	// --- lockable path (see docs/porting/renderer-resource-seam.md) ------------
 	bool lockable = false;
@@ -458,6 +460,11 @@ public:
 		return resource_stats_;
 	}
 
+	void Destroy_Texture(TextureHandle* texture) override;
+	void Destroy_Surface(SurfaceHandle* surface) override;
+	void Destroy_Vertex_Buffer(VertexBufferHandle* vb) override;
+	void Destroy_Index_Buffer(IndexBufferHandle* ib) override;
+
 	void Set_Fixed_Function_Fvf(uint32_t fvf) override;
 	void Set_Vertex_Buffer(VertexBufferHandle* vb, uint32_t stream, uint32_t stride) override;
 	void Set_Index_Buffer(IndexBufferHandle* ib, uint32_t index_base_offset) override;
@@ -585,6 +592,20 @@ private:
 	bool Acquire_Staging(VkDeviceSize size, StagingBlock& out);
 	void Release_Staging(StagingBlock& block);
 	bool Ensure_Texture_Staging(TextureHandle* texture);
+	// --- resource lifetime (docs/porting/renderer-resource-lifetime.md) ----------
+	void Free_Buffer(Buffer& buffer);
+	void Free_Image(Image& image);
+	void Free_Staging_Block(StagingBlock& block);
+	void Free_Texture(TextureHandle* texture);
+	void Free_Surface(SurfaceHandle* surface);
+	void Free_Vertex_Buffer(VertexBufferHandle* vb);
+	void Free_Index_Buffer(IndexBufferHandle* ib);
+	// Moves a level surface out of the live set and drops the framebuffers and the
+	// target binding that name it. Caller holds resource_mutex_.
+	void Retire_Surface(SurfaceHandle* surface);
+	// Frees everything Destroy_* retired. Called once the GPU is known to be idle on
+	// every frame that could have read those resources.
+	void Flush_Retired();
 	// Copy_Rects for a format whose host layout and image layout differ, i.e. one the
 	// device has no equivalent of and the seam emulates with B8G8R8A8.
 	bool Copy_Rects_Converting(SurfaceHandle* source, const LockRect* rects,
@@ -729,7 +750,14 @@ private:
 	uint32_t device_target_width_ = 0, device_target_height_ = 0;
 	// {has depth, load colour} -> render pass, and attachment pair -> framebuffer.
 	std::unordered_map<uint32_t, VkRenderPass> render_passes_;
-	std::unordered_map<uint64_t, VkFramebuffer> framebuffers_;
+	// The attachment pair is kept with the framebuffer so that destroying a surface can
+	// find and drop every framebuffer that names it.
+	struct CachedFramebuffer {
+		VkFramebuffer framebuffer = VK_NULL_HANDLE;
+		SurfaceHandle* color = nullptr;
+		SurfaceHandle* depth = nullptr;
+	};
+	std::unordered_map<uint64_t, CachedFramebuffer> framebuffers_;
 	std::vector<SurfaceHandle*> owned_surfaces_;
 
 	VkShaderModule vert_module_ = VK_NULL_HANDLE;
@@ -832,6 +860,19 @@ private:
 	std::vector<TextureHandle*> owned_textures_;
 	std::vector<VertexBufferHandle*> owned_vbs_;
 	std::vector<IndexBufferHandle*> owned_ibs_;
+	// Destroyed by the caller, not yet freed: the frame being recorded (or the one in
+	// flight) may still read them. Begin_Scene frees them once its fence wait proves
+	// every earlier submission complete; Shutdown frees whatever is left.
+	std::vector<TextureHandle*> retired_textures_;
+	std::vector<SurfaceHandle*> retired_surfaces_;
+	std::vector<VertexBufferHandle*> retired_vbs_;
+	std::vector<IndexBufferHandle*> retired_ibs_;
+	std::vector<VkFramebuffer> retired_framebuffers_;
+	// Negative control (ZH_RENDER_NO_RESOURCE_DESTROY): Destroy_* keep every resource
+	// until Shutdown, which is what the backend did before it had a destroy path and
+	// what made the live counts grow without bound. Exists so the gate that proves
+	// the counts are bounded can be shown to fail without the path.
+	bool resource_destroy_ = true;
 
 	// --- shadow state, mirroring DX8Wrapper::RenderStates / TextureStageStates ---
 	uint32_t render_states_[D3DRS_MAX]{};
@@ -1134,6 +1175,7 @@ bool VulkanBackend::Pick_Device() {
 	staging_retain_ = std::getenv("ZH_SPIKE_STAGING_RETAIN") != nullptr;
 	untyped_vertex_buffers_ = std::getenv("ZH_RENDER_NO_UNTYPED_VB") == nullptr;
 	vertex_declarations_ = std::getenv("ZH_RENDER_NO_VERTEX_DECLARATION") == nullptr;
+	resource_destroy_ = std::getenv("ZH_RENDER_NO_RESOURCE_DESTROY") == nullptr;
 
 	// D3D8 states that need a Vulkan *feature*, not just a pipeline field:
 	// D3DRS_POINTSIZE > 1 needs largePoints, D3DTSS_MAXANISOTROPY needs
@@ -1435,7 +1477,7 @@ bool VulkanBackend::Rebuild_Render_Targets() {
 	// being replaced, so the state that named them has to go back to them.
 	const bool default_bound = (current_color_ == &default_color_surface_);
 	vkDeviceWaitIdle(device_);
-	for (auto& fb : framebuffers_) vkDestroyFramebuffer(device_, fb.second, nullptr);
+	for (auto& fb : framebuffers_) vkDestroyFramebuffer(device_, fb.second.framebuffer, nullptr);
 	framebuffers_.clear();
 	Destroy_Render_Targets();
 	if (!Create_Render_Targets()) return false;
@@ -1544,7 +1586,7 @@ VkFramebuffer VulkanBackend::Get_Or_Create_Framebuffer(VkRenderPass pass,
 	                     (reinterpret_cast<uint64_t>(depth) * 14695981039346656037ull) ^
 	                     (reinterpret_cast<uint64_t>(pass) << 1);
 	auto it = framebuffers_.find(key);
-	if (it != framebuffers_.end()) return it->second;
+	if (it != framebuffers_.end()) return it->second.framebuffer;
 
 	VkImageView views[2] = {color->image->view,
 	                        depth != nullptr ? depth->image->view : VK_NULL_HANDLE};
@@ -1564,7 +1606,7 @@ VkFramebuffer VulkanBackend::Get_Or_Create_Framebuffer(VkRenderPass pass,
 	if (vkCreateFramebuffer(device_, &fbci, nullptr, &framebuffer) != VK_SUCCESS) {
 		return VK_NULL_HANDLE;
 	}
-	framebuffers_[key] = framebuffer;
+	framebuffers_[key] = CachedFramebuffer{framebuffer, color, depth};
 	return framebuffer;
 }
 
@@ -1684,9 +1726,7 @@ bool VulkanBackend::Flush_Frame_Commands(bool end_pass_first) {
 void VulkanBackend::Note_Texture_Layout(TextureHandle* texture, VkImageLayout layout) {
 	if (texture == nullptr) return;
 	texture->layout = layout;
-	for (SurfaceHandle* surface : owned_surfaces_) {
-		if (surface->owner == texture) surface->layout = layout;
-	}
+	if (texture->level0 != nullptr) texture->level0->layout = layout;
 }
 
 void VulkanBackend::Mark_Gpu_Write(Image* image) {
@@ -2102,54 +2142,20 @@ void VulkanBackend::Shutdown() {
 	for (auto& [key, sampler] : samplers_) vkDestroySampler(device_, sampler, nullptr);
 	samplers_.clear();
 
-	auto free_buffer = [&](Buffer& b) {
-		if (b.buffer) vkDestroyBuffer(device_, b.buffer, nullptr);
-		if (b.memory) vkFreeMemory(device_, b.memory, nullptr);
-		b = Buffer{};
-	};
-	auto free_image = [&](Image& i) {
-		if (i.view) vkDestroyImageView(device_, i.view, nullptr);
-		if (i.image) vkDestroyImage(device_, i.image, nullptr);
-		if (i.memory) vkFreeMemory(device_, i.memory, nullptr);
-		i = Image{};
-	};
-
-	auto free_staging_block = [&](StagingBlock& b) {
-		if (b.mapped != nullptr) vkUnmapMemory(device_, b.buffer.memory);
-		free_buffer(b.buffer);
-		b = StagingBlock{};
-	};
-
-	for (auto* t : owned_textures_) {
-		free_image(t->image);
-		// A block still held here belongs to a resource that was never unlocked, or
-		// one whose block is pinned for C7/C8. Everything else is in the pool.
-		free_staging_block(t->staging);
-		t->staging_mapped = nullptr;
-		delete t;
-	}
+	// Everything the caller destroyed and the device may still have been reading:
+	// the wait above makes it free-able now.
+	Flush_Retired();
+	// A block still held by a texture belongs to a resource that was never unlocked,
+	// or one whose block is pinned for C7/C8. Everything else is in the pool.
+	for (auto* t : owned_textures_) Free_Texture(t);
 	owned_textures_.clear();
-	for (StagingBlock& b : staging_free_) free_staging_block(b);
+	for (StagingBlock& b : staging_free_) Free_Staging_Block(b);
 	staging_free_.clear();
-	for (auto* vb : owned_vbs_) {
-		if (vb->mapped != nullptr) vkUnmapMemory(device_, vb->buffer.memory);
-		free_buffer(vb->buffer);
-		delete vb;
-	}
+	for (auto* vb : owned_vbs_) Free_Vertex_Buffer(vb);
 	owned_vbs_.clear();
-	for (auto* ib : owned_ibs_) {
-		if (ib->mapped != nullptr) vkUnmapMemory(device_, ib->buffer.memory);
-		free_buffer(ib->buffer);
-		delete ib;
-	}
+	for (auto* ib : owned_ibs_) Free_Index_Buffer(ib);
 	owned_ibs_.clear();
-	for (auto* s : owned_surfaces_) {
-		// A system-memory surface's bytes stay mapped for its whole life, the same
-		// contract a lockable texture's staging memory has.
-		if (s->mapped != nullptr) vkUnmapMemory(device_, s->bits.memory);
-		free_buffer(s->bits);
-		delete s;
-	}
+	for (auto* s : owned_surfaces_) Free_Surface(s);
 	owned_surfaces_.clear();
 	// The default colour target grows a host-visible buffer the first time anything
 	// reads it (Surface_Bits), and it is not in owned_surfaces_.
@@ -2157,7 +2163,7 @@ void VulkanBackend::Shutdown() {
 		vkUnmapMemory(device_, default_color_surface_.bits.memory);
 		default_color_surface_.mapped = nullptr;
 	}
-	free_buffer(default_color_surface_.bits);
+	Free_Buffer(default_color_surface_.bits);
 	current_color_ = nullptr;
 	current_depth_ = nullptr;
 
@@ -2166,24 +2172,24 @@ void VulkanBackend::Shutdown() {
 			vkUnmapMemory(device_, block.uniforms.memory);
 			block.mapped = nullptr;
 		}
-		free_buffer(block.uniforms);
+		Free_Buffer(block.uniforms);
 		if (block.pool) vkDestroyDescriptorPool(device_, block.pool, nullptr);
 	}
 	draw_blocks_.clear();
 	draw_stats_.descriptor_capacity = 0;
 	draw_stats_.descriptor_blocks = 0;
-	free_buffer(dummy_vertex_buffer_);
+	Free_Buffer(dummy_vertex_buffer_);
 	if (up_mapped_ != nullptr) {
 		vkUnmapMemory(device_, up_ring_.memory);
 		up_mapped_ = nullptr;
 	}
-	free_buffer(up_ring_);
-	free_image(color_target_);
-	free_image(depth_target_);
+	Free_Buffer(up_ring_);
+	Free_Image(color_target_);
+	Free_Image(depth_target_);
 
 	if (acquire_fence_) vkDestroyFence(device_, acquire_fence_, nullptr);
 	if (swapchain_) vkDestroySwapchainKHR(device_, swapchain_, nullptr);
-	for (auto& fb : framebuffers_) vkDestroyFramebuffer(device_, fb.second, nullptr);
+	for (auto& fb : framebuffers_) vkDestroyFramebuffer(device_, fb.second.framebuffer, nullptr);
 	framebuffers_.clear();
 	for (auto& rp : render_passes_) vkDestroyRenderPass(device_, rp.second, nullptr);
 	render_passes_.clear();
@@ -2598,6 +2604,8 @@ TextureHandle* VulkanBackend::Create_Texture(const TextureDesc& desc) {
 	      handle->image.width, handle->image.height, handle->image.mip_levels,
 	      static_cast<unsigned>(handle->format), static_cast<int>(handle->vk_format));
 	owned_textures_.push_back(handle);
+	++resource_stats_.textures_created;
+	resource_stats_.live_textures = static_cast<uint32_t>(owned_textures_.size());
 	return handle;
 }
 
@@ -2625,6 +2633,8 @@ VertexBufferHandle* VulkanBackend::Create_Vertex_Buffer(const void* data, size_t
 		return nullptr;
 	}
 	owned_vbs_.push_back(handle);
+	++resource_stats_.vertex_buffers_created;
+	resource_stats_.live_vertex_buffers = static_cast<uint32_t>(owned_vbs_.size());
 	return handle;
 }
 
@@ -2637,6 +2647,8 @@ IndexBufferHandle* VulkanBackend::Create_Index_Buffer(const uint16_t* data, size
 		return nullptr;
 	}
 	owned_ibs_.push_back(handle);
+	++resource_stats_.index_buffers_created;
+	resource_stats_.live_index_buffers = static_cast<uint32_t>(owned_ibs_.size());
 	return handle;
 }
 
@@ -3056,6 +3068,8 @@ TextureHandle* VulkanBackend::Create_Lockable_Texture(uint32_t width, uint32_t h
 	      static_cast<int>(handle->vk_format), handle->levels.empty() ? 0u : handle->levels[0].pitch,
 	      handle->expand_on_unlock ? 1 : 0);
 	owned_textures_.push_back(handle);
+	++resource_stats_.textures_created;
+	resource_stats_.live_textures = static_cast<uint32_t>(owned_textures_.size());
 	return handle;
 }
 
@@ -3288,6 +3302,8 @@ VertexBufferHandle* VulkanBackend::Create_Lockable_Vertex_Buffer(size_t bytes, u
 		resource_stats_.dynamic_buffer_bytes += total;
 	}
 	owned_vbs_.push_back(handle);
+	++resource_stats_.vertex_buffers_created;
+	resource_stats_.live_vertex_buffers = static_cast<uint32_t>(owned_vbs_.size());
 	return handle;
 }
 
@@ -3784,8 +3800,12 @@ void VulkanBackend::Begin_Scene() {
 	vkWaitForFences(device_, 1, &frame_fence_, VK_TRUE, UINT64_MAX);
 	vkResetFences(device_, 1, &frame_fence_);
 	// Everything submitted before this point has finished, which is what makes a
-	// dynamic-buffer region safe to rename.
+	// dynamic-buffer region safe to rename and a destroyed resource safe to free.
 	completed_frame_ = frame_counter_;
+	{
+		std::lock_guard<std::mutex> guard(resource_mutex_);
+		Flush_Retired();
+	}
 	++frame_counter_;
 	vkResetCommandBuffer(frame_cmd_, 0);
 	// The UP scratch bytes of the previous frame have been consumed by the draws that
@@ -4752,6 +4772,8 @@ TextureHandle* VulkanBackend::Create_Render_Target_Texture(uint32_t width, uint3
 	Trace_Always("create texture=%p render_target %ux%u fmt=%u vk=%d", static_cast<void*>(handle),
 	      width, height, static_cast<unsigned>(handle->format), static_cast<int>(handle->vk_format));
 	owned_textures_.push_back(handle);
+	++resource_stats_.textures_created;
+	resource_stats_.live_textures = static_cast<uint32_t>(owned_textures_.size());
 	return handle;
 }
 
@@ -4765,10 +4787,9 @@ SurfaceHandle* VulkanBackend::Get_Surface_Level(TextureHandle* texture, uint32_t
 	}
 	// The same surface pointer every time: the engine compares the surface it saved
 	// against the one it restores, and the framebuffer cache is keyed on identity.
-	for (SurfaceHandle* existing : owned_surfaces_) {
-		if (existing->owner == texture) return existing;
-	}
+	if (texture->level0 != nullptr) return texture->level0;
 	auto* surface = new SurfaceHandle();
+	texture->level0 = surface;
 	surface->image = &texture->image;
 	surface->owner = texture;
 	surface->width = texture->image.width;
@@ -4783,6 +4804,8 @@ SurfaceHandle* VulkanBackend::Get_Surface_Level(TextureHandle* texture, uint32_t
 	      static_cast<void*>(surface), static_cast<void*>(texture), surface->width,
 	      surface->height, surface->pitch, static_cast<unsigned>(surface->format));
 	owned_surfaces_.push_back(surface);
+	++resource_stats_.surfaces_created;
+	resource_stats_.live_surfaces = static_cast<uint32_t>(owned_surfaces_.size());
 	return surface;
 }
 
@@ -4832,6 +4855,196 @@ bool VulkanBackend::Set_Render_Target(SurfaceHandle* color, SurfaceHandle* depth
 	return Begin_Current_Pass();
 }
 
+// --- resource lifetime (docs/porting/renderer-resource-lifetime.md) --------------
+
+void VulkanBackend::Free_Buffer(Buffer& b) {
+	if (b.buffer) vkDestroyBuffer(device_, b.buffer, nullptr);
+	if (b.memory) vkFreeMemory(device_, b.memory, nullptr);
+	b = Buffer{};
+}
+
+void VulkanBackend::Free_Image(Image& i) {
+	if (i.view) vkDestroyImageView(device_, i.view, nullptr);
+	if (i.image) vkDestroyImage(device_, i.image, nullptr);
+	if (i.memory) vkFreeMemory(device_, i.memory, nullptr);
+	i = Image{};
+}
+
+void VulkanBackend::Free_Staging_Block(StagingBlock& b) {
+	if (b.mapped != nullptr) vkUnmapMemory(device_, b.buffer.memory);
+	Free_Buffer(b.buffer);
+	b = StagingBlock{};
+}
+
+// Caller holds resource_mutex_ (the staging pool's lock).
+void VulkanBackend::Free_Texture(TextureHandle* t) {
+	Free_Image(t->image);
+	// A block the texture still holds (pinned, or never unlocked) goes back to the
+	// pool rather than to the driver: the next lock of a same-sized texture reuses it,
+	// which is the pool's whole purpose, and Shutdown frees the pool last.
+	if (t->staging.valid()) {
+		if (t->retain_staging && resource_stats_.staging_retained_blocks > 0) {
+			--resource_stats_.staging_retained_blocks;
+		}
+		Release_Staging(t->staging);
+	}
+	t->staging_mapped = nullptr;
+	delete t;
+}
+
+void VulkanBackend::Free_Surface(SurfaceHandle* s) {
+	// A system-memory surface's bytes stay mapped for its whole life, the same
+	// contract a lockable texture's staging memory has. A level surface owns nothing.
+	if (s->mapped != nullptr) vkUnmapMemory(device_, s->bits.memory);
+	Free_Buffer(s->bits);
+	delete s;
+}
+
+void VulkanBackend::Free_Vertex_Buffer(VertexBufferHandle* vb) {
+	if (vb->mapped != nullptr) vkUnmapMemory(device_, vb->buffer.memory);
+	Free_Buffer(vb->buffer);
+	delete vb;
+}
+
+void VulkanBackend::Free_Index_Buffer(IndexBufferHandle* ib) {
+	if (ib->mapped != nullptr) vkUnmapMemory(device_, ib->buffer.memory);
+	Free_Buffer(ib->buffer);
+	delete ib;
+}
+
+void VulkanBackend::Flush_Retired() {
+	for (VkFramebuffer fb : retired_framebuffers_) vkDestroyFramebuffer(device_, fb, nullptr);
+	retired_framebuffers_.clear();
+	for (auto* t : retired_textures_) Free_Texture(t);
+	retired_textures_.clear();
+	for (auto* s : retired_surfaces_) Free_Surface(s);
+	retired_surfaces_.clear();
+	for (auto* vb : retired_vbs_) Free_Vertex_Buffer(vb);
+	retired_vbs_.clear();
+	for (auto* ib : retired_ibs_) Free_Index_Buffer(ib);
+	retired_ibs_.clear();
+	resource_stats_.retired_pending = 0;
+}
+
+void VulkanBackend::Retire_Surface(SurfaceHandle* surface) {
+	auto it = std::find(owned_surfaces_.begin(), owned_surfaces_.end(), surface);
+	if (it == owned_surfaces_.end()) return;
+	owned_surfaces_.erase(it);
+	// A framebuffer names its attachments' image views, so it cannot outlive them.
+	for (auto fb = framebuffers_.begin(); fb != framebuffers_.end();) {
+		if (fb->second.color == surface || fb->second.depth == surface) {
+			retired_framebuffers_.push_back(fb->second.framebuffer);
+			fb = framebuffers_.erase(fb);
+		} else {
+			++fb;
+		}
+	}
+	// Destroying the bound target is legal in D3D8 (the device keeps its own
+	// reference); here the device falls back to its default targets, which is where
+	// the engine's own Set_Render_Target save/restore would have put it anyway.
+	if (current_color_ == surface || current_depth_ == surface) {
+		End_Current_Pass();
+		if (current_color_ == surface) {
+			current_color_ = &default_color_surface_;
+			target_width_ = default_color_surface_.width;
+			target_height_ = default_color_surface_.height;
+			device_target_width_ = device_width_;
+			device_target_height_ = device_height_;
+			viewport_ = ViewportRect{0, 0, target_width_, target_height_, 0.0f, 1.0f};
+		}
+		if (current_depth_ == surface) current_depth_ = nullptr;
+		std::fprintf(stderr, "Destroy: surface %p was the bound render target; "
+		             "device target restored\n", static_cast<void*>(surface));
+	}
+	retired_surfaces_.push_back(surface);
+	++resource_stats_.surfaces_destroyed;
+	resource_stats_.live_surfaces = static_cast<uint32_t>(owned_surfaces_.size());
+	resource_stats_.retired_pending =
+	    static_cast<uint32_t>(retired_textures_.size() + retired_surfaces_.size() +
+	                          retired_vbs_.size() + retired_ibs_.size());
+}
+
+void VulkanBackend::Destroy_Texture(TextureHandle* texture) {
+	if (texture == nullptr || !resource_destroy_) return;
+	std::lock_guard<std::mutex> guard(resource_mutex_);
+	auto it = std::find(owned_textures_.begin(), owned_textures_.end(), texture);
+	if (it == owned_textures_.end()) {
+		std::fprintf(stderr, "Destroy_Texture: %p is not a live texture\n",
+		             static_cast<void*>(texture));
+		return;
+	}
+	owned_textures_.erase(it);
+	for (TextureHandle*& bound : bound_textures_) {
+		if (bound == texture) bound = nullptr;
+	}
+	// The level surface has no life of its own; it goes with the texture.
+	if (texture->level0 != nullptr) {
+		Retire_Surface(texture->level0);
+		texture->level0 = nullptr;
+	}
+	Trace("destroy texture=%p live=%zu", static_cast<void*>(texture), owned_textures_.size());
+	retired_textures_.push_back(texture);
+	++resource_stats_.textures_destroyed;
+	resource_stats_.live_textures = static_cast<uint32_t>(owned_textures_.size());
+	resource_stats_.retired_pending =
+	    static_cast<uint32_t>(retired_textures_.size() + retired_surfaces_.size() +
+	                          retired_vbs_.size() + retired_ibs_.size());
+}
+
+void VulkanBackend::Destroy_Surface(SurfaceHandle* surface) {
+	if (surface == nullptr || !resource_destroy_) return;
+	std::lock_guard<std::mutex> guard(resource_mutex_);
+	// IDirect3DTexture8 owns its level surfaces; releasing one frees nothing.
+	if (surface->owner != nullptr) return;
+	if (std::find(owned_surfaces_.begin(), owned_surfaces_.end(), surface) ==
+	    owned_surfaces_.end()) {
+		std::fprintf(stderr, "Destroy_Surface: %p is not a live surface\n",
+		             static_cast<void*>(surface));
+		return;
+	}
+	Trace("destroy surface=%p live=%zu", static_cast<void*>(surface),
+	      owned_surfaces_.size() - 1);
+	Retire_Surface(surface);
+}
+
+void VulkanBackend::Destroy_Vertex_Buffer(VertexBufferHandle* vb) {
+	if (vb == nullptr || !resource_destroy_) return;
+	std::lock_guard<std::mutex> guard(resource_mutex_);
+	auto it = std::find(owned_vbs_.begin(), owned_vbs_.end(), vb);
+	if (it == owned_vbs_.end()) {
+		std::fprintf(stderr, "Destroy_Vertex_Buffer: %p is not a live buffer\n",
+		             static_cast<void*>(vb));
+		return;
+	}
+	owned_vbs_.erase(it);
+	if (bound_vb_ == vb) bound_vb_ = nullptr;
+	retired_vbs_.push_back(vb);
+	++resource_stats_.vertex_buffers_destroyed;
+	resource_stats_.live_vertex_buffers = static_cast<uint32_t>(owned_vbs_.size());
+	resource_stats_.retired_pending =
+	    static_cast<uint32_t>(retired_textures_.size() + retired_surfaces_.size() +
+	                          retired_vbs_.size() + retired_ibs_.size());
+}
+
+void VulkanBackend::Destroy_Index_Buffer(IndexBufferHandle* ib) {
+	if (ib == nullptr || !resource_destroy_) return;
+	std::lock_guard<std::mutex> guard(resource_mutex_);
+	auto it = std::find(owned_ibs_.begin(), owned_ibs_.end(), ib);
+	if (it == owned_ibs_.end()) {
+		std::fprintf(stderr, "Destroy_Index_Buffer: %p is not a live buffer\n",
+		             static_cast<void*>(ib));
+		return;
+	}
+	owned_ibs_.erase(it);
+	if (bound_ib_ == ib) bound_ib_ = nullptr;
+	retired_ibs_.push_back(ib);
+	++resource_stats_.index_buffers_destroyed;
+	resource_stats_.live_index_buffers = static_cast<uint32_t>(owned_ibs_.size());
+	resource_stats_.retired_pending =
+	    static_cast<uint32_t>(retired_textures_.size() + retired_surfaces_.size() +
+	                          retired_vbs_.size() + retired_ibs_.size());
+}
+
 SurfaceHandle* VulkanBackend::Create_Image_Surface(uint32_t width, uint32_t height,
                                                    TextureFormat format) {
 	const uint32_t texel_bytes = Source_Texel_Bytes(format);
@@ -4864,6 +5077,8 @@ SurfaceHandle* VulkanBackend::Create_Image_Surface(uint32_t width, uint32_t heig
 	      width, height, surface->pitch, static_cast<unsigned>(format),
 	      static_cast<int>(surface->vk_format));
 	owned_surfaces_.push_back(surface);
+	++resource_stats_.surfaces_created;
+	resource_stats_.live_surfaces = static_cast<uint32_t>(owned_surfaces_.size());
 	return surface;
 }
 
@@ -5594,6 +5809,8 @@ IndexBufferHandle* VulkanBackend::Create_Lockable_Index_Buffer(size_t count, boo
 		resource_stats_.dynamic_buffer_bytes += total;
 	}
 	owned_ibs_.push_back(handle);
+	++resource_stats_.index_buffers_created;
+	resource_stats_.live_index_buffers = static_cast<uint32_t>(owned_ibs_.size());
 	return handle;
 }
 

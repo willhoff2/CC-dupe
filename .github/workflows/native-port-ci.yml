@@ -1333,6 +1333,27 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The text path's per-string texture and its two surfaces, created and released every
+      # frame; the backend must free them when their last D3D8 reference goes and the live
+      # counts must return to their bound (docs/porting/renderer-resource-lifetime.md). The
+      # negative control -- ZH_RENDER_NO_RESOURCE_DESTROY -- runs inside the checker and must
+      # fail for the growth.
+      - name: Resource lifetime, live counts back at their bound after N frames of text
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+          XDG_RUNTIME_DIR: /tmp/xdgrt
+        run: |
+          set -o pipefail
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          unset DISPLAY
+          {
+            echo '## Resource lifetime (Linux, lavapipe)'
+            echo '```'
+            python3 scripts/ci/check-resource-lifetime.py \
+              --binary build/spike/zh-resource-lifetime
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Re-derive the resource-seam counts
         run: |
           set -o pipefail
@@ -1637,6 +1658,17 @@ jobs:
             echo '```'
             python3 scripts/ci/check-untyped-vertex-buffer.py \
               --binary build/spike/zh-untyped-vb
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Resource lifetime through MoltenVK
+        run: |
+          set -eux -o pipefail
+          {
+            echo '## Resource lifetime (macOS arm64, MoltenVK)'
+            echo '```'
+            python3 scripts/ci/check-resource-lifetime.py \
+              --binary build/spike/zh-resource-lifetime
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
