@@ -69,6 +69,8 @@ struct Voice
 	int playbackRate = 0;			///< Hz; 0 == "the file's own rate"
 	bool started = false;
 	bool paused = false;
+	/// Set by the service thread when the source ran out; consumed by deliverCompletions().
+	bool completionPending = false;
 	DecodedAudio audio;
 };
 
@@ -168,6 +170,7 @@ struct StreamVoice
 	int playbackRate = 0;
 	bool playing = false;
 	bool paused = false;
+	bool completionPending = false;
 	bool exhausted = false;			///< no more data to queue from the source file
 
 	/// Handle returned by the engine's file-open callback; stream I/O goes through the callbacks
@@ -244,14 +247,40 @@ struct Library
 	std::vector<StreamVoice*> streams;
 	std::vector<HAUDIO> quickAudio;
 
-	/// Miles delivered end-of-sample callbacks from its mixer thread. OpenAL has no such thread,
-	/// so one is run here; the engine's callbacks already assume they may run concurrently and
-	/// take AIL_lock.
+	/// Polls OpenAL for finished voices and refills streams. It never calls back into the engine:
+	/// it only marks a voice completionPending, and the callback is delivered from the API thread.
 	std::thread service;
 	std::atomic<bool> serviceQuit{false};
+
+	/// The thread that called AIL_startup. End-of-sample callbacks are delivered on this thread
+	/// only, when an AIL_* entry point returns and no other entry point is active on it.
+	std::thread::id apiThread;
+	int apiDepth = 0;				///< nesting of AIL_* entry points on apiThread; touched by it alone
 };
 
 Library& lib();
+
+/// Delivers every pending end-of-sample/stream callback on the calling thread. Callbacks are read
+/// at delivery time, so one unregistered since the voice stopped is dropped, and a voice restarted
+/// since is left alone. Called by ApiCall on the API thread; the tests may call it directly.
+void deliverCompletions();
+
+/// Scope of one AIL_* entry point. On the API thread the outermost scope delivers pending
+/// completions as it ends, after the entry point's own effect has been applied, so the engine sees
+/// its callbacks only while it is inside the library and never while the service thread is
+/// concurrently reading engine state. Nested entry points (the engine calls AIL_* from inside its
+/// callbacks) and other threads deliver nothing.
+class ApiCall
+{
+public:
+	ApiCall();
+	~ApiCall();
+	ApiCall(const ApiCall&) = delete;
+	ApiCall& operator=(const ApiCall&) = delete;
+
+private:
+	bool m_onApiThread;
+};
 
 /// Starts/stops the callback service thread. Idempotent.
 void startServiceThread();

@@ -75,6 +75,7 @@ using namespace OpenALAudio;
 
 H3DSAMPLE AIL_allocate_3D_sample_handle(HPROVIDER lib_handle)
 {
+	ApiCall api;
 	(void)lib_handle;
 
 	Library& l = lib();
@@ -102,6 +103,7 @@ H3DSAMPLE AIL_allocate_3D_sample_handle(HPROVIDER lib_handle)
 
 void AIL_release_3D_sample_handle(H3DSAMPLE sample)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr || object->isListener) {
 		return;
@@ -124,6 +126,7 @@ void AIL_release_3D_sample_handle(H3DSAMPLE sample)
 
 int AIL_set_3D_sample_file(H3DSAMPLE sample, const void* file_image)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr) {
 		return 0;
@@ -154,6 +157,7 @@ int AIL_set_3D_sample_file(H3DSAMPLE sample, const void* file_image)
 
 void AIL_start_3D_sample(H3DSAMPLE sample)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr || object->voice.source == 0) {
 		return;
@@ -163,11 +167,13 @@ void AIL_start_3D_sample(H3DSAMPLE sample)
 	alSourceRewind(object->voice.source);
 	alSourcePlay(object->voice.source);
 	object->voice.started = true;
+	object->voice.completionPending = false;
 	object->voice.paused = false;
 }
 
 void AIL_stop_3D_sample(H3DSAMPLE sample)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr || object->voice.source == 0) {
 		return;
@@ -179,6 +185,7 @@ void AIL_stop_3D_sample(H3DSAMPLE sample)
 
 void AIL_resume_3D_sample(H3DSAMPLE sample)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr || object->voice.source == 0) {
 		return;
@@ -187,10 +194,12 @@ void AIL_resume_3D_sample(H3DSAMPLE sample)
 	alSourcePlay(object->voice.source);
 	object->voice.paused = false;
 	object->voice.started = true;
+	object->voice.completionPending = false;
 }
 
 void AIL_end_3D_sample(H3DSAMPLE sample)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr || object->voice.source == 0) {
 		return;
@@ -198,6 +207,7 @@ void AIL_end_3D_sample(H3DSAMPLE sample)
 	std::lock_guard<std::recursive_mutex> guard(lib().lock);
 	alSourceStop(object->voice.source);
 	object->voice.started = false;
+	object->voice.completionPending = false;
 	object->voice.paused = false;
 }
 
@@ -205,12 +215,14 @@ void AIL_end_3D_sample(H3DSAMPLE sample)
 
 float AIL_3D_sample_volume(H3DSAMPLE sample)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	return (object != nullptr) ? object->voice.volume : 0.0f;
 }
 
 void AIL_set_3D_sample_volume(H3DSAMPLE sample, float volume)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr) {
 		return;
@@ -222,6 +234,7 @@ void AIL_set_3D_sample_volume(H3DSAMPLE sample, float volume)
 
 void AIL_set_3D_sample_distances(H3DSAMPLE sample, float max_dist, float min_dist)
 {
+	ApiCall api;
 	// Note the Miles argument order: max first.
 	Object3D* object = objectOf(sample);
 	if (object == nullptr || object->voice.source == 0) {
@@ -236,6 +249,7 @@ void AIL_set_3D_sample_distances(H3DSAMPLE sample, float max_dist, float min_dis
 
 void AIL_set_3D_sample_occlusion(H3DSAMPLE sample, float occlusion)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr) {
 		return;
@@ -247,6 +261,7 @@ void AIL_set_3D_sample_occlusion(H3DSAMPLE sample, float occlusion)
 
 void AIL_set_3D_sample_effects_level(H3DSAMPLE sample, float effect_level)
 {
+	ApiCall api;
 	// Reverb send level. Recorded only; there is no EFX effect slot yet.
 	Object3D* object = objectOf(sample);
 	if (object != nullptr) {
@@ -258,12 +273,14 @@ void AIL_set_3D_sample_effects_level(H3DSAMPLE sample, float effect_level)
 
 unsigned int AIL_3D_sample_loop_count(H3DSAMPLE sample)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	return (object != nullptr) ? (unsigned int)object->voice.loopCount : 0;
 }
 
 void AIL_set_3D_sample_loop_count(H3DSAMPLE sample, unsigned int count)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr) {
 		return;
@@ -275,6 +292,7 @@ void AIL_set_3D_sample_loop_count(H3DSAMPLE sample, unsigned int count)
 
 unsigned int AIL_3D_sample_offset(H3DSAMPLE sample)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr || object->voice.source == 0) {
 		return 0;
@@ -287,6 +305,7 @@ unsigned int AIL_3D_sample_offset(H3DSAMPLE sample)
 
 void AIL_set_3D_sample_offset(H3DSAMPLE sample, unsigned int offset)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr || object->voice.source == 0) {
 		return;
@@ -297,12 +316,14 @@ void AIL_set_3D_sample_offset(H3DSAMPLE sample, unsigned int offset)
 
 int AIL_3D_sample_length(H3DSAMPLE sample)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	return (object != nullptr) ? (int)object->voice.audio.lengthMs() : 0;
 }
 
 int AIL_3D_sample_playback_rate(H3DSAMPLE sample)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr) {
 		return 0;
@@ -313,6 +334,7 @@ int AIL_3D_sample_playback_rate(H3DSAMPLE sample)
 
 void AIL_set_3D_sample_playback_rate(H3DSAMPLE sample, int playback_rate)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr) {
 		return;
@@ -326,6 +348,7 @@ void AIL_set_3D_sample_playback_rate(H3DSAMPLE sample, int playback_rate)
 
 void AIL_set_3D_position(H3DPOBJECT obj, float X, float Y, float Z)
 {
+	ApiCall api;
 	Object3D* object = objectOf(obj);
 	if (object == nullptr) {
 		return;
@@ -341,6 +364,7 @@ void AIL_set_3D_position(H3DPOBJECT obj, float X, float Y, float Z)
 void AIL_set_3D_orientation(
 	H3DPOBJECT obj, float X_face, float Y_face, float Z_face, float X_up, float Y_up, float Z_up)
 {
+	ApiCall api;
 	Object3D* object = objectOf(obj);
 	if (object == nullptr) {
 		return;
@@ -358,6 +382,7 @@ void AIL_set_3D_orientation(
 
 void AIL_set_3D_velocity_vector(H3DSAMPLE sample, float x, float y, float z)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr) {
 		return;
@@ -372,6 +397,7 @@ void AIL_set_3D_velocity_vector(H3DSAMPLE sample, float x, float y, float z)
 
 void* AIL_3D_user_data(H3DSAMPLE sample, unsigned int index)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr || index >= USER_DATA_SLOTS) {
 		return nullptr;
@@ -381,6 +407,7 @@ void* AIL_3D_user_data(H3DSAMPLE sample, unsigned int index)
 
 void AIL_set_3D_user_data(H3DPOBJECT obj, unsigned int index, void* value)
 {
+	ApiCall api;
 	Object3D* object = objectOf(obj);
 	if (object == nullptr || index >= USER_DATA_SLOTS) {
 		return;
@@ -390,6 +417,7 @@ void AIL_set_3D_user_data(H3DPOBJECT obj, unsigned int index, void* value)
 
 AIL_3dsample_callback AIL_register_3D_EOS_callback(H3DSAMPLE sample, AIL_3dsample_callback EOS)
 {
+	ApiCall api;
 	Object3D* object = objectOf(sample);
 	if (object == nullptr) {
 		return nullptr;
@@ -404,6 +432,7 @@ AIL_3dsample_callback AIL_register_3D_EOS_callback(H3DSAMPLE sample, AIL_3dsampl
 
 H3DPOBJECT AIL_open_3D_listener(HPROVIDER lib_handle)
 {
+	ApiCall api;
 	(void)lib_handle;
 
 	Library& l = lib();
@@ -424,6 +453,7 @@ H3DPOBJECT AIL_open_3D_listener(HPROVIDER lib_handle)
 
 void AIL_close_3D_listener(H3DPOBJECT listener)
 {
+	ApiCall api;
 	Object3D* object = objectOf(listener);
 	if (object == nullptr || !object->isListener) {
 		return;

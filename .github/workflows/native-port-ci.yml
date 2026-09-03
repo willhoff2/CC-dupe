@@ -1487,6 +1487,21 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # End-of-sample callbacks must reach the engine on the thread that calls AIL_*, inside one of
+      # its calls, never from the shim's service thread (sound-effects-chain.md §4.1). The harness
+      # runs on OpenAL Soft's null driver, so no audio device is needed.
+      - name: Check completion callbacks are delivered on the AIL_* calling thread
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## OpenAL backend: callback thread contract'
+            echo '```'
+            python3 scripts/native-audio-callback-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Measure the AIL_* surface and the backend's coverage of it
         run: |
           set -o pipefail

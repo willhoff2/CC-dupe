@@ -86,6 +86,7 @@ AREAS = {
         "cmake/minimp3.cmake",
         "CMakeLists.txt",
         "scripts/audio-surface-scan.py",
+        "scripts/native-audio-callback-test.py",
     ),
 }
 

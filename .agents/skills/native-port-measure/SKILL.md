@@ -208,6 +208,18 @@ python3 scripts/ci/check-openal-symbols.py \
 python3 scripts/audio-surface-scan.py --check
 ```
 
+The backend's callback-thread contract (end-of-sample callbacks reach the engine on the thread that
+calls `AIL_*`, inside one of its calls, never from the service thread — `sound-effects-chain.md` §4.1)
+is gated by `scripts/native-audio-callback-test.py`, which compiles
+`Core/Libraries/Source/OpenALAudioDevice/tests/openal_callback_thread_test.cpp` against the shim
+sources directly (no CMake) and runs it on OpenAL Soft's `null` driver, so it needs only
+`libopenal-dev` and `clang++-14`. `--shim-rev e1f8de610 --expect-defect` rebuilds the pre-fix shim
+from git and must report the defect; `--json` writes the facts for a doc row.
+
+```sh
+CLANGXX=clang++-14 python3 scripts/native-audio-callback-test.py
+```
+
 Ubuntu 22.04 ships CMake 3.22, which the top-level `cmake_minimum_required(3.25)` rejects; the
 `audio-surface-scan.py --check` half of the pair still runs without a build, but the symbol gate does
 not. `pip install --user 'cmake==4.1.2'` provides a new enough `~/.local/bin/cmake` without touching

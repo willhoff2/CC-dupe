@@ -27,6 +27,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <utility>
+#include <vector>
 
 namespace OpenALAudio
 {
@@ -80,13 +82,12 @@ void serviceLoop()
 {
 	Library& l = lib();
 	while (!l.serviceQuit.load()) {
-		// Miles dispatched end-of-sample callbacks from its mixer thread. Poll source state and do
-		// the same. Callbacks are invoked without the library lock held: the engine's handlers take
-		// AIL_lock themselves, and holding it here would deadlock against them.
-		std::vector<std::pair<AIL_sample_callback, HSAMPLE>> sampleDone;
-		std::vector<std::pair<AIL_3dsample_callback, H3DPOBJECT>> objectDone;
-		std::vector<std::pair<AIL_stream_callback, HSTREAM>> streamDone;
-
+		// Poll source state and mark voices that ran out. Nothing is called back from here: the
+		// engine's completion handlers (MilesAudioManager::notifyOfAudioCompletion and what it
+		// reaches) read and rewrite PlayingAudio/AudioEventRTS state with no lock against the main
+		// thread, exactly as they did against retail Miles, whose EOS callbacks the engine only ever
+		// observed between its own AIL_* calls. deliverCompletions() keeps that contract by firing
+		// the callbacks on the API thread as its AIL_* calls return.
 		{
 			std::lock_guard<std::recursive_mutex> guard(l.lock);
 
@@ -98,9 +99,7 @@ void serviceLoop()
 				alGetSourcei(sample->source, AL_SOURCE_STATE, &state);
 				if (state == AL_STOPPED) {
 					sample->started = false;
-					if (sample->endOfSample != nullptr) {
-						sampleDone.emplace_back(sample->endOfSample, (HSAMPLE)sample);
-					}
+					sample->completionPending = true;
 				}
 			}
 
@@ -113,9 +112,7 @@ void serviceLoop()
 				alGetSourcei(object->voice.source, AL_SOURCE_STATE, &state);
 				if (state == AL_STOPPED) {
 					object->voice.started = false;
-					if (object->endOfSample != nullptr) {
-						objectDone.emplace_back(object->endOfSample, (H3DPOBJECT)object);
-					}
+					object->voice.completionPending = true;
 				}
 			}
 
@@ -127,16 +124,10 @@ void serviceLoop()
 				serviceStream(*stream, finished);
 				if (finished) {
 					stream->playing = false;
-					if (stream->endOfStream != nullptr) {
-						streamDone.emplace_back(stream->endOfStream, (HSTREAM)stream);
-					}
+					stream->completionPending = true;
 				}
 			}
 		}
-
-		for (auto& done : sampleDone) done.first(done.second);
-		for (auto& done : objectDone) done.first(done.second);
-		for (auto& done : streamDone) done.first(done.second);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
@@ -164,6 +155,77 @@ void stopServiceThread()
 	l.service.join();
 }
 
+void deliverCompletions()
+{
+	Library& l = lib();
+	std::vector<std::pair<AIL_sample_callback, HSAMPLE>> sampleDone;
+	std::vector<std::pair<AIL_3dsample_callback, H3DPOBJECT>> objectDone;
+	std::vector<std::pair<AIL_stream_callback, HSTREAM>> streamDone;
+
+	{
+		std::lock_guard<std::recursive_mutex> guard(l.lock);
+
+		for (SampleVoice* sample : l.samples) {
+			if (!sample->completionPending) {
+				continue;
+			}
+			sample->completionPending = false;
+			if (sample->endOfSample != nullptr && !sample->started) {
+				sampleDone.emplace_back(sample->endOfSample, (HSAMPLE)sample);
+			}
+		}
+
+		for (Object3D* object : l.objects) {
+			if (object->isListener || !object->voice.completionPending) {
+				continue;
+			}
+			object->voice.completionPending = false;
+			if (object->endOfSample != nullptr && !object->voice.started) {
+				objectDone.emplace_back(object->endOfSample, (H3DPOBJECT)object);
+			}
+		}
+
+		for (StreamVoice* stream : l.streams) {
+			if (!stream->completionPending) {
+				continue;
+			}
+			stream->completionPending = false;
+			if (stream->endOfStream != nullptr && !stream->playing) {
+				streamDone.emplace_back(stream->endOfStream, (HSTREAM)stream);
+			}
+		}
+	}
+
+	// Without the library lock: the handlers call straight back into AIL_* (startNextLoop ->
+	// AIL_start_3D_sample), and a handler may release the very handle it was told about.
+	for (auto& done : sampleDone) done.first(done.second);
+	for (auto& done : objectDone) done.first(done.second);
+	for (auto& done : streamDone) done.first(done.second);
+}
+
+ApiCall::ApiCall()
+{
+	Library& l = lib();
+	m_onApiThread = l.apiThread == std::this_thread::get_id();
+	if (m_onApiThread) {
+		++l.apiDepth;
+	}
+}
+
+ApiCall::~ApiCall()
+{
+	if (!m_onApiThread) {
+		return;
+	}
+	Library& l = lib();
+	// Drain while still counted as inside the outermost call, so the AIL_* calls a handler makes
+	// (nesting to depth 2) return without draining again.
+	if (l.apiDepth == 1) {
+		deliverCompletions();
+	}
+	--l.apiDepth;
+}
+
 } // namespace OpenALAudio
 
 using namespace OpenALAudio;
@@ -178,6 +240,7 @@ int AIL_startup(void)
 	if (l.started) {
 		return AIL_NO_ERROR;
 	}
+	l.apiThread = std::this_thread::get_id();
 
 	l.device = alcOpenDevice(nullptr);
 	if (l.device == nullptr) {

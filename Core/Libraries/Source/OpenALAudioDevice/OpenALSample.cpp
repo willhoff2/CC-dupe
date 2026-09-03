@@ -96,6 +96,7 @@ using namespace OpenALAudio;
 
 HSAMPLE AIL_allocate_sample_handle(HDIGDRIVER dig)
 {
+	ApiCall api;
 	(void)dig;
 
 	Library& l = lib();
@@ -125,6 +126,7 @@ HSAMPLE AIL_allocate_sample_handle(HDIGDRIVER dig)
 
 void AIL_release_sample_handle(HSAMPLE sample)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return;
@@ -143,6 +145,7 @@ void AIL_release_sample_handle(HSAMPLE sample)
 
 void AIL_init_sample(HSAMPLE sample)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return;
@@ -157,6 +160,7 @@ void AIL_init_sample(HSAMPLE sample)
 	voice->loopCount = 1;
 	voice->playbackRate = 0;
 	voice->started = false;
+	voice->completionPending = false;
 	voice->paused = false;
 	voice->filterPreferences.clear();
 	std::memset(voice->processor, 0, sizeof(voice->processor));
@@ -169,6 +173,7 @@ void AIL_init_sample(HSAMPLE sample)
 
 int AIL_set_sample_file(HSAMPLE sample, const void* file_image, int block)
 {
+	ApiCall api;
 	(void)block;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
@@ -181,6 +186,7 @@ int AIL_set_sample_file(HSAMPLE sample, const void* file_image, int block)
 int AIL_set_named_sample_file(
 	HSAMPLE sample, const char* file_name, const void* file_image, int file_size, int block)
 {
+	ApiCall api;
 	// The name is only used by Miles to pick a decoder by extension; the image is authoritative.
 	(void)file_name;
 	(void)block;
@@ -197,6 +203,7 @@ int AIL_set_named_sample_file(
 
 void AIL_start_sample(HSAMPLE sample)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr || voice->source == 0) {
 		return;
@@ -210,11 +217,13 @@ void AIL_start_sample(HSAMPLE sample)
 	alSourceRewind(voice->source);
 	alSourcePlay(voice->source);
 	voice->started = true;
+	voice->completionPending = false;
 	voice->paused = false;
 }
 
 void AIL_stop_sample(HSAMPLE sample)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr || voice->source == 0) {
 		return;
@@ -227,6 +236,7 @@ void AIL_stop_sample(HSAMPLE sample)
 
 void AIL_resume_sample(HSAMPLE sample)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr || voice->source == 0) {
 		return;
@@ -235,10 +245,12 @@ void AIL_resume_sample(HSAMPLE sample)
 	alSourcePlay(voice->source);
 	voice->paused = false;
 	voice->started = true;
+	voice->completionPending = false;
 }
 
 void AIL_end_sample(HSAMPLE sample)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr || voice->source == 0) {
 		return;
@@ -246,6 +258,7 @@ void AIL_end_sample(HSAMPLE sample)
 	std::lock_guard<std::recursive_mutex> guard(lib().lock);
 	alSourceStop(voice->source);
 	voice->started = false;
+	voice->completionPending = false;
 	voice->paused = false;
 }
 
@@ -253,12 +266,14 @@ void AIL_end_sample(HSAMPLE sample)
 
 int AIL_sample_volume(HSAMPLE sample)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	return (voice != nullptr) ? (int)(voice->volume * MILES_MAX_INT_VOLUME) : 0;
 }
 
 void AIL_set_sample_volume(HSAMPLE sample, int volume)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return;
@@ -270,12 +285,14 @@ void AIL_set_sample_volume(HSAMPLE sample, int volume)
 
 int AIL_sample_pan(HSAMPLE sample)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	return (voice != nullptr) ? (int)(voice->pan * MILES_MAX_INT_VOLUME) : 0;
 }
 
 void AIL_set_sample_pan(HSAMPLE sample, int pan)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return;
@@ -287,6 +304,7 @@ void AIL_set_sample_pan(HSAMPLE sample, int pan)
 
 void AIL_sample_volume_pan(HSAMPLE sample, float* volume, float* pan)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return;
@@ -298,6 +316,7 @@ void AIL_sample_volume_pan(HSAMPLE sample, float* volume, float* pan)
 
 void AIL_set_sample_volume_pan(HSAMPLE sample, float volume, float pan)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return;
@@ -312,12 +331,14 @@ void AIL_set_sample_volume_pan(HSAMPLE sample, float volume, float pan)
 
 int AIL_sample_loop_count(HSAMPLE sample)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	return (voice != nullptr) ? voice->loopCount : 0;
 }
 
 void AIL_set_sample_loop_count(HSAMPLE sample, int count)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return;
@@ -329,6 +350,7 @@ void AIL_set_sample_loop_count(HSAMPLE sample, int count)
 
 void AIL_sample_ms_position(HSAMPLE sample, long* total_ms, long* current_ms)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		if (total_ms != nullptr) *total_ms = 0;
@@ -349,6 +371,7 @@ void AIL_sample_ms_position(HSAMPLE sample, long* total_ms, long* current_ms)
 
 void AIL_set_sample_ms_position(HSAMPLE sample, int pos)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return;
@@ -359,6 +382,7 @@ void AIL_set_sample_ms_position(HSAMPLE sample, int pos)
 
 int AIL_sample_playback_rate(HSAMPLE sample)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return 0;
@@ -368,6 +392,7 @@ int AIL_sample_playback_rate(HSAMPLE sample)
 
 void AIL_set_sample_playback_rate(HSAMPLE sample, int playback_rate)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return;
@@ -381,6 +406,7 @@ void AIL_set_sample_playback_rate(HSAMPLE sample, int playback_rate)
 
 void* AIL_sample_user_data(HSAMPLE sample, unsigned int index)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr || index >= USER_DATA_SLOTS) {
 		return nullptr;
@@ -390,6 +416,7 @@ void* AIL_sample_user_data(HSAMPLE sample, unsigned int index)
 
 void AIL_set_sample_user_data(HSAMPLE sample, unsigned int index, void* value)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr || index >= USER_DATA_SLOTS) {
 		return;
@@ -399,6 +426,7 @@ void AIL_set_sample_user_data(HSAMPLE sample, unsigned int index, void* value)
 
 AIL_sample_callback AIL_register_EOS_callback(HSAMPLE sample, AIL_sample_callback EOS)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr) {
 		return nullptr;
@@ -413,6 +441,7 @@ AIL_sample_callback AIL_register_EOS_callback(HSAMPLE sample, AIL_sample_callbac
 
 HPROVIDER AIL_set_sample_processor(HSAMPLE sample, SAMPLESTAGE pipeline_stage, HPROVIDER provider)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr || pipeline_stage < 0 || pipeline_stage >= N_SAMPLE_STAGES) {
 		return nullptr;
@@ -426,6 +455,7 @@ HPROVIDER AIL_set_sample_processor(HSAMPLE sample, SAMPLESTAGE pipeline_stage, H
 
 void AIL_set_filter_sample_preference(HSAMPLE sample, const char* name, const void* val)
 {
+	ApiCall api;
 	SampleVoice* voice = voiceOf(sample);
 	if (voice == nullptr || name == nullptr) {
 		return;
@@ -441,6 +471,7 @@ void AIL_set_filter_sample_preference(HSAMPLE sample, const char* name, const vo
 int AIL_quick_startup(
 	int use_digital, int use_MIDI, unsigned int output_rate, int output_bits, int output_channels)
 {
+	ApiCall api;
 	// MIDI is unused by Zero Hour and unsupported here.
 	(void)use_digital;
 	(void)use_MIDI;
@@ -461,11 +492,13 @@ int AIL_quick_startup(
 
 void AIL_quick_shutdown(void)
 {
+	ApiCall api;
 	AIL_shutdown();
 }
 
 void AIL_quick_handles(HDIGDRIVER* pdig, HMDIDRIVER* pmdi, HDLSDEVICE* pdls)
 {
+	ApiCall api;
 	Library& l = lib();
 	if (pdig != nullptr) *pdig = (HDIGDRIVER)&l.driver;
 	if (pmdi != nullptr) *pmdi = nullptr;
@@ -474,6 +507,7 @@ void AIL_quick_handles(HDIGDRIVER* pdig, HMDIDRIVER* pmdi, HDLSDEVICE* pdls)
 
 HAUDIO AIL_quick_load_and_play(const char* filename, unsigned int loop_count, int wait_request)
 {
+	ApiCall api;
 	// Used for speech playback. The file is read through the engine's file callbacks, because
 	// speech lives in the same archives as everything else.
 	(void)wait_request;
@@ -532,6 +566,7 @@ HAUDIO AIL_quick_load_and_play(const char* filename, unsigned int loop_count, in
 
 void AIL_quick_set_volume(HAUDIO audio, float volume, float extravol)
 {
+	ApiCall api;
 	QuickAudio* quick = reinterpret_cast<QuickAudio*>(audio);
 	if (quick == nullptr) {
 		return;
@@ -544,6 +579,7 @@ void AIL_quick_set_volume(HAUDIO audio, float volume, float extravol)
 
 void AIL_quick_unload(HAUDIO audio)
 {
+	ApiCall api;
 	QuickAudio* quick = reinterpret_cast<QuickAudio*>(audio);
 	if (quick == nullptr) {
 		return;
