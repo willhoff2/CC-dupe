@@ -30,7 +30,7 @@ with real SDL input (main menu → Skirmish → Start), player GLA, one AI.
 | Fix | Both fixed in this slice, 21 lines in `MilesAudioManager.cpp`, 3 declarations widened to `uintptr_t`. No `AIL_*` added, no music-path or renderer change. |
 | Device-level evidence | During a real skirmish on Linux: `m_num2DSamples` 4, `m_num3DSamples` 25, `OpenALAudio::lib().objects` 26 (25 voices + listener), 5 2D and 234 3D `AIL_start_*` calls in 3.5 minutes, up to 1 sample and 7 object sources in `AL_PLAYING` at once, `AL_SAMPLE_OFFSET` advancing between samples on named events (`WorkerVoiceMove`, `CommandCenterGLASelect`, `IndustrialYardAmbientLoop`, …), 69 `alSourcePlay` calls seen by an `LD_PRELOAD` interposer, a 148 MB non-silent 32-bit-float stereo 44.1 kHz `.wav` from the `wave` backend. |
 | Heard | **No.** Nobody listened; the device was a file. |
-| Apple Silicon | **UNMEASURED** for sound effects. Music on the M1 Pro is measured and untouched (`playability-probe.md` §3). |
+| Apple Silicon | **Engine state MEASURED, Wave 11** (pools, started voices, OpenAL device/context; §7) and a **PORT DEFECT MEASURED**: SIGSEGV in the completion callback after 16.2 min (§6 item 1). Audibility UNMEASURED. Music on the M1 Pro is measured and untouched (`playability-probe.md` §3). |
 
 ## 1. The chain, as read from source
 
@@ -324,35 +324,46 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
 
 ## 6. What remains, ranked (evidence, then cost)
 
-1. **Apple Silicon `AL_PLAYING` confirmation — MEASURED FAILURE (probe), playback still
-   UNMEASURED.** Wave 11 reached a live real-input skirmish on the M1 Pro and measured the fixed pool
-   state: `.samples=4`, `.objects=26`, `m_num2DSamples=4`, `m_num3DSamples=25`, non-null OpenAL
-   context/device, one music stream with advancing `framesPlayed`. Twice, however, the required LLDB
-   `alGetSourcei` expression wedged the process on OpenAL Soft's source mutex; see
-   `playability-probe.md` §1.3. Cost: fix the probe without calling OpenAL while its threads are
-   stopped, then repeat combat/acknowledgement sampling.
-2. **Nobody has heard a sound effect on any platform.** Linux evidence stops at the mixer (§5.4). Cost:
+1. **PORT DEFECT, measured on the M1 Pro: SIGSEGV in `MilesAudioManager::initFilters3D` on the
+   OpenAL service thread.** 16.2 resumed minutes into a real-input skirmish, the end-of-sample
+   callback delivered by `OpenALAudio::serviceLoop` (`OpenALDriver.cpp:138`) restarted a looping 3D
+   sound (`notifyOfAudioCompletion` → `startNextLoop` → `playSample3D` → `initFilters3D`) and read
+   `event->getAudioEventInfo()->m_lowPassFreq` through a null info pointer (fault address `0xd8` =
+   `offsetof(AudioEventInfo, m_lowPassFreq)`, verified with `expr` on the binary).
+   `getAudioEventInfo()` returns null when the cached info's name no longer matches the event, so the
+   `PlayingAudio`'s event had been reassigned/torn down by the main thread under the callback.
+   `MilesAudioManager` takes no `AIL_lock`; nothing serialises the two threads. macOS wrote
+   `zh-2026-09-03-020314.ips`; no debugger expression was running. Full frames and mechanism in
+   `playability-probe.md` §1.3. Cost: decide whether completion callbacks should be deferred to the
+   main thread's `AIL_serve`/`update` (the Windows oracle question: Miles' EOS callback thread
+   affinity is inferred, not verified) or whether the handler must take the library lock; then a
+   ≥20-minute soak.
+2. **Apple Silicon `AL_PLAYING` by function evaluation — probe defect, Wave 12 tooling fix.** The
+   checked-in `SOURCE_STATE_COUNT` calls `alGetSourcei` from LLDB while all threads are stopped and
+   twice wedged OpenAL Soft's source mutex. The shim's own bookkeeping was read by memory instead:
+   `Voice::started && !paused` counted 9–11 started 3D voices in the opening minutes and 19–25 of 25
+   during the AI attack, started 2D samples 0, pools `.samples=4`, `.objects=26`, `m_num2DSamples=4`,
+   `m_num3DSamples=25`, non-null OpenAL device/context, music `framesPlayed` advancing. Cost: replace
+   `SOURCE_STATE_COUNT` with the memory read or read alsoft's source struct.
+3. **Nobody has heard a sound effect on any platform.** Linux evidence stops at the mixer (§5.4). Cost:
    run once with a real OpenAL Soft device (`drivers = pulse`/`alsa`) on a machine with speakers, or
-   item 1.
-3. **Speech and EVA were not exercised** (`playStream` 0; no speech event in the named list). The
+   a listener at the M1 Pro during item 2's run.
+4. **Speech and EVA were not exercised** (`playStream` 0; no speech event in the named list). The
    `ST_STREAM` path is the music path plus `AudioEventInfo` speech entries; speech uses
    `playSample`/`playSample3D` like effects when not streamed, and EVA goes through the same
    `addAudioEvent`. Nothing in the trace suggests a separate defect, but it is unmeasured. Cost: a
    skirmish long enough for an EVA line (building complete, under attack), ~10 minutes attached, with
    `Eva::playSound` added to the probe's `LINKS`.
-4. **Weapon-fire sounds were not in the named list** — the run ended before combat; `FiringTracker`
+5. **Weapon-fire sounds were not in the named list** — the run ended before combat; `FiringTracker`
    raises them through the same `addAudioEvent` and `combat-probe.md` shows combat resolves, so the
    remaining question is only voice-limit pressure (25 3D voices, 7 of them held by ambient loops on
    this map, so a firefight will hit `violatesVoice`/priority eviction). That is retail behaviour, not a
    port defect, but its *audible* result on a 25-voice pool is unmeasured. Cost: same run as item 3.
-5. **Callback thread affinity.** `notifyOfAudioCompletion` now finds its entry and mutates
-   `m_playing3DSounds` from the OpenAL service thread, which is also what Miles did (its callbacks ran
-   on Miles' background thread), so this is original design rather than a new hazard; but the original
-   relied on Miles' locking around `AIL_*` calls made from the main thread at the same time. No crash or
-   list corruption occurred in ~10 minutes of probed play (the probe's list walks stayed consistent).
-   Unmeasured under load. Cost: a TSan build of the audio libraries, or a long soak with
-   `-fsanitize=thread` on `MilesAudioManager.cpp` + `OpenALDriver.cpp` only.
-6. **Focus mute** (`m_muteReasonBits`, documented in `playability-probe.md` §3): unchanged, not a
+6. **Callback thread affinity** is no longer "unmeasured under load": item 1 is the crash this
+   paragraph predicted. The earlier claim that Miles ran callbacks on its background thread stays
+   unverified. Cost: folded into item 1; a TSan build of `MilesAudioManager.cpp` + `OpenALDriver.cpp`
+   would show the remaining races.
+7. **Focus mute** (`m_muteReasonBits`, documented in `playability-probe.md` §3): unchanged, not a
    defect, but anyone measuring audio through a harness that steals focus will see silence and must
    click into the window first. Cost: nothing; documented here so it is not re-discovered.
 
@@ -361,14 +372,15 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
 | item | status | needs |
 |---|---|---|
 | Sound-effect pools on Apple Silicon (M1 Pro) | **MEASURED, Mac / live / real input / engine state**: samples 4, objects 26, 2D 4, 3D 25 | — |
-| `AL_PLAYING` for effects on Apple Silicon | **MEASURED FAILURE**: the LLDB/OpenAL expression deadlocked the stopped process twice; source state remains UNMEASURED | a probe that does not call OpenAL while its worker threads are stopped |
+| `AL_PLAYING` for effects on Apple Silicon | **UNMEASURED by `alGetSourcei`** (probe defect: LLDB function evaluation wedges alsoft's source mutex); **MEASURED, engine state**, via the shim's `Voice::started` mirror: 9–25 started 3D voices during play, 0 started 2D samples | replace `SOURCE_STATE_COUNT` with a memory read |
+| Sound-effect completion callback on Apple Silicon | **MEASURED FAILURE (PORT DEFECT)**: SIGSEGV in `initFilters3D` on the service thread at 16.2 min, `.ips` written | §6 item 1 |
 | CoreAudio output open | **MEASURED, engine/OS state**: non-null OpenAL device/context, advancing music `framesPlayed`, and `com.apple.audio.IOThread.client` in `HALC_ProxyIOContext`; this proves the output client exists, not audibility | — |
 | Human-observed audibility on any platform | **UNMEASURED** (no human listener; Linux remains SYNTHETIC-ONLY) | a machine with an audio device and a listener |
 | Speech / EVA | UNMEASURED | longer skirmish, `Eva::playSound` in the probe |
 | Weapon fire under voice-limit pressure | UNMEASURED | combat in the probed window |
 | Windows build of the widened virtual | **built**: `scripts/docker-build.sh --game zh` (Wine/VC6) on the rebased head, 1363/1363 targets, `generalszh.exe` linked | — |
 | Retail replay gate | not run locally (Wine is a differential check only) | the Windows CI replay job on the PR; audio is not on the CRC path, but the gate is the proof |
-| Callback thread safety under load | UNMEASURED | TSan or a long soak |
+| Callback thread safety under load | **MEASURED FAILURE** on the M1 Pro (§6 item 1) | the fix, then a ≥20-minute soak |
 
 ## 8. Evidence taxonomy, for anyone reading the numbers
 

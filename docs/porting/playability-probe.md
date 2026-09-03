@@ -85,48 +85,83 @@ per-resource destroy, so `Release()` at zero freed the wrapper and nothing else)
 notes the counts above may be byte counts of the vectors (8× the element count) and are owed a re-read
 on the Mac.
 
-### 1.3 Wave 11 Apple Silicon re-measurement stopped by the audio-state probe
+### 1.3 Wave 11 Apple Silicon re-measurement: two runs, one probe defect, one game crash
 
-**Mac / live / real input / engine state, 2026-09-03, `main` `66f7183e5`.** A fresh
-arm64 strict-link build entered Alpine Assault through `CGEventPost`. The resource reader used the
-three `std::vector` words directly: `(finish - start) / sizeof(void*)`, so these are elements. A
-safe 13.0 minutes of resumed runtime (14 samples, 60 s `ran_for` intervals) read
-`owned_textures_` 459 → 561 and `owned_surfaces_` 539 → 661, RSS 192,512,000 → 100,745,216 bytes,
-and render FPS 30.04 → 30.02 (middle sample 28.94; engine average 30.00 → 30.01). Logic advanced
-565 → 23,779 in 781.7 resumed seconds: **29.70 logic FPS**. This is a partial run, not the required
-20-minute-plus-pause result, so it does not classify a lifetime slope.
+**Mac / live / real input / engine state, 2026-09-03, `main` `66f7183e5`, M1 Pro, MoltenVK.** A
+fresh arm64 strict-link build (980/980 objects, 0 unresolved, strict link exit 0) entered Alpine
+Assault through `CGEventPost`. Every resource count below is a `std::vector` element count read from
+the vector's own begin/end words, `(finish - start) / sizeof(void*)`, never a byte size.
 
-The required OpenAL state read exposed a new measurement defect. Twice, an LLDB expression calling
-`alGetSourcei` while the process was stopped timed out/unwound while holding OpenAL Soft's source
-mutex. After detach, frame 545 never advanced: the main thread waited in
-`AIL_set_3D_orientation` → `alGetSourcei`, and the shim service thread also waited in
-`OpenALAudio::serviceLoop` → `alGetSourcei`. CPU fell from normal play to about 2 %. This is a
-**probe-induced deadlock**, not evidence that ordinary play deadlocks. Per the slice stop rule the
-probe was not fixed here; the experiment diff and both wedged-run JSON/logs are session evidence,
-not committed.
+**Run 1 (PID 80240, probe as checked in).** 13.0 resumed minutes, 14 samples at 60 s: logic
+565 → 23,779 in 781.7 s (**29.70 logic FPS**), `owned_textures_` 459 → 561, `owned_surfaces_`
+539 → 661, RSS 192.5 → 100.7 MB, render FPS 30.04 → 30.02. It ended in a **probe defect**: the
+checked-in `SOURCE_STATE_COUNT` expression calls `alGetSourcei` from LLDB while every thread is
+stopped; twice the expression timed out and unwound holding OpenAL Soft's source mutex, after which
+the main thread (`AIL_set_3D_orientation` → `alGetSourcei`) and the shim service thread
+(`serviceLoop` → `alGetSourcei`) waited forever and the frame counter froze. That is tooling, not
+a port finding; the probe fix is residual work for Wave 12. Run 1 is superseded by run 2 and kept
+only as the record of why `AL_PLAYING` cannot be read by function evaluation.
 
-Consequently `AL_PLAYING`, the paused stretch, the full ≥20 resumed minutes and all quit paths are
-explicitly **UNMEASURED** in this slice. Engine-side state before the stop was non-null OpenAL
-context/device, 4 sample voices, 26 3D objects, `m_num2DSamples=4`, `m_num3DSamples=25`, one music
-stream and advancing `framesPlayed`; that proves allocation/bookkeeping, not source playback or
-human audibility.
+**Run 2 (PID 13394, no OpenAL function evaluation).** A session-only wrapper replaced
+`Probe.audio_state` with memory reads: `Voice::started && !paused` per pool entry (the shim clears
+`started` when its service thread sees `AL_STOPPED`, so this is a one-tick-lagged mirror of
+`AL_PLAYING` that never touches OpenAL), `StreamVoice::framesPlayed`, and the four Vulkan owned
+vectors. The game (GLA vs. a hard GLA Stealth AI, a worker ordered by real click) ran **974.5 resumed
+seconds (16.2 min), 18 samples**, logic 2,974 → 32,067: **29.85 logic FPS**. Render FPS stayed
+29.66–30.57 (engine average 29.99–30.05). `owned_textures_` 439 → 518, `owned_surfaces_` 519 → 599,
+`owned_vbs_` 92, `owned_ibs_` 81; RSS 154.9 MB → 218.2 MB (second sample) → ~176 MB → 87.5–97.7 MB
+for the last thirteen samples. Started 3D voices were 9–11 for the first six minutes and 19–25 (of 25)
+thereafter as the AI attacked; started 2D samples stayed 0; the music stream advanced
+`framesPlayed` throughout. By sample 18 the AI had built 15 units and 7 buildings.
 
-Commands (PID was 80240; reports stayed outside the repository):
+The run ended at 974.5 resumed seconds, 11.9 s into the eighteenth interval, with a **real game
+crash**, recorded by macOS with no debugger expression in flight (`~/Library/Logs/DiagnosticReports/zh-2026-09-03-020314.ips`, count 40 → 41):
+
+```text
+EXC_BAD_ACCESS (SIGSEGV) KERN_INVALID_ADDRESS at 0xd8, thread 7 (OpenAL shim service thread)
+  MilesAudioManager::initFilters3D        MilesAudioManager.cpp:1301
+  MilesAudioManager::playSample3D         MilesAudioManager.cpp:2741
+  MilesAudioManager::startNextLoop        MilesAudioManager.cpp:2669
+  MilesAudioManager::notifyOfAudioCompletion  MilesAudioManager.cpp:1479
+  set3DSampleCompleted                    MilesAudioManager.cpp:2957
+  OpenALAudio::(anonymous)::serviceLoop   OpenALDriver.cpp:138
+thread 0 (main): W3DSmudgeManager::render → DX8Wrapper::Draw → MoltenVK vkUpdateDescriptorSets
+thread 5: com.apple.audio.IOThread.client → CoreAudioPlayback → alsoft DeviceBase::renderSamples
+```
+
+Mechanism, from the frames and source: the shim's service thread delivers the end-of-sample
+callback (`OpenALDriver.cpp:137-139`, deliberately without the library lock) and the engine's
+handler restarts a looping 3D sound on that thread. `initFilters3D` reads
+`event->getAudioEventInfo()->m_lowPassFreq`; `0xd8` is that field's offset from a null pointer, and
+`AudioEventRTS::getAudioEventInfo()` (`AudioEventRTS.cpp:523-534`) returns null exactly when the
+cached info's name no longer matches the event's name, i.e. the `PlayingAudio`/`AudioEventRTS` had
+been reassigned or torn down by the main thread while the callback held a stale pointer. The
+`MilesAudioManager` never takes `AIL_lock`; nothing serialises the callback against the main
+thread's list edits. Whether retail Miles delivered EOS callbacks on its own thread or during
+`AIL_serve` on the caller's thread is **inferred, not verified**, and is the first question for the
+fix. Per the slice rule the defect is documented, not fixed, here; the `.ips`, `soak-run.json` and
+wrapper script are session artefacts, not committed.
+
+Consequently: `AL_PLAYING` via function evaluation is **UNMEASURED** (probe defect), while the
+shim's own started-voice mirror is measured; the ≥20 resumed minutes and the paused stretch are
+**UNMEASURED** because the game crashed at 16.2 minutes; the three quit paths are **UNMEASURED**
+because the stop rule for a real game defect applied first. Human audibility is UNMEASURED.
+
+Commands (run 2; the wrapper lives outside the repository):
 
 ```sh
 arch -arm64 python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
   --with-shims --strict-link --build-dir build/native-macos-arm64-w11
-arch -arm64 python3 scripts/macos-input-drive.py --pid 80240 --binary ~/devin-work/wave11/run/zh \
-  click --window ButtonStart
-arch -arm64 /Applications/Xcode.app/Contents/Developer/usr/bin/python3 \
-  scripts/macos-playability-probe.py --pid 80240 --binary ~/devin-work/wave11/run/zh \
-  --out ~/devin-work/wave11/probe.json run --minutes 27 --interval 60
-sample 80240 1
-ls ~/Library/Logs/DiagnosticReports | wc -l    # 40 before and after forced cleanup
+cd ~/devin-work/wave11/run && arch -arm64 ./zh -win &
+arch -arm64 python3 scripts/macos-input-drive.py --pid 13394 --binary run/zh --key 53 key  # skip intro
+arch -arm64 python3 scripts/macos-input-drive.py --pid 13394 --binary run/zh \
+  --window ButtonSinglePlayer click   # then ButtonSkirmish, ButtonStart
+arch -arm64 python3 scripts/macos-input-drive.py --pid 13394 --binary run/zh --client 375,366 click
+PYTHONPATH="$(lldb -P)" arch -arm64 /Applications/Xcode.app/Contents/Developer/usr/bin/python3 \
+  no-openal-playability-probe.py --pid 13394 --binary run/zh --out soak-run.json \
+  run --minutes 24 --interval 60
+ls ~/Library/Logs/DiagnosticReports | wc -l    # 40 before, 41 after: zh-2026-09-03-020314.ips
 ```
-
-The build report was 980/980 objects, zero unresolved, strict link exit 0. The probe did not reach its
-requested duration; the table values elsewhere use only the 14 persisted safe samples.
 
 ## 2. Is it fast enough? Borderline, and the simulation silently runs ~5 % slow
 

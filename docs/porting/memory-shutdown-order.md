@@ -160,16 +160,18 @@ block chain it can read instead of on a memcheck summary.
 | --- | --- | --- |
 | The real pool destroyed by `exit()` after `shutdownMemoryManager()` | Linux x86-64, native archives | exit 0, block list intact; **exit -11 in `~ObjectPoolClass` before the fix** |
 | Pre-fix arithmetic overwrites the block header | Linux x86-64 | reproduced, half-zero pointer |
-| Main Menu → Exit | Apple Silicon | **UNMEASURED** — Wave 11 stopped after the newly found LLDB/OpenAL probe deadlock, before quit-path runs |
+| Main Menu → Exit | Apple Silicon | **UNMEASURED** — Wave 11 stopped on a real game crash during the soak (below) before the quit-path runs |
 | Quit from a running skirmish | Apple Silicon | **UNMEASURED** — same stop rule; no exit status exists |
 | Quit from a running campaign mission | Apple Silicon | **UNMEASURED** — same stop rule; campaign was not launched |
-| No crash report written in `~/Library/Logs/DiagnosticReports`, no hang | Apple Silicon | **UNMEASURED for clean exits** — directory count was 40 before and after the two probe-wedged processes were killed, but `SIGKILL` is not an exit-path result |
+| No crash report written in `~/Library/Logs/DiagnosticReports`, no hang | Apple Silicon | **UNMEASURED for clean exits**. Measured for the soak: count 40 → 41, `zh-2026-09-03-020314.ips`, `EXC_BAD_ACCESS`/`SIGSEGV` at `0xd8` in `MilesAudioManager::initFilters3D` on the OpenAL service thread, 16.2 resumed minutes into a running skirmish — a **runtime** crash, not a shutdown one |
 
-Wave 11 reached a running real-input skirmish on the M1 Pro, but the required `alGetSourcei` LLDB
-measurement deadlocked the stopped process twice (`playability-probe.md` §1.3). The slice instruction
-was to name a new defect and stop rather than repair it, so none of the three clean-exit paths was
-attempted. The DiagnosticReports count staying 40 across forced cleanup is recorded only to show no
-crash report accompanied the probe wedge; it is not substituted for a clean exit.
+Wave 11 reached a running real-input skirmish on the M1 Pro twice. The first run ended in a
+probe-induced deadlock (tooling, `playability-probe.md` §1.3 run 1); the second ran without any
+OpenAL function evaluation and crashed in the audio completion callback (`sound-effects-chain.md`
+§6 item 1). The slice instruction was to name a real defect and stop, so none of the three
+clean-exit paths was attempted. That crash says nothing about the #145 `~ObjectPoolClass` fix or
+about `exit()`: the process never reached shutdown. The three rows above remain owed as fresh,
+debugger-free launches once the callback crash is fixed.
 
 ## The input wedge is a different finding
 

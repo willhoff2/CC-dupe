@@ -12,11 +12,11 @@ from the *scan* defect and measures each, and adds the regression gate with its 
 Every result carries one of **PORT DEFECT**, **UNIMPLEMENTED PATH**, **MISSING DATA**,
 **SYNTHETIC-ONLY**. The enforced numbers come from `scripts/ci/check-resource-lifetime.py` on every
 CI run; the real-game numbers in §5 were produced once, on Linux x86-64 under lavapipe, by
-`scripts/native-resource-probe.py`, and are dated. The Apple Silicon rows are **UNMEASURED** in this
-slice: the session that produced this document had no Mac and was told not to acquire one; the
-M1 Pro confirmation of §5 is owed as a follow-up and the slice is not "done on the Mac" until it
-exists. `docs/porting/ci-baselines/*.json` remain the source of truth for everything else quoted in
-`docs/porting/`, and nothing in this file is.
+`scripts/native-resource-probe.py`, and are dated. The Apple Silicon rows were **UNMEASURED** when
+this document was written (that session had no Mac); Wave 11 measured 16.2 resumed minutes on the
+M1 Pro in §5.5 with flat RSS and step-wise, build-out-correlated counts, but the ≥20-minute window
+and paused stretch are still owed because the game crashed first. `docs/porting/ci-baselines/*.json`
+remain the source of truth for everything else quoted in `docs/porting/`, and nothing in this file is.
 
 ## 0. Summary
 
@@ -405,40 +405,50 @@ fixed binary, compared with `playability-probe.md` §2.1. Owed; **UNMEASURED** h
 
 ### 5.4 What this measurement does not cover
 
-- A complete Mac lifetime result: Wave 11 measured 13.0 resumed minutes but stopped on the
-  probe-induced OpenAL deadlock in `playability-probe.md` §1.3 before the required ≥20 minutes and
-  paused stretch. Counts, RSS and FPS exist; a steady-state/slope verdict does not.
+- A complete Mac lifetime result: Wave 11's best run reached 16.2 resumed minutes before the game
+  crashed in the audio completion callback (`playability-probe.md` §1.3), short of the required ≥20
+  minutes and paused stretch. Counts, RSS and FPS exist; a formal steady-state/slope verdict does not.
 - The campaign: the probe ran a skirmish. The text path is the same (`W3DDisplayString::draw`).
 - Sound: Linux had no ALSA device, so the run was silent (`docs/porting/playability-probe.md` §3 is
   about a different defect; not renderer evidence either way).
 
-### 5.5 Apple Silicon, Wave 11 — partial, stopped on a measurement defect
+### 5.5 Apple Silicon, Wave 11 — 16.2 resumed minutes, ended by a game crash
 
 **Mac / live / real input / engine state, M1 Pro, MoltenVK, 2026-09-03, `main` `66f7183e5`.**
-`scripts/macos-playability-probe.py run --minutes 27 --interval 60` entered Alpine Assault through
-real `CGEventPost` input. The experimental resource expression read the vector's three words and
-computed `(finish - start) / sizeof(void*)`; no byte-size API was used.
+Alpine Assault, GLA vs. one hard AI, entered through real `CGEventPost` input; the long-lived LLDB
+probe sampled every 60 s of resumed runtime with no OpenAL function evaluation (run 2 in
+`playability-probe.md` §1.3). Each count is `(finish - start) / sizeof(void*)` over the vector's
+own begin/end words, i.e. **elements**, read from `((spike::VulkanBackend*)TheLiveBackend)->owned_*`.
 
-| metric | start | middle | last safe sample |
+| metric | start | middle (sample 10) | last (sample 18) |
 |---|---:|---:|---:|
-| resumed runtime | 0 | 420.9 s | 781.7 s |
-| logic frame | 565 | 13,113 | 23,779 |
-| `owned_textures_` elements | 459 | 536 | 561 |
-| `owned_surfaces_` elements | 539 | 625 | 661 |
-| RSS bytes | 192,512,000 | 107,167,744 | 100,745,216 |
-| current render FPS | 30.04 | 28.94 | 30.02 |
-| engine average FPS | 30.00 | 30.02 | 30.01 |
+| resumed runtime | 0 | 541.3 s | 974.5 s |
+| logic frame | 2,974 | 19,140 | 32,067 |
+| `owned_textures_` elements | 439 | 469 | 518 |
+| `owned_surfaces_` elements | 519 | 550 | 599 |
+| `owned_vbs_` / `owned_ibs_` | 92 / 81 | 92 / 81 | 92 / 81 |
+| RSS bytes | 154,861,568 | 95,485,952 | 93,569,024 |
+| current render FPS | 29.99 | 30.57 | 29.84 |
+| engine average FPS | 30.00 | 30.01 | 30.00 |
 
-Logic rate was `(23779 - 565) / 781.7 = 29.70 FPS`, separate from the render ring. Counts rose
-+102 textures/+122 surfaces while RSS fell 91.8 MB; because map/UI state also changed under AI
-attack and the run is short, this does **not** establish a leak slope. The current element counts
-supersede any attempt to quote §1.1's old six-digit values as a fixed-build resident count, but they
-do not prove whether those pre-fix hand reads were bytes; dividing them by eight is not a valid
-cross-build correction.
+Logic rate `(32067 - 2974) / 974.5 = 29.85 FPS`, separately from the render ring, and the render
+FPS never left 29.66–30.57. RSS peaked at 218,202,112 bytes in the second sample, held ~176 MB for
+three, then sat at 87.5–97.7 MB for the last thirteen samples: no RSS slope. Texture/surface counts
+rose in steps (439/519 → 446/526 → 469/550 → 483/564 → 518/599) that coincide with the AI's
+build-out (15 units, 7 buildings by the last sample) rather than with time, and were flat for the
+five samples at frames 15,544–22,736 while nothing new appeared: consistent with steady state plus
+new assets, **not** the #147 pre-fix slope (+9,416 textures in 20 minutes on Linux). A formal
+verdict still needs the ≥20-minute window and the paused stretch, which this run did not reach.
 
-Required status: **UNMEASURED** for ≥20 resumed minutes, paused interval, and steady-state/slope.
-Reason: `alGetSourcei` from LLDB deadlocked the stopped process twice (§1.3); the slice rule required
-stopping and documenting that failure rather than fixing the probe in this PR.
+The run 1 partial (459 → 561 textures, 539 → 661 surfaces, 29.70 logic FPS over 781.7 s) agrees in
+kind. The current element counts supersede any attempt to quote §1.1's old six-digit values as a
+fixed-build resident count, but they do not prove whether those pre-fix hand reads were bytes;
+dividing them by eight is not a valid cross-build correction.
+
+Required status: **UNMEASURED** for ≥20 resumed minutes, the paused interval, and the formal
+steady-state/slope verdict. Reason: the game crashed at 16.2 resumed minutes in
+`MilesAudioManager::initFilters3D` on the OpenAL service thread (`playability-probe.md` §1.3), a
+real defect that the slice rule says to document and stop on.
 
 ## 6. The gate: `zh-resource-lifetime` and `scripts/ci/check-resource-lifetime.py`
 
