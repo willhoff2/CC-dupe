@@ -200,7 +200,9 @@ class AudioManager : public SubsystemInterface
 		virtual void *getDevice() = 0;
 
 		// Device Dependent notification functions
-		virtual void notifyOfAudioCompletion( UnsignedInt audioCompleted, UnsignedInt flags ) = 0;
+		// audioCompleted carries the backend voice handle (an HSAMPLE/H3DSAMPLE/HSTREAM pointer), so it
+		// is pointer-wide; on the 32-bit Windows build uintptr_t is the same type UnsignedInt was.
+		virtual void notifyOfAudioCompletion( uintptr_t audioCompleted, UnsignedInt flags ) = 0;
 
 		// Device Dependent enumerate providers functions. It is okay for there to be only 1 provider (Miles provides a maximum of 64.
 		virtual UnsignedInt getProviderCount() const = 0;
