@@ -35,7 +35,7 @@ score screen / next-mission load (`-file` quits to desktop by design), and any A
 | Data | retail 1.04 (`zerohour104_gamedata_full.7z`, SHA-256 `d9ddd881…ac1ae4`, verified before extraction), unpacked to a disposable run dir outside the repo; base game `English.big` located through `~/.config/CommandAndConquerGeneralsZeroHour/Registry.ini`. Nothing retail is committed. |
 | Route | **Native headless simulation**: `zh -headless -ignoreAsserts -file Maps\MD_USA01.map` under gdb, driven by `scripts/campaign-flow-probe.py` (new). Not lavapipe (no renderer is needed to reach the script engine) and not `scripts/native-sim-probe.py` (that harness links a subset; the script engine only runs inside the full game loop). |
 | Audio | `ALSOFT_DRIVERS=null` so OpenAL does not probe ALSA. Headless still constructs the real `MilesAudioManager` over the `AIL_*`→OpenAL seam (the crash in §6 is in `AIL_open_stream`), but with zero sample pools and no provider selected (§4). |
-| Base | `main` at `e1f8de610` (this branch), fix applied |
+| Base | `main` at `e1f8de610` (this branch), fix applied. The 9,000-update live run was repeated on this base: every per-type condition/action count, every link count, the 285 firings, the 924 objects and the 27 script-audio results were identical to the pre-rebase run (deterministic sim; only wall time differs). |
 
 `-ignoreAsserts` is required: the debug binary hits a `ControlBar.cpp:2466` assertion before the
 first frame (no control bar in headless) and would `_exit(1)`. Every assertion that fires is recorded
