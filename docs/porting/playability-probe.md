@@ -147,7 +147,9 @@ provider named `OpenAL`, and if the preferred-provider string does not match it 
 `m_selectedProvider = PROVIDER_ERROR` and never opens a provider, leaving the sample pools empty even
 though the settings ask for 4 2D and 25 3D samples. **The empty pools are measured; that this specific
 mismatch is the cause is an inference from source** and wants a direct read of `m_selectedProvider` and
-`m_pref3DProvider` on a fresh process to confirm.
+`m_pref3DProvider` on a fresh process to confirm. (Confirmed on Linux x86-64 and fixed, together with
+a second defect directly behind it, in `sound-effects-chain.md`; the Apple Silicon re-measurement is
+still owed.)
 
 **What could not be proven without a listener**: that the music is *audible* — no HAL-level check
 (device sample-rate, underrun counters) was made. What was proven is stronger than decode and weaker

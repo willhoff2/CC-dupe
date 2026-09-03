@@ -1385,7 +1385,16 @@ void MilesAudioManager::openDevice()
 		setOn( false, AudioAffect_All );
 	}
 
-	selectProvider(TheAudio->getProviderIndex(m_pref3DProvider));
+	UnsignedInt providerNdx = TheAudio->getProviderIndex(m_pref3DProvider);
+	if (providerNdx == PROVIDER_ERROR && m_providerCount > 0 &&
+			getProviderIndex("Miles Fast 2D Positional Audio") == PROVIDER_ERROR)
+	{
+		// A non-Miles backend enumerates its own provider names, so neither the preference nor
+		// Miles' software provider resolves; take the backend's first. selectProvider treats
+		// PROVIDER_ERROR as "already selected" and would never build the sample pools.
+		providerNdx = 0;
+	}
+	selectProvider(providerNdx);
 
 	// Now that we're all done, update the cached variables so that everything is in sync.
 	TheAudio->refreshCachedVariables();
@@ -1446,7 +1455,7 @@ Bool MilesAudioManager::isCurrentlyPlaying( AudioHandle handle )
 }
 
 //-------------------------------------------------------------------------------------------------
-void MilesAudioManager::notifyOfAudioCompletion( UnsignedInt handle, UnsignedInt flags )
+void MilesAudioManager::notifyOfAudioCompletion( uintptr_t handle, UnsignedInt flags )
 {
 	PlayingAudio *playing = findPlayingAudioFrom(handle, flags);
 	if (!playing) {
@@ -1508,7 +1517,7 @@ void MilesAudioManager::notifyOfAudioCompletion( UnsignedInt handle, UnsignedInt
 }
 
 //-------------------------------------------------------------------------------------------------
-PlayingAudio *MilesAudioManager::findPlayingAudioFrom( UnsignedInt handle, UnsignedInt flags )
+PlayingAudio *MilesAudioManager::findPlayingAudioFrom( uintptr_t handle, UnsignedInt flags )
 {
 	std::list<PlayingAudio *>::iterator it;
 	PlayingAudio *playing;
@@ -2939,19 +2948,19 @@ void MilesAudioManager::friend_forcePlayAudioEventRTS(const AudioEventRTS* event
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK setSampleCompleted( HSAMPLE sampleCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedInt) sampleCompleted, PAT_Sample);
+	TheAudio->notifyOfAudioCompletion((uintptr_t) sampleCompleted, PAT_Sample);
 }
 
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK set3DSampleCompleted( H3DSAMPLE sample3DCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedInt) sample3DCompleted, PAT_3DSample);
+	TheAudio->notifyOfAudioCompletion((uintptr_t) sample3DCompleted, PAT_3DSample);
 }
 
 //-------------------------------------------------------------------------------------------------
 void AILCALLBACK setStreamCompleted( HSTREAM streamCompleted )
 {
-	TheAudio->notifyOfAudioCompletion((UnsignedInt) streamCompleted, PAT_Stream);
+	TheAudio->notifyOfAudioCompletion((uintptr_t) streamCompleted, PAT_Stream);
 }
 
 //-------------------------------------------------------------------------------------------------
