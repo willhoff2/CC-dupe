@@ -138,7 +138,13 @@ DECLARE_PERF_TIMER(MemoryPoolInitFilling)
 
 #ifdef MEMORYPOOL_BOUNDINGWALL
 
-	#define WALLCOUNT (2)	// default setting of 8 requires 4*4*2==32 extra bytes PER BLOCK
+	// TheSuperHackers @bugfix Devin 03/09/2026 The leading wall sits between the (aligned) block
+	// header and the user data, so its size has to be a multiple of MEM_BOUND_ALIGNMENT or the user
+	// data loses the alignment the header was padded for. 2 Ints is exact on 32-bit Windows (bound
+	// 4) and stays 2 there; at a 16-byte bound it widens to 4 Ints. Debug configuration only.
+	#define WALLCOUNT_MIN (2)	// default setting of 8 requires 4*4*2==32 extra bytes PER BLOCK
+	#define WALLCOUNT ((Int)(MEM_BOUND_ALIGNMENT / sizeof(Int)) > WALLCOUNT_MIN ? \
+		(Int)(MEM_BOUND_ALIGNMENT / sizeof(Int)) : WALLCOUNT_MIN)
 	#define WALLSIZE	(WALLCOUNT * sizeof(Int))
 
 #endif
