@@ -262,6 +262,12 @@ ordering does not cover this path.
 **Classification: PORT DEFECT.** Every quit is a crash report. (No user data was lost in the runs here,
 but nothing proves the exit path finished flushing anything either.)
 
+**Mechanism found and fixed** in `docs/porting/memory-shutdown-order.md` ("The second mechanism"):
+`ObjectPoolClass::Allocate_Object_Memory()` skipped `sizeof(uint32)`, not `sizeof(uint32 *)`, past the
+block's next-block pointer, so on LP64 the first object of every block overwrote the top half of it —
+which is why the fault address has a zero low half. Reproduced and fixed on Linux x86-64; the three
+Mac quit paths remain **UNMEASURED**.
+
 ## 8. What a player notices that the subsystem probes could not see
 
 Measured with real `CGEventPost` input plus LLDB reads:
@@ -323,7 +329,8 @@ Ranked by what a player notices first, not by fix cost.
    `Get_Surface_Level` linear scan drags render FPS from 30 to ~17 after a few hours. A long session
    degrades and eventually exhausts memory.
 6. **Every quit is a crash** (§7, PORT DEFECT). `SIGSEGV` in
-   `ObjectPoolClass<MultiListNodeClass>::~ObjectPoolClass` from `exit`.
+   `ObjectPoolClass<MultiListNodeClass>::~ObjectPoolClass` from `exit`. Mechanism named and fixed
+   (LP64 block-header arithmetic, `docs/porting/memory-shutdown-order.md`); Mac confirmation owed.
 7. **The simulation runs ~5 % slow** (§2, PORT DEFECT, small). 28.38 logic FPS against an intended 30,
    in every measured interval; a uniform time-base divergence from the Windows oracle.
 8. **Combat is unproven** (§4, NOT MEASURABLE YET). The AI builds, produces and harvests, but nothing

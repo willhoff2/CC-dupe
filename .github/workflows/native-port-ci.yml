@@ -791,6 +791,24 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # WWLib's object pools put their objects a uint32 into the block instead of a pointer into it,
+      # so on LP64 the first object overlapped the next-block pointer and the destructor exit() runs
+      # walked a half-overwritten chain: that is the crash report every quit on Apple Silicon wrote
+      # in ObjectPoolClass<MultiListNodeClass,256>::~ObjectPoolClass. This exercises the real pool
+      # and requires the pre-fix arithmetic, in the control, to still show the overwrite -- a 32-bit
+      # build cannot have the defect at all. See docs/porting/memory-shutdown-order.md.
+      - name: Prove the object pools are destroyed cleanly at exit (with the pre-fix control)
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Exit-time object pool teardown'
+            echo '```'
+            python3 scripts/native-exit-teardown-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Reporting a failed lock used to allocate, and the allocator is what holds the lock, so a
       # recoverable errno became an unbounded recursion at both ends of the process lifetime. This
       # makes the lock fail on purpose and requires one bounded diagnostic and an abort, against a

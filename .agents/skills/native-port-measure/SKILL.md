@@ -132,6 +132,7 @@ python3 scripts/native-d3dx8-entrypoints-test.py
 python3 scripts/native-init-failure-test.py
 python3 scripts/native-base-game-install-test.py
 python3 scripts/native-memory-shutdown-test.py       # allocator critical sections outlive statics
+python3 scripts/native-exit-teardown-test.py         # object pools destroyed after the allocator
 python3 scripts/native-lock-failure-test.py
 python3 scripts/native-instance-lock-test.py
 python3 scripts/native-stackwalk-test.py             # real symbolised backtrace; also run on macOS
