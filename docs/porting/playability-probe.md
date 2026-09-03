@@ -80,7 +80,10 @@ the backtrace is the *iterator increment* of the linear scan in `Get_Surface_Lev
 number of leaked surfaces: this is simultaneously the memory defect and the slowdown in §2.1.
 
 **Classification: PORT DEFECT** — unbounded lifetime in the D3D8→Vulkan texture/surface seam, reachable
-by simply leaving the game open.
+by simply leaving the game open. Named and fixed in `renderer-resource-lifetime.md` (the backend had no
+per-resource destroy, so `Release()` at zero freed the wrapper and nothing else); that document also
+notes the counts above may be byte counts of the vectors (8× the element count) and are owed a re-read
+on the Mac.
 
 ## 2. Is it fast enough? Borderline, and the simulation silently runs ~5 % slow
 
@@ -327,7 +330,8 @@ Ranked by what a player notices first, not by fix cost.
 5. **The renderer leaks a texture and a surface several times a second** (§1.1/§2.1, PORT DEFECT).
    ~134 surfaces/s and ~67 textures/s *even while paused*, RSS 32 MB → 184 MB in 20 min, and the
    `Get_Surface_Level` linear scan drags render FPS from 30 to ~17 after a few hours. A long session
-   degrades and eventually exhausts memory.
+   degrades and eventually exhausts memory. Fixed on the seam in `renderer-resource-lifetime.md`,
+   measured flat over 20 min on Linux; the Mac re-measurement is owed.
 6. **Every quit is a crash** (§7, PORT DEFECT). `SIGSEGV` in
    `ObjectPoolClass<MultiListNodeClass>::~ObjectPoolClass` from `exit`. Mechanism named and fixed
    (LP64 block-header arithmetic, `docs/porting/memory-shutdown-order.md`); Mac confirmation owed.
