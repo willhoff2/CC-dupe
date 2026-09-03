@@ -60,11 +60,21 @@
  *                                                                                             *
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
+#include "WWLib/platform/platform_cursor.h"
 #include "WWLib/platform/platform_window.h"
 
 #include <windows.h>
 
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <strings.h>
+#include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+
+#include <string>
+#include <vector>
 
 static int _Failures = 0;
 static int _Checks = 0;
@@ -116,6 +126,17 @@ struct FakeSeam
 	bool Last_Show;
 	void * Last_Show_Window;
 
+	// What the cursor-shape half of the seam saw: every cursor created (a copy of the image, as
+	// the real backends take), the destroys, and the selections in order.
+	int Create_Calls;
+	int Destroy_Calls;
+	int Set_Cursor_Calls;
+	void * Last_Set_Cursor;
+	void * Last_Set_Cursor_Window;
+	bool Refuse_Create;
+	std::vector<WWPlatform::CursorImage> Created;
+	std::vector<std::vector<unsigned char> > Created_Pixels;
+
 	// The client area the seam reports, in points, and whether it knows one yet.
 	int Client_Width;
 	int Client_Height;
@@ -149,7 +170,9 @@ struct FakeSeam
 	FakeSeam()
 		: Current(FAKE_WINDOW), Minimised(false), Cursor_X(0), Cursor_Y(0), Origin_X(0),
 		  Origin_Y(0), Have_Cursor(true), Have_Origin(true), Show_Calls(0), Last_Show(false),
-		  Last_Show_Window(nullptr), Client_Width(800), Client_Height(600), Fullscreen(false),
+		  Last_Show_Window(nullptr), Create_Calls(0), Destroy_Calls(0), Set_Cursor_Calls(0),
+		  Last_Set_Cursor(nullptr), Last_Set_Cursor_Window(nullptr), Refuse_Create(false),
+		  Client_Width(800), Client_Height(600), Fullscreen(false),
 		  Have_Insets(true), Inset_Left(3), Inset_Top(28), Inset_Right(3), Inset_Bottom(5),
 		  Display_Count(2), Display_Of_Window(0), Set_Position_Calls(0), Set_Position_X(0),
 		  Set_Position_Y(0), Set_Size_Calls(0), Set_Size_Width(0), Set_Size_Height(0),
@@ -213,6 +236,38 @@ void Window_Show_System_Cursor(void * window, bool show)
 	TheSeam.Show_Calls++;
 	TheSeam.Last_Show = show;
 	TheSeam.Last_Show_Window = window;
+}
+
+void * Window_Create_Cursor(const CursorImage & image)
+{
+	TheSeam.Create_Calls++;
+	if (TheSeam.Refuse_Create || image.Pixels_BGRA == nullptr || image.Width <= 0 ||
+		image.Height <= 0) {
+		return nullptr;
+	}
+	TheSeam.Created.push_back(image);
+	TheSeam.Created_Pixels.push_back(std::vector<unsigned char>(image.Pixels_BGRA,
+		image.Pixels_BGRA + static_cast<size_t>(image.Width) * image.Height * 4));
+	// The handle is the 1-based index into Created, so a null handle stays "no cursor".
+	return reinterpret_cast<void *>(static_cast<uintptr_t>(TheSeam.Created.size()));
+}
+
+void Window_Destroy_Cursor(void * cursor)
+{
+	if (cursor == nullptr) return;
+	TheSeam.Destroy_Calls++;
+}
+
+void Window_Set_Cursor(void * window, void * cursor)
+{
+	TheSeam.Set_Cursor_Calls++;
+	TheSeam.Last_Set_Cursor = cursor;
+	TheSeam.Last_Set_Cursor_Window = window;
+}
+
+const char * Window_Last_Error()
+{
+	return "fake seam refused";
 }
 
 void Window_Client_Size(void * window, int & width, int & height)
@@ -443,7 +498,226 @@ static void Test_Cursor_Round_Trip()
 
 
 /***********************************************************************************************
- *  SetCursor()                                                                                  *
+ *  Synthetic .CUR / .ANI fixtures. Built byte by byte from the RIFF ACON and ICO layouts, so   *
+ *  that the parser is tested against the formats' definitions rather than against itself.       *
+ * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+typedef std::vector<unsigned char> Bytes;
+
+static void Put_U16(Bytes & out, unsigned value)
+{
+	out.push_back(static_cast<unsigned char>(value & 0xFF));
+	out.push_back(static_cast<unsigned char>((value >> 8) & 0xFF));
+}
+
+static void Put_U32(Bytes & out, unsigned long value)
+{
+	Put_U16(out, static_cast<unsigned>(value & 0xFFFF));
+	Put_U16(out, static_cast<unsigned>((value >> 16) & 0xFFFF));
+}
+
+static void Put_Tag(Bytes & out, const char * tag)
+{
+	out.insert(out.end(), tag, tag + 4);
+}
+
+static void Put_Chunk(Bytes & out, const char * tag, const Bytes & body)
+{
+	Put_Tag(out, tag);
+	Put_U32(out, body.size());
+	out.insert(out.end(), body.begin(), body.end());
+	if (body.size() & 1) out.push_back(0);		// RIFF chunks are word aligned
+}
+
+/*
+**	A width x height .CUR with one BI_RGB image whose pixel (x, y) is BGR (x, y, 0x80), except
+**	the top row, which is black, alpha 0 (at 32 bpp) and set in the AND mask: the way a real
+**	cursor spells a transparent pixel, so both the alpha route and the mask route decode to the
+**	same picture. `bpp` 24 drops the alpha channel so the mask is the only transparency.
+*/
+static Bytes Make_Cur(int width, int height, int hot_x, int hot_y, int bpp)
+{
+	Bytes image;
+	const int header_size = 40;
+	const int xor_stride = ((width * bpp + 31) / 32) * 4;
+	const int and_stride = ((width + 31) / 32) * 4;
+	const int image_size = header_size + xor_stride * height + and_stride * height;
+
+	Put_U32(image, header_size);
+	Put_U32(image, width);
+	Put_U32(image, height * 2);				// XOR and AND stacked
+	Put_U16(image, 1);
+	Put_U16(image, bpp);
+	Put_U32(image, 0);							// BI_RGB
+	Put_U32(image, 0);							// biSizeImage may be 0 for BI_RGB
+	Put_U32(image, 0); Put_U32(image, 0); Put_U32(image, 0); Put_U32(image, 0);
+
+	for (int row = height - 1; row >= 0; --row) {			// bottom-up
+		Bytes line;
+		for (int x = 0; x < width; ++x) {
+			line.push_back(row == 0 ? 0 : static_cast<unsigned char>(x));	// B
+			line.push_back(row == 0 ? 0 : static_cast<unsigned char>(row));	// G
+			line.push_back(row == 0 ? 0 : 0x80);							// R
+			if (bpp == 32) line.push_back(row == 0 ? 0x00 : 0xFF);			// A
+		}
+		line.resize(xor_stride, 0);
+		image.insert(image.end(), line.begin(), line.end());
+	}
+	for (int row = height - 1; row >= 0; --row) {
+		Bytes line(and_stride, 0);
+		if (row == 0) line.assign(and_stride, 0xFF);				// row 0: transparent (1 bits)
+		image.insert(image.end(), line.begin(), line.end());
+	}
+
+	Bytes cur;
+	Put_U16(cur, 0);				// reserved
+	Put_U16(cur, 2);				// type: cursor
+	Put_U16(cur, 1);				// one image
+	cur.push_back(static_cast<unsigned char>(width));
+	cur.push_back(static_cast<unsigned char>(height));
+	cur.push_back(0);				// colour count
+	cur.push_back(0);				// reserved
+	Put_U16(cur, hot_x);
+	Put_U16(cur, hot_y);
+	Put_U32(cur, image_size);
+	Put_U32(cur, 6 + 16);			// offset of the image
+	cur.insert(cur.end(), image.begin(), image.end());
+	return cur;
+}
+
+/*
+**	A RIFF ACON around `frames` .CUR images, each with a different hotspot so that the test can
+**	tell which frame was decoded. With `sequence`, a 'seq ' chunk lists the frames in reverse
+**	order, so step 0 is the LAST frame, and there are frames+1 steps.
+*/
+static Bytes Make_Ani(int frames, bool sequence, int width, int height, int rate)
+{
+	Bytes anih;
+	Put_U32(anih, 36);
+	Put_U32(anih, frames);
+	Put_U32(anih, sequence ? frames + 1 : frames);
+	Put_U32(anih, 0); Put_U32(anih, 0); Put_U32(anih, 0); Put_U32(anih, 0);
+	Put_U32(anih, rate);
+	Put_U32(anih, 1 | (sequence ? 2 : 0));		// AF_ICON | AF_SEQUENCE
+
+	Bytes fram;
+	Put_Tag(fram, "fram");
+	for (int i = 0; i < frames; ++i) {
+		Put_Chunk(fram, "icon", Make_Cur(width, height, 1 + i, 2 + i, 32));
+	}
+
+	Bytes body;
+	Put_Tag(body, "ACON");
+	Put_Chunk(body, "anih", anih);
+	if (sequence) {
+		Bytes seq;
+		for (int i = 0; i < frames + 1; ++i) Put_U32(seq, ((frames - 1 - i) % frames + frames) % frames);
+		Put_Chunk(body, "seq ", seq);
+	}
+	Put_Chunk(body, "LIST", fram);
+
+	Bytes riff;
+	Put_Chunk(riff, "RIFF", body);
+	return riff;
+}
+
+static std::string Write_Temp(const char * name, const Bytes & bytes)
+{
+	const char * dir = getenv("TMPDIR");
+	std::string path = std::string(dir != nullptr && *dir ? dir : "/tmp") + "/" + name;
+	FILE * file = fopen(path.c_str(), "wb");
+	if (file != nullptr) {
+		fwrite(bytes.data(), 1, bytes.size(), file);
+		fclose(file);
+	}
+	return path;
+}
+
+
+/***********************************************************************************************
+ *  Cursor_Decode()                                                                              *
+ * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+static void Test_Cursor_Decode()
+{
+	std::string error;
+	WWPlatform::CursorFile file;
+
+	// A bare .CUR: 32x32, hotspot (5, 7), 32-bit with alpha.
+	Bytes cur = Make_Cur(32, 32, 5, 7, 32);
+	Check(WWPlatform::Cursor_Decode(cur.data(), cur.size(), file, error),
+		"a bare .CUR decodes");
+	Check_Equal(file.Frame_Count, 1, ".CUR: one frame");
+	Check_Equal(file.Step_Count, 1, ".CUR: one step");
+	Check_Equal(file.First.Width, 32, ".CUR: width");
+	Check_Equal(file.First.Height, 32, ".CUR: height is the XOR half, not the doubled DIB height");
+	Check_Equal(file.First.Hotspot_X, 5, ".CUR: hotspot x from the directory entry");
+	Check_Equal(file.First.Hotspot_Y, 7, ".CUR: hotspot y from the directory entry");
+	Check_Equal(file.First.Bits_Per_Pixel, 32, ".CUR: source depth reported");
+	Check_Equal(static_cast<long>(file.First.Pixels_BGRA.size()), 32 * 32 * 4,
+		".CUR: one BGRA quad per pixel");
+	if (file.First.Pixels_BGRA.size() == 32 * 32 * 4) {
+		const unsigned char * px = file.First.Pixels_BGRA.data();
+		// (x=3, y=0) is on the transparent top row; (x=3, y=9) is opaque. Rows come out top-down.
+		Check_Equal(px[3 * 4 + 3], 0x00, ".CUR: top row is transparent");
+		Check_Equal(px[(9 * 32 + 3) * 4 + 0], 3, ".CUR: blue = x, so rows were un-flipped");
+		Check_Equal(px[(9 * 32 + 3) * 4 + 1], 9, ".CUR: green = y, so rows were un-flipped");
+		Check_Equal(px[(9 * 32 + 3) * 4 + 2], 0x80, ".CUR: red");
+		Check_Equal(px[(9 * 32 + 3) * 4 + 3], 0xFF, ".CUR: opaque below the top row");
+	}
+
+	// 24-bit: no alpha channel, so transparency comes from the AND mask alone.
+	Bytes cur24 = Make_Cur(16, 16, 0, 15, 24);
+	Check(WWPlatform::Cursor_Decode(cur24.data(), cur24.size(), file, error),
+		"a 24-bit .CUR decodes");
+	Check_Equal(file.First.Bits_Per_Pixel, 24, "24-bit: source depth reported");
+	Check_Equal(file.First.Hotspot_Y, 15, "24-bit: hotspot on the last row is in range");
+	if (file.First.Pixels_BGRA.size() == 16 * 16 * 4) {
+		Check_Equal(file.First.Pixels_BGRA[3], 0x00, "24-bit: AND mask makes the top row transparent");
+		Check_Equal(file.First.Pixels_BGRA[(16 + 0) * 4 + 3], 0xFF, "24-bit: mask leaves row 1 opaque");
+	}
+
+	// An .ANI: 3 frames, no sequence -> the first frame is frame 0 (hotspot (1, 2)).
+	Bytes ani = Make_Ani(3, false, 32, 32, 6);
+	Check(WWPlatform::Cursor_Decode(ani.data(), ani.size(), file, error),
+		"a RIFF ACON with 3 frames decodes");
+	if (!error.empty()) printf("      error: %s\n", error.c_str());
+	Check_Equal(file.Frame_Count, 3, ".ANI: cFrames");
+	Check_Equal(file.Step_Count, 3, ".ANI: cSteps equals cFrames without a sequence");
+	Check_Equal(file.Display_Rate_Jiffies, 6, ".ANI: JifRate");
+	Check_Equal(file.First.Width, 32, ".ANI: first frame width");
+	Check_Equal(file.First.Height, 32, ".ANI: first frame height");
+	Check_Equal(file.First.Hotspot_X, 1, ".ANI: first frame is frame 0 (hotspot x)");
+	Check_Equal(file.First.Hotspot_Y, 2, ".ANI: first frame is frame 0 (hotspot y)");
+
+	// With a sequence, step 0 names the LAST frame, hotspot (3, 4).
+	Bytes seq = Make_Ani(3, true, 24, 24, 10);
+	Check(WWPlatform::Cursor_Decode(seq.data(), seq.size(), file, error),
+		"a RIFF ACON with a 'seq ' chunk decodes");
+	Check_Equal(file.Frame_Count, 3, ".ANI seq: cFrames");
+	Check_Equal(file.Step_Count, 4, ".ANI seq: cSteps is the sequence length");
+	Check_Equal(file.First.Width, 24, ".ANI seq: width");
+	Check_Equal(file.First.Hotspot_X, 3, ".ANI seq: the first STEP's frame is shown (hotspot x)");
+	Check_Equal(file.First.Hotspot_Y, 4, ".ANI seq: the first STEP's frame is shown (hotspot y)");
+
+	// Rejections: must say why, and must never claim a frame.
+	Check(!WWPlatform::Cursor_Decode(nullptr, 0, file, error) && !error.empty(),
+		"empty input is rejected with a reason");
+	Bytes junk(64, 0x5A);
+	Check(!WWPlatform::Cursor_Decode(junk.data(), junk.size(), file, error) && !error.empty(),
+		"junk is rejected with a reason");
+	Bytes truncated(ani.begin(), ani.begin() + ani.size() / 2);
+	Check(!WWPlatform::Cursor_Decode(truncated.data(), truncated.size(), file, error),
+		"a truncated .ANI is rejected rather than read past its end");
+	Bytes wave = ani;
+	memcpy(&wave[8], "WAVE", 4);
+	Check(!WWPlatform::Cursor_Decode(wave.data(), wave.size(), file, error),
+		"a RIFF that is not ACON is rejected");
+}
+
+
+/***********************************************************************************************
+ *  SetCursor() / LoadCursorFromFile() / DestroyCursor()                                         *
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 static void Test_Set_Cursor()
@@ -451,27 +725,105 @@ static void Test_Set_Cursor()
 	TheSeam = FakeSeam();
 
 	/*
-	**	The call the engine makes: SetCursor(nullptr) means "no cursor", so the system pointer
-	**	must be hidden. Showing it instead is the two-cursors defect, and it is a `!` away.
+	**	The call the engine makes for NONE or an invisible mouse: SetCursor(nullptr) means "no
+	**	cursor", so the system pointer must be hidden. Showing it instead is the two-cursors
+	**	defect, and it is a `!` away.
 	*/
 	Check(SetCursor(nullptr) == nullptr, "the first SetCursor() reports no previous cursor");
 	Check_Equal(TheSeam.Show_Calls, 1, "SetCursor() goes through the seam rather than doing nothing");
 	Check(TheSeam.Last_Show == false, "SetCursor(nullptr) HIDES the system pointer");
 	Check(TheSeam.Last_Show_Window == FAKE_WINDOW,
 		"SetCursor() addresses the seam's own window");
+	Check_Equal(TheSeam.Set_Cursor_Calls, 0, "SetCursor(nullptr) does not change the shape");
 
 	/*
-	**	A non-null handle cannot be resolved to a shape here. What is asserted is that it does not
-	**	silently do nothing: the system pointer is shown, so the symptom is a visible wrong cursor
-	**	rather than no cursor at all, and the previous handle is returned as Win32 documents.
+	**	Win32Mouse::initCursorResources() loads "data\cursors\Name.ANI". Two distinguishable
+	**	cursors, so that the test can tell which one the seam was handed.
 	*/
-	HCURSOR arrow = reinterpret_cast<HCURSOR>(0xA110C);
-	Check(SetCursor(arrow) == nullptr, "SetCursor() returns the previous cursor, which was null");
-	Check_Equal(TheSeam.Show_Calls, 2, "a non-null cursor still reaches the seam");
-	Check(TheSeam.Last_Show == true, "a non-null cursor shows the system pointer");
+	std::string attack_path = Write_Temp("SCCAttack.ANI", Make_Ani(2, false, 32, 32, 4));
+	std::string move_path = Write_Temp("SCCMove.ANI", Make_Ani(1, false, 24, 24, 4));
+	HCURSOR attack = LoadCursorFromFile(attack_path.c_str());
+	HCURSOR move = LoadCursorFromFile(move_path.c_str());
+	Check(attack != nullptr && move != nullptr, "LoadCursorFromFile() returns handles");
+	Check(attack != move, "distinct files give distinct handles");
+	Check_Equal(TheSeam.Create_Calls, 2, "each load creates one backend cursor");
+	Check_Equal(static_cast<long>(TheSeam.Created.size()), 2, "both were accepted by the seam");
+	if (TheSeam.Created.size() == 2) {
+		Check_Equal(TheSeam.Created[0].Width, 32, "attack: the frame's width reached the seam");
+		Check_Equal(TheSeam.Created[0].Hotspot_X, 1, "attack: the first frame's hotspot x");
+		Check_Equal(TheSeam.Created[0].Hotspot_Y, 2, "attack: the first frame's hotspot y");
+		Check_Equal(TheSeam.Created[1].Width, 24, "move: the frame's width reached the seam");
+		Check_Equal(TheSeam.Created_Pixels[1][(9 * 24 + 3) * 4 + 1], 9,
+			"move: decoded top-down BGRA pixels reached the seam");
+	}
 
-	Check(SetCursor(nullptr) == arrow, "SetCursor() returns the handle set before it");
-	Check(TheSeam.Last_Show == false, "back to nullptr hides the system pointer again");
+	// The call the engine makes every frame the cursor is visible.
+	Check(SetCursor(attack) == nullptr, "SetCursor() returns the previous cursor, which was null");
+	Check_Equal(TheSeam.Show_Calls, 2, "a non-null cursor still reaches the visibility seam");
+	Check(TheSeam.Last_Show == true, "a non-null cursor shows the pointer");
+	Check_Equal(TheSeam.Set_Cursor_Calls, 1, "and selects a shape through the seam");
+	Check(TheSeam.Last_Set_Cursor == reinterpret_cast<void *>(1),
+		"the shape selected is the one LoadCursorFromFile() created for that handle");
+	Check(TheSeam.Last_Set_Cursor_Window == FAKE_WINDOW, "on the seam's own window");
+
+	Check(SetCursor(attack) == attack, "re-selecting the same cursor returns it as the previous");
+	Check_Equal(TheSeam.Set_Cursor_Calls, 1, "re-selecting the current shape is not a seam call");
+
+	Check(SetCursor(move) == attack, "switching cursors returns the previous one");
+	Check_Equal(TheSeam.Set_Cursor_Calls, 2, "switching selects the new shape");
+	Check(TheSeam.Last_Set_Cursor == reinterpret_cast<void *>(2), "and it is the OTHER cursor");
+
+	Check(SetCursor(nullptr) == move, "SetCursor() returns the handle set before it");
+	Check(TheSeam.Last_Show == false, "back to nullptr hides the pointer again");
+	Check_Equal(TheSeam.Set_Cursor_Calls, 2, "hiding does not touch the shape");
+
+	Check(SetCursor(move) == nullptr, "showing again returns null as the previous");
+	Check_Equal(TheSeam.Set_Cursor_Calls, 2,
+		"the shape was still selected while hidden, so showing again needs no reselection");
+	Check(TheSeam.Last_Show == true, "and the pointer is shown");
+
+	/*
+	**	MISSING DATA at runtime: the retail Data\Cursors\*.ANI is not in the .big archives, so a
+	**	native install may well lack it. The load must not fail (null would make setCursor()
+	**	hide the pointer) and selecting the handle must fall back to the platform's arrow, which
+	**	the seam spells as Window_Set_Cursor(window, nullptr).
+	*/
+	HCURSOR missing = LoadCursorFromFile("data\\cursors\\NoSuchCursor.ANI");
+	Check(missing != nullptr, "a missing .ANI still yields a handle");
+	Check_Equal(TheSeam.Create_Calls, 2, "a missing file creates no backend cursor");
+	SetCursor(missing);
+	Check_Equal(TheSeam.Set_Cursor_Calls, 3, "selecting the missing cursor reaches the seam");
+	Check(TheSeam.Last_Set_Cursor == nullptr, "as the default arrow, not as garbage");
+	Check(TheSeam.Last_Show == true, "and the pointer is VISIBLE: an arrow, not nothing");
+
+	// A file that exists but is not a cursor behaves the same way.
+	std::string junk_path = Write_Temp("Junk.ANI", Bytes(100, 0x42));
+	HCURSOR junk = LoadCursorFromFile(junk_path.c_str());
+	Check(junk != nullptr, "an undecodable .ANI still yields a handle");
+	Check_Equal(TheSeam.Create_Calls, 2, "an undecodable file creates no backend cursor");
+
+	// And so does a backend that refuses (no display, out of memory).
+	TheSeam.Refuse_Create = true;
+	HCURSOR refused = LoadCursorFromFile(attack_path.c_str());
+	TheSeam.Refuse_Create = false;
+	Check(refused != nullptr, "a backend refusal still yields a handle");
+	SetCursor(refused);
+	Check(TheSeam.Last_Set_Cursor == nullptr, "which selects the default arrow");
+
+	// Destroying the current cursor must not leave a dangling selection in the compat layer.
+	SetCursor(attack);
+	Check(TheSeam.Last_Set_Cursor == reinterpret_cast<void *>(1), "attack reselected");
+	Check(DestroyCursor(attack) == TRUE, "DestroyCursor() accepts a live handle");
+	Check_Equal(TheSeam.Destroy_Calls, 1, "and destroys the backend cursor");
+	Check(DestroyCursor(nullptr) == FALSE, "DestroyCursor(nullptr) fails as Win32 does");
+	Check(DestroyCursor(move) == TRUE && DestroyCursor(missing) == TRUE &&
+		DestroyCursor(junk) == TRUE && DestroyCursor(refused) == TRUE,
+		"handles without a backend cursor destroy cleanly");
+	Check_Equal(TheSeam.Destroy_Calls, 2, "only the two real backend cursors were destroyed");
+
+	remove(attack_path.c_str());
+	remove(move_path.c_str());
+	remove(junk_path.c_str());
 
 	// Before the window exists the call must still be safe; the seam is what rejects the null
 	// window, and it is reached with it rather than being second-guessed here.
@@ -480,6 +832,106 @@ static void Test_Set_Cursor()
 	SetCursor(nullptr);
 	Check_Equal(TheSeam.Show_Calls, 1, "SetCursor() before the window exists still calls the seam");
 	Check(TheSeam.Last_Show_Window == nullptr, "and passes the null window through unchanged");
+}
+
+
+/***********************************************************************************************
+ *  The retail cursor set. Win32Mouse.cpp names these in its table and loads                     *
+ *  data\cursors\<Name>.ANI (plus <Name>0..7 for the 8-direction Scroll cursor) relative to the *
+ *  game directory. The files ship LOOSE with the retail installer -- they are not in any .big   *
+ *  -- so this test reads them from $GENERALSMD_PATH/Data/Cursors or ./Data/Cursors, and when   *
+ *  neither exists it SKIPS, saying so, rather than failing or inventing a result.               *
+ * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+static const char * const RETAIL_CURSOR_NAMES[] = {
+	"SCCPointer", "SCCNoAction", "SCCSelect", "SCCMove", "SCCAttMov", "SCCAttack", "SCCEnter",
+	"SCCExit", "SCCFriendly", "SCCHostile", "SCCHostile2", "SCCHostile3", "SCCKnifeAttack",
+	"SCCNoBomb", "SCCNoKnife", "SCCPlaceBeacon", "SCCRallyPnt", "SCCRemoteChg", "SCCRepair",
+	"SCCResumeC", "SCCSDIUplink", "SCCSniper", "SCCTNTAttack", "SCCTimedChg", "SCCWaypoint",
+	"SCCCashHack",
+};
+
+static bool Directory_Exists(const std::string & path)
+{
+	struct stat info;
+	return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+}
+
+static bool Read_File(const std::string & path, Bytes & out)
+{
+	FILE * file = fopen(path.c_str(), "rb");
+	if (file == nullptr) return false;
+	unsigned char chunk[4096];
+	size_t got;
+	while ((got = fread(chunk, 1, sizeof(chunk), file)) > 0) out.insert(out.end(), chunk, chunk + got);
+	fclose(file);
+	return true;
+}
+
+// Case-insensitive lookup of <name>.ani in a directory, since the retail files are mixed case
+// and the game's spelling ("data\cursors\Name.ANI") is not necessarily the disk's.
+static std::string Find_Cursor_File(const std::string & dir, const std::string & name)
+{
+	DIR * handle = opendir(dir.c_str());
+	if (handle == nullptr) return "";
+	std::string want = name + ".ani";
+	std::string found;
+	while (struct dirent * entry = readdir(handle)) {
+		if (strcasecmp(entry->d_name, want.c_str()) == 0) {
+			found = dir + "/" + entry->d_name;
+			break;
+		}
+	}
+	closedir(handle);
+	return found;
+}
+
+static void Test_Retail_Cursor_Set()
+{
+	std::string dir;
+	const char * install = getenv("GENERALSMD_PATH");
+	if (install != nullptr && *install && Directory_Exists(std::string(install) + "/Data/Cursors")) {
+		dir = std::string(install) + "/Data/Cursors";
+	} else if (Directory_Exists("Data/Cursors")) {
+		dir = "Data/Cursors";
+	}
+
+	if (dir.empty()) {
+		printf("SKIP: retail cursor set: no Data/Cursors directory (checked $GENERALSMD_PATH/Data/"
+			"Cursors and ./Data/Cursors). The retail .ANI cursors ship loose with the installer and "
+			"are not in the .big archives, so this run cannot measure them; the synthetic fixtures "
+			"above are the evidence for the parser. Set GENERALSMD_PATH to a retail install to run "
+			"it.\n");
+		return;
+	}
+
+	printf("retail cursor set from %s:\n", dir.c_str());
+	const int names = static_cast<int>(sizeof(RETAIL_CURSOR_NAMES) / sizeof(RETAIL_CURSOR_NAMES[0]));
+	for (int i = 0; i < names + 8; ++i) {
+		std::string name = i < names ? RETAIL_CURSOR_NAMES[i]
+			: "SCCScroll" + std::string(1, static_cast<char>('0' + (i - names)));
+		std::string path = Find_Cursor_File(dir, name);
+		Check(!path.empty(), (name + ".ANI is present").c_str());
+		if (path.empty()) continue;
+
+		Bytes bytes;
+		std::string error;
+		WWPlatform::CursorFile file;
+		Check(Read_File(path, bytes), (name + ".ANI is readable").c_str());
+		bool ok = WWPlatform::Cursor_Decode(bytes.data(), bytes.size(), file, error);
+		Check(ok, (name + ".ANI decodes: " + error).c_str());
+		if (!ok) continue;
+		printf("  %-16s %2dx%-2d hotspot (%2d,%2d) frames %2d steps %2d rate %d bpp %d\n",
+			name.c_str(), file.First.Width, file.First.Height, file.First.Hotspot_X,
+			file.First.Hotspot_Y, file.Frame_Count, file.Step_Count, file.Display_Rate_Jiffies,
+			file.First.Bits_Per_Pixel);
+		Check(file.First.Width > 0 && file.First.Width <= 256 && file.First.Height > 0 &&
+			file.First.Height <= 256, (name + ": frame size is a cursor's").c_str());
+		Check(file.First.Hotspot_X >= 0 && file.First.Hotspot_X < file.First.Width &&
+			file.First.Hotspot_Y >= 0 && file.First.Hotspot_Y < file.First.Height,
+			(name + ": hotspot lies inside the frame").c_str());
+		Check(file.Frame_Count >= 1, (name + ": at least one frame").c_str());
+	}
 }
 
 
@@ -903,7 +1355,9 @@ int main()
 	Test_Get_Cursor_Pos();
 	Test_Screen_To_Client();
 	Test_Cursor_Round_Trip();
+	Test_Cursor_Decode();
 	Test_Set_Cursor();
+	Test_Retail_Cursor_Set();
 	Test_Is_Iconic();
 	Test_Get_Client_Rect();
 	Test_Get_Window_Long();

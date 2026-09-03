@@ -45,10 +45,10 @@
  *  creates -- and both it and GetCursorPos() work in POINTS, because this is the mouse path and    *
  *  the renderer converts at its own boundary (docs/porting/decisions-resolved.md).                 *
  *                                                                                              *
- *  SetCursor() is hide-or-show: every call site reachable here passes null, meaning "no           *
- *  cursor", because W3DMouse draws the game's own. A non-null HCURSOR would be a handle from      *
- *  LoadCursor()/LoadCursorFromFile() reading a .CUR/.ANI, which do not exist here, so it says so   *
- *  once and shows the system pointer rather than guessing a shape.                                *
+ *  LoadCursorFromFile(), SetCursor() and DestroyCursor() are the game's cursor: the retail       *
+ *  Data\Cursors\*.ANI is decoded by platform_cursor.cpp and its first frame becomes a backend    *
+ *  cursor through Window_Create_Cursor(); SetCursor(null) hides the pointer as Win32 does, and   *
+ *  SetCursor(handle) selects the shape and shows it (docs/porting/mouse-cursor-seam.md).         *
  *                                                                                              *
  *  GetClientRect(), GetWindowLongA(), AdjustWindowRect(), MonitorFromWindow(),                  *
  *  GetMonitorInfoA() and SetWindowPos() are the window-sizing path                              *
@@ -75,14 +75,18 @@
 
 #ifdef WWPLATFORM_WIN32_COMPAT
 
+#include "WWLib/platform/platform_cursor.h"
 #include "WWLib/platform/platform_dialog.h"
+#include "WWLib/platform/platform_path.h"
 #include "WWLib/platform/platform_window.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -124,6 +128,29 @@ std::string Narrow(LPCWSTR text)
 	WideCharToMultiByte(CP_UTF8, 0, text, -1, &narrow[0], length, nullptr, nullptr);
 	return narrow;
 }
+
+/*
+**	What an HCURSOR is off Windows: the decoded file's first frame turned into a backend cursor
+**	by Window_Create_Cursor(), plus what the decoder reported, for diagnostics. Native is null
+**	when the file could not be read or decoded, or the backend could not make a cursor of it;
+**	selecting such a handle shows the platform's default arrow, so the pointer never vanishes
+**	because an asset is missing (docs/porting/mouse-cursor-seam.md, "missing data").
+*/
+struct Cursor_Handle
+{
+	void * Native;
+	WWPlatform::CursorFile File;
+	std::string Path;
+
+	Cursor_Handle() : Native(nullptr) {}
+};
+
+Cursor_Handle * Handle_Of(HCURSOR cursor)
+{
+	return reinterpret_cast<Cursor_Handle *>(cursor);
+}
+
+HCURSOR TheCurrentCursor = nullptr;
 
 }	// anonymous namespace
 
@@ -245,30 +272,83 @@ BOOL ScreenToClient(HWND window, LPPOINT point)
 }
 
 
+
+HCURSOR LoadCursorFromFileA(LPCSTR path)
+{
+	/*
+	**	The Win32 spelling Win32Mouse::initCursorResources() uses on "data\cursors\Name.ANI".
+	**	The path is Windows shaped and possibly the wrong case for this filesystem, which is what
+	**	Path::Open_Stream() exists to absorb.
+	**
+	**	Unlike Win32 this never returns null for a bad or missing file: the handle comes back
+	**	with no native cursor and SetCursor() on it shows the default arrow. Returning null would
+	**	make the caller pass null to SetCursor(), which hides the pointer, and a hidden pointer is
+	**	the defect this replaces. The failure is said on stderr.
+	*/
+	Cursor_Handle * handle = new Cursor_Handle();
+	handle->Path = path != nullptr ? path : "";
+
+	std::string error;
+	std::vector<unsigned char> bytes;
+	FILE * stream = path != nullptr ? WWPlatform::Path::Open_Stream(path, "rb") : nullptr;
+	if (stream == nullptr) {
+		error = "file not found";
+	} else {
+		unsigned char chunk[4096];
+		size_t got;
+		while ((got = fread(chunk, 1, sizeof(chunk), stream)) > 0) {
+			bytes.insert(bytes.end(), chunk, chunk + got);
+		}
+		fclose(stream);
+		if (WWPlatform::Cursor_Decode(bytes.data(), bytes.size(), handle->File, error)) {
+			WWPlatform::CursorImage image;
+			image.Width = handle->File.First.Width;
+			image.Height = handle->File.First.Height;
+			image.Hotspot_X = handle->File.First.Hotspot_X;
+			image.Hotspot_Y = handle->File.First.Hotspot_Y;
+			image.Pixels_BGRA = handle->File.First.Pixels_BGRA.data();
+			handle->Native = WWPlatform::Window_Create_Cursor(image);
+			if (handle->Native == nullptr) error = WWPlatform::Window_Last_Error();
+		}
+	}
+
+	if (handle->Native == nullptr) {
+		fprintf(stderr, "!!! LoadCursorFromFile(\"%s\"): %s; the default arrow is shown instead\n",
+			handle->Path.c_str(), error.c_str());
+	}
+	return reinterpret_cast<HCURSOR>(handle);
+}
+
+
+BOOL DestroyCursor(HCURSOR cursor)
+{
+	Cursor_Handle * handle = Handle_Of(cursor);
+	if (handle == nullptr) return FALSE;
+	if (TheCurrentCursor == cursor) TheCurrentCursor = nullptr;
+	WWPlatform::Window_Destroy_Cursor(handle->Native);
+	delete handle;
+	return TRUE;
+}
+
+
 HCURSOR SetCursor(HCURSOR cursor)
 {
 	/*
-	**	The game's own cursor is drawn by W3DMouse, and what it wants from Win32 is for the
-	**	system pointer to be out of the way: every reachable call site off Windows passes null,
-	**	which in Win32 means "no cursor", i.e. hide it. That maps exactly onto the seam's
-	**	Window_Show_System_Cursor().
-	**
-	**	A non-null HCURSOR cannot be honoured: the handle would have come from LoadCursor() or
-	**	LoadCursorFromFile() reading a Win32 .CUR/.ANI, neither of which exists here, so there is
-	**	nothing to identify the requested shape by. Those call sites are in Win32DIMouse.cpp,
-	**	which is not on the native path. Rather than pick an arbitrary shape, this says so once
-	**	and shows the system pointer, so the symptom is "the wrong cursor is visible" rather than
-	**	"the pointer vanished".
+	**	Win32Mouse::setCursor() passes null for "no cursor" (NONE, or the mouse made invisible),
+	**	which in Win32 hides the pointer, and otherwise a handle from LoadCursorFromFile(). Both
+	**	halves go through the seam: the shape to Window_Set_Cursor(), the visibility to
+	**	Window_Show_System_Cursor(), so that the pointer is shown exactly when Windows would
+	**	show it and with the shape Windows would give it. A handle without a native cursor (see
+	**	LoadCursorFromFileA) selects the default arrow.
 	*/
 	static HCURSOR previous = nullptr;
 
-	if (cursor != nullptr) {
-		WWPlatform::Win32::Report_Stub("SetCursor",
-			"a non-null HCURSOR is a Win32 .CUR/.ANI handle and cannot be resolved to a shape "
-			"here; showing the system pointer instead");
+	void * window = WWPlatform::Window_Current();
+	if (cursor != nullptr && cursor != TheCurrentCursor) {
+		WWPlatform::Window_Set_Cursor(window, Handle_Of(cursor)->Native);
+		TheCurrentCursor = cursor;
 	}
-
-	WWPlatform::Window_Show_System_Cursor(WWPlatform::Window_Current(), cursor != nullptr);
+	WWPlatform::Window_Show_System_Cursor(window, cursor != nullptr);
 
 	/*
 	**	Win32 returns the cursor that was set before, and null if there was none. Nothing in the

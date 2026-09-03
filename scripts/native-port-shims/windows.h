@@ -794,6 +794,8 @@ BOOL    ClientToScreen(HWND, LPPOINT);
 int     ShowCursor(BOOL);
 HCURSOR SetCursor(HCURSOR);
 HCURSOR LoadCursorA(HINSTANCE, LPCSTR);
+HCURSOR LoadCursorFromFileA(LPCSTR);
+BOOL    DestroyCursor(HCURSOR);
 HICON   LoadIconA(HINSTANCE, LPCSTR);
 short   GetAsyncKeyState(int);
 short   GetKeyState(int);
@@ -892,6 +894,7 @@ BOOL    SetDeviceGammaRamp(HDC, LPVOID);
 #define GetWindowLong    GetWindowLongA
 #define GetMonitorInfo   GetMonitorInfoA
 #define LoadCursor       LoadCursorA
+#define LoadCursorFromFile LoadCursorFromFileA
 #define CreateFont       CreateFontA
 #define GetTextMetrics   GetTextMetricsA
 #define LoadIcon         LoadIconA
