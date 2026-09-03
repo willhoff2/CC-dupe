@@ -32,6 +32,13 @@
 #include <utility>
 #include <vector>
 
+#include <pthread.h>
+#if defined(__APPLE__)
+#include <sys/qos.h>
+#else
+#include <sched.h>
+#endif
+
 namespace OpenALAudio
 {
 
@@ -61,6 +68,9 @@ unsigned long elapsedUs(std::chrono::steady_clock::time_point from,
 /// Seconds between periodic `counters` lines from the service thread.
 constexpr unsigned long DIAG_REPORT_SECONDS = 10;
 
+/// A gap between service passes worth its own log line: 100 ms is ten missed polls.
+constexpr unsigned long SERVICE_STALL_LOG_US = 100000;
+
 } // namespace
 
 void diagnosticsInit()
@@ -83,6 +93,16 @@ void diagnosticsInit()
 	}
 	d.started = std::chrono::steady_clock::now();
 	d.lastReport = d.started;
+	d.lastPassEnd = std::chrono::steady_clock::time_point();
+	const char* stall = std::getenv("OPENAL_AUDIO_DIAG_STALL");
+	if (stall != nullptr) {
+		unsigned long atMs = 0;
+		unsigned long forMs = 0;
+		if (std::sscanf(stall, "%lu:%lu", &atMs, &forMs) == 2 && forMs != 0) {
+			d.stallAtUs = atMs * 1000ul;
+			d.stallForUs = forMs * 1000ul;
+		}
+	}
 	d.enabled = true;
 }
 
@@ -116,8 +136,8 @@ void diagnosticsReport(const char* when)
 		" object_starts=%lu object_restarts_while_playing=%lu"
 		" buffer_data_calls=%lu buffer_data_mismatches=%lu"
 		" gain_writes=%lu position_writes=%lu"
-		" service_passes=%lu service_hold_max_us=%lu service_wait_max_us=%lu"
-		" api_hold_max_us=%lu api_wait_max_us=%lu al_errors=%lu",
+		" service_passes=%lu service_pass_gap_max_us=%lu service_hold_max_us=%lu"
+		" service_wait_max_us=%lu api_hold_max_us=%lu api_wait_max_us=%lu al_errors=%lu",
 		when,
 		d.streamServiceCalls.load(), d.streamBuffersRequeued.load(), d.streamQueueEmptied.load(),
 		d.streamStoppedWithData.load(), d.streamQueuedMin.load(), d.streamServiceGapMaxUs.load(),
@@ -126,7 +146,8 @@ void diagnosticsReport(const char* when)
 		d.objectStarts.load(), d.objectRestartsWhilePlaying.load(),
 		d.bufferDataCalls.load(), d.bufferDataMismatches.load(),
 		d.gainWrites.load(), d.positionWrites.load(),
-		d.servicePasses.load(), d.serviceHoldMaxUs.load(), d.serviceWaitMaxUs.load(),
+		d.servicePasses.load(), d.servicePassGapMaxUs.load(), d.serviceHoldMaxUs.load(),
+		d.serviceWaitMaxUs.load(),
 		d.apiHoldMaxUs.load(), d.apiWaitMaxUs.load(), d.alErrors.load());
 }
 
@@ -239,11 +260,45 @@ char FILTER_NAME[] = "OpenAL Filter";
 h3DPOBJECT THE_3D_PROVIDER = {};
 h3DPOBJECT THE_FILTER_PROVIDER = {};
 
+/// Ask the scheduler to run the refill thread ahead of the renderer and game threads. The queue
+/// only covers BUFFER_COUNT * BUFFER_FRAMES of playback, so a long enough scheduling stall of this
+/// thread is a mixer underrun. Best effort: a refusal (no realtime privilege) is only logged.
+void raiseServiceThreadPriority()
+{
+	int result = -1;
+#if defined(__APPLE__)
+	result = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#else
+	sched_param param = {};
+	param.sched_priority = sched_get_priority_min(SCHED_RR);
+	result = pthread_setschedparam(pthread_self(), SCHED_RR, &param);
+#endif
+	diagnosticsLog("service thread: priority raise %s", result == 0 ? "accepted" : "refused");
+}
+
 void serviceLoop()
 {
 	Library& l = lib();
 	Diagnostics& d = diagnostics();
+	raiseServiceThreadPriority();
 	while (!l.serviceQuit.load()) {
+		if (d.enabled) {
+			const std::chrono::steady_clock::time_point woke = std::chrono::steady_clock::now();
+			if (!d.stallDone && d.stallForUs != 0 && elapsedUs(d.started, woke) >= d.stallAtUs) {
+				d.stallDone = true;
+				diagnosticsLog("service thread: injected stall of %lu ms", d.stallForUs / 1000);
+				std::this_thread::sleep_for(std::chrono::microseconds(d.stallForUs));
+			}
+			if (d.lastPassEnd != std::chrono::steady_clock::time_point()) {
+				const unsigned long gap = elapsedUs(d.lastPassEnd, std::chrono::steady_clock::now());
+				diagnosticsMax(d.servicePassGapMaxUs, gap);
+				if (gap >= SERVICE_STALL_LOG_US) {
+					diagnosticsLog("service thread: %lu ms between passes (poll is 10 ms)",
+						gap / 1000);
+				}
+			}
+		}
+
 		// Poll source state and mark voices that ran out. Nothing is called back from here: the
 		// engine's completion handlers (MilesAudioManager::notifyOfAudioCompletion and what it
 		// reaches) read and rewrite PlayingAudio/AudioEventRTS state with no lock against the main
@@ -300,6 +355,7 @@ void serviceLoop()
 					d.lastReport = now;
 					diagnosticsReport("periodic");
 				}
+				d.lastPassEnd = std::chrono::steady_clock::now();
 			}
 		}
 

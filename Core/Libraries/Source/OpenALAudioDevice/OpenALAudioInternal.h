@@ -158,7 +158,10 @@ struct StreamVoice
 {
 	~StreamVoice();
 
-	static constexpr unsigned int BUFFER_COUNT = 4;
+	/// Queue depth. Refill only happens on the service thread's 10 ms poll, so the queue is the
+	/// whole tolerance for that thread not running: 8 x 8192 frames is 1.49 s at 44.1 kHz, more than
+	/// the ~1.2 s scheduling stalls measured during a lavapipe map load (4 buffers, 0.74 s, ran dry).
+	static constexpr unsigned int BUFFER_COUNT = 8;
 	static constexpr unsigned int BUFFER_FRAMES = 8192;
 
 	ALuint source = 0;
@@ -314,6 +317,14 @@ struct Diagnostics
 	std::atomic<unsigned long> apiHoldMaxUs{0};
 	std::atomic<unsigned long> apiWaitMaxUs{0};
 	std::atomic<unsigned long> servicePasses{0};
+	std::atomic<unsigned long> servicePassGapMaxUs{0};	///< longest time between two service passes
+	std::chrono::steady_clock::time_point lastPassEnd;
+
+	// Fault injection, OPENAL_AUDIO_DIAG_STALL="<at_ms>:<for_ms>": once, the first time the service
+	// thread wakes at or past at_ms, it sleeps for_ms before its pass, imitating a scheduling stall.
+	unsigned long stallAtUs = 0;
+	unsigned long stallForUs = 0;
+	bool stallDone = false;
 
 	std::atomic<unsigned long> alErrors{0};
 };

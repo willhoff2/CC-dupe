@@ -1456,7 +1456,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            clang-14 ninja-build git ca-certificates python3 python3-pip binutils libopenal-dev
+            clang-14 ninja-build git ca-certificates python3 python3-pip binutils libopenal-dev \
+            python3-numpy
           pip3 install --no-cache-dir 'cmake==4.1.2'
           cmake --version
 
@@ -1502,6 +1503,23 @@ jobs:
             echo '## OpenAL backend: callback thread contract'
             echo '```'
             python3 scripts/native-audio-callback-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The shim's data path (decode -> alBufferData -> stream refill -> mix) must render a known
+      # tone with no discontinuity, no starvation and no format mismatch, at the engine's 44.1 kHz
+      # mixer rate (sound-effects-chain.md §6 item 0). OpenAL Soft's wave backend writes the mix to
+      # a file, so this is synthetic evidence: it cannot see a real-time underrun.
+      - name: Check the shim renders without discontinuities at the engine's mixer rate
+        env:
+          CLANGXX: clang++-14
+          MINIMP3_INCLUDE_DIR: build/native/_deps/minimp3-src
+        run: |
+          set -o pipefail
+          {
+            echo '## OpenAL backend: render discontinuity / starvation'
+            echo '```'
+            python3 scripts/native-audio-render-test.py
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

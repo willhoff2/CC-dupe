@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Does the OpenAL Miles replacement render a known waveform without clicks, gaps or starvation?
 
-The M1 Pro hears a constant crackle in menu music and ambient SFX (sound-effects-chain.md §6 item 0).
+The M1 Pro hears a constant crackle in menu music and ambient SFX (sound-effects-chain.md §6
+item 0).
 This driver isolates the part of that chain a Linux box can judge deterministically: the shim's data
 path from the AIL_* surface to OpenAL Soft's mixer output, on the file-writing `wave` backend. A
 file backend cannot underrun the way a real-time device does, so a clean run here rules the data
@@ -18,7 +19,12 @@ then judges the rendered PCM with scripts/audio-pcm-discontinuity.py and the cou
   * no stream ran its queue dry, no stopped source had to be restarted, no alBufferData call
     disagreed with its decoded data, no AL error;
   * the stream and one-shot renders have zero jumps and zero interior gaps; the loop render has zero
-    jumps (its inter-loop gaps are the engine's callback latency, reported, not judged).
+    jumps (its inter-loop gaps are the engine's callback latency, reported, not judged);
+  * the `stall` render — the stream again, with the shim's OPENAL_AUDIO_DIAG_STALL fault injection
+    holding the service thread off for STALL_FOR_MS, the stall the lavapipe skirmish soak measured —
+    still ran no queue dry and rendered without a gap. The wave backend's mixer runs on a real
+    clock, so this is the one real-time property the file backend can judge: the queue depth covers
+    a refill-thread scheduling stall of that length.
 
 `--shim-rev REV` builds the shim from that git revision instead, with the same harness and assets.
 
@@ -60,11 +66,18 @@ MIXER_RATE = 44100
 JUMP_THRESHOLD = 0.1
 GAP_MS = 1.0
 
+# The service thread stall the lavapipe skirmish soak measured (1.14-1.16 s between two passes of a
+# 10 ms poll, during map load) with the mixer clock running: replayed here with the shim's
+# OPENAL_AUDIO_DIAG_STALL fault injection, so the queue depth has to cover it on every platform.
+STALL_AT_MS = 1000
+STALL_FOR_MS = 1200
+
 RENDERS = (
-    # (mode, asset name, rate, channels, seconds)
-    ("stream", "tone-stream.wav", 44100, 2, 6.0),
-    ("sample", "tone-sample.wav", 22050, 1, 1.5),
-    ("loop", "tone-loop.wav", 22050, 1, 0.5),
+    # (case, harness mode, asset name, rate, channels, seconds, injected stall or None)
+    ("stream", "stream", "tone-stream.wav", 44100, 2, 6.0, None),
+    ("stall", "stream", "tone-stall.wav", 44100, 2, 6.0, f"{STALL_AT_MS}:{STALL_FOR_MS}"),
+    ("sample", "sample", "tone-sample.wav", 22050, 1, 1.5, None),
+    ("loop", "loop", "tone-loop.wav", 22050, 1, 0.5, None),
 )
 
 
@@ -151,16 +164,19 @@ def parse_diag(log_path):
     return context, counters
 
 
-def render(binary, analyser, work, mode, asset, seconds, verbose):
-    out_wav = work / f"render-{mode}.wav"
-    conf = work / f"alsoft-{mode}.conf"
+def render(binary, analyser, work, case, mode, asset, seconds, stall, verbose):
+    out_wav = work / f"render-{case}.wav"
+    conf = work / f"alsoft-{case}.conf"
     # No `frequency` key: OpenAL Soft lets the config file override the ALC_FREQUENCY attribute,
     # and the point is to observe what the shim's own request produced.
     conf.write_text(f"[general]\ndrivers = wave\n[wave]\nfile = {out_wav}\n")
-    diag = work / f"diag-{mode}.log"
+    diag = work / f"diag-{case}.log"
     env = dict(os.environ)
     env["ALSOFT_CONF"] = str(conf)
     env["OPENAL_AUDIO_DIAG"] = str(diag)
+    env.pop("OPENAL_AUDIO_DIAG_STALL", None)
+    if stall:
+        env["OPENAL_AUDIO_DIAG_STALL"] = stall
     env.setdefault("ALSOFT_LOGLEVEL", "0")
     limit = str(seconds * 12 + 5)
     result = subprocess.run([str(binary), mode, str(asset), limit], capture_output=True,
@@ -176,6 +192,7 @@ def render(binary, analyser, work, mode, asset, seconds, verbose):
     context, counters = parse_diag(diag)
     facts["context"] = context
     facts["counters"] = counters
+    facts["injected_stall"] = stall
 
     if out_wav.exists() and out_wav.stat().st_size > 44:
         rate, channels, pcm = analyser.read_wave(out_wav)
@@ -196,7 +213,7 @@ def render(binary, analyser, work, mode, asset, seconds, verbose):
     else:
         facts["pcm"] = {"fatal": "no PCM rendered"}
     if verbose:
-        print(json.dumps({mode: facts}, indent=2))
+        print(json.dumps({case: facts}, indent=2))
     return facts
 
 
@@ -217,7 +234,14 @@ def judge(results):
     add("context created at the engine's mixer rate with the attribute list accepted",
         context.get("frequency") == MIXER_RATE and context.get("attributes_accepted") == 1,
         f"requested={context.get('requested_frequency')} effective={context.get('frequency')} "
-        f"refresh={context.get('refresh')} attributes_accepted={context.get('attributes_accepted')}")
+        f"refresh={context.get('refresh')} "
+        f"attributes_accepted={context.get('attributes_accepted')}")
+
+    stall = results.get("stall", {}).get("counters", {})
+    add("stall: the injected service-thread stall really happened",
+        stall.get("service_pass_gap_max_us", 0) >= STALL_FOR_MS * 1000,
+        f"injected={STALL_FOR_MS} ms "
+        f"service_pass_gap_max_us={stall.get('service_pass_gap_max_us')}")
 
     for mode, facts in results.items():
         c = facts.get("counters", {})
@@ -229,6 +253,7 @@ def judge(results):
             f"stopped_with_data={c.get('stream_stopped_with_data')} "
             f"queued_min={c.get('stream_queued_min')} "
             f"service_gap_max_us={c.get('stream_service_gap_max_us')} "
+            f"pass_gap_max_us={c.get('service_pass_gap_max_us')} "
             f"sample_restarts_while_playing={c.get('sample_restarts_while_playing')} "
             f"buffer_data_calls={c.get('buffer_data_calls')} "
             f"mismatches={c.get('buffer_data_mismatches')} al_errors={c.get('al_errors')}")
@@ -271,10 +296,11 @@ def main():
         binary = build(probe, shim_dir, work, args.verbose)
         if binary is None:
             return 2
-        for mode, name, rate, channels, seconds in RENDERS:
+        for case, mode, name, rate, channels, seconds, stall in RENDERS:
             asset = work / name
             write_tone(asset, rate, channels, seconds)
-            results[mode] = render(binary, analyser, work, mode, asset, seconds, args.verbose)
+            results[case] = render(binary, analyser, work, case, mode, asset, seconds, stall,
+                                   args.verbose)
     finally:
         if args.keep:
             print(f"work directory kept: {work}")

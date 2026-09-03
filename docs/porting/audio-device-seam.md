@@ -188,6 +188,53 @@ Windows, builds `core_openalaudiodevice`, checks declared-vs-defined `AIL_*` sym
 `scripts/ci/openal-standalone/` is deleted. jammy's CMake 3.22 is too old for the root
 `CMakeLists.txt` (needs 3.25), so the job pip-installs CMake 4.1.2.
 
+Two shim-level harnesses run in the same job, both built with `clang++-14` straight from the shim
+sources against the system `libopenal` and the fetched `<minimp3.h>`, both on OpenAL Soft's
+non-device backends so no audio hardware is needed:
+
+- `scripts/native-audio-callback-test.py` (`tests/openal_callback_thread_test.cpp`, `null`
+  backend): end-of-sample callbacks reach the engine on the `AIL_*` calling thread, inside one of
+  its calls (sound-effects-chain.md §4.1; `ci-baselines/audio-callback-soak.json`).
+- `scripts/native-audio-render-test.py` (`tests/openal_render_test.cpp`, `wave` backend, Wave 13):
+  synthesises 440 Hz tones, plays them through `AIL_open_stream`, `AIL_start_sample` and the
+  EOS-callback loop restart, and judges the rendered PCM with `scripts/audio-pcm-discontinuity.py`
+  (zero adjacent-sample jumps above the tone's own slope, zero interior gaps for stream/one-shot)
+  together with the shim's `OPENAL_AUDIO_DIAG` counters (`stream_queue_emptied`,
+  `stream_stopped_with_data`, `*_restarts_while_playing`, `buffer_data_mismatches`, `al_errors`
+  all 0) and the context readback (`ALC_FREQUENCY` 44 100, attribute list accepted). The `wave`
+  backend writes the mix to a file, so this is synthetic evidence of the data path only: it cannot
+  underrun like a real-time device (`ci-baselines/audio-render-discontinuity.json`). Its `stall`
+  case sets `OPENAL_AUDIO_DIAG_STALL=1000:1200` (service thread sleeps 1.2 s once, at t=1 s) to
+  replay the scheduling stall the live game measured: red on the 4-buffer queue (queue drained,
+  forced restart, 534 ms gap in the PCM), green on the 8-buffer queue with the same input.
+
+### Context creation and diagnostics (Wave 13)
+
+`AIL_startup` requests `ALC_FREQUENCY = 44100` (`Library::MIXER_RATE`, what the engine's
+`AIL_quick_startup` asks Miles for) and falls back to the attribute-less context if the
+implementation rejects the list, then reads back `ALC_FREQUENCY`/`ALC_REFRESH` into
+`Library::contextFrequency/contextRefresh`. `ALC_REFRESH` is not requested: OpenAL Soft honours it
+by shrinking the device period, which only helps a real-time backend underrun. Setting
+`OPENAL_AUDIO_DIAG=stderr` (or a file path) turns on the shim's counters — implementation and
+effective context at startup, stream starvation/forced-restart/queue-depth/service-gap, one-shot and
+3D restart-while-playing, `alBufferData` declared-vs-decoded checks, gain/position write counts,
+library-lock hold and wait maxima on both threads, `alGetError` after each service pass — reported
+every 10 s and at shutdown as one `counters` line. Off, the diagnostics cost one `bool` load per
+call site. `OPENAL_AUDIO_DIAG_STALL=<at_ms>:<for_ms>` (only read when diagnostics are on) makes
+the service thread sleep once, for fault injection. Nothing here is reachable from the Windows build.
+
+### Stream queue depth and service-thread scheduling (Wave 13)
+
+`StreamVoice::BUFFER_COUNT` is 8 buffers of up to 8192 frames (1.49 s at 44.1 kHz; it was 4,
+0.74 s). The music/stream refill runs only on the shim's 10 ms service poll; on Linux under lavapipe
+the service thread was measured not running for 1.13–1.16 s (`service_pass_gap_max_us`), which
+drained the 4-buffer queue, left the source `AL_STOPPED` with data queued and forced a restart — an
+audible gap. Eight buffers rode the same stall out with one buffer to spare
+(`stream_queued_min=1`). The service thread also asks, best effort, for a higher scheduling class
+(`pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE)` on macOS, `SCHED_RR` at minimum
+priority elsewhere); the result is logged (`priority raise accepted|refused`) and never fatal. Decode
+stays under the library lock: measured hold maxima are ~4 ms, two orders below the queue.
+
 ## 6a. The native build links it, and every `AIL_*` the engine references resolves
 
 `scripts/native-build.py` — the harness that compiles the engine's libraries with clang and runs a
