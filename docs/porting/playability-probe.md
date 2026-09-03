@@ -144,8 +144,9 @@ wrapper script are session artefacts, not committed.
 
 Consequently: `AL_PLAYING` via function evaluation is **UNMEASURED** (probe defect), while the
 shim's own started-voice mirror is measured; the ≥20 resumed minutes and the paused stretch are
-**UNMEASURED** because the game crashed at 16.2 minutes; the three quit paths are **UNMEASURED**
-because the stop rule for a real game defect applied first. Human audibility is UNMEASURED.
+**UNMEASURED** because the game crashed at 16.2 minutes; the three quit paths were measured
+afterwards as separate fresh, debugger-free launches (all exit 0, no crash report;
+`memory-shutdown-order.md` "What is measured where"). Human audibility is UNMEASURED.
 
 Commands (run 2; the wrapper lives outside the repository):
 
@@ -354,7 +355,8 @@ but nothing proves the exit path finished flushing anything either.)
 `ObjectPoolClass::Allocate_Object_Memory()` skipped `sizeof(uint32)`, not `sizeof(uint32 *)`, past the
 block's next-block pointer, so on LP64 the first object of every block overwrote the top half of it —
 which is why the fault address has a zero low half. Reproduced and fixed on Linux x86-64; the three
-Mac quit paths remain **UNMEASURED**.
+Mac quit paths were measured in wave 11 on the fixed build: fresh launches, real input, no
+debugger, all exit 0 with no `.ips` written (`memory-shutdown-order.md`).
 
 ## 8. What a player notices that the subsystem probes could not see
 
@@ -400,22 +402,28 @@ are dequeued at all in that state, plus a repro attempt (long uptime + focus cyc
 
 Ranked by the evidence needed to close native Mac playability, then cost.
 
-1. **Fix the measurement deadlock, without changing game behaviour.** `alGetSourcei` from an LLDB
+1. **Audio completion-callback SIGSEGV (real port defect, not fixed here).** `MilesAudioManager::
+   initFilters3D` dereferences a null `getAudioEventInfo()` (fault `0xd8` = `m_lowPassFreq`) when
+   `startNextLoop` restarts a looping 3D sound from the OpenAL service thread, 16.2 resumed minutes
+   into a running skirmish (§1.3 run 2, `sound-effects-chain.md` §6 item 1). Wave 12's first slice.
+2. **Fix the measurement deadlock, without changing game behaviour.** `alGetSourcei` from an LLDB
    expression wedged the stopped process twice (§1.3). Until the probe reads OpenAL state without
-   taking its source mutex, it cannot safely prove `AL_PLAYING` or complete a soak.
-2. **Sound-effect playback and audibility.** Pool allocation is now proven on the M1 Pro (4 2D,
-   25 3D; `sound-effects-chain.md` §7). `AL_PLAYING` is unmeasured because of item 1, and no human
-   listened. Unit acknowledgements, weapon fire, speech and EVA therefore remain open.
-3. **Three clean exits.** Main Menu → Exit, running skirmish → Exit and running campaign → Exit have
-   no Apple Silicon exit status or hang/SIGSEGV result (`memory-shutdown-order.md`). Wave 11 stopped
-   before them under the explicit new-defect rule.
-4. **Complete renderer lifetime measurement.** Wave 11 has 13.0 resumed minutes of element counts,
-   RSS and render/logic FPS, but not the required ≥20 minutes plus paused stretch; no slope verdict is
-   honest (`renderer-resource-lifetime.md` §5.5).
+   taking its source mutex, it cannot safely prove `AL_PLAYING`.
+3. **Sound-effect playback and audibility.** Pool allocation is proven on the M1 Pro (4 2D, 25 3D;
+   `sound-effects-chain.md` §7) and the shim's started-voice mirror advances; `AL_PLAYING` via the
+   API is unmeasured because of item 2, and no human listened. Unit acknowledgements, weapon fire,
+   speech and EVA therefore remain open.
+4. **Complete renderer lifetime measurement.** Wave 11 has 16.2 resumed minutes of element counts,
+   RSS and render/logic FPS, but not the required ≥20 minutes plus paused stretch (item 1 crashed
+   first); no slope verdict is honest (`renderer-resource-lifetime.md` §5.5).
 5. **The separate input wedge candidate** (§8.1) still lacks a mechanism or fresh reproduction.
-6. **Logic cadence.** Current `main` measured 29.70 FPS in the partial run, contradicting the old
-   28.38/5 % claim; a completed soak is needed to close the remaining 1.0 % difference.
+6. **Logic cadence.** Current `main` measured 29.85 FPS over 974.5 resumed seconds, contradicting
+   the old 28.38/5 % claim; a completed soak is needed to close the remaining 0.5 % difference.
 7. **Mission briefing/load-screen video** remains unmeasured (§5). The intro movie works.
+
+Closed in wave 11 on the M1 Pro: the three clean-exit paths (Main Menu → Exit, quit from a running
+skirmish, quit from a running campaign mission), each exit 0 with no crash report and no debugger
+(`memory-shutdown-order.md`).
 
 Closed by later slices and current remeasurement: textured mission viewport, save/load, combat,
 resource destruction on the synthetic/Linux gates, sound-effect pool creation, and the skirmish
