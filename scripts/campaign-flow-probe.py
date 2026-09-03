@@ -551,6 +551,8 @@ class UpdateSampler(gdb.Breakpoint if gdb else object):
             PROBE.first_update_frame = PROBE.logic_frame
         PROBE.sample()
         options = PROBE.options
+        if PROBE.stop_reason is not None:
+            return True
         if PROBE.updates >= options["frames"]:
             PROBE.stop_reason = "frame budget reached"
             return True
@@ -601,6 +603,11 @@ class NewMap(gdb.Breakpoint if gdb else object):
             "game_mode": game_mode_name(),
         }
         PROBE.inventory = script_inventory()
+        wanted = PROBE.options["map"].rsplit("\\", 1)[-1].lower()
+        if wanted not in PROBE.map_loaded["map_name"].lower():
+            PROBE.stop_reason = (
+                "wrong map loaded: %s (asked for %s); a release binary ignores -file"
+                % (PROBE.map_loaded["map_name"], PROBE.options["map"]))
         return False
 
 
@@ -725,7 +732,7 @@ def gdb_main():
         alive = inferior.is_valid() and any(t.is_valid() for t in inferior.threads())
         if not alive:
             break
-        if PROBE.stop_reason == "frame budget reached":
+        if PROBE.stop_reason is not None:
             break
         if options["force_end"] != "none" and PROBE.forced_end is None:
             force_end(options["force_end"])
@@ -934,7 +941,7 @@ def launcher_main(argv):
         with open(args.summary, "w") as handle:
             summarize(result, handle)
     sys.stdout.write("\njson: %s\n" % json_path)
-    return 0
+    return 3 if str(result["stop_reason"]).startswith("wrong map") else 0
 
 
 if __name__ == "__main__":
