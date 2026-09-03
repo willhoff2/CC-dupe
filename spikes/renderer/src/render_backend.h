@@ -182,6 +182,26 @@ struct ResourceStats {
 	// Nothing can wait for that draw, so unless the ring grows the new bytes overwrite
 	// its geometry before submission (docs/porting/mission-frame-corruption.md).
 	uint32_t ring_overruns = 0;
+	// Resource lifetime (docs/porting/renderer-resource-lifetime.md). `live_*` is what
+	// the backend owns right now: created, not yet destroyed. In a run that only ever
+	// re-creates the same working set -- a text string rebuilt every frame -- the live
+	// counts are bounded; the created totals are not, and the difference between the
+	// two is the leak this figure exists to make visible. `retired_pending` are
+	// resources the caller has destroyed that wait for the frame that may still read
+	// them to finish on the GPU; they are freed at the next Begin_Scene.
+	uint32_t live_textures = 0;
+	uint32_t live_surfaces = 0;
+	uint32_t live_vertex_buffers = 0;
+	uint32_t live_index_buffers = 0;
+	uint64_t textures_created = 0;
+	uint64_t textures_destroyed = 0;
+	uint64_t surfaces_created = 0;
+	uint64_t surfaces_destroyed = 0;
+	uint64_t vertex_buffers_created = 0;
+	uint64_t vertex_buffers_destroyed = 0;
+	uint64_t index_buffers_created = 0;
+	uint64_t index_buffers_destroyed = 0;
+	uint32_t retired_pending = 0;
 };
 
 // Per-draw resource accounting (docs/porting/draws-per-frame.md). A draw costs a
@@ -363,6 +383,21 @@ public:
 	virtual bool Unlock_Vertex_Buffer(VertexBufferHandle* vb) = 0;
 
 	virtual ResourceStats Get_Resource_Stats() const = 0;
+
+	// --- resource lifetime: IUnknown::Release reaching zero ---------------------
+	// D3D8 frees a texture, a system-memory surface or a buffer when the last
+	// reference to it is released, and the D3D8-shaped seam calls these at that
+	// moment. A level surface (Get_Surface_Level) has no lifetime of its own: it is
+	// owned by its texture and goes with it, exactly as IDirect3DTexture8 owns the
+	// surfaces GetSurfaceLevel hands out. Destroying a resource the current frame has
+	// already drawn with is legal, as it is in D3D8: the backend defers the free until
+	// that frame has finished on the GPU. Bound state naming the resource is cleared.
+	virtual void Destroy_Texture(TextureHandle* texture) = 0;
+	// Create_Image_Surface surfaces only; a level surface is not the caller's to
+	// destroy and the call is a no-op.
+	virtual void Destroy_Surface(SurfaceHandle* surface) = 0;
+	virtual void Destroy_Vertex_Buffer(VertexBufferHandle* vb) = 0;
+	virtual void Destroy_Index_Buffer(IndexBufferHandle* ib) = 0;
 
 	// --- render targets and surfaces: the SetRenderTarget/CopyRects group ------
 	// D3D8's own shape, which the engine relies on: DX8Wrapper::Set_Render_Target
