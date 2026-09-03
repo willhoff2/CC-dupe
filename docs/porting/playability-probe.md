@@ -85,7 +85,7 @@ per-resource destroy, so `Release()` at zero freed the wrapper and nothing else)
 notes the counts above may be byte counts of the vectors (8× the element count) and are owed a re-read
 on the Mac.
 
-### 1.3 Wave 11 Apple Silicon re-measurement: two runs, one probe defect, one game crash
+### 1.3 Wave 11 Apple Silicon re-measurement: two runs, one probe defect, one game crash — crash FIXED and RE-MEASURED in Wave 12 (§1.3.1)
 
 **Mac / live / real input / engine state, 2026-09-03, `main` `66f7183e5`, M1 Pro, MoltenVK.** A
 fresh arm64 strict-link build (980/980 objects, 0 unresolved, strict link exit 0) entered Alpine
@@ -142,13 +142,13 @@ thread's list edits. Whether retail Miles delivered EOS callbacks on its own thr
 fix. Per the slice rule the defect is documented, not fixed, here; the `.ips`, `soak-run.json` and
 wrapper script are session artefacts, not committed. (Fixed since, in the shim only:
 `sound-effects-chain.md` §4.1 — completions are queued and delivered on the `AIL_*` calling thread;
-Linux 22-minute soak green, the Mac re-run is UNMEASURED and owed to the Mac slice.)
+Linux 22-minute soak green, the Mac re-run is §1.3.1.)
 
-Consequently: `AL_PLAYING` via function evaluation is **UNMEASURED** (probe defect), while the
-shim's own started-voice mirror is measured; the ≥20 resumed minutes and the paused stretch are
-**UNMEASURED** because the game crashed at 16.2 minutes; the three quit paths were measured
-afterwards as separate fresh, debugger-free launches (all exit 0, no crash report;
-`memory-shutdown-order.md` "What is measured where"). Human audibility is UNMEASURED.
+Consequently (Wave 11): `AL_PLAYING` via function evaluation is **UNMEASURED** (probe defect), while
+the shim's own started-voice mirror is measured; the ≥20 resumed minutes and the paused stretch
+were **UNMEASURED** because the game crashed at 16.2 minutes (both measured in §1.3.1); the three
+quit paths were measured afterwards as separate fresh, debugger-free launches (all exit 0, no
+crash report; `memory-shutdown-order.md` "What is measured where").
 
 Commands (run 2; the wrapper lives outside the repository):
 
@@ -165,6 +165,57 @@ PYTHONPATH="$(lldb -P)" arch -arm64 /Applications/Xcode.app/Contents/Developer/u
   run --minutes 24 --interval 60
 ls ~/Library/Logs/DiagnosticReports | wc -l    # 40 before, 41 after: zh-2026-09-03-020314.ips
 ```
+
+#### 1.3.1 Wave 12: the fixed binary, ~29 running minutes + 265 s paused, no crash, exit 0
+
+**Mac / live / real input / engine state, 2026-09-03, `main` `c6fd1bd7c` (= #153, verified in the
+local history before building), M1 Pro, MoltenVK 1.4.2.** Build: `scripts/native-build.py --level
+1 --level 2 --level 3 --level 4 --with-shims --strict-link --build-dir build/native-macos-arm64-w12`
+— 981/981 objects, 0 undefined, strict link exit 0, Mach-O arm64. Launch `arch -arm64 ./zh -win`
+from a directory holding the retail data; real OS clicks SKIRMISH → PLAY GAME (Alpine Assault,
+USA vs. one Easy `AmericaSuperWeaponGeneral` AI). Machine-readable record:
+`ci-baselines/audio-callback-soak-macos-arm64.json`.
+
+- **Duration.** Mission from about 18:40:00 to 19:13:40 UTC; one Escape pause 18:50:16–18:54:41
+  (**265 s**, game clock frozen at 00:08:20–00:08:22); **~1 755 s running**, in-game clock
+  00:23:16 at quit. Both exceed the ≥20 running minutes and ≥3 paused minutes required.
+- **Activity.** AI 3 → 35 objects, 9 units built / 5 lost, 10 buildings; human 3 units / 1 lost,
+  6 buildings / 2 lost (both sides lost things: real combat, not a build-only run). Started 3D
+  voices 7–17 of 25 while running, 0 while paused; music stream `framesPlayed` 672 768 →
+  7 759 872 and `playing=0` during the pause.
+- **Probe.** A session-only LLDB script (run 2's memory-only reads, plus breakpoints on
+  `setSampleCompleted`, `set3DSampleCompleted`, `setStreamCompleted` with the hitting thread
+  classified in Python; no OpenAL/`AIL_*` function evaluation; the first 25 stacks per callback
+  sampled), samples every 300 s. Six mission samples 18:40:26–19:06:28: logic frame 763 → 31 562,
+  `owned_textures_` 332 → 469, `owned_surfaces_` 427 → 573 (elements, `(finish - start) /
+  sizeof(void*)`), `owned_vbs_`/`owned_ibs_` 94/83, RSS 41–100 MB with no trend; render ring
+  29.5–30.5 when the probe was not stopping the process (13–50 excursions where it was); logic rate
+  between unpaused samples net of the probe's stop time **25.6 / 25.0 / 24.1 FPS** — lower than
+  run 2's 29.85 because every EOS callback (20–45 per second) is a breakpoint stop; that
+  attribution is INFERRED, the debugger-free number is run 2's. Table in
+  `renderer-resource-lifetime.md` §5.6.
+- **Callbacks.** 20 220 in the probed mission window (48 `setSampleCompleted`, 20 171
+  `set3DSampleCompleted`, 1 `setStreamCompleted`); **0 off the main thread**; all 78 sampled
+  stacks were `setXSampleCompleted ← OpenALAudio::deliverCompletions ← ApiCall::~ApiCall ←
+  AIL_set_3D_orientation` (from `setDeviceListenerPosition`) or `← AIL_stream_loop_count` (from
+  `hasMusicTrackCompleted`) on the engine thread. `serviceLoop` never appeared in a callback stack.
+  The Wave 11 crash mechanism is therefore **FIXED and RE-MEASURED** on the machine that found it.
+- **Crash.** None. `ls ~/Library/Logs/DiagnosticReports | wc -l` 37 before, 37 after; `diff` of
+  the two listings empty.
+- **Quit path (d).** From the running skirmish, by real input: Escape → EXIT GAME → YES → score
+  screen EXIT → MAIN MENU → EXIT GAME, with plain `lldb -p` attached only to observe:
+  `Process 62246 exited with status = 0`; PID gone; no new report.
+- **HUMAN AUDIBILITY, Mac, live.** The project's owner listened at the machine during this run:
+  main-menu music **audible**, skirmish ambient SFX (birds) **audible**, and a **constant
+  crackle/pop** under both. That is a new PORT DEFECT, documented and ranked with candidate
+  mechanisms (all INFERRED) in `sound-effects-chain.md` §6 item 0 and not fixed here. Recorded
+  output stays UNMEASURED: no `ffmpeg`/loopback device; a ScreenCaptureKit system capture heard a
+  system sound but the game as −120 dBFS silence. Output device (standalone CoreAudio query):
+  `MacBook Pro Speakers`, 44 100 Hz, 2 ch, 512-frame HAL buffer.
+
+UNMEASURED in this run: a debugger-free logic FPS on the fixed binary (§2's method, owed), the
+≥2 h frame-time decay, recorded audio output, and the other two quit paths on this exact binary
+(measured on `66f7183e5` above; the shutdown code is unchanged by #153).
 
 ## 2. Is it fast enough? Borderline, and the simulation silently runs ~5 % slow
 

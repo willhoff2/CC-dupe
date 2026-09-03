@@ -1,0 +1,86 @@
+{
+  "what": "Apple Silicon (M1 Pro) real-input skirmish soak of the OpenAL shim's queued end-of-sample callback delivery on the fixed shim (#153), mirroring audio-callback-soak.json. A session-only LLDB probe (the #149 method: memory reads of the shim mirror and the Vulkan owned_* vectors, breakpoints on the three engine EOS callbacks with per-hit thread classification in Python, NO OpenAL/AIL_* function evaluation from the debugger) attached to the strict-link arm64 binary from scripts/native-build.py. Sound effects and music on; OpenAL Soft CoreAudio backend; MacBook Pro Speakers.",
+  "platform": "macOS 26.x arm64 (Apple M1 Pro), Apple clang 21.0.0, MoltenVK 1.4.2, OpenAL Soft CoreAudio backend",
+  "shim_rev_under_test": "main c6fd1bd7ccc39217fc8bbd4c874c3f1b4ab3e043 (#153)",
+  "binary": "scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims --strict-link --build-dir build/native-macos-arm64-w12: 981/981 objects, 0 undefined, strict link exit 0, Mach-O 64-bit arm64",
+  "date_utc": "2026-09-03",
+  "input": "real OS input (mouse clicks and Escape key delivered by the OS, no synthetic engine events): main menu -> SKIRMISH -> PLAY GAME (Alpine Assault, USA vs one Easy AI, AmericaSuperWeaponGeneral); pause/resume by Escape",
+  "mission_wall_seconds_running_approx": 1755,
+  "mission_wall_seconds_paused": 265,
+  "mission_in_game_clock_at_quit": "00:23:16 (logic time; the in-game clock advances per logic frame)",
+  "mission_utc": "about 18:40:00 (first mission sample 18:40:26 at logic frame 763) to 19:13:40 (Escape -> EXIT GAME)",
+  "pause_utc": "18:50:16 to 18:54:41",
+  "probed_window_utc": "18:40:26 to 19:06:28 (two attach windows: soak-a 30 min from 18:29:55 incl. menu, soak-b 10 min from 19:01:09)",
+  "sample_interval_seconds": 300,
+  "owned_vector_unit": "elements: (finish - start) / sizeof(void*) over each std::vector's own begin/end words",
+  "samples": [
+    {"utc": "18:40:26", "frame": 763, "paused": 0, "current_fps": 14.19, "average_fps": 24.76, "fps_ring_min_max": [4.11, 30.40], "rss_bytes": 83165184, "owned_textures": 332, "owned_surfaces": 427, "owned_vbs": 92, "owned_ibs": 80, "started_3d_voices": 7, "num_3d_samples": 25, "started_2d_samples": 0, "num_2d_samples": 4, "objects_3d": 26, "stream_frames_played": 672768, "stream_playing": 1, "stop_cost_s": 17.65, "note": "mission just loaded"},
+    {"utc": "18:45:45", "frame": 8552, "paused": 0, "current_fps": 32.38, "average_fps": 29.22, "fps_ring_min_max": [18.43, 46.07], "rss_bytes": 85000192, "owned_textures": 427, "owned_surfaces": 523, "owned_vbs": 93, "owned_ibs": 81, "started_3d_voices": 13, "num_3d_samples": 25, "started_2d_samples": 0, "num_2d_samples": 4, "objects_3d": 26, "stream_frames_played": 3068928, "stream_playing": 1, "stop_cost_s": 14.12},
+    {"utc": "18:50:59", "frame": 15022, "paused": 1, "current_fps": 29.88, "average_fps": 30.00, "fps_ring_min_max": [29.63, 30.40], "rss_bytes": 78020608, "owned_textures": 447, "owned_surfaces": 559, "owned_vbs": 94, "owned_ibs": 83, "started_3d_voices": 0, "num_3d_samples": 25, "started_2d_samples": 0, "num_2d_samples": 4, "objects_3d": 26, "stream_frames_played": 2875392, "stream_playing": 0, "stop_cost_s": 13.77, "note": "inside the paused stretch: logic frame frozen, render ring still 30, all voices stopped"},
+    {"utc": "18:56:14", "frame": 17289, "paused": 0, "current_fps": 34.77, "average_fps": 27.69, "fps_ring_min_max": [13.49, 46.88], "rss_bytes": 89571328, "owned_textures": 443, "owned_surfaces": 549, "owned_vbs": 94, "owned_ibs": 83, "started_3d_voices": 17, "num_3d_samples": 25, "started_2d_samples": 0, "num_2d_samples": 4, "objects_3d": 26, "stream_frames_played": 6598656, "stream_playing": 1, "stop_cost_s": 12.96},
+    {"utc": "19:01:09", "frame": 24196, "paused": 0, "current_fps": 29.99, "average_fps": 30.00, "fps_ring_min_max": [29.50, 30.51], "rss_bytes": 41435136, "owned_textures": 457, "owned_surfaces": 561, "owned_vbs": 94, "owned_ibs": 83, "started_3d_voices": 9, "num_3d_samples": 25, "started_2d_samples": 0, "num_2d_samples": 4, "objects_3d": 26, "stream_frames_played": 6331392, "stream_playing": 1, "stop_cost_s": 18.58},
+    {"utc": "19:06:28", "frame": 31562, "paused": 0, "current_fps": 30.02, "average_fps": 28.39, "fps_ring_min_max": [13.39, 49.64], "rss_bytes": 100171776, "owned_textures": 469, "owned_surfaces": 573, "owned_vbs": 94, "owned_ibs": 83, "started_3d_voices": 10, "num_3d_samples": 25, "started_2d_samples": 0, "num_2d_samples": 4, "objects_3d": 26, "stream_frames_played": 7759872, "stream_playing": 1, "stop_cost_s": 13.70}
+  ],
+  "logic_fps_between_unpaused_samples_excluding_probe_stop": [25.61, 25.00, 24.11],
+  "logic_fps_note": "Under this probe every EOS callback is a breakpoint stop (about 20-45 per second), which costs logic frames; Wave 11 measured 29.85 logic FPS on this Mac with no breakpoints. The render ring (engine fpsHistory) sat at 29.5-30.5 in quiet intervals and shows 13-49 excursions where the probe stopped and resumed the process.",
+  "ai_state_last_sample": {"ai_objects": 35, "ai_units_built": 9, "ai_units_lost": 5, "ai_buildings_built": 10, "human_units_built": 3, "human_units_lost": 1, "human_buildings_built": 6, "human_buildings_lost": 2},
+  "exited_before_deadline": false,
+  "callbacks": {
+    "counting_method": "LLDB breakpoints on setSampleCompleted / set3DSampleCompleted / setStreamCompleted; thread id of each hit compared with the main thread in Python; first 25 stacks per callback sampled",
+    "mission_window_18_40_to_19_06": {
+      "setSampleCompleted": 48,
+      "set3DSampleCompleted": 20171,
+      "setStreamCompleted": 1,
+      "total": 20220,
+      "off_main_thread": 0
+    },
+    "attach_window_a_including_menu": {
+      "setSampleCompleted": 90,
+      "set3DSampleCompleted": 15352,
+      "setStreamCompleted": 3,
+      "total": 15445,
+      "off_main_thread": 0,
+      "stacks_sampled": 53,
+      "stacks_via_OpenALAudio_deliverCompletions": 53,
+      "stacks_via_elsewhere": 0
+    },
+    "attach_window_b": {
+      "setSampleCompleted": 0,
+      "set3DSampleCompleted": 6964,
+      "setStreamCompleted": 0,
+      "total": 6964,
+      "off_main_thread": 0,
+      "stacks_sampled": 25,
+      "stacks_via_OpenALAudio_deliverCompletions": 25,
+      "stacks_via_elsewhere": 0
+    },
+    "sampled_stack_shape": "setXSampleCompleted <- OpenALAudio::deliverCompletions <- OpenALAudio::ApiCall::~ApiCall <- AIL_* (AIL_set_3D_orientation from MilesAudioManager::setDeviceListenerPosition, AIL_stream_loop_count from MilesAudioManager::hasMusicTrackCompleted) on the main thread",
+    "engine_handlers": "not counted (a continuously active deliverCompletions / notifyOfAudioCompletion / startNextLoop breakpoint cost ~19 s per stop and dropped the game to ~6 FPS; only the three EOS callbacks were counted)"
+  },
+  "crash": {
+    "sigsegv": false,
+    "diagnostic_reports_before": 37,
+    "diagnostic_reports_after": 37
+  },
+  "quit_path": {
+    "route": "Escape -> EXIT GAME -> YES -> score screen EXIT -> skirmish menu MAIN MENU -> EXIT GAME, with plain lldb attached to observe the exit status (no expression evaluation)",
+    "exit_status": 0,
+    "new_diagnostic_reports": 0
+  },
+  "output_device": {
+    "tool": "standalone Swift AudioObjectGetPropertyData query outside the game",
+    "name": "MacBook Pro Speakers",
+    "nominal_sample_rate_hz": 44100,
+    "channels": 2,
+    "buffer_frame_size": 512,
+    "shim_open": "alcOpenDevice(nullptr) + alcCreateContext(device, nullptr): no frequency/channel/refresh attributes requested; effective OpenAL context format UNMEASURED (reading it needs alcGetIntegerv, which the probe must not call)"
+  },
+  "human_audibility": {
+    "label": "HUMAN AUDIBILITY, Mac, live",
+    "main_menu_music": "audible",
+    "skirmish_ambient_sfx_birds": "audible",
+    "defect": "constant crackle/pop across main menu (music only) and skirmish",
+    "recorded_output": "UNMEASURED: no ffmpeg/BlackHole/aggregate loopback on this Mac; a ScreenCaptureKit system-audio capture recorded a system sound at -26.7 dBFS peak but the game's output as digital silence (-120 dBFS in every 0.5 s window), so the capture route did not reach the game's CoreAudio client"
+  },
+  "verdict": "pass (callback thread affinity and >=20 min soak); defect: constant crackle, human-observed, mechanism INFERRED"
+}
