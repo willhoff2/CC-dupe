@@ -160,10 +160,13 @@ Native build: `CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --le
 
 The retail `Data\Cursors\*.ANI` are installed **loose** by the Zero Hour installer. They are **not
 in any of the 35 `.big` archives** (`zerohour104_gamedata_full.7z` holds only `.big` files; a direct
-parse of every `.big` directory found zero `.ani`/`.cur` entries). They are in
-`s3://cc-mac-game-data/zerohour104_loose_data.7z` (206,614 bytes, uploaded 2026-09-03), which
-extracts to `staged/GeneralsMD/Data/Cursors/` with **52** `.ani` files (and the same 52 names under
-`staged/Generals/Data/Cursors/`). None of them is committed.
+parse of every `.big` directory found zero `.ani`/`.cur` entries). `pack-gamedata.py --archives loose`
+packs the loose `Data/` tree into `s3://cc-mac-game-data/zerohour104_loose_data.7z` (206,614 bytes,
+SHA-256 pinned as `GAMEDATA_LOOSE_SHA256`; see
+[`replay-check-gamedata.md`](replay-check-gamedata.md#the-fifth-object-zerohour104_loose_data7z)),
+which extracts to `staged/GeneralsMD/Data/Cursors/` with **52** `.ani` files (and the same 52 names
+under `staged/Generals/Data/Cursors/`) — 52 files backing the 27 names below, because `SCCScroll` is
+eight of them and most shapes ship an `_S` variant. None of them is committed.
 
 The retail-set test in `scripts/native-win32-user32-test.py` was run against that directory on
 Linux x86-64 (`clang++-14`, `GENERALSMD_PATH=<staged>/GeneralsMD`): **429 checks, 0 failures**. It
@@ -231,7 +234,8 @@ folder copied from a Windows install is found — the loose bundle mixes cases (
 
 To re-run the retail row: `aws s3 cp s3://cc-mac-game-data/zerohour104_loose_data.7z .`,
 `7z x -ostaged zerohour104_loose_data.7z`, then
-`GENERALSMD_PATH=$PWD/staged/GeneralsMD python3 scripts/native-win32-user32-test.py`. Without the
+`GENERALSMD_PATH=$PWD/staged/GeneralsMD python3 scripts/native-win32-user32-test.py` (on the
+project's Mac, `~/devin-work/zh-data` is an install that already has `Data/Cursors`). Without the
 data the test says `SKIP: retail cursor set: no Data/Cursors directory …` and passes; it never
 fabricates a row.
 
