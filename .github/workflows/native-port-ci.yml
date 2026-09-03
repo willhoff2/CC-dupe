@@ -1489,10 +1489,13 @@ jobs:
 
       # End-of-sample callbacks must reach the engine on the thread that calls AIL_*, inside one of
       # its calls, never from the shim's service thread (sound-effects-chain.md §4.1). The harness
-      # runs on OpenAL Soft's null driver, so no audio device is needed.
+      # runs on OpenAL Soft's null driver, so no audio device is needed. <minimp3.h> comes from the
+      # copy the CMake configure above already fetched, so this job does not also need
+      # fetch-probe-deps.sh.
       - name: Check completion callbacks are delivered on the AIL_* calling thread
         env:
           CLANGXX: clang++-14
+          MINIMP3_INCLUDE_DIR: build/native/_deps/minimp3-src
         run: |
           set -o pipefail
           {
