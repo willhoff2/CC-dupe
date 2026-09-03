@@ -46,6 +46,10 @@ DRAW = re.compile(
 LOCK = re.compile(r"^(\d+) lock (vb|ib)=(\S+) discard region=(\d+)/(\d+) .* overrun=(\d)")
 CREATE = re.compile(r"^(\d+) create (texture|surface)=(\S+) (.*)$")
 TARGET = re.compile(r"^(\d+) render_target (.*)$")
+LOCKABLE = re.compile(r"lockable (\d+)x(\d+) mips=\d+ fmt=\d+ vk=(\d+) pitch0=(\d+)")
+VK_FORMAT = re.compile(r" vk=(\d+)")
+# Vulkan format enums the seam creates for D3DFMT_DXT1 / DXT2,3 / DXT4,5.
+BLOCK_COMPRESSED_VK = {133: ("BC1", 8), 135: ("BC2", 16), 137: ("BC3", 16)}
 
 
 class Frame:
@@ -161,18 +165,66 @@ def format_counter(counter, limit=4):
     return text
 
 
-def summarize_missing_textures(game_log, out):
-    """Count the engine's missing-texture fallbacks (magenta placeholder) from the game log."""
+def summarize_texture_formats(creates_by_frame, out):
+    """Texture creations by Vulkan format, and the block-compressed ones checked against block
+    pitch: for a compressed level `pitch0` is bytes per row of 4x4 blocks, ceil(w/4)*block_bytes.
+    A zero block-compressed count in a mission means every DXT DDS went somewhere else."""
+    by_format = collections.Counter()
+    bad_pitch = []
+    compressed = 0
+    for lines in creates_by_frame.values():
+        for line in lines:
+            if not line.startswith("texture="):
+                continue
+            vk = VK_FORMAT.search(line)
+            if not vk:
+                continue
+            by_format[int(vk.group(1))] += 1
+            match = LOCKABLE.search(line)
+            if match and int(match.group(3)) in BLOCK_COMPRESSED_VK:
+                compressed += 1
+                width, pitch = int(match.group(1)), int(match.group(4))
+                _name, block_bytes = BLOCK_COMPRESSED_VK[int(match.group(3))]
+                if pitch != ((width + 3) // 4) * block_bytes:
+                    bad_pitch.append(line)
+    out.write("\ntexture creations by Vulkan format (133/135/137 are BC1/BC2/BC3, 44 is "
+              "B8G8R8A8):\n")
+    for vk, count in sorted(by_format.items()):
+        label = BLOCK_COMPRESSED_VK.get(vk, ("", 0))[0]
+        out.write("  vk=%d%s: %d\n" % (vk, " (%s)" % label if label else "", count))
+    out.write("block-compressed textures created: %d; with a pitch0 that is not "
+              "ceil(w/4)*block_bytes: %d\n" % (compressed, len(bad_pitch)))
+    for line in bad_pitch[:12]:
+        out.write("  %s\n" % line)
+
+
+def summarize_game_log(game_log, out):
+    """Lines the engine and the seam write to stderr that the trace does not carry: missing-texture
+    fallbacks (magenta placeholder), D3DX format substitutions, and the backend's ledger of
+    refused D3D8 calls (first occurrence each; counts come from `macos-input-drive.py snapshot`)."""
     if game_log is None or not game_log.exists():
         return
     names = collections.Counter()
+    substitutions = collections.Counter()
+    ledger = []
     for line in game_log.read_text(errors="replace").splitlines():
         if line.startswith("missing-texture "):
             names[line.split()[1]] += 1
+        elif line.startswith("D3DX texture creation: this device rejected format "):
+            substitutions[line] += 1
+        elif line.startswith("ledger: "):
+            ledger.append(line)
     out.write("\nmissing-texture fallbacks (each is MISSING DATA or a loader defect, not renderer "
               "corruption): %d\n" % sum(names.values()))
     for name, count in names.most_common(12):
         out.write("  %d x %s\n" % (count, name))
+    out.write("\nD3DX format substitutions (a creation that succeeded at a format other than the "
+              "one asked for): %d\n" % sum(substitutions.values()))
+    for line, count in substitutions.most_common():
+        out.write("  %d x %s\n" % (count, line))
+    out.write("\nbackend ledger entries reached (first occurrence each): %d\n" % len(ledger))
+    for line in ledger:
+        out.write("  %s\n" % line)
 
 
 def summarize(path, out=sys.stdout, game_log=None):
@@ -227,7 +279,8 @@ def summarize(path, out=sys.stdout, game_log=None):
     for number, lines in creates_by_frame.items():
         for line in lines:
             out.write("  %d: %s\n" % (number, line))
-    summarize_missing_textures(game_log, out)
+    summarize_texture_formats(creates_by_frame, out)
+    summarize_game_log(game_log, out)
     return 0
 
 

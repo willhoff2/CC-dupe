@@ -62,9 +62,16 @@ here, and nothing in this file is.
 - **The engine's own path agrees (§4.2):** `DX8Wrapper::_Create_DX8_Texture(DXT1/3/5)` through
   the real `DX8Caps` returns the requested format with the block pitch on levels 0 and 5 and refuses
   the half-block lock; `DX8Caps::Support_DXTC()` is 1.
-- **Real game on the Mac (§5):** see that section for the BC creation count, missing-texture count,
-  the mission-frame classification, and the answer to "are the models still noise" — measured on
-  the M1 Pro, not inferred from lavapipe.
+- **Real game on the M1 Pro (§5.2, MoltenVK 1.4.2, `main` 6e182ac34):** 1025 block-compressed
+  textures created in USA-01 (BC1 533, BC3 492, BC2 0 — the data asks for none), every one at
+  block pitch, 0 D3DX substitutions, 1 missing texture (unchanged), the ledger holding only the
+  pre-existing `LightEnable(TRUE)`. **The models are not noise**: a human looked at six mission
+  frames and the shell — every structure, vehicle, infantry model and terrain decal is a
+  recognisable textured model; black inside the picture < 1 %, magenta 0, model-region
+  high-frequency content ≈ terrain's. The black structures playability-probe.md §8 recorded
+  pre-#141 are gone; the radar panel could not be seen (intro cinematic) and stays open (§6.1).
+  The negative control gives BC 0 but *no* substitution entry, because with caps saying no DXTC
+  the loader decodes before D3DX is asked — a doc prediction corrected in §5.2, not a defect.
 
 ## 1. The decision between the candidates
 
@@ -113,8 +120,10 @@ Three things were wrong with that at once, and they are fixed in this order of i
 
 ### 1.4 Reproducing the failure signature on Linux (SYNTHETIC-ONLY, lavapipe)
 
-The negative control forces the `main` shape of the world — caps refuse nothing the engine asks
-before creation, creation refuses the block format — through the engine's own `_Create_DX8_Texture`:
+The negative control forces the `main` shape of the world — creation refuses the block format
+while the harness, which asks `_Create_DX8_Texture` for DXTn directly without consulting caps,
+carries on as the game's loader did — through the engine's own `_Create_DX8_Texture` (in the real
+game the same switch also clears the caps, and the loader then decodes instead; §5.2):
 
 ```
 $ ZH_RENDER_NO_BLOCK_COMPRESSED=1 python3 scripts/native-render-backend-run.py --validation
@@ -350,17 +359,16 @@ sub-rect rewritten, a half-block sub-rect refused, a level read back byte-exact,
 and every block verified in the readback, the validation layer active and silent
 ```
 
-So MoltenVK samples BC1/2/3 and the block-pitch lock contract holds on it; the M1 Pro
-real-game measurement in §5 remains owed.
+So MoltenVK samples BC1/2/3 and the block-pitch lock contract holds on it; the same two checks
+on the real M1 Pro GPU (MoltenVK 1.4.2) are recorded at the top of §5.2.
 
 ## 5. Real-game evidence — macOS arm64, Apple M1 Pro, MoltenVK
 
-**Status at the time of this PR: NOT MEASURED ON THE BRANCH — MISSING DATA.** Two `will-mac` child
-sessions were started for exactly this measurement (`0b5ed184…`, `24bbe3a8…`); neither got past
-environment start-up (the repository pull hung for ~30 minutes twice and the first session was
-suspended for inactivity having run nothing). The blocker is reported. Everything below that is
-not labelled otherwise is what a human saw on the Mac running the *pre-slice* game, plus what the
-Linux reproduction predicts for the branch; none of it is a claim about the branch on MoltenVK.
+**Status: MEASURED on `main` 6e182ac34 (#141 and #143 in) + measurement-only instrumentation
+(branch SHA `6be741b01`), on the user's M1 Pro, 2026-09-03.** Three earlier `will-mac` child
+sessions (`0b5ed184…`, `24bbe3a8…`, `ad3b4257…`) never got a machine (one-machine pool held by
+another wave); the fourth (`1f025ee8…`) did, and §5.2 is its report. §5.1 is what a human saw on
+the *pre-#141* game and is kept as the before-picture.
 
 ### 5.1 What a human saw (macOS arm64, M1 Pro, MoltenVK; build SHA not stated, pre-slice behaviour; two screenshots)
 
@@ -385,42 +393,76 @@ This answers the question the slice was set — **the models were never noise in
 index, stride, transform or sampler state**: every geometric property in the frame is correct and
 the defect follows texture *format*, not mesh. It does so from a human reading two screenshots,
 not from a per-draw trace on the branch; the per-draw isolation the prompt asked for is therefore
-not needed for a *second* cause, but the measurement that the branch removes the first one is
-still owed.
+not needed for a *second* cause; §5.2 is the measurement that #141 removed the first one.
 
-### 5.2 What the branch must show when the outpost is available (owed, not claimed)
+### 5.2 Measured: `main` with #141 on the M1 Pro (real game, retail data, USA campaign mission 1)
 
-From `scripts/mission-frame-trace.py` on the branch, in the same mission:
+Provenance: macOS 26.6.1 (25G76), Apple M1 Pro, every command under `arch -arm64`
+(`proc_translated` 0 for the built binary and the game; the outpost's login shell itself is a
+Rosetta process, `uname -m` there says `x86_64`); Apple clang 21.0.0; MoltenVK **1.4.2**
+(`vulkaninfo`: `driverInfo 1.4.2`, `apiVersion 1.4.357`), loader/validation layer 1.4.357,
+layer loaded via `eval "$(arch -arm64 python3 scripts/ci/vulkan_manifests.py --require-layer
+--print-env)"`; `uptime` at start `load averages: 4.66 4.85 5.72` (not the swap-thrashed ~50
+state); retail data the existing `asv/run` directory, nothing fetched or committed. Strict build
+980/980 objects, 0 unresolved, arm64 Mach-O. Synthetic MoltenVK evidence on the same machine and
+SHA: `check-bc-textures.py` PASS (BC1/BC2/BC3 sampled, 9/9 cases block-exact, 3 level readbacks
+byte-exact, validation loaded and 0 messages, negative control fails for the right reason);
+`native-render-backend-run.py --validation`: `Support_DXTC() = 1`, DXT1/3/5 created as requested,
+block pitch, unaligned refused, 0 stages failed — the §4.1/§4.2 output, on a real M1 Pro GPU.
 
-| Figure | `main` (#137, measured) | branch, predicted | branch, measured |
+```sh
+VK_LOADER_DEBUG=info arch -arm64 python3 scripts/mission-frame-trace.py run \
+  --run-dir <run-dir> --out ~/devin-work/bc/run1                       # run1: default 45 s mission
+arch -arm64 python3 scripts/mission-frame-trace.py run ... --out run2 --mission-seconds 150
+arch -arm64 python3 scripts/mission-frame-trace.py summarize run1/trace.log
+```
+
+| Figure | `main` (#137, pre-#141, measured) | #141, predicted | #141 on M1 Pro, **measured** (run1 / run2) |
 |---|---|---|---|
-| `create texture` lines with `vk` in {133,135,137} | 0 | hundreds (every DXT DDS) | **not measured** |
-| `create texture` lines with `vk=44` | 3,851 | far fewer (TGA and 8888 DDS only) | **not measured** |
-| `pitch0` for BC creations vs width | — | `ceil(w/4)*8` (BC1) / `*16` (BC2/3) | **not measured** |
-| `missing-texture` lines in the mission | 1 | 1 (unchanged; unrelated to format) | **not measured** |
-| ledger: `D3DXCreateTexture(block-compressed format substituted)` | (did not exist) | 0 | **not measured** |
-| model/decal surfaces: black or 2-px striped | yes (human) | no (human) | **not looked at** |
-| negative control `ZH_RENDER_NO_BLOCK_COMPRESSED=1` | — | caps say no DXTC; engine software-decodes; substitution count 0, BC count 0 | **not measured** |
+| `create texture` with `vk` in {133,135,137} | 0 | hundreds | **1025 / 1029** — BC1 (133) 533/534, BC3 (137) 492/495, BC2 (135) **0** (the retail data asks for no DXT2/3) |
+| of which during shell + mission load (frame < 1440) | — | — | 1021 (532 + 489); BC creation timeline: 82 in frames 0–59, 908 in 1320–1379, 31 in 1380–1439, then 1 per traced bucket |
+| `create texture` with `vk=44` | 3,851 | far fewer | **1580 / 2942**: 615/566 in shell+load; 964/2375 in the mission — every mission one is `64x64 mips=1`, ~1.15 per frame, a per-frame 8888 scratch texture (see residual 4) |
+| other formats | — | — | `vk=4` 2, `vk=8` 2, `vk=37` 2 |
+| BC creations whose `pitch0` ≠ `ceil(w/4)*block_bytes` | — | 0 | **0 / 1025**; BC1 widths 16/32/64/128/256/1024 → pitch 32/64/128/256/512/2048, BC3 widths 16…256 → 64…1024 |
+| `missing-texture` lines | 1 | 1 | **1** (`trstrtholecvr.tga`, during the load; 0 in the mission) — MISSING DATA, unchanged |
+| D3DX format substitutions (`D3DX texture creation: this device rejected format …`) | every DXT DDS, uncounted | 0 | **0** |
+| backend ledger entries reached | (not emitted) | 0 BC-related | **1 kind, not BC**: `IDirect3DDevice8::LightEnable(TRUE)` (live count 607,092 / 1,932,870 via the snapshot's `render_ledger`) — the pre-existing UNIMPLEMENTED PATH in renderer-integration.md; no `D3DXCreateTexture(block-compressed format substituted)`, no `CopyRects(block-compressed surface)`, no `LockRect(compressed sub-rect)` |
+| mission PNGs (1600x1200; 25 % of each frame is the cinematic's black letterbox, excluded from "inside") | black structures | not black | run1 f2220: black inside 0.30 %, magenta 0.0000 %, 172,392 colours, model-region mean abs gradient 21.65 vs grass 19.02; f1980: 0.48 % / 0 / 189,073 / 11.46 vs rock 12.85; run2 f3900 (USA base): 0.71 % / 0 / 164,729 / 10.76 vs ground 8.00 — model regions carry the same high-frequency content as textured terrain (ratio 0.9–1.3), not noise (×5–10) and not flat fill (~0) |
+| structures solid black? (playability-probe.md §8, pre-#141: yes) | yes | no | **no — looked**: radar dish tower, Humvee, Crusader, barracks with USA emblem, Patriot battery, GLA motorbikes with riders, railroad-track decals, trees, canyon rock: all recognisable textured models, none black, none striped, none flat, none magenta |
+| model/decal surfaces 2-px striped? | yes | no | **no — looked** (frames 1440, 1800, 1980, 2220; run2 3000–3900; shell frame 900) |
+| radar panel black? (playability-probe.md §8, pre-#141: yes) | yes | no | **NOT MEASURED** — the HUD is hidden by the USA-01 intro cinematic for the whole 45 s and 150 s windows; Escape opens the quit menu rather than skipping it |
+| negative control `ZH_RENDER_NO_BLOCK_COMPRESSED=1` (20 s mission) | — | BC 0; substitutions > 0 | BC **0**, `vk=44` 1953 (≈ run1's 615 + 1021 BC now decoded), substitutions **0**, ledger unchanged (LightEnable only). The prediction of a substitution count was wrong for the *game*, see below |
+| per-draw isolation (`--per-draw`) | — | only if noise remains | not run: no draw is noise or black, nothing to isolate |
 
-When those numbers exist they replace this table; until then the branch's real-game claim is:
-none.
+**The negative-control prediction was wrong, and why.** `ZH_RENDER_NO_BLOCK_COMPRESSED` removes BC
+from the sampled-format mask (§2), so `DX8Caps::Support_DXTC()` is 0 and `textureloader.cpp`'s
+`Is_Format_Compressed` gate never asks for a DXT format: the loader software-decodes every DDS
+level to 8888 *before* D3DX is called, and there is nothing to substitute. That is the chosen,
+caps-recorded fallback the slice's rule 3 allows — the choice is visible in the caps, not in the
+ledger. It is **not** what pre-#141 `main` did: there the caps were truthful (`Support_DXTC() = 1`,
+§3.1), the loader asked for DXTn, creation failed on the missing block layout and D3DX substituted
+8888 silently. So the control proves "BC creations 0 when refused" (its purpose) and shows that
+the game has two distinct no-BC paths — caps-gated loader decode (recorded) and post-caps
+substitution (now counted) — of which only the second was ever a defect. The §3.1 table's
+"substitution count 0, BC count 0" line for this control is therefore correct; the §5.2 prediction
+above of a non-zero substitution count was not.
+
+Pixel statistics were computed by the child session's `frame-stats.py` over the traced PNGs
+(retail art, attached to the session, not committed). The PNGs a human looked at: run1 frames
+900 (shell map: textured tanks, Humvees, helicopter, palms, logo), 1440, 1800, 1980, 2220; run2
+frames 3000–3900.
 
 ## 6. Ranked residuals
 
 Ranked by what a player notices; classified.
 
-1. **Branch not yet measured in the real game on MoltenVK — MISSING DATA.** The synthetic
-   evidence is complete on lavapipe and on the macOS arm64 CI runner (§4.3); the real-game table
-   in §5.2 is empty because the `will-mac` outpost disconnected three times during this slice
-   (two child sessions, no command run). This PR was landed on that evidence deliberately, with
-   no claim about the branch's mission frame. **Named follow-up, to run the moment the outpost
-   stays connected:** on the M1 Pro, with the merged SHA, `scripts/mission-frame-trace.py` into
-   the USA campaign — (a) BC creation count (`vk=133/135/137` traces, must be non-zero), (b)
-   `missing-texture` count from `game.log`, (c) the exit ledger (both substitution lines must be
-   0), (d) the mission-frame PNG classified per pixel and per draw, (e) a human looking at it.
-   If (d)/(e) still show striped or black skins with (a) non-zero and (c) zero, the noise has a
-   second cause and is isolated with `ZH_RENDER_TRACE_PERDRAW=1`. Cost: one working `will-mac`
-   session (~1 h).
+1. **Radar panel on the M1 Pro — NOT MEASURED.** playability-probe.md §8 recorded the radar panel
+   black pre-#141; the §5.2 run never saw the HUD because USA-01's intro cinematic covers it for
+   longer than the 150 s window and Escape opens the quit menu. What it takes: a run with
+   `--mission-seconds` ≳ 300, the cinematic's real skip affordance, or a skirmish (no cinematic),
+   then classify the radar quadrant of the frame. Whether #141 alone fixes the radar is open;
+   the structures it predicted black are measured textured (§5.2), so if the radar is still black
+   it has a different cause. Cost: a few minutes on a connected `will-mac`.
 2. **`CopyRects` with a compressed endpoint is refused — UNIMPLEMENTED PATH.** No mission path
    is known to take it (the engine uploads compressed levels through `LockRect`); if the ledger on
    the Mac shows the entry, that is the next item. Cost: a block-granular `vkCmdCopyImage`, under a
@@ -438,6 +480,20 @@ Ranked by what a player notices; classified.
 Everything else in `docs/porting/playability-probe.md` §9 (sound, save/load, input wedge, texture
 leak, quit crash, logic speed) is unaffected by this slice and is not re-ranked here.
 
+
+Added by the M1 Pro measurement (§5.2):
+
+- **`IDirect3DDevice8::LightEnable(TRUE)` — UNIMPLEMENTED PATH, pre-existing, not BC.** The only
+  ledger kind reached in a real mission; 607k calls in 45 s. Already listed in
+  renderer-integration.md; recorded here because it is now the whole ledger.
+- **A `64x64 mips=1` 8888 texture is created every frame in the mission (~1.15/frame, 964 in
+  45 s, 2375 in 150 s) — observation, unclassified.** Not a BC figure; whoever creates it needs
+  its own creation-site trace (churn or leak). Cost: one traced run with the creator's call site
+  logged.
+- **BC2 (DXT2/3) has no real-game coverage — SYNTHETIC-ONLY.** The retail data never asks for
+  it in this mission; its block path is proven only by §4.
+- **`trstrtholecvr.tga` — MISSING DATA**, unchanged since #137, during the load.
+
 ## 7. Reproducing this
 
 ```sh
@@ -452,7 +508,8 @@ CLANGXX=clang++-14 python3 scripts/native-render-backend-run.py --validation
 
 # the real game (macOS, retail data; docs/porting/mission-frame-corruption.md §1)
 python3 scripts/mission-frame-trace.py run --run-dir <run-dir> --out <out>
-python3 scripts/mission-frame-trace.py summarize <out>/trace.log
+python3 scripts/mission-frame-trace.py summarize <out>/trace.log   # BC-by-format, pitch check, substitutions, ledger, missing-texture
+ZH_RENDER_NO_BLOCK_COMPRESSED=1 python3 scripts/mission-frame-trace.py run --run-dir <run-dir> --out <out>-nobc   # negative control
 grep -c 'create texture=.* vk=13[357] ' <out>/trace.log      # BC1/BC2/BC3 creations
 grep -c '^missing-texture' <out>/game.log
 ```
