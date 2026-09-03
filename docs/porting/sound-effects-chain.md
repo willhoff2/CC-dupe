@@ -31,6 +31,7 @@ with real SDL input (main menu → Skirmish → Start), player GLA, one AI.
 | Device-level evidence | During a real skirmish on Linux: `m_num2DSamples` 4, `m_num3DSamples` 25, `OpenALAudio::lib().objects` 26 (25 voices + listener), 5 2D and 234 3D `AIL_start_*` calls in 3.5 minutes, up to 1 sample and 7 object sources in `AL_PLAYING` at once, `AL_SAMPLE_OFFSET` advancing between samples on named events (`WorkerVoiceMove`, `CommandCenterGLASelect`, `IndustrialYardAmbientLoop`, …), 69 `alSourcePlay` calls seen by an `LD_PRELOAD` interposer, a 148 MB non-silent 32-bit-float stereo 44.1 kHz `.wav` from the `wave` backend. |
 | Heard | **No.** Nobody listened; the device was a file. |
 | Apple Silicon | **Engine state MEASURED, Wave 11** (pools, started voices, OpenAL device/context; §7) and a **PORT DEFECT MEASURED**: SIGSEGV in the completion callback after 16.2 min (§6 item 1). Audibility UNMEASURED. Music on the M1 Pro is measured and untouched (`playability-probe.md` §3). |
+| Third broken link (found by the M1 Pro crash) | The OpenAL shim delivered end-of-sample callbacks from its own service thread; the engine's handlers (`notifyOfAudioCompletion` → `startNextLoop` → `playSample3D`) edit `m_playingSounds`/`PlayingAudio`/`AudioEventRTS` with no lock, as they did against retail Miles. Fixed below the `AIL_*` surface (§4.1): the shim now queues completions and delivers them on the thread that calls `AIL_*`, as that thread's `AIL_*` calls return. Linux soak 22 min, 16 641 callbacks, 0 off the main thread (§6 item 1); Mac re-run UNMEASURED, owed to the Mac slice. |
 
 ## 1. The chain, as read from source
 
@@ -67,6 +68,8 @@ MilesAudioManager::update (per frame)
             AIL_start_3D_sample / AIL_start_sample              milesstub: alSourcePlay
     m_playing3DSounds / m_playingSounds  <- PlayingAudio bookkeeping
 OpenALAudio service thread (10 ms)     alGetSourcei(AL_SOURCE_STATE) == AL_STOPPED
+    -> Voice::completionPending = true                      (nothing called back from here; §4.1)
+main thread, next AIL_* call returning  OpenALAudio::deliverCompletions
     -> endOfSample callback -> set3DSampleCompleted(H3DSAMPLE)
     -> TheAudio->notifyOfAudioCompletion(handle, PAT_3DSample)
     -> findPlayingAudioFrom(handle) -> loop restart (startNextLoop) or release voice to the pool
@@ -264,6 +267,64 @@ The callback widening: `notifyOfAudioCompletion(uintptr_t, UnsignedInt)` in `Gam
 Not changed: `selectProvider`'s Dolby/DirectSound branch (`#ifdef _WIN32`), the music/stream path, the
 renderer, `milesstub`. No `AIL_*` entry point was added or altered.
 
+### 4.1 Completion callbacks: delivered on the API thread, not the service thread
+
+The crash in §6 item 1 is a threading contract the shim broke, not an engine bug, so the fix is in
+`Core/Libraries/Source/OpenALAudioDevice/` only (the shim does not compile on Windows; the engine and
+the Windows binary are untouched).
+
+**What retail Miles did — INFERRED, not proven from a vendor quote.** The Miles header this build is
+pinned to (`build/docker/_deps/miles-src/mss/mss.h`, the `OmniBlade` stub of the `mss32.dll` subset the
+engine imports) declares `AIL_register_EOS_callback` / `AIL_register_3D_EOS_callback` /
+`AIL_register_stream_callback` and the timer API (`HTIMER`, `AIL_stop_timer`,
+`AIL_get_timer_highest_delay`) but carries no documentation of the thread an EOS callback runs on, and
+the repo has no Miles 6 manual. What the *engine* proves: `rg 'AIL_serve|AIL_lock|AIL_unlock'` over
+`MilesAudioManager.cpp` (and all of `GeneralsMD/Code`) finds nothing — `MilesAudioManager::update()`
+pumps nothing, and `notifyOfAudioCompletion`/`startNextLoop`/`playSample3D` walk and rewrite
+`m_playingSounds`, `PlayingAudio` and `AudioEventRTS` with no synchronisation of any kind. That code
+shipped and ran for hours against retail Miles, so either Miles ran the EOS callbacks on the caller's
+thread inside its own `AIL_*` calls, or its background thread's callbacks happened to serialise with the
+main thread in a way this code never had to think about. Either way the engine was written to, and only
+works under, an effectively single-threaded contract: **completions are observed between the engine's
+own `AIL_*` calls, on the thread that makes them.** The shim now provides exactly that contract, which
+is safe regardless of which of the two Miles actually did — it is the stricter of the two.
+
+**The change.** `OpenALAudio::serviceLoop` (`OpenALDriver.cpp`) still polls `AL_SOURCE_STATE`
+and refills streams on its thread, but on a voice running dry it only sets `Voice::completionPending`.
+Every `AIL_*` entry point that touches a sample, 3D object or stream constructs an `ApiCall`; when the
+outermost `ApiCall` on the API thread (the thread that called `AIL_startup`) is destroyed,
+`deliverCompletions()` collects the pending `(callback, handle)` pairs under the library lock, clears the
+flags, and invokes the callbacks **with the lock released** (the handlers re-enter `AIL_*`:
+`startNextLoop` → `AIL_start_3D_sample`, and may release the handle they were told about). Nested
+`AIL_*` calls made from inside a callback do not drain again (`apiDepth`). Starting, resuming or ending
+a voice clears its pending flag, so a voice the engine reused before the drain never reports a stale
+completion. The comment that claimed "the engine's handlers take `AIL_lock` themselves" was false and is
+gone.
+
+**Red/green at the shim level** — `scripts/native-audio-callback-test.py` builds
+`Core/Libraries/Source/OpenALAudioDevice/tests/openal_callback_thread_test.cpp` against the shim,
+drives 2D/3D/stream voices to completion through the public `AIL_*` surface with synthetic WAVE data
+and records on which thread, and whether inside an `AIL_*` call, each callback arrived:
+
+| check | `--shim-rev e1f8de610` (before) | working tree (after) |
+|---|---|---|
+| callbacks while the API thread is idle (out of the library) | 4 (all loop callbacks; service thread) | 0 |
+| 2D / 3D / stream completion on the API thread, inside an `AIL_*` call | 0 / 0 / 0 of 1 each | 1 / 1 / 1 |
+| callback after the voice was retired (unregistered) | 1 delivered | 0 |
+| handler restarting its own 3D voice from the callback (3 restarts) | 4 callbacks, 0 on the API thread | 4 callbacks, 4 on the API thread, inside an `AIL_*` call |
+| verdict | defect observed | pass (5 consecutive runs) |
+
+**Live game, Linux, 22 minutes** — `scripts/linux-audio-soak-probe.py` attached with gdb to a
+lavapipe skirmish (China vs GLA AI, sound effects on, OpenAL Soft `wave`), main thread identified from
+the first `MilesAudioManager::update`, breakpoints on the three engine EOS callbacks and on
+`notifyOfAudioCompletion`/`startNextLoop` (`docs/porting/ci-baselines/audio-callback-soak.json`):
+1320 s wall, no exit; `setSampleCompleted` 9, `set3DSampleCompleted` 16 632, `setStreamCompleted` 0;
+all 16 641 callbacks entered from `OpenALAudio::deliverCompletions`, none from anywhere else, **0 off
+the main thread**; `notifyOfAudioCompletion` 16 640, `startNextLoop` (looping sound restarted) 16 631,
+both 0 off the main thread. Under gdb's breakpoint overhead the game ran ~8 fps (5:31 of game time in
+the 22 wall minutes), which is why the M1 Pro's 16.2-minute figure is not comparable. Apple Silicon:
+UNMEASURED, owed to the Mac slice.
+
 ## 5. Device-level evidence (Linux x86-64, OpenAL Soft `wave` backend — SYNTHETIC-ONLY for audibility)
 
 ### 5.1 Engine pools and provider (measured on the final build, every sample)
@@ -324,9 +385,10 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
 
 ## 6. What remains, ranked (evidence, then cost)
 
-1. **PORT DEFECT, measured on the M1 Pro: SIGSEGV in `MilesAudioManager::initFilters3D` on the
-   OpenAL service thread.** 16.2 resumed minutes into a real-input skirmish, the end-of-sample
-   callback delivered by `OpenALAudio::serviceLoop` (`OpenALDriver.cpp:138`) restarted a looping 3D
+1. **PORT DEFECT, measured on the M1 Pro, FIXED in the shim (§4.1), Linux-measured, Mac UNMEASURED:
+   SIGSEGV in `MilesAudioManager::initFilters3D` on the OpenAL service thread.** 16.2 resumed
+   minutes into a real-input skirmish, the end-of-sample callback delivered by
+   `OpenALAudio::serviceLoop` (then `OpenALDriver.cpp:138`) restarted a looping 3D
    sound (`notifyOfAudioCompletion` → `startNextLoop` → `playSample3D` → `initFilters3D`) and read
    `event->getAudioEventInfo()->m_lowPassFreq` through a null info pointer (fault address `0xd8` =
    `offsetof(AudioEventInfo, m_lowPassFreq)`, verified with `expr` on the binary).
@@ -334,10 +396,12 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
    `PlayingAudio`'s event had been reassigned/torn down by the main thread under the callback.
    `MilesAudioManager` takes no `AIL_lock`; nothing serialises the two threads. macOS wrote
    `zh-2026-09-03-020314.ips`; no debugger expression was running. Full frames and mechanism in
-   `playability-probe.md` §1.3. Cost: decide whether completion callbacks should be deferred to the
-   main thread's `AIL_serve`/`update` (the Windows oracle question: Miles' EOS callback thread
-   affinity is inferred, not verified) or whether the handler must take the library lock; then a
-   ≥20-minute soak.
+   `playability-probe.md` §1.3. Fix: the shim queues completions and delivers them on the API thread
+   as its `AIL_*` calls return (§4.1); Miles' own EOS thread affinity stays INFERRED (no vendor doc in
+   the pinned deps), the fix is the stricter contract so it is safe either way. Linux: shim test red
+   on `e1f8de610`, green after; 22-minute lavapipe skirmish soak, 16 641 callbacks, 16 631 loop
+   restarts, 0 off the main thread, no crash. Cost remaining: the same soak on the M1 Pro (owed to
+   the Mac slice).
 2. **Apple Silicon `AL_PLAYING` by function evaluation — probe defect, Wave 12 tooling fix.** The
    checked-in `SOURCE_STATE_COUNT` calls `alGetSourcei` from LLDB while all threads are stopped and
    twice wedged OpenAL Soft's source mutex. The shim's own bookkeeping was read by memory instead:
@@ -359,10 +423,11 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
    remaining question is only voice-limit pressure (25 3D voices, 7 of them held by ambient loops on
    this map, so a firefight will hit `violatesVoice`/priority eviction). That is retail behaviour, not a
    port defect, but its *audible* result on a 25-voice pool is unmeasured. Cost: same run as item 3.
-6. **Callback thread affinity** is no longer "unmeasured under load": item 1 is the crash this
-   paragraph predicted. The earlier claim that Miles ran callbacks on its background thread stays
-   unverified. Cost: folded into item 1; a TSan build of `MilesAudioManager.cpp` + `OpenALDriver.cpp`
-   would show the remaining races.
+6. **Callback thread affinity**: item 1 was the crash this paragraph predicted; after §4.1 the shim's
+   callbacks are on the API thread by construction (measured: 0 of 16 641 off it on Linux). What
+   Miles itself did stays unverified (INFERRED). Cost: a TSan build of `MilesAudioManager.cpp` +
+   `OpenALDriver.cpp` would show whether any *other* shim→engine crossing remains (the service thread
+   still reads `Voice` fields under the library lock, never engine state).
 7. **Focus mute** (`m_muteReasonBits`, documented in `playability-probe.md` §3): unchanged, not a
    defect, but anyone measuring audio through a harness that steals focus will see silence and must
    click into the window first. Cost: nothing; documented here so it is not re-discovered.
@@ -373,14 +438,16 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
 |---|---|---|
 | Sound-effect pools on Apple Silicon (M1 Pro) | **MEASURED, Mac / live / real input / engine state**: samples 4, objects 26, 2D 4, 3D 25 | — |
 | `AL_PLAYING` for effects on Apple Silicon | **UNMEASURED by `alGetSourcei`** (probe defect: LLDB function evaluation wedges alsoft's source mutex); **MEASURED, engine state**, via the shim's `Voice::started` mirror: 9–25 started 3D voices during play, 0 started 2D samples | replace `SOURCE_STATE_COUNT` with a memory read |
-| Sound-effect completion callback on Apple Silicon | **MEASURED FAILURE (PORT DEFECT)**: SIGSEGV in `initFilters3D` on the service thread at 16.2 min, `.ips` written | §6 item 1 |
+| Sound-effect completion callback on Apple Silicon | **MEASURED FAILURE (PORT DEFECT)** before §4.1: SIGSEGV in `initFilters3D` on the service thread at 16.2 min, `.ips` written. After §4.1: **UNMEASURED** on the Mac | the Mac slice: a ≥20-minute real-input skirmish on the fixed shim |
+| Sound-effect completion callback on Linux, after §4.1 | **MEASURED, live / engine state**: 22 min, 16 641 callbacks all from `deliverCompletions` on the main thread, 16 631 loop restarts, no crash (`ci-baselines/audio-callback-soak.json`) | — |
+| Miles 6 EOS callback thread (the retail oracle) | **INFERRED** (§4.1): the pinned `mss.h` is a stub without vendor prose; the engine takes no `AIL_lock`/`AIL_serve` | the Miles 6 SDK manual, if anyone has it; not needed for the fix |
 | CoreAudio output open | **MEASURED, engine/OS state**: non-null OpenAL device/context, advancing music `framesPlayed`, and `com.apple.audio.IOThread.client` in `HALC_ProxyIOContext`; this proves the output client exists, not audibility | — |
 | Human-observed audibility on any platform | **UNMEASURED** (no human listener; Linux remains SYNTHETIC-ONLY) | a machine with an audio device and a listener |
 | Speech / EVA | UNMEASURED | longer skirmish, `Eva::playSound` in the probe |
 | Weapon fire under voice-limit pressure | UNMEASURED | combat in the probed window |
 | Windows build of the widened virtual | **built**: `scripts/docker-build.sh --game zh` (Wine/VC6) on the rebased head, 1363/1363 targets, `generalszh.exe` linked | — |
 | Retail replay gate | not run locally (Wine is a differential check only) | the Windows CI replay job on the PR; audio is not on the CRC path, but the gate is the proof |
-| Callback thread safety under load | **MEASURED FAILURE** on the M1 Pro (§6 item 1) | the fix, then a ≥20-minute soak |
+| Callback thread safety under load | **MEASURED FAILURE** on the M1 Pro before the fix (§6 item 1); **MEASURED PASS on Linux** after it (22 min); Mac UNMEASURED | the same soak on the M1 Pro |
 
 ## 8. Evidence taxonomy, for anyone reading the numbers
 

@@ -612,6 +612,7 @@ using namespace OpenALAudio;
 
 HSTREAM AIL_open_stream(HDIGDRIVER dig, const char* filename, int stream_mem)
 {
+	ApiCall api;
 	(void)dig;
 	(void)stream_mem;
 
@@ -651,6 +652,7 @@ HSTREAM AIL_open_stream(HDIGDRIVER dig, const char* filename, int stream_mem)
 
 HSTREAM AIL_open_stream_by_sample(HDIGDRIVER driver, HSAMPLE sample, const char* file_name, int mem)
 {
+	ApiCall api;
 	// Miles could bind a stream to an already-allocated 2D voice so the caller kept its handle.
 	// Here streams own their own OpenAL source, so the sample handle is not needed.
 	(void)sample;
@@ -659,6 +661,7 @@ HSTREAM AIL_open_stream_by_sample(HDIGDRIVER driver, HSAMPLE sample, const char*
 
 void AIL_close_stream(HSTREAM stream_handle)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr) {
 		return;
@@ -685,6 +688,7 @@ void AIL_close_stream(HSTREAM stream_handle)
 
 void AIL_start_stream(HSTREAM stream_handle)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr || stream->source == 0) {
 		return;
@@ -707,12 +711,14 @@ void AIL_start_stream(HSTREAM stream_handle)
 
 	alSourcePlay(stream->source);
 	stream->playing = true;
+	stream->completionPending = false;
 	stream->paused = false;
 	stream->framesPlayed = 0;
 }
 
 void AIL_pause_stream(HSTREAM stream_handle, int onoff)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr || stream->source == 0) {
 		return;
@@ -725,6 +731,7 @@ void AIL_pause_stream(HSTREAM stream_handle, int onoff)
 		alSourcePlay(stream->source);
 		stream->paused = false;
 		stream->playing = true;
+		stream->completionPending = false;
 	}
 }
 
@@ -732,12 +739,14 @@ void AIL_pause_stream(HSTREAM stream_handle, int onoff)
 
 int AIL_stream_volume(HSTREAM stream_handle)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	return (stream != nullptr) ? (int)(stream->volume * MILES_MAX_INT_VOLUME) : 0;
 }
 
 void AIL_set_stream_volume(HSTREAM stream_handle, int volume)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr) {
 		return;
@@ -749,12 +758,14 @@ void AIL_set_stream_volume(HSTREAM stream_handle, int volume)
 
 int AIL_stream_pan(HSTREAM stream_handle)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	return (stream != nullptr) ? (int)(stream->pan * MILES_MAX_INT_VOLUME) : 0;
 }
 
 void AIL_set_stream_pan(HSTREAM stream_handle, int pan)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr) {
 		return;
@@ -766,6 +777,7 @@ void AIL_set_stream_pan(HSTREAM stream_handle, int pan)
 
 void AIL_stream_volume_pan(HSTREAM stream_handle, float* volume, float* pan)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr) {
 		return;
@@ -776,6 +788,7 @@ void AIL_stream_volume_pan(HSTREAM stream_handle, float* volume, float* pan)
 
 void AIL_set_stream_volume_pan(HSTREAM stream_handle, float volume, float pan)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr) {
 		return;
@@ -790,12 +803,14 @@ void AIL_set_stream_volume_pan(HSTREAM stream_handle, float volume, float pan)
 
 int AIL_stream_loop_count(HSTREAM stream_handle)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	return (stream != nullptr) ? stream->loopCount : 0;
 }
 
 void AIL_set_stream_loop_count(HSTREAM stream_handle, int count)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream != nullptr) {
 		stream->loopCount = count;
@@ -804,6 +819,7 @@ void AIL_set_stream_loop_count(HSTREAM stream_handle, int count)
 
 void AIL_set_stream_loop_block(HSTREAM stream_handle, int loop_start, int loop_end)
 {
+	ApiCall api;
 	// Byte offsets into the stream's payload; a negative end means "to the end of the file", which
 	// is what SoundStreamHandleClass::Set_Sample_Loop_Count passes. Offsets are pulled back onto a
 	// decodable boundary, so a caller cannot ask playback to resume mid-ADPCM-block.
@@ -825,6 +841,7 @@ void AIL_set_stream_loop_block(HSTREAM stream_handle, int loop_start, int loop_e
 
 void AIL_stream_ms_position(HSTREAM stream_handle, S32* total_milliseconds, S32* current_milliseconds)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr) {
 		if (total_milliseconds != nullptr) *total_milliseconds = 0;
@@ -857,6 +874,7 @@ void AIL_stream_ms_position(HSTREAM stream_handle, S32* total_milliseconds, S32*
 
 void AIL_set_stream_ms_position(HSTREAM stream_handle, int pos)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr || stream->rate == 0) {
 		return;
@@ -913,6 +931,7 @@ void AIL_set_stream_ms_position(HSTREAM stream_handle, int pos)
 
 int AIL_stream_playback_rate(HSTREAM stream_handle)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr) {
 		return 0;
@@ -922,6 +941,7 @@ int AIL_stream_playback_rate(HSTREAM stream_handle)
 
 void AIL_set_stream_playback_rate(HSTREAM stream_handle, int rate)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr) {
 		return;
@@ -933,6 +953,7 @@ void AIL_set_stream_playback_rate(HSTREAM stream_handle, int rate)
 
 AIL_stream_callback AIL_register_stream_callback(HSTREAM stream_handle, AIL_stream_callback callback)
 {
+	ApiCall api;
 	StreamVoice* stream = streamOf(stream_handle);
 	if (stream == nullptr) {
 		return nullptr;

@@ -41,7 +41,7 @@ Measured against the retail Zero Hour 1.04 data (`zerohour104_gamedata_full.7z`,
 | `W3DModel=` entries in `Mouse.ini` | **0** of 27 cursors | `RM_W3D` has no model to draw for any cursor |
 | `Image=` names in `Mouse.ini` that exist in `MappedImages` | **1** of 27 (`SCCAttack`) | `RM_POLYGON` would draw a blank quad for 26 cursors |
 | `Directions = 8` entries | 1 (`Scroll`) | only the scroll cursor is directional |
-| loose `Data/Cursors/*.ani` in the archive | **0** — see §6 | the retail data for option 1 is MISSING here |
+| loose `Data/Cursors/*.ani` in the archive | **0** in the `.big` bundle; **52** in `zerohour104_loose_data.7z` — see §6 | the retail data for option 1 exists and decodes (measured on Linux, §6) |
 
 Option 2 is rejected: the renderer's own cursor path is *wired* but the retail data does not feed
 it, so switching to it would produce an invisible or blank cursor for 26 of 27 shapes, and fixing
@@ -154,50 +154,98 @@ Native build: `CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --le
   cursor is 32 points, i.e. small, on a 2× display — Windows' cursors are 32 device pixels too, so
   this is faithful, but it has not been seen).
 - `NSCursor` over a fullscreen/borderless `NSWindow` with the MoltenVK layer as content.
-- Whether the retail `.ANI` frames are 32-bit with alpha or 8-bit palette + mask — §6.
+- Whether the decoded retail frames *look* right on a display: §6 measures the decode only.
 
-## 6. The retail cursor set: hosted as of 2026-09-03, still unmeasured
+## 6. MEASURED (Linux, decode only): the retail cursor set
 
 The retail `Data\Cursors\*.ANI` are installed **loose** by the Zero Hour installer. They are **not
-in any of the 35 `.big` archives**, and the R2 bundle `s3://cc-mac-game-data/zerohour104_gamedata_full.7z`
-(SHA-256 verified) contains only those `.big` files: a direct parse of every `.big` directory found
-**zero** `.ani`/`.cur` entries.
+in any of the 35 `.big` archives** (`zerohour104_gamedata_full.7z` holds only `.big` files; a direct
+parse of every `.big` directory found zero `.ani`/`.cur` entries). `pack-gamedata.py --archives loose`
+packs the loose `Data/` tree into `s3://cc-mac-game-data/zerohour104_loose_data.7z` (206,614 bytes,
+SHA-256 pinned as `GAMEDATA_LOOSE_SHA256`; see
+[`replay-check-gamedata.md`](replay-check-gamedata.md#the-fifth-object-zerohour104_loose_data7z)),
+which extracts to `staged/GeneralsMD/Data/Cursors/` with **52** `.ani` files (and the same 52 names
+under `staged/Generals/Data/Cursors/`) — 52 files backing the 27 names below, because `SCCScroll` is
+eight of them and most shapes ship an `_S` variant. None of them is committed.
 
-**The data gap is now closed.** `pack-gamedata.py --archives loose` packs the loose `Data/` tree,
-and `s3://cc-mac-game-data/zerohour104_loose_data.7z` (202 KiB, SHA-256 `8E474944…9406`, pinned as
-`GAMEDATA_LOOSE_SHA256`) holds all 52 `.ani` from each install root — 52 files backing the 27 names
-below, because `SCCScroll` is eight of them and most shapes ship an `_S` variant. See
-[`replay-check-gamedata.md`](replay-check-gamedata.md#the-fifth-object-zerohour104_loose_data7z).
+The retail-set test in `scripts/native-win32-user32-test.py` was run against that directory on
+Linux x86-64 (`clang++-14`, `GENERALSMD_PATH=<staged>/GeneralsMD`): **429 checks, 0 failures**. It
+loads each of the 34 names the engine asks for (`Mouse.ini`'s 27 cursors, `Scroll` expanded to
+`SCCScroll0..7`) through `LoadCursorFromFile()` → `Cursor_Decode()`, prints what it decoded, and
+asserts the hotspot lies inside the frame. Every file is a RIFF `ACON` whose frames are `AF_ICON`
+`.CUR` images, **32×32, 4 bits per pixel (16-colour palette) + AND mask**, `JifRate` 10 — so the
+"32-bit alpha or palette + mask" question of §5 is answered: palette + mask, which the decoder
+already handled (it is the fixture format the synthetic tests also cover).
 
-Hosted is not measured. Nobody has run the decoder over these files yet, so the retail row stays
-**UNMEASURED** — but it is now a session's work rather than a blocked one:
+| Cursor | Frame size | Hotspot (x,y) | Frames | Steps | Rate (jiffies) | bpp | Status |
+|---|---|---|---|---|---|---|---|
+| `SCCPointer` | 32x32 | (13,13) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCNoAction` | 32x32 | (15,15) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCSelect` | 32x32 | (15,16) | 8 | 14 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCMove` | 32x32 | (15,15) | 7 | 12 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCAttMov` | 32x32 | (15,15) | 7 | 12 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCAttack` | 32x32 | (15,15) | 8 | 10 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCEnter` | 32x32 | (15,15) | 3 | 3 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCExit` | 32x32 | (15,15) | 3 | 3 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCFriendly` | 32x32 | (15,15) | 8 | 8 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCHostile` | 32x32 | (15,15) | 4 | 6 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCHostile2` | 32x32 | (16,26) | 11 | 11 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCHostile3` | 32x32 | (13,13) | 33 | 33 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCKnifeAttack` | 32x32 | (0,0) | 5 | 5 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCNoBomb` | 32x32 | (15,15) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCNoKnife` | 32x32 | (15,15) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCPlaceBeacon` | 32x32 | (15,10) | 9 | 9 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCRallyPnt` | 32x32 | (15,15) | 5 | 8 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCRemoteChg` | 32x32 | (6,8) | 12 | 12 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCRepair` | 32x32 | (4,4) | 7 | 12 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCResumeC` | 32x32 | (4,4) | 23 | 23 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCSDIUplink` | 32x32 | (15,16) | 21 | 21 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCSniper` | 32x32 | (15,16) | 20 | 20 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCTNTAttack` | 32x32 | (5,5) | 6 | 6 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCTimedChg` | 32x32 | (6,7) | 11 | 11 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCWaypoint` | 32x32 | (16,16) | 2 | 2 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCCashHack` | 32x32 | (3,3) | 10 | 10 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCScroll0` | 32x32 | (22,16) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCScroll1` | 32x32 | (24,24) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCScroll2` | 32x32 | (16,22) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCScroll3` | 32x32 | (7,24) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCScroll4` | 32x32 | (9,16) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCScroll5` | 32x32 | (7,7) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCScroll6` | 32x32 | (16,9) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
+| `SCCScroll7` | 32x32 | (24,7) | 1 | 1 | 10 | 4 | MEASURED (Linux, decode only) |
 
-| Cursor | Frame size | Hotspot | Frames | Status |
-|---|---|---|---|---|
-| all 27 (`SCCPointer`, `SCCNoAction`, `SCCSelect`, `SCCMove`, `SCCAttMov`, `SCCAttack`, `SCCEnter`, `SCCExit`, `SCCFriendly`, `SCCHostile`, `SCCHostile2`, `SCCHostile3`, `SCCKnifeAttack`, `SCCNoBomb`, `SCCNoKnife`, `SCCPlaceBeacon`, `SCCRallyPnt`, `SCCRemoteChg`, `SCCRepair`, `SCCResumeC`, `SCCSDIUplink`, `SCCSniper`, `SCCTNTAttack`, `SCCTimedChg`, `SCCWaypoint`, `SCCCashHack`, `SCCScroll0..7`) | — | — | — | UNMEASURED — data now available |
+Observations from the table, not defects: `SCCKnifeAttack` carries hotspot (0,0) in its directory
+entry (that is what the retail file says; the decoder reports it unchanged); the
+directional `SCCScroll0..7` hotspots sit on the arrow tips at the frame edges; 22 cursors animate
+(`Frames > 1`), and `SCCSelect`, `SCCMove`, `SCCAttMov`, `SCCAttack`, `SCCHostile`, `SCCRallyPnt`,
+`SCCRepair` carry a `seq ` chunk (`Steps ≠ Frames`), so the first *step* is what the port shows.
+The 18 files the engine never names (`*_S.ani`, `SCCGuard`, `SCCHeal`, `SCCNoEntry`, `SCCOutrange`,
+`SCCPlace`, `SCCSell`, `SCCSpyDrone`, `SCCStop`) are not measured.
+
+**What this does not measure:** the cursor on a display. Linux SDL2 and macOS Cocoa visibility,
+hotspot alignment under a click and Retina scaling remain **UNMEASURED** (§5, owed to the Mac slice).
 
 The path the game expects at runtime, relative to the game directory (the process's working
 directory), is exactly `data\cursors\<Name>.ANI` (`data\cursors\SCCScroll<0-7>.ANI` for the
 directional one), with a `<ModDir>\data\cursors\` override checked first when a mod is active. The
 seam's `Path::Open_Stream()` makes that case-insensitive and slash-agnostic, so a `Data/Cursors/`
-folder copied from a Windows install is found.
+folder copied from a Windows install is found — the loose bundle mixes cases (`sccpointer.ani`,
+`SCCSelect.ani`) and all 34 were found.
 
-To run the retail row: point `GENERALSMD_PATH` at an install that has `Data/Cursors` — either a
-local one (on the project's Mac, `~/devin-work/zh-data`) or the object above, extracted to a
-staging directory and copied per install root — and run the test. It prints one line per cursor
-(size, hotspot, frames, steps, rate, bpp) and asserts the hotspot lies inside the frame. Without
-it the test says `SKIP: retail cursor set: no Data/Cursors directory …` and passes; it never
+To re-run the retail row: `aws s3 cp s3://cc-mac-game-data/zerohour104_loose_data.7z .`,
+`7z x -ostaged zerohour104_loose_data.7z`, then
+`GENERALSMD_PATH=$PWD/staged/GeneralsMD python3 scripts/native-win32-user32-test.py` (on the
+project's Mac, `~/devin-work/zh-data` is an install that already has `Data/Cursors`). Without the
+data the test says `SKIP: retail cursor set: no Data/Cursors directory …` and passes; it never
 fabricates a row.
 
 ## 7. Residual risks, ranked
 
 1. **UNMEASURED on the Mac.** The whole point of the slice — a visible, correctly aimed cursor — is
    inferred from AppKit documentation, not seen. First thing for the follow-up Mac session.
-2. **Retail `.ANI` format assumptions.** The decoder handles `AF_ICON` frames in 1/4/8/24/32-bit
-   `BI_RGB`. If the retail files use raw-DIB frames or a compression it does not know, every cursor
-   falls back to the arrow (visibly, and with a stderr line naming the file and reason) — playable,
-   but wrong shapes. The files are hosted now (§6); what is missing is a session that runs the test
-   against them.
+2. **Retail `.ANI` format assumptions — resolved on Linux (§6).** All 34 engine-named cursors are
+   `AF_ICON` 32×32 4-bpp `BI_RGB` frames and decode with in-range hotspots; no fallback to the
+   arrow was taken. What remains is whether the decoded pixels look right on screen (UNMEASURED).
 3. **No animation.** Windows animates `SCCAttack` and friends; the port shows the first step. A
    follow-up can drive `Window_Set_Cursor()` from `Display_Rate_Jiffies`.
 4. **Directional scroll on the Mac.** Eight `NSCursor`s swapped per frame through
