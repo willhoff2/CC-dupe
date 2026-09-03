@@ -315,7 +315,7 @@ texture's and now uses the pointer. The `Destroy_*` entry points themselves do a
 the live vector, which is bounded now (443 surfaces / 375 textures in the real game, §5) and
 costs well under a microsecond; it is listed in §7 rather than optimised here.
 
-## 5. Real game, before and after — Linux x86-64, lavapipe; Apple Silicon UNMEASURED
+## 5. Real game, before and after — Linux x86-64; Apple Silicon partial measurement
 
 ### 5.0 Units
 
@@ -377,9 +377,8 @@ unchanged, and the backend now does what D3D8 did with the releases.
 | RSS first → last (max) | 1,061.1 MB → 1,373.9 MB (**+312.8 MB** over 20.0 min, +15.6 MB/min) | 923.3 MB → 923.3 MB (max 923.3 MB; 923,312,128 bytes at first, last and peak: **+0**) |
 
 Both runs start above 900 MB because lavapipe keeps its "device memory" in host RAM and the map's
-own textures are large; the *slope* is what the leak owned. **Apple Silicon: UNMEASURED.** The
-M1 Pro's 32 → 184 MB over 21.8 min in `playability-probe.md` §1.1 is the number this fix should
-flatten there, and it has not been re-measured on that machine.
+own textures are large; the *slope* is what the leak owned. The Apple Silicon partial re-measurement
+is §5.5.
 
 ### 5.3 Frame time — measured, and not the number the Mac needs
 
@@ -406,14 +405,40 @@ fixed binary, compared with `playability-probe.md` §2.1. Owed; **UNMEASURED** h
 
 ### 5.4 What this measurement does not cover
 
-- The Mac (all of it): counts, RSS, frame time — **UNMEASURED**, by instruction. The Linux numbers
-  above are on the same backend code with a different ICD; the leak and the fix are in
-  platform-independent code (`vulkan_backend.cpp`, `vulkanrenderbackend.cpp`), so there is no
-  platform-dependent value in this slice — the MoltenVK CI job runs the §6 gate, which is the
-  synthetic half of the Mac evidence.
+- A complete Mac lifetime result: Wave 11 measured 13.0 resumed minutes but stopped on the
+  probe-induced OpenAL deadlock in `playability-probe.md` §1.3 before the required ≥20 minutes and
+  paused stretch. Counts, RSS and FPS exist; a steady-state/slope verdict does not.
 - The campaign: the probe ran a skirmish. The text path is the same (`W3DDisplayString::draw`).
 - Sound: Linux had no ALSA device, so the run was silent (`docs/porting/playability-probe.md` §3 is
   about a different defect; not renderer evidence either way).
+
+### 5.5 Apple Silicon, Wave 11 — partial, stopped on a measurement defect
+
+**Mac / live / real input / engine state, M1 Pro, MoltenVK, 2026-09-03, `main` `66f7183e5`.**
+`scripts/macos-playability-probe.py run --minutes 27 --interval 60` entered Alpine Assault through
+real `CGEventPost` input. The experimental resource expression read the vector's three words and
+computed `(finish - start) / sizeof(void*)`; no byte-size API was used.
+
+| metric | start | middle | last safe sample |
+|---|---:|---:|---:|
+| resumed runtime | 0 | 420.9 s | 781.7 s |
+| logic frame | 565 | 13,113 | 23,779 |
+| `owned_textures_` elements | 459 | 536 | 561 |
+| `owned_surfaces_` elements | 539 | 625 | 661 |
+| RSS bytes | 192,512,000 | 107,167,744 | 100,745,216 |
+| current render FPS | 30.04 | 28.94 | 30.02 |
+| engine average FPS | 30.00 | 30.02 | 30.01 |
+
+Logic rate was `(23779 - 565) / 781.7 = 29.70 FPS`, separate from the render ring. Counts rose
++102 textures/+122 surfaces while RSS fell 91.8 MB; because map/UI state also changed under AI
+attack and the run is short, this does **not** establish a leak slope. The current element counts
+supersede any attempt to quote §1.1's old six-digit values as a fixed-build resident count, but they
+do not prove whether those pre-fix hand reads were bytes; dividing them by eight is not a valid
+cross-build correction.
+
+Required status: **UNMEASURED** for ≥20 resumed minutes, paused interval, and steady-state/slope.
+Reason: `alGetSourcei` from LLDB deadlocked the stopped process twice (§1.3); the slice rule required
+stopping and documenting that failure rather than fixing the probe in this PR.
 
 ## 6. The gate: `zh-resource-lifetime` and `scripts/ci/check-resource-lifetime.py`
 

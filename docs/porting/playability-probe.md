@@ -85,6 +85,49 @@ per-resource destroy, so `Release()` at zero freed the wrapper and nothing else)
 notes the counts above may be byte counts of the vectors (8× the element count) and are owed a re-read
 on the Mac.
 
+### 1.3 Wave 11 Apple Silicon re-measurement stopped by the audio-state probe
+
+**Mac / live / real input / engine state, 2026-09-03, `main` `66f7183e5`.** A fresh
+arm64 strict-link build entered Alpine Assault through `CGEventPost`. The resource reader used the
+three `std::vector` words directly: `(finish - start) / sizeof(void*)`, so these are elements. A
+safe 13.0 minutes of resumed runtime (14 samples, 60 s `ran_for` intervals) read
+`owned_textures_` 459 → 561 and `owned_surfaces_` 539 → 661, RSS 192,512,000 → 100,745,216 bytes,
+and render FPS 30.04 → 30.02 (middle sample 28.94; engine average 30.00 → 30.01). Logic advanced
+565 → 23,779 in 781.7 resumed seconds: **29.70 logic FPS**. This is a partial run, not the required
+20-minute-plus-pause result, so it does not classify a lifetime slope.
+
+The required OpenAL state read exposed a new measurement defect. Twice, an LLDB expression calling
+`alGetSourcei` while the process was stopped timed out/unwound while holding OpenAL Soft's source
+mutex. After detach, frame 545 never advanced: the main thread waited in
+`AIL_set_3D_orientation` → `alGetSourcei`, and the shim service thread also waited in
+`OpenALAudio::serviceLoop` → `alGetSourcei`. CPU fell from normal play to about 2 %. This is a
+**probe-induced deadlock**, not evidence that ordinary play deadlocks. Per the slice stop rule the
+probe was not fixed here; the experiment diff and both wedged-run JSON/logs are session evidence,
+not committed.
+
+Consequently `AL_PLAYING`, the paused stretch, the full ≥20 resumed minutes and all quit paths are
+explicitly **UNMEASURED** in this slice. Engine-side state before the stop was non-null OpenAL
+context/device, 4 sample voices, 26 3D objects, `m_num2DSamples=4`, `m_num3DSamples=25`, one music
+stream and advancing `framesPlayed`; that proves allocation/bookkeeping, not source playback or
+human audibility.
+
+Commands (PID was 80240; reports stayed outside the repository):
+
+```sh
+arch -arm64 python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
+  --with-shims --strict-link --build-dir build/native-macos-arm64-w11
+arch -arm64 python3 scripts/macos-input-drive.py --pid 80240 --binary ~/devin-work/wave11/run/zh \
+  click --window ButtonStart
+arch -arm64 /Applications/Xcode.app/Contents/Developer/usr/bin/python3 \
+  scripts/macos-playability-probe.py --pid 80240 --binary ~/devin-work/wave11/run/zh \
+  --out ~/devin-work/wave11/probe.json run --minutes 27 --interval 60
+sample 80240 1
+ls ~/Library/Logs/DiagnosticReports | wc -l    # 40 before and after forced cleanup
+```
+
+The build report was 980/980 objects, zero unresolved, strict link exit 0. The probe did not reach its
+requested duration; the table values elsewhere use only the 14 persisted safe samples.
+
 ## 2. Is it fast enough? Borderline, and the simulation silently runs ~5 % slow
 
 `m_framesPerSecondLimit` 30 with `m_useFpsLimit` 1, i.e. the engine's intended rate is 30 (and
@@ -110,12 +153,12 @@ to sample, so wall clock between samples is not the denominator — `ran_for` is
 | p50 | 28.38 |
 | min / max | 26.48 / 29.21 |
 
-The simulation never reached its intended 30 Hz in any interval. A player would experience this as the
-whole game — build times, harvesting, timers — running about 5 % slow, uniformly, which is invisible
-alone but is a real divergence from the Windows oracle for anything time-dependent.
+The original run never reached its intended 30 Hz in any interval. A player would experience this as
+the whole game — build times, harvesting, timers — running about 5 % slow, uniformly.
 
-**Classification: PORT DEFECT (small).** 30 Hz is the engine's intended rate and it is missed
-consistently, on a machine that is not thermally or GPU limited at 800x600.
+Wave 11 on current `main` contradicts that as a current fixed-build claim: its partial safe window
+measured **29.70 logic FPS** over 781.7 resumed seconds. That is 1.0 % below 30, not 5 %. It is not a
+full soak, so the old finding is **superseded for current `main`, not yet closed**.
 
 ### 2.1 Performance degrades with uptime
 
@@ -125,7 +168,7 @@ at first sample, ≈ 23.8 thirty seconds later) *while paused with nothing to si
 
 **Classification: PORT DEFECT**, same root cause as §1.1.
 
-## 3. Is the game audible? Music only. There is no sound-effect path at all — PORT DEFECT
+## 3. Audio history: pool defect fixed; Apple Silicon playback still unmeasured
 
 Measured in all 40 samples of the long run, and again in the second process:
 
@@ -151,8 +194,7 @@ provider named `OpenAL`, and if the preferred-provider string does not match it 
 though the settings ask for 4 2D and 25 3D samples. **The empty pools are measured; that this specific
 mismatch is the cause is an inference from source** and wants a direct read of `m_selectedProvider` and
 `m_pref3DProvider` on a fresh process to confirm. (Confirmed on Linux x86-64 and fixed, together with
-a second defect directly behind it, in `sound-effects-chain.md`; the Apple Silicon re-measurement is
-still owed.)
+a second defect directly behind it, in `sound-effects-chain.md`.)
 
 **What could not be proven without a listener**: that the music is *audible* — no HAL-level check
 (device sample-rate, underrun counters) was made. What was proven is stronger than decode and weaker
@@ -164,8 +206,14 @@ needs a **real click into the window** — the Accessibility raise (`AXRaise`/`A
 `kAXErrorSuccess`) left `Window_Is_Active` false with 21 windows in front, and the mute stayed on until
 a posted click landed in the client area, after which `m_muteReasonBits` went back to 0.
 
-**Classification: PORT DEFECT** (no sample/3D voice pool is ever created), plus an **UNIMPLEMENTED
-PATH** note: nothing in the OpenAL device reports voice-pool creation failure to the player or the log.
+**Historical classification: PORT DEFECT** (no sample/3D voice pool was created), plus an
+**UNIMPLEMENTED PATH** note: nothing in the OpenAL device reports voice-pool creation failure to the
+player or the log.
+
+Wave 11 on current `main` proves that fix reached Apple Silicon: 4 sample voices, 26 objects including
+the listener, `m_num2DSamples=4`, `m_num3DSamples=25`, non-null context/device. It does **not** prove
+effect playback: the `AL_PLAYING` measurement itself deadlocked the process (§1.3), and no human
+listened. See `sound-effects-chain.md` §7 for the measured/unmeasured split.
 
 ## 4. Does the AI play? It builds and it earns. Nothing died in 12 minutes of game time
 
@@ -313,40 +361,30 @@ unidentified, so it is not yet a named defect. What would unblock it: breakpoint
 `GameWindowManager::winProcessMouseEvent` and `Mouse::update` to see whether translated button events
 are dequeued at all in that state, plus a repro attempt (long uptime + focus cycle + pause menu).
 
-## 9. Ranked: what stands between this and a game a person would call playable
+## 9. Wave 11 ranked residuals
 
-Ranked by what a player notices first, not by fix cost.
+Ranked by the evidence needed to close native Mac playability, then cost.
 
-1. **The mission viewport is corrupt** (`draws-per-frame.md` §5.1, owned by a parallel slice, not
-   measured here). Ranked first because it is the first thing anyone sees; listed only so the ranking is
-   honest. Slice 5 (`block-compressed-textures.md`) names the mechanism behind the black/striped
-   models and decals and fixes it on the seam; the real-game re-measurement on the Mac is still owed,
-   so this item keeps its rank until it exists.
-2. **There are no sound effects, ever** (§3, PORT DEFECT). Music plays, so the game sounds *nearly*
-   right, which is worse: every click, every unit, every weapon and all of EVA are silent. No voice
-   object is ever allocated.
-3. **Saving is a trap** (§6, PORT DEFECT). The game says `*** Game Saved ***`, writes 2 MB, and the load
-   list is empty forever. A player loses a session the first time they rely on it.
-4. **Input can wedge permanently mid-game** (§8.1, PORT DEFECT candidate). Rendering continues, no key
-   or click does anything, force-quit is the only exit. Rare in this session — but unrecoverable.
-5. **The renderer leaks a texture and a surface several times a second** (§1.1/§2.1, PORT DEFECT).
-   ~134 surfaces/s and ~67 textures/s *even while paused*, RSS 32 MB → 184 MB in 20 min, and the
-   `Get_Surface_Level` linear scan drags render FPS from 30 to ~17 after a few hours. A long session
-   degrades and eventually exhausts memory. Fixed on the seam in `renderer-resource-lifetime.md`,
-   measured flat over 20 min on Linux; the Mac re-measurement is owed.
-6. **Every quit is a crash** (§7, PORT DEFECT). `SIGSEGV` in
-   `ObjectPoolClass<MultiListNodeClass>::~ObjectPoolClass` from `exit`. Mechanism named and fixed
-   (LP64 block-header arithmetic, `docs/porting/memory-shutdown-order.md`); Mac confirmation owed.
-7. **The simulation runs ~5 % slow** (§2, PORT DEFECT, small). 28.38 logic FPS against an intended 30,
-   in every measured interval; a uniform time-base divergence from the Windows oracle.
-8. **Combat is unproven** (§4, NOT MEASURABLE YET). The AI builds, produces and harvests, but nothing
-   died in 12.4 minutes of game time. This is the highest-value *next measurement*, since a game where
-   combat does not resolve is not a game — it is ranked below the defects above only because it is not
-   yet known to be broken.
-9. **Mission briefing / load-screen video is unmeasured** (§5, NOT MEASURED). The intro movie visibly
-   plays, so the seam works somewhere; the campaign sites were not driven.
-10. **Input latency is unquantified, and orders/hotkeys are unexercised** (§8). Camera, clicks and
-    selection work; issuing a build or attack order through the command bar has never been measured.
+1. **Fix the measurement deadlock, without changing game behaviour.** `alGetSourcei` from an LLDB
+   expression wedged the stopped process twice (§1.3). Until the probe reads OpenAL state without
+   taking its source mutex, it cannot safely prove `AL_PLAYING` or complete a soak.
+2. **Sound-effect playback and audibility.** Pool allocation is now proven on the M1 Pro (4 2D,
+   25 3D; `sound-effects-chain.md` §7). `AL_PLAYING` is unmeasured because of item 1, and no human
+   listened. Unit acknowledgements, weapon fire, speech and EVA therefore remain open.
+3. **Three clean exits.** Main Menu → Exit, running skirmish → Exit and running campaign → Exit have
+   no Apple Silicon exit status or hang/SIGSEGV result (`memory-shutdown-order.md`). Wave 11 stopped
+   before them under the explicit new-defect rule.
+4. **Complete renderer lifetime measurement.** Wave 11 has 13.0 resumed minutes of element counts,
+   RSS and render/logic FPS, but not the required ≥20 minutes plus paused stretch; no slope verdict is
+   honest (`renderer-resource-lifetime.md` §5.5).
+5. **The separate input wedge candidate** (§8.1) still lacks a mechanism or fresh reproduction.
+6. **Logic cadence.** Current `main` measured 29.70 FPS in the partial run, contradicting the old
+   28.38/5 % claim; a completed soak is needed to close the remaining 1.0 % difference.
+7. **Mission briefing/load-screen video** remains unmeasured (§5). The intro movie works.
+
+Closed by later slices and current remeasurement: textured mission viewport, save/load, combat,
+resource destruction on the synthetic/Linux gates, sound-effect pool creation, and the skirmish
+radar panel (`block-compressed-textures.md` §5.3).
 
 ## 10. Reproducing this
 

@@ -324,13 +324,13 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
 
 ## 6. What remains, ranked (evidence, then cost)
 
-1. **Apple Silicon confirmation of both fixes — UNMEASURED.** Both defects are platform-independent
-   in mechanism (the sentinel collision needs only a non-Miles backend; the truncation needs only 64-bit
-   pointers, and arm64 heap addresses exceed 32 bits like Linux's), so they are expected to reproduce
-   and to be fixed identically, but that is inference. Cost: one M1 Pro session with
-   `scripts/macos-playability-probe.py audio` reading `OpenALAudio::lib().samples/.objects`,
-   `m_num3DSamples` and `AL_PLAYING` in a skirmish; and a human saying whether they heard a worker
-   answer. This is the row `playability-probe.md` §9 item 2 needs before it can be closed.
+1. **Apple Silicon `AL_PLAYING` confirmation — MEASURED FAILURE (probe), playback still
+   UNMEASURED.** Wave 11 reached a live real-input skirmish on the M1 Pro and measured the fixed pool
+   state: `.samples=4`, `.objects=26`, `m_num2DSamples=4`, `m_num3DSamples=25`, non-null OpenAL
+   context/device, one music stream with advancing `framesPlayed`. Twice, however, the required LLDB
+   `alGetSourcei` expression wedged the process on OpenAL Soft's source mutex; see
+   `playability-probe.md` §1.3. Cost: fix the probe without calling OpenAL while its threads are
+   stopped, then repeat combat/acknowledgement sampling.
 2. **Nobody has heard a sound effect on any platform.** Linux evidence stops at the mixer (§5.4). Cost:
    run once with a real OpenAL Soft device (`drivers = pulse`/`alsa`) on a machine with speakers, or
    item 1.
@@ -360,8 +360,10 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
 
 | item | status | needs |
 |---|---|---|
-| Sound effects on Apple Silicon (M1 Pro, CoreAudio) | UNMEASURED | the outpost, one skirmish, `macos-playability-probe.py audio` |
-| Audibility on any platform | UNMEASURED (SYNTHETIC-ONLY mixer output only) | a machine with an audio device and a listener |
+| Sound-effect pools on Apple Silicon (M1 Pro) | **MEASURED, Mac / live / real input / engine state**: samples 4, objects 26, 2D 4, 3D 25 | — |
+| `AL_PLAYING` for effects on Apple Silicon | **MEASURED FAILURE**: the LLDB/OpenAL expression deadlocked the stopped process twice; source state remains UNMEASURED | a probe that does not call OpenAL while its worker threads are stopped |
+| CoreAudio output open | **MEASURED, engine/OS state**: non-null OpenAL device/context, advancing music `framesPlayed`, and `com.apple.audio.IOThread.client` in `HALC_ProxyIOContext`; this proves the output client exists, not audibility | — |
+| Human-observed audibility on any platform | **UNMEASURED** (no human listener; Linux remains SYNTHETIC-ONLY) | a machine with an audio device and a listener |
 | Speech / EVA | UNMEASURED | longer skirmish, `Eva::playSound` in the probe |
 | Weapon fire under voice-limit pressure | UNMEASURED | combat in the probed window |
 | Windows build of the widened virtual | **built**: `scripts/docker-build.sh --game zh` (Wine/VC6) on the rebased head, 1363/1363 targets, `generalszh.exe` linked | — |

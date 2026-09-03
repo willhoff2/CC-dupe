@@ -452,17 +452,25 @@ Pixel statistics were computed by the child session's `frame-stats.py` over the 
 900 (shell map: textured tanks, Humvees, helicopter, palms, logo), 1440, 1800, 1980, 2220; run2
 frames 3000–3900.
 
+### 5.3 Radar panel, Apple Silicon Wave 11 — measured rendered
+
+**Mac / live / real input / human-observed, M1 Pro, 2026-09-03, `main` `66f7183e5`.** A skirmish
+has no intro cinematic: the in-game radar was visible immediately and human inspection showed the
+map texture, shroud boundary, player-view trapezoid and unit dots rather than a solid-black panel.
+The screenshot is attached to the session, not committed because it contains retail art.
+
+Classified readback used `sips -s format bmp s5-ingame.png --out radar.bmp`, then a Python standard-
+library BMP reader over the bezel-free screenshot rectangle `(40,970)..(337,1224)`. Result:
+75,438 pixels, 35 with every channel below 16 (**0.0464 % black**), 22,649 unique RGB values, channel
+variances 8,405.32 / 8,404.01 / 8,415.95. This closes the old pre-#141 solid-black radar observation
+for the current build; it does not attribute which renderer fix closed it.
+
 ## 6. Ranked residuals
 
 Ranked by what a player notices; classified.
 
-1. **Radar panel on the M1 Pro — NOT MEASURED.** playability-probe.md §8 recorded the radar panel
-   black pre-#141; the §5.2 run never saw the HUD because USA-01's intro cinematic covers it for
-   longer than the 150 s window and Escape opens the quit menu. What it takes: a run with
-   `--mission-seconds` ≳ 300, the cinematic's real skip affordance, or a skirmish (no cinematic),
-   then classify the radar quadrant of the frame. Whether #141 alone fixes the radar is open;
-   the structures it predicted black are measured textured (§5.2), so if the radar is still black
-   it has a different cause. Cost: a few minutes on a connected `will-mac`.
+1. **Radar panel on the M1 Pro — MEASURED RENDERED.** Classified readback and human inspection are
+   §5.3. No remaining radar-specific defect is evidenced on current `main`.
 2. **`CopyRects` with a compressed endpoint is refused — UNIMPLEMENTED PATH.** No mission path
    is known to take it (the engine uploads compressed levels through `LockRect`); if the ledger on
    the Mac shows the entry, that is the next item. Cost: a block-granular `vkCmdCopyImage`, under a
