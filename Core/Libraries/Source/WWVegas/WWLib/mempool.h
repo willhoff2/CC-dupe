@@ -287,7 +287,12 @@ T * ObjectPoolClass<T,BLOCK_SIZE>::Allocate_Object_Memory()
 		*(void **)BlockListHead = tmp_block_head;
 
 		// Link the objects in the block into the free object list
-		FreeListHead = (T*)(BlockListHead + 1);
+		// TheSuperHackers @bugfix Devin 03/09/2026 The block's first bytes hold the next-block
+		// pointer, so the objects have to start a pointer past the block and not a uint32 past it.
+		// On LP64 those differ: the first object used to overlap the top half of that pointer and
+		// the pool's destructor then walked a half-overwritten block list. Identical on Win32,
+		// where a uint32 and a pointer are both four bytes.
+		FreeListHead = (T*)((char *)BlockListHead + sizeof(uint32 *));
 		for ( int i = 0; i < BLOCK_SIZE; i++ ) {
 			*(T**)(&(FreeListHead[i])) = &(FreeListHead[i+1]);	// link up the elements
 		}
