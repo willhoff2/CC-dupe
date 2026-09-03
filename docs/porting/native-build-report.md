@@ -16,7 +16,7 @@ Configuration: **release** — the engine's assertions and debug logging are com
 |---|---:|---:|---:|
 | `Core/Libraries/Source/Compression` | 11 | 11 | 11 |
 | `Core/Libraries/Source/WWVegas/WWMath` | 37 | 37 | 37 |
-| `Core/Libraries/Source/WWVegas/WWLib` | 79 | 79 | 79 |
+| `Core/Libraries/Source/WWVegas/WWLib` | 80 | 80 | 80 |
 | `Core/Libraries/Source/WWVegas/WWDebug` | 3 | 3 | 3 |
 | `Core/Libraries/Source/WWVegas/WWSaveLoad` | 12 | 12 | 12 |
 | `Core/GameEngine` | 211 | 211 | 211 |
@@ -28,11 +28,11 @@ Configuration: **release** — the engine's assertions and debug logging are com
 | `Core/GameEngineDevice` | 70 | 70 | 70 |
 | `GeneralsMD/Code/GameEngineDevice` | 39 | 39 | 39 |
 | `GeneralsMD/Code/Main` | 1 | 1 | 1 |
-| **Total** | **980** | **980** | **980** |
+| **Total** | **981** | **981** | **981** |
 
 ## 2. How much the probe over-reports
 
-**0 translation units that the probe calls clean fail to compile**, out of 980 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
+**0 translation units that the probe calls clean fail to compile**, out of 981 probe-clean units (0%). These are the codegen-class failures `-fsyntax-only` cannot see.
 
 ## 3. Undefined symbols
 
@@ -72,7 +72,7 @@ The linker's list and §3's `nm` scan agree, so the categorised list above is th
 
 Symbol resolution is necessary and not sufficient; `docs/porting/startability.md` defines what else a first launch needs.
 
-The file is `build/native/native_strict_link`, 83.1 MiB, ELF 64-bit x86-64 (`file`: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=35e422d0ff1b391e5625e94e081ef536f9e01690, for GNU/Linux 3.2.0, with debug_info, not stripped). That it loads and runs is a separate question from whether it links, and one this run does not answer: see `docs/porting/startability.md`.
+The file is `build/native/native_strict_link`, 83.5 MiB, ELF 64-bit x86-64. That it loads and runs is a separate question from whether it links, and one this run does not answer: see `docs/porting/startability.md`.
 
 ## Reproducing
 

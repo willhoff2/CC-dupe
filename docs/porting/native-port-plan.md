@@ -19,12 +19,12 @@ slice is much closer to portable than the raw `windows.h` counts suggest.
 
 > **Superseded.** That 106/147 covered only the `Core/Libraries` slice, and later slices grew the
 > denominator; `review-and-decisions.md` records it as stale. The probe now covers nine targets:
-> **674 / 762** clean native and **718 / 762** shimmed (clang 14, commit `632ba201f`). The
-> `761 -> 762` move since `3098ef1` (673 / 761 and 717 / 761) is a denominator change, not progress:
-> #117 added `Common/System/CriticalSectionFailure.cpp` to `GeneralsMD/Code/GameEngine`, and it
-> compiles clean in both modes. Read [`STATUS.md`](STATUS.md), which is generated from the committed
-> baselines, rather than this paragraph; `scripts/ci/check-doc-figures.py` fails CI when the pair
-> quoted here disagrees with them.
+> **675 / 763** clean native and **719 / 763** shimmed (clang 14, commit `f25a9f553`). The
+> `762 -> 763` move since `632ba201f` (674 / 762 and 718 / 762) is a denominator change, not progress:
+> #148 added `WWLib/platform/platform_cursor.cpp`, and it compiles clean in both modes, as was the
+> `761 -> 762` move before it (#117, `Common/System/CriticalSectionFailure.cpp`). Read
+> [`STATUS.md`](STATUS.md), which is generated from the committed baselines, rather than this
+> paragraph; `scripts/ci/check-doc-figures.py` fails CI when the pair quoted here disagrees with them.
 
 Findings worth recording:
 
