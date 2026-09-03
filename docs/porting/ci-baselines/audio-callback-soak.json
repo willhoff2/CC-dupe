@@ -1,0 +1,23 @@
+{
+  "what": "Linux x86-64 lavapipe skirmish soak of the OpenAL shim's queued end-of-sample callback delivery (scripts/linux-audio-soak-probe.py attached with gdb to the strict-link binary from scripts/native-build.py; sound effects on; OpenAL Soft wave backend). Apple Silicon: UNMEASURED.",
+  "platform": "Linux x86-64, Ubuntu 22.04, clang++-14, lavapipe, OpenAL Soft wave backend",
+  "shim_rev_under_test": "working tree of the PR that introduced OpenALAudio::deliverCompletions",
+  "wall_seconds": 1320,
+  "exited_before_deadline": false,
+  "main_thread_from_first_MilesAudioManager_update": true,
+  "callbacks": {
+    "setSampleCompleted": 9,
+    "set3DSampleCompleted": 16632,
+    "setStreamCompleted": 0,
+    "total": 16641,
+    "called_from_OpenALAudio_deliverCompletions": 16641,
+    "called_from_elsewhere": 0,
+    "off_main_thread": 0
+  },
+  "engine_handlers": {
+    "MilesAudioManager::notifyOfAudioCompletion": 16640,
+    "MilesAudioManager::startNextLoop": 16631,
+    "off_main_thread": 0
+  },
+  "verdict": "pass"
+}

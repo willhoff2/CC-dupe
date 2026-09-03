@@ -140,7 +140,9 @@ been reassigned or torn down by the main thread while the callback held a stale 
 thread's list edits. Whether retail Miles delivered EOS callbacks on its own thread or during
 `AIL_serve` on the caller's thread is **inferred, not verified**, and is the first question for the
 fix. Per the slice rule the defect is documented, not fixed, here; the `.ips`, `soak-run.json` and
-wrapper script are session artefacts, not committed.
+wrapper script are session artefacts, not committed. (Fixed since, in the shim only:
+`sound-effects-chain.md` §4.1 — completions are queued and delivered on the `AIL_*` calling thread;
+Linux 22-minute soak green, the Mac re-run is UNMEASURED and owed to the Mac slice.)
 
 Consequently: `AL_PLAYING` via function evaluation is **UNMEASURED** (probe defect), while the
 shim's own started-voice mirror is measured; the ≥20 resumed minutes and the paused stretch are
