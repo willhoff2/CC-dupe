@@ -71,7 +71,7 @@ CASE_LABEL = re.compile(r"case\s+WWPlatform::(WINDOW_EVENT_[A-Z_]+)\s*:")
 # Win32-only spellings that must never appear outside an #ifdef _WIN32 in the wired files.
 WIN32_ONLY = re.compile(
     r"\b(?:<windows\.h>|PeekMessage|DispatchMessage|TranslateMessage|GetMessage|CreateWindow|"
-    r"RegisterClass|ClipCursor|SetCursorPos|LoadCursorFromFile|IsIconic|GetKeyboardLayout|"
+    r"RegisterClass|ClipCursor|SetCursorPos|IsIconic|GetKeyboardLayout|"
     r"GetKeyState|SetErrorMode|DirectInput8Create)\b")
 
 # The renderer resizes the window to the requested resolution through the seam's Win32 user
@@ -81,7 +81,10 @@ RESIZE_CALL = re.compile(r"\bResize_And_Position_Window\s*\(\s*\)\s*;")
 
 # MessageBox() and ShowWindow() are deliberately absent from WIN32_ONLY: Debug.cpp keeps calling
 # them under those names, and off Windows they resolve to the seam's own definitions. That is the
-# pattern, not a leak.
+# pattern, not a leak. LoadCursorFromFile() and SetCursor() are absent for the same reason:
+# Win32Mouse.cpp calls them under their Win32 names and platform_win32_user.cpp defines them off
+# Windows over the seam's Window_Create_Cursor()/Window_Set_Cursor()
+# (docs/porting/mouse-cursor-seam.md).
 
 
 def read(path):

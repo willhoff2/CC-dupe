@@ -41,9 +41,12 @@
 #include "WinMain.h"
 #else
 // TheSuperHackers @port The window seam replaces WinMain.cpp's WndProc as the source of the events
-// buffered here, and ClipCursor()/GetClientRect() for the capture. The cursor image is still a
-// Win32 HCURSOR loaded from an .ANI file, which has no portable equivalent - off Windows the
-// game's own W3D cursor is the only one there is. See docs/porting/window-event-loop.md.
+// buffered here, and ClipCursor()/GetClientRect() for the capture. The cursor itself keeps its
+// Win32 spelling: LoadCursorFromFile() and SetCursor() are defined off Windows by
+// WWLib/platform/platform_win32_user.cpp, which decodes the .ANI and hands the shape to the window
+// seam, so the loading and selection code below is shared with Windows. Declared here rather than
+// through <windows.h>, whose macros this file does not want. See docs/porting/window-event-loop.md
+// and docs/porting/mouse-cursor-seam.md.
 #include "GameClient/PlatformWindowHost.h"
 #endif
 
@@ -53,6 +56,9 @@ extern Win32Mouse *TheWin32Mouse;
 
 #ifndef _WIN32
 typedef void * HCURSOR;
+extern "C" HCURSOR LoadCursorFromFileA(const char * path);
+extern "C" HCURSOR SetCursor(HCURSOR cursor);
+#define LoadCursorFromFile LoadCursorFromFileA
 #endif
 
 HCURSOR cursorResources[Mouse::NUM_MOUSE_CURSORS][MAX_2D_CURSOR_DIRECTIONS];
@@ -473,16 +479,6 @@ void Win32Mouse::regainFocus()
 is created to avoid cursor corruption on buggy ATI Radeon cards. */
 void Win32Mouse::initCursorResources()
 {
-#ifndef _WIN32
-
-	// TheSuperHackers @port LoadCursorFromFile() reads a Win32 .ANI, and SetCursor() hands the
-	// system cursor to the window manager. Neither has an equivalent through the seam, and neither
-	// is needed: the game's own RM_W3D/RM_POLYGON cursor is drawn by the renderer. The system
-	// cursor stays hidden, as the Win32 window class made it.
-	return;
-
-#else
-
 	for (Int cursor=FIRST_CURSOR; cursor<NUM_MOUSE_CURSORS; cursor++)
 	{
 		for (Int direction=0; direction<m_cursorInfo[cursor].numDirections; direction++)
@@ -521,8 +517,6 @@ void Win32Mouse::initCursorResources()
 		}
 //		SetCursor(cursorResources[cursor][m_directionFrame]);
 	}
-
-#endif // !_WIN32
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -536,14 +530,12 @@ void Win32Mouse::setCursor( MouseCursor cursor )
 	if (m_lostFocus)
 		return;	//stop messing with mouse cursor if we don't have focus.
 
-#ifdef _WIN32
 	if (cursor == NONE || !m_visible)
 		SetCursor( nullptr );
 	else
 	{
 		SetCursor(cursorResources[cursor][m_directionFrame]);
 	}
-#endif
 
 	// save current cursor
 	m_currentWin32Cursor=m_currentCursor = cursor;

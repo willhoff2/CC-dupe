@@ -16,7 +16,7 @@ none of them talks to a windowing system directly.
 |---|---|---|
 | `GetCursorPos` | `Window_Cursor_Position` | `W3DMouse.cpp` |
 | `ScreenToClient` | `Window_Client_Origin` | `W3DMouse.cpp` |
-| `SetCursor` | `Window_Show_System_Cursor` only — see §4 | `W3DMouse.cpp` |
+| `SetCursor` | `Window_Show_System_Cursor`, `Window_Set_Cursor` — see `mouse-cursor-seam.md` | `W3DMouse.cpp`, `Win32Mouse.cpp` |
 | `IsIconic` | `Window_Is_Minimised` | `W3DDisplay.cpp` |
 | `GetClientRect` | `Window_Client_Size` | `dx8wrapper.cpp` |
 | `GetWindowLongA` | `Window_Is_Fullscreen`, `Window_Is_Minimised` | `dx8wrapper.cpp`, `Debug.cpp` |
@@ -113,10 +113,10 @@ and returns the value Win32 returns on failure, so a caller's own fallback runs.
   is deliberately not a window the seam will act on, so `IsIconic()`/`GetClientRect()` on it fail
   rather than reaching the game's window. **Cost: none for this call site**; any future caller that
   wants the desktop's *size* must ask `GetMonitorInfoA()` instead.
-- **`SetCursor` shows the system pointer.** A non-null `HCURSOR` is a Win32 `.CUR`/`.ANI` resource
-  handle, and there is nothing off Windows to resolve one to a shape. `W3DMouse` draws the game's
-  own cursor as geometry in the D3D path anyway. **Cost: the Win32-resource cursor path shows the
-  system arrow.**
+- **`SetCursor` selects a shape** since the mouse-cursor slice: a non-null `HCURSOR` is a handle
+  `LoadCursorFromFile()` made from a decoded `.ANI`, and the shape goes to `Window_Set_Cursor()`.
+  What remains a cost is that a cursor whose file is missing selects the platform arrow — see
+  `docs/porting/mouse-cursor-seam.md`.
 
 `GetWindowLongA` answers `0` for any index other than `GWL_STYLE`/`GWL_EXSTYLE` and reports it:
 there is no `WndProc` or `HINSTANCE` to hand back. `AdjustWindowRect` reports and falls back to the

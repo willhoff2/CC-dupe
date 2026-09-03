@@ -295,6 +295,37 @@ void Window_Warp_Cursor(void * window, int x, int y);
 void Window_Show_System_Cursor(void * window, bool show);
 
 /*
+**	Cursor shape, the other half of SetCursor(). Windows gets the game's cursors from
+**	LoadCursorFromFile() on Data\Cursors\*.ANI; off Windows platform_cursor.cpp decodes the
+**	file and the backend turns the first frame into a native cursor here.
+**
+**	CursorImage is Width*Height 32-bit BGRA pixels with straight (unpremultiplied) alpha, rows
+**	top-down, hotspot in that same top-left-origin pixel space; the pixels are copied, the
+**	caller keeps ownership. Window_Create_Cursor() returns an opaque handle, or null with
+**	Window_Last_Error() set. Window_Set_Cursor() makes that shape the one shown over the
+**	window (SetCursor(non-null)); a null cursor restores the platform's default arrow. It does
+**	not change visibility: that stays with Window_Show_System_Cursor(). Destroying the cursor
+**	that is currently set restores the default arrow first.
+**
+**	Only the first frame is presented; the .ANI's animation is not reproduced (see
+**	docs/porting/mouse-cursor-seam.md).
+*/
+struct CursorImage
+{
+	int Width;
+	int Height;
+	int Hotspot_X;
+	int Hotspot_Y;
+	const unsigned char * Pixels_BGRA;
+
+	CursorImage() : Width(0), Height(0), Hotspot_X(0), Hotspot_Y(0), Pixels_BGRA(nullptr) {}
+};
+
+void * Window_Create_Cursor(const CursorImage & image);
+void Window_Destroy_Cursor(void * cursor);
+void Window_Set_Cursor(void * window, void * cursor);
+
+/*
 **	The read side of the same seam, which is what GetCursorPos() and ScreenToClient() need.
 **	Window_Cursor_Position() is GetCursorPos(): where the pointer is now, in the platform's own
 **	screen coordinates with a top-left origin, whether or not it is over our window.

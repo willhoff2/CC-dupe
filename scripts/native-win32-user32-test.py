@@ -46,6 +46,7 @@ SOURCES = [
     f"{PLATFORM_DIR}/platform_dialog.cpp",
     f"{PLATFORM_DIR}/platform_mutex.cpp",
     f"{PLATFORM_DIR}/platform_thread.cpp",
+    f"{PLATFORM_DIR}/platform_cursor.cpp",
     "Core/Libraries/Source/WWVegas/WWLib/wwstring.cpp",
     f"{PLATFORM_DIR}/tests/win32_user32_test.cpp",
 ]

@@ -552,7 +552,7 @@
   },
   "per_area": {
     "device": {
-      "cursor": 30,
+      "cursor": 31,
       "message_pump": 5,
       "mode_change": 4,
       "polled_input": 18,
@@ -575,7 +575,7 @@
       "wndproc": 217
     },
     "libraries": {
-      "cursor": 29,
+      "cursor": 35,
       "message_pump": 13,
       "mode_change": 61,
       "placement": 18,
@@ -618,7 +618,7 @@
       "window_handle": 7
     },
     "Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp": {
-      "cursor": 7,
+      "cursor": 8,
       "window_handle": 5,
       "wndproc": 14
     },
@@ -673,7 +673,7 @@
       "Reset_Device": 8,
       "ScreenToClient": 13,
       "SetCapture": 1,
-      "SetCursor": 14,
+      "SetCursor": 21,
       "SetCursorPos": 2,
       "SetFocus": 1,
       "SetForegroundWindow": 2,
@@ -754,7 +754,7 @@
   },
   "totals": {
     "in_scope": {
-      "cursor": 59,
+      "cursor": 66,
       "message_pump": 25,
       "mode_change": 65,
       "placement": 31,

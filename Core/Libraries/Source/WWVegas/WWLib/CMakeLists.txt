@@ -191,6 +191,8 @@ else()
     # off Windows: there the real API is the implementation
     # (docs/porting/win32-file-api-seam.md).
     list(APPEND WWLIB_SRC
+        platform/platform_cursor.cpp
+        platform/platform_cursor.h
         platform/platform_win32_compat.h
         platform/platform_win32_file.cpp
         platform/platform_win32_gdi_font.cpp

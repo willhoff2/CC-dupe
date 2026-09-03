@@ -96,6 +96,48 @@
 #	include <vulkan/vulkan.h>
 #endif
 
+/*
+**	The content view. AppKit resets the pointer to the arrow whenever it re-evaluates cursor
+**	rectangles (window activation, resize, the pointer re-entering the view), so a bare
+**	[NSCursor set] does not stick; the view has to answer resetCursorRects with the cursor the
+**	game last selected. This is the Cocoa equivalent of WM_SETCURSOR returning the class cursor.
+*/
+@interface WWGameView : NSView
+{
+	NSCursor * Game_Cursor;			// retained; nil means the default arrow
+}
+- (void)setGameCursor:(NSCursor *)cursor;
+@end
+
+@implementation WWGameView
+
+- (void)dealloc
+{
+	[Game_Cursor release];
+	[super dealloc];
+}
+
+- (void)setGameCursor:(NSCursor *)cursor
+{
+	[cursor retain];
+	[Game_Cursor release];
+	Game_Cursor = cursor;
+	[[self window] invalidateCursorRectsForView:self];
+	// The rects are re-evaluated on the next event; set it now too so a game that selects a
+	// cursor while the pointer is already inside sees the change this frame.
+	[(cursor != nil ? cursor : [NSCursor arrowCursor]) set];
+}
+
+- (void)resetCursorRects
+{
+	[super resetCursorRects];
+	if (Game_Cursor != nil) {
+		[self addCursorRect:[self bounds] cursor:Game_Cursor];
+	}
+}
+
+@end
+
 namespace WWPlatform
 {
 
@@ -444,11 +486,12 @@ struct WindowState
 	bool Resizable;
 	int Width;
 	int Height;
+	NSCursor * Cursor;				// what Window_Set_Cursor() last selected; not owned here
 
 	WindowState()
 		: Window(nil), View(nil), Layer(nil), Last_Modifier_Flags(0), Active(false),
 		  Minimised(false), Closed(false), Cursor_Clipped(false), Resizable(false), Width(0),
-		  Height(0)
+		  Height(0), Cursor(nil)
 	{
 		for (int i = 0; i < 256; ++i) Key_Down[i] = false;
 	}
@@ -744,7 +787,7 @@ void * Window_Create(const WindowConfig & config)
 	[window setRestorable:NO];
 	[window center];
 
-	NSView * view = [[NSView alloc] initWithFrame:frame];
+	NSView * view = [[WWGameView alloc] initWithFrame:frame];
 	CAMetalLayer * layer = [CAMetalLayer layer];
 	if (layer == nil) {
 		TheLastError = "CAMetalLayer layer returned nil (no Metal device?)";
@@ -1084,6 +1127,80 @@ void Window_Show_System_Cursor(void * window, bool show)
 	} else {
 		[NSCursor hide];
 	}
+}
+
+/*
+**	NSBitmapImageRep with NSBitmapFormatAlphaNonpremultiplied takes the seam's straight-alpha
+**	pixels as they are, but as R,G,B,A, so the channels are swapped on the way in. NSCursor's
+**	hot spot is in the image's flipped (top-left origin) coordinate system, which is the .CUR
+**	hotspot as decoded. The image is Width x Height points, i.e. the cursor is the same size in
+**	points as Windows draws it in pixels at 100% DPI. Inferred from the AppKit documentation;
+**	whether the shape, hotspot and size are right on a real Mac is UNMEASURED
+**	(docs/porting/mouse-cursor-seam.md).
+*/
+void * Window_Create_Cursor(const CursorImage & image)
+{
+	if (image.Pixels_BGRA == nullptr || image.Width <= 0 || image.Height <= 0) {
+		TheLastError = "Window_Create_Cursor: empty image";
+		return nullptr;
+	}
+	NSBitmapImageRep * rep = [[NSBitmapImageRep alloc]
+		initWithBitmapDataPlanes:NULL
+		pixelsWide:image.Width
+		pixelsHigh:image.Height
+		bitsPerSample:8
+		samplesPerPixel:4
+		hasAlpha:YES
+		isPlanar:NO
+		colorSpaceName:NSDeviceRGBColorSpace
+		bitmapFormat:NSBitmapFormatAlphaNonpremultiplied
+		bytesPerRow:image.Width * 4
+		bitsPerPixel:32];
+	if (rep == nil) {
+		TheLastError = "Window_Create_Cursor: NSBitmapImageRep init returned nil";
+		return nullptr;
+	}
+	unsigned char * dst = [rep bitmapData];
+	const unsigned char * src = image.Pixels_BGRA;
+	const size_t pixels = static_cast<size_t>(image.Width) * image.Height;
+	for (size_t i = 0; i < pixels; ++i, src += 4, dst += 4) {
+		dst[0] = src[2];
+		dst[1] = src[1];
+		dst[2] = src[0];
+		dst[3] = src[3];
+	}
+	NSImage * ns_image = [[NSImage alloc] initWithSize:NSMakeSize(image.Width, image.Height)];
+	[ns_image addRepresentation:rep];
+	[rep release];
+	NSCursor * cursor = [[NSCursor alloc] initWithImage:ns_image
+		hotSpot:NSMakePoint(image.Hotspot_X, image.Hotspot_Y)];
+	[ns_image release];
+	if (cursor == nil) {
+		TheLastError = "Window_Create_Cursor: NSCursor initWithImage returned nil";
+		return nullptr;
+	}
+	return cursor;
+}
+
+void Window_Destroy_Cursor(void * cursor)
+{
+	if (cursor == nullptr) return;
+	NSCursor * ns_cursor = (NSCursor *)cursor;
+	if (TheWindow != nullptr && TheWindow->Cursor == ns_cursor) {
+		TheWindow->Cursor = nil;
+		[(WWGameView *)TheWindow->View setGameCursor:nil];
+	}
+	[ns_cursor release];
+}
+
+void Window_Set_Cursor(void * window, void * cursor)
+{
+	WindowState * state = State(window);
+	if (state == nullptr) return;
+	NSCursor * ns_cursor = (NSCursor *)cursor;
+	if (state->Cursor == ns_cursor) return;
+	state->Cursor = ns_cursor;
+	[(WWGameView *)state->View setGameCursor:ns_cursor];
 }
 
 bool Window_Cursor_Position(void * window, int & x, int & y)

@@ -715,6 +715,49 @@ void Window_Show_System_Cursor(void * window, bool show)
 	SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE);
 }
 
+/*
+**	SDL_PIXELFORMAT_ARGB8888 is the packed 32-bit word A<<24|R<<16|G<<8|B, which on a little
+**	endian host is B,G,R,A in memory: the seam's layout, so no conversion. SDL_CreateColorCursor()
+**	copies the surface, so the caller's pixels are not referenced afterwards. This is a real
+**	cursor on X11 and Wayland; it needs a display server, so it is unmeasured on the headless
+**	CI runner (docs/porting/mouse-cursor-seam.md).
+*/
+void * Window_Create_Cursor(const CursorImage & image)
+{
+	if (image.Pixels_BGRA == nullptr || image.Width <= 0 || image.Height <= 0) {
+		TheLastError = "Window_Create_Cursor: empty image";
+		return nullptr;
+	}
+	SDL_Surface * surface = SDL_CreateRGBSurfaceWithFormatFrom(
+		const_cast<unsigned char *>(image.Pixels_BGRA), image.Width, image.Height, 32,
+		image.Width * 4, SDL_PIXELFORMAT_ARGB8888);
+	if (surface == nullptr) {
+		TheLastError = std::string("SDL_CreateRGBSurfaceWithFormatFrom failed: ") + SDL_GetError();
+		return nullptr;
+	}
+	SDL_Cursor * cursor = SDL_CreateColorCursor(surface, image.Hotspot_X, image.Hotspot_Y);
+	SDL_FreeSurface(surface);
+	if (cursor == nullptr) {
+		TheLastError = std::string("SDL_CreateColorCursor failed: ") + SDL_GetError();
+		return nullptr;
+	}
+	return cursor;
+}
+
+void Window_Destroy_Cursor(void * cursor)
+{
+	if (cursor == nullptr) return;
+	SDL_Cursor * sdl_cursor = static_cast<SDL_Cursor *>(cursor);
+	if (SDL_GetCursor() == sdl_cursor) SDL_SetCursor(SDL_GetDefaultCursor());
+	SDL_FreeCursor(sdl_cursor);
+}
+
+void Window_Set_Cursor(void * window, void * cursor)
+{
+	if (State(window) == nullptr) return;
+	SDL_SetCursor(cursor != nullptr ? static_cast<SDL_Cursor *>(cursor) : SDL_GetDefaultCursor());
+}
+
 bool Window_Cursor_Position(void * window, int & x, int & y)
 {
 	WindowState * state = State(window);
