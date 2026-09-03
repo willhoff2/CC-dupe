@@ -160,16 +160,38 @@ block chain it can read instead of on a memcheck summary.
 | --- | --- | --- |
 | The real pool destroyed by `exit()` after `shutdownMemoryManager()` | Linux x86-64, native archives | exit 0, block list intact; **exit -11 in `~ObjectPoolClass` before the fix** |
 | Pre-fix arithmetic overwrites the block header | Linux x86-64 | reproduced, half-zero pointer |
-| Main Menu → Exit | Apple Silicon | **UNMEASURED** |
-| Quit from a running skirmish | Apple Silicon | **UNMEASURED** |
-| Quit from a running campaign mission | Apple Silicon | **UNMEASURED** |
-| No crash report written in `~/Library/Logs/DiagnosticReports`, no hang | Apple Silicon | **UNMEASURED** |
+| Main Menu → Exit | Apple Silicon (M1 Pro, live, real input, no debugger) | **exit 0**, 2 s after the click, no hang, no SIGSEGV; DiagnosticReports 41 → 41 |
+| Quit from a running skirmish | Apple Silicon (M1 Pro, live, real input, no debugger) | **exit 0**, no hang, no SIGSEGV; DiagnosticReports 41 → 41. Quit at ~1 min of game time (Escape → Exit → Yes), through the score screen and skirmish setup back to the shell, then Exit Game |
+| Quit from a running campaign mission | Apple Silicon (M1 Pro, live, real input, no debugger) | **exit 0**, no hang, no SIGSEGV; DiagnosticReports 41 → 41. USA-01 on Easy, quit at 00:02:11 mission time after the intro cinematic (Escape → Exit Mission → Yes), score screen → shell → Exit Game |
+| No crash report written in `~/Library/Logs/DiagnosticReports`, no hang | Apple Silicon | **Measured for all three clean exits: none written** (41 before and after each fresh launch, `ls ~/Library/Logs/DiagnosticReports \| wc -l`). Measured for the soak: count 40 → 41, `zh-2026-09-03-020314.ips`, `EXC_BAD_ACCESS`/`SIGSEGV` at `0xd8` in `MilesAudioManager::initFilters3D` on the OpenAL service thread, 16.2 resumed minutes into a running skirmish — a **runtime** crash, not a shutdown one |
 
-The three retail quit paths and the crash-report directory are owed by a Mac session: this slice was
-run on Linux deliberately (the single M1 Pro outpost is reserved for renderer measurement), so the
-Apple Silicon rows are not claimed. The mechanism is LP64 arithmetic, identical on both targets, and
-the fix is verified against the same source on x86-64 — but "no crash report on the Mac" is a
-measurement nobody has taken yet.
+Wave 11 reached a running real-input skirmish on the M1 Pro twice under the probe. The first run
+ended in a probe-induced deadlock (tooling, `playability-probe.md` §1.3 run 1); the second ran
+without any OpenAL function evaluation and crashed in the audio completion callback
+(`sound-effects-chain.md` §6 item 1). That crash says nothing about the #145 `~ObjectPoolClass`
+fix or about `exit()`: the process never reached shutdown.
+
+The three clean-exit rows were then measured separately, on the same `main` build (HEAD
+`66f7183e5`), as fresh launches with **no debugger attached at any point** (LLDB attached only to
+disposable scout launches used to read the GameWindow button positions; those were killed and are
+not the measured runs). Each run: `ls ~/Library/Logs/DiagnosticReports | wc -l` before launch;
+`cd <run-dir> && arch -arm64 ./zh -win &`; posted real CGEvent input via
+`scripts/macos-input-drive.py post --pid <pid> --key 53` (skip intro) and
+`post --client <x,y>` for each button (Exit Game at client 644,334; in-game quit menu Exit at
+400,347; confirm Yes at 299,412); `wait <pid>` for the status; count again. All three returned
+`0` with the process gone within 2 s of the final click; no `.ips` appeared and the count stayed
+at 41 throughout. Screenshots of the running skirmish (HUD, 00:01:13 game clock), the running
+mission (HUD, 00:02:11) and the shell were taken through the same script and kept in the session,
+not the repo (retail art).
+
+Two caveats on how the quit paths behave, both matching the Windows shell flow rather than a Mac
+regression: quitting a skirmish or mission does not exit the process — it goes to the score screen,
+then back to the skirmish setup (or the shell), so the row's exit status is the one from the final
+Exit Game click. Two earlier harness attempts that stopped at the score/setup screen were killed by
+the harness after its 120/180 s wait (SIGKILL, DiagnosticReports unchanged); those are harness
+timeouts, not game hangs, and they are not the measured runs. `/usr/bin/sample` could not read
+thread state on this machine without elevation, so a hang, had one occurred, would have been
+recorded from `ps` state and the timeout only.
 
 ## The input wedge is a different finding
 
