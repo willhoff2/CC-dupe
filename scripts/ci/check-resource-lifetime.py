@@ -49,10 +49,12 @@ LIVE_EXCEEDED = re.compile(
 STRINGS_PER_FRAME = 8
 SURFACES_PER_TEXTURE = 2  # the image surface and the texture's level 0
 
-# The scan's cost at the end of the run may not exceed this multiple of its cost at the start.
-# With the live set bounded the scan is over a handful of surfaces both times; the pre-fix
-# backend measured 24x on 300 frames (271 -> 6549 ns/call on lavapipe).
+# The scan's cost at the end of the run may not exceed this multiple of its cost at the start,
+# once it is above the noise floor of a ~100 ns call. With the live set bounded the lookup is
+# O(1) both times; the pre-fix backend measured 271 -> 6,549 ns/call (24x) on 300 frames on
+# lavapipe with the leak, and 352 -> 20,664 ns/call with the leak but the pointer lookup absent.
 SCAN_GROWTH_LIMIT = 4.0
+SCAN_NOISE_FLOOR_NS = 1000
 
 
 def run_workload(binary, frames, disable=None):
@@ -141,7 +143,7 @@ def check_run(result, frames, failures):
         failures.append("the workload did not time Get_Surface_Level")
     else:
         first, last = result["scan"]
-        if first > 0 and last > first * SCAN_GROWTH_LIMIT:
+        if first > 0 and last > SCAN_NOISE_FLOOR_NS and last > first * SCAN_GROWTH_LIMIT:
             failures.append(f"Get_Surface_Level cost grew {first} -> {last} ns/call over the run "
                             f"(limit {SCAN_GROWTH_LIMIT}x): the scan is over a growing list")
 
