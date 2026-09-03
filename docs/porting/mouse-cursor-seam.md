@@ -100,7 +100,7 @@ native install without `Data/Cursors` gets an arrow everywhere, never a crash an
 |---|---|---|
 | Windows | real `user32` `LoadCursorFromFile`/`SetCursor`; animation by the OS | unchanged, byte-identical source in the `_WIN32` path |
 | Linux / SDL2 | `SDL_CreateColorCursor` from the first frame | **compiles and links** (native build, level 4, strict link); behaviour needs a display server — UNMEASURED |
-| macOS / Cocoa | `NSCursor` from `NSImage`, set via `-resetCursorRects` on the content view | **inferred** from AppKit's documented behaviour; cursor visible over the window, hotspot alignment, per-direction scroll cursors — UNMEASURED, owed to a follow-up Mac session |
+| macOS / Cocoa | `NSCursor` from `NSImage`, set via `-resetCursorRects` on the content view | **MEASURED, Mac / live / real input** (§6.1): visible at fresh launch, main menu and in-mission; `NSCursor.currentSystem` is a 32×32 non-arrow image whose hotspot matches the retail file for each state (13,13 pointer; 15,15 in-mission; 22,16 `SCCScroll0` at the right screen edge); real coordinate clicks land on menu buttons. Hidden-during-cinematic, button-*edge* click and the other seven scroll directions — UNMEASURED (§6.1) |
 | Headless test (fake seam) | `win32_user32_test.cpp` records what reached `Window_Create_Cursor`/`Window_Set_Cursor` | **proven** — §5 |
 
 Animation is not presented on any non-Windows platform: the first step's frame is a still cursor.
@@ -147,14 +147,20 @@ Native build: `CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --le
 - **SDL2.** `SDL_PIXELFORMAT_ARGB8888` is a packed format; on little-endian hosts (every target
   here) its bytes in memory are B, G, R, A — the decoder's output.
 
-### UNMEASURED (owed to a follow-up Mac session)
+### Measured since on the Mac (Wave 12) — see §6.1
 
-- Cursor visible over the native window on Apple Silicon; the hotspot lands where the click lands;
-  the eight `SCCScroll0..7` directional cursors select per direction; Retina scaling (a 32×32
-  cursor is 32 points, i.e. small, on a 2× display — Windows' cursors are 32 device pixels too, so
-  this is faithful, but it has not been seen).
-- `NSCursor` over a fullscreen/borderless `NSWindow` with the MoltenVK layer as content.
-- Whether the decoded retail frames *look* right on a display: §6 measures the decode only.
+Visibility at fresh launch / main menu / in-mission, retail identity by hotspot, one scroll
+direction at the right edge, Retina logical size, and coordinate clicks reaching menu buttons.
+
+### UNMEASURED (still)
+
+- The remaining seven `SCCScroll1..7` directions and the swap latency; a click at a menu button's
+  *edge* (only centre clicks were driven); the cursor hidden while the game hides it (cinematic /
+  `SetCursor(nullptr)`) — no cinematic was reached in the skirmish run.
+- `NSCursor` over a fullscreen/borderless `NSWindow` with the MoltenVK layer as content (the run
+  used `-win`).
+- Whether the decoded retail frames *look* right on a display beyond "a non-arrow 32×32 image is
+  shown": pixel-level comparison with the decoded frame is not done.
 
 ## 6. MEASURED (Linux, decode only): the retail cursor set
 
@@ -222,8 +228,33 @@ directional `SCCScroll0..7` hotspots sit on the arrow tips at the frame edges; 2
 The 18 files the engine never names (`*_S.ani`, `SCCGuard`, `SCCHeal`, `SCCNoEntry`, `SCCOutrange`,
 `SCCPlace`, `SCCSell`, `SCCSpyDrone`, `SCCStop`) are not measured.
 
-**What this does not measure:** the cursor on a display. Linux SDL2 and macOS Cocoa visibility,
-hotspot alignment under a click and Retina scaling remain **UNMEASURED** (§5, owed to the Mac slice).
+**What this does not measure:** the cursor on a display. Linux SDL2 visibility remains
+**UNMEASURED**; macOS is measured in §6.1.
+
+### 6.1 MEASURED (Mac / live / real input): the cursor over the native window
+
+**M1 Pro, macOS 26.x, 3456×2234 device pixels at backing scale 2× (1728×1117 points), 2026-09-03,
+`main` `c6fd1bd7c`, `arch -arm64 ./zh -win`.** Two session-only tools, neither inside the game: a
+Swift `NSCursor.currentSystem` reader (logical size, hotspot, `NSBitmapImageRep` pixel and point
+size, `isEqual` to `NSCursor.arrow`) run while the OS pointer was over the game window, and the
+retail decoder test `python3 scripts/native-win32-user32-test.py` with
+`GENERALSMD_PATH=~/devin-work/zh-data` on this Mac: **429 checks, 0 failures**, the same 34-row
+table as above (the Mac's install and the S3 bundle decode identically).
+
+| State | Evidence label | Result |
+|---|---|---|
+| Fresh launch (intro/shell) | Mac / live, screenshot + `NSCursor` | visible; `logical_size=32x32 hotspot=13,13 is_system_arrow=false` = `SCCPointer` (13,13) |
+| Main menu | Mac / live, screenshot + `NSCursor` | visible; same 32×32 (13,13) non-arrow image |
+| In-mission (over terrain) | Mac / live, screenshot + `NSCursor` | visible; `logical_size=32x32 hotspot=15,15 is_system_arrow=false` — the in-mission set (`SCCNoAction`/`SCCMove`/… all carry (15,15)); `rep[0] pixels=32x32 points=32x32 class=NSBitmapImageRep` |
+| Retail identity | Mac / live vs. Linux+Mac decode | the hotspots the OS reports are the decoded files' hotspots, so the image set is the retail set, not the system arrow (pixel-for-pixel comparison of the frame: UNMEASURED) |
+| Hotspot / click | Mac / live / real input | coordinate clicks (SKIRMISH, PLAY GAME, Escape menu EXIT GAME / YES, score EXIT, MAIN MENU, EXIT GAME) all activated the button under the pointer tip; a click at a button *edge* pixel: UNMEASURED |
+| Scroll direction | Mac / live / real input, pointer dragged to the right screen edge | `logical_size=32x32 hotspot=22,16 is_system_arrow=false` = `SCCScroll0` (22,16) — one direction measured, the other seven UNMEASURED |
+| Hidden when the game hides it | — | UNMEASURED: no cinematic in a skirmish, `SetCursor(nullptr)` path not reached |
+| Retina | Mac / live | the `NSImage` has a single 32×32-pixel rep at 32×32 points, so AppKit draws it at 32 points = 64 device pixels (2× upscale) — the same physical size as Windows' 32-px cursor on a 1× display; crispness by eye not assessed |
+
+The `CGCursorIsVisible()` API is gone from the current SDK, so "visible" is a screenshot of the
+window with the cursor drawn plus a non-nil `NSCursor.currentSystem`; screenshots are session
+artefacts, not committed.
 
 The path the game expects at runtime, relative to the game directory (the process's working
 directory), is exactly `data\cursors\<Name>.ANI` (`data\cursors\SCCScroll<0-7>.ANI` for the
@@ -241,14 +272,16 @@ fabricates a row.
 
 ## 7. Residual risks, ranked
 
-1. **UNMEASURED on the Mac.** The whole point of the slice — a visible, correctly aimed cursor — is
-   inferred from AppKit documentation, not seen. First thing for the follow-up Mac session.
+1. **Mac partly measured (§6.1).** Visible, retail image, hotspots matching the files, centre
+   clicks landing, one scroll direction, Retina size — seen. Still UNMEASURED: hide-on-cinematic,
+   button-edge click, seven scroll directions, fullscreen window.
 2. **Retail `.ANI` format assumptions — resolved on Linux (§6).** All 34 engine-named cursors are
    `AF_ICON` 32×32 4-bpp `BI_RGB` frames and decode with in-range hotspots; no fallback to the
    arrow was taken. What remains is whether the decoded pixels look right on screen (UNMEASURED).
 3. **No animation.** Windows animates `SCCAttack` and friends; the port shows the first step. A
    follow-up can drive `Window_Set_Cursor()` from `Display_Rate_Jiffies`.
 4. **Directional scroll on the Mac.** Eight `NSCursor`s swapped per frame through
-   `-invalidateCursorRectsForView:`; the swap latency has not been observed.
+   `-invalidateCursorRectsForView:`; `SCCScroll0` was observed at the right edge (§6.1), the other
+   seven and the swap latency have not been.
 5. **Cursor handle lifetime.** `Win32Mouse` never destroys its cursors (Windows didn't either);
    `DestroyCursor()` exists for completeness and is tested, but nothing calls it at exit.

@@ -405,9 +405,10 @@ fixed binary, compared with `playability-probe.md` §2.1. Owed; **UNMEASURED** h
 
 ### 5.4 What this measurement does not cover
 
-- A complete Mac lifetime result: Wave 11's best run reached 16.2 resumed minutes before the game
-  crashed in the audio completion callback (`playability-probe.md` §1.3), short of the required ≥20
-  minutes and paused stretch. Counts, RSS and FPS exist; a formal steady-state/slope verdict does not.
+- A Mac lifetime result on this probe: Wave 11's best run reached 16.2 resumed minutes before the
+  game crashed in the audio completion callback (`playability-probe.md` §1.3); Wave 12 (§5.6) ran
+  ~29 running minutes plus a paused stretch on the fixed binary with 5-minute samples and gives the
+  count/RSS verdict, but under a breakpoint probe, so its FPS is not a clean performance number.
 - The campaign: the probe ran a skirmish. The text path is the same (`W3DDisplayString::draw`).
 - Sound: Linux had no ALSA device, so the run was silent (`docs/porting/playability-probe.md` §3 is
   about a different defect; not renderer evidence either way).
@@ -445,10 +446,50 @@ kind. The current element counts supersede any attempt to quote §1.1's old six-
 fixed-build resident count, but they do not prove whether those pre-fix hand reads were bytes;
 dividing them by eight is not a valid cross-build correction.
 
-Required status: **UNMEASURED** for ≥20 resumed minutes, the paused interval, and the formal
-steady-state/slope verdict. Reason: the game crashed at 16.2 resumed minutes in
+Required status for this Wave 11 run: **UNMEASURED** for ≥20 resumed minutes, the paused interval,
+and the formal steady-state/slope verdict. Reason: the game crashed at 16.2 resumed minutes in
 `MilesAudioManager::initFilters3D` on the OpenAL service thread (`playability-probe.md` §1.3), a
-real defect that the slice rule says to document and stop on.
+real defect that the slice rule says to document and stop on. Superseded by §5.6.
+
+### 5.6 Apple Silicon, Wave 12 — ~29 running minutes + 265 s paused on the fixed binary, no crash
+
+**Mac / live / real input / engine state, M1 Pro, MoltenVK 1.4.2, 2026-09-03, `main` `c6fd1bd7c`
+(contains #153).** Same build recipe as §5.5 (`scripts/native-build.py --level 1..4 --with-shims
+--strict-link`, 981/981 objects, 0 undefined, arm64). Alpine Assault, USA vs. one Easy AI
+(`AmericaSuperWeaponGeneral`), entered by real OS clicks (SKIRMISH → PLAY GAME); the session-only
+LLDB probe (`playability-probe.md` §1.3 method, no OpenAL function evaluation, plus breakpoints on
+the three audio EOS callbacks) sampled every 300 s. Each count is `(finish - start) / sizeof(void*)`
+over the vector's own begin/end words, i.e. **elements**, read from
+`((spike::VulkanBackend*)TheLiveBackend)->owned_*`. The mission ran from about 18:40:00 to
+19:13:40 UTC with one Escape pause 18:50:16–18:54:41 (265 s): ~1 755 s running (in-game clock
+00:23:16 at quit). Machine-readable copy: `ci-baselines/audio-callback-soak-macos-arm64.json`.
+
+| UTC | logic frame | paused | `owned_textures_` | `owned_surfaces_` | `owned_vbs_`/`owned_ibs_` | RSS bytes | render FPS (ring min–max) | engine avg FPS |
+|---|---:|---|---:|---:|---|---:|---|---:|
+| 18:40:26 | 763 | no | 332 | 427 | 92 / 80 | 83,165,184 | 14.19 (4.1–30.4, loading) | 24.76 |
+| 18:45:45 | 8,552 | no | 427 | 523 | 93 / 81 | 85,000,192 | 32.38 (18.4–46.1) | 29.22 |
+| 18:50:59 | 15,022 | **yes** | 447 | 559 | 94 / 83 | 78,020,608 | 29.88 (29.6–30.4) | 30.00 |
+| 18:56:14 | 17,289 | no | 443 | 549 | 94 / 83 | 89,571,328 | 34.77 (13.5–46.9) | 27.69 |
+| 19:01:09 | 24,196 | no | 457 | 561 | 94 / 83 | 41,435,136 | 29.99 (29.5–30.5) | 30.00 |
+| 19:06:28 | 31,562 | no | 469 | 573 | 94 / 83 | 100,171,776 | 30.02 (13.4–49.6) | 28.39 |
+
+Owned counts: textures 332 → 469, surfaces 427 → 573 over 26 minutes, rising in steps with the
+build-out (the AI went from 3 to 35 objects, 9 units and 10 buildings built; the human side 6
+buildings, 2 lost; total objects 224 → 263) and *falling* 447/559 → 443/549 across the paused
+stretch while the AI lost 4 units and the human a building — a live resident set that tracks scene
+content, not a slope. `owned_vbs_`/`owned_ibs_` sat at
+94/83 from the first minute. RSS was 41–100 MB with no trend (the 41 MB sample followed the probe's
+re-attach; the process had just been stopped ~18 s). Logic rate between unpaused samples, excluding
+the probe's own stop time: **25.6, 25.0, 24.1 logic FPS** — below Wave 11's 29.85 because this
+probe stops the process on every one of the ~20 000 audio EOS callbacks (about 20–45 per second);
+that attribution is INFERRED, and the render ring stayed at 29.5–30.5 wherever the probe did not
+stop the process. No SIGSEGV; `~/Library/Logs/DiagnosticReports` 37 → 37 before and after; the
+quit from the running skirmish exited 0 (§1.3 of `playability-probe.md`).
+
+Verdict for the §5.4 gap: **MEASURED, steady state** on the M1 Pro for ≥20 running minutes with a
+≥3-minute paused interval — no monotonic slope in `owned_textures_`/`owned_surfaces_` or RSS. The
+frame-time decay after hours (§5.3) is still **UNMEASURED**: this run was 29 minutes under a
+breakpoint probe, not the ≥2 h debugger-free run §5.3 asks for.
 
 ## 6. The gate: `zh-resource-lifetime` and `scripts/ci/check-resource-lifetime.py`
 
