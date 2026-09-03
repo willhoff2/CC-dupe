@@ -450,11 +450,9 @@ Bool FileSystem::isPathInDirectory(const AsciiString& testPath, const AsciiStrin
 		basePathNormalized.concat(pathSep);
 	}
 
-#ifdef _WIN32
+	// Engine paths follow Windows case rules on every host: GameState lower-cases the real map path
+	// it reconstructs from a save file, and the native path seam resolves names case-insensitively.
 	if (!testPathNormalized.startsWithNoCase(basePathNormalized))
-#else
-	if (!testPathNormalized.startsWith(basePathNormalized))
-#endif
 	{
 		return false;
 	}

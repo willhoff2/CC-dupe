@@ -77,7 +77,8 @@ def check_disk(user_data, failures, label):
 
 
 def check_round_trip(probe, workdir, failures):
-    """Fresh user data: name, write, renumber, list one, reopen -- and the file is in Save/."""
+    """Fresh user data: name, write, renumber, list one, reopen, map-name round trip -- and the
+    file is in Save/."""
     directory = workdir / "fresh"
     directory.mkdir()
     write_registry(directory)
@@ -94,6 +95,9 @@ def check_round_trip(probe, workdir, failures):
                      "RESULT reopen exists=yes readback=yes",
                      "RESULT savepath ok=yes"):
         require(expected in output, "fresh: no line '{}'".format(expected), failures)
+    require("RESULT mapname portable=save\\alpine assault.map real=" in output
+            and " insavedir=yes" in output,
+            "fresh: the lower-cased map path did not test as inside the save directory", failures)
 
     user_data = directory / "userdata" / USER_DATA_LEAF
     require(user_data.is_dir(), "fresh: user data directory {} was not created".format(user_data),
