@@ -156,16 +156,25 @@ Native build: `CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --le
 - `NSCursor` over a fullscreen/borderless `NSWindow` with the MoltenVK layer as content.
 - Whether the retail `.ANI` frames are 32-bit with alpha or 8-bit palette + mask — §6.
 
-## 6. MISSING DATA: the retail cursor set
+## 6. The retail cursor set: hosted as of 2026-09-03, still unmeasured
 
 The retail `Data\Cursors\*.ANI` are installed **loose** by the Zero Hour installer. They are **not
 in any of the 35 `.big` archives**, and the R2 bundle `s3://cc-mac-game-data/zerohour104_gamedata_full.7z`
 (SHA-256 verified) contains only those `.big` files: a direct parse of every `.big` directory found
-**zero** `.ani`/`.cur` entries. The retail row is therefore **UNMEASURED**:
+**zero** `.ani`/`.cur` entries.
+
+**The data gap is now closed.** `pack-gamedata.py --archives loose` packs the loose `Data/` tree,
+and `s3://cc-mac-game-data/zerohour104_loose_data.7z` (202 KiB, SHA-256 `8E474944…9406`, pinned as
+`GAMEDATA_LOOSE_SHA256`) holds all 52 `.ani` from each install root — 52 files backing the 27 names
+below, because `SCCScroll` is eight of them and most shapes ship an `_S` variant. See
+[`replay-check-gamedata.md`](replay-check-gamedata.md#the-fifth-object-zerohour104_loose_data7z).
+
+Hosted is not measured. Nobody has run the decoder over these files yet, so the retail row stays
+**UNMEASURED** — but it is now a session's work rather than a blocked one:
 
 | Cursor | Frame size | Hotspot | Frames | Status |
 |---|---|---|---|---|
-| all 27 (`SCCPointer`, `SCCNoAction`, `SCCSelect`, `SCCMove`, `SCCAttMov`, `SCCAttack`, `SCCEnter`, `SCCExit`, `SCCFriendly`, `SCCHostile`, `SCCHostile2`, `SCCHostile3`, `SCCKnifeAttack`, `SCCNoBomb`, `SCCNoKnife`, `SCCPlaceBeacon`, `SCCRallyPnt`, `SCCRemoteChg`, `SCCRepair`, `SCCResumeC`, `SCCSDIUplink`, `SCCSniper`, `SCCTNTAttack`, `SCCTimedChg`, `SCCWaypoint`, `SCCCashHack`, `SCCScroll0..7`) | — | — | — | UNMEASURED — MISSING DATA |
+| all 27 (`SCCPointer`, `SCCNoAction`, `SCCSelect`, `SCCMove`, `SCCAttMov`, `SCCAttack`, `SCCEnter`, `SCCExit`, `SCCFriendly`, `SCCHostile`, `SCCHostile2`, `SCCHostile3`, `SCCKnifeAttack`, `SCCNoBomb`, `SCCNoKnife`, `SCCPlaceBeacon`, `SCCRallyPnt`, `SCCRemoteChg`, `SCCRepair`, `SCCResumeC`, `SCCSDIUplink`, `SCCSniper`, `SCCTNTAttack`, `SCCTimedChg`, `SCCWaypoint`, `SCCCashHack`, `SCCScroll0..7`) | — | — | — | UNMEASURED — data now available |
 
 The path the game expects at runtime, relative to the game directory (the process's working
 directory), is exactly `data\cursors\<Name>.ANI` (`data\cursors\SCCScroll<0-7>.ANI` for the
@@ -173,10 +182,12 @@ directional one), with a `<ModDir>\data\cursors\` override checked first when a 
 seam's `Path::Open_Stream()` makes that case-insensitive and slash-agnostic, so a `Data/Cursors/`
 folder copied from a Windows install is found.
 
-To run the retail row: copy the install's `Data/Cursors` next to the game or set
-`GENERALSMD_PATH=<install dir>` and run the test; it prints one line per cursor (size, hotspot,
-frames, steps, rate, bpp) and asserts the hotspot lies inside the frame. Until then the test says
-`SKIP: retail cursor set: no Data/Cursors directory …` and passes; it never fabricates a row.
+To run the retail row: point `GENERALSMD_PATH` at an install that has `Data/Cursors` — either a
+local one (on the project's Mac, `~/devin-work/zh-data`) or the object above, extracted to a
+staging directory and copied per install root — and run the test. It prints one line per cursor
+(size, hotspot, frames, steps, rate, bpp) and asserts the hotspot lies inside the frame. Without
+it the test says `SKIP: retail cursor set: no Data/Cursors directory …` and passes; it never
+fabricates a row.
 
 ## 7. Residual risks, ranked
 
@@ -185,7 +196,8 @@ frames, steps, rate, bpp) and asserts the hotspot lies inside the frame. Until t
 2. **Retail `.ANI` format assumptions.** The decoder handles `AF_ICON` frames in 1/4/8/24/32-bit
    `BI_RGB`. If the retail files use raw-DIB frames or a compression it does not know, every cursor
    falls back to the arrow (visibly, and with a stderr line naming the file and reason) — playable,
-   but wrong shapes. Needs the loose files to measure.
+   but wrong shapes. The files are hosted now (§6); what is missing is a session that runs the test
+   against them.
 3. **No animation.** Windows animates `SCCAttack` and friends; the port shows the first step. A
    follow-up can drive `Window_Set_Cursor()` from `Display_Rate_Jiffies`.
 4. **Directional scroll on the Mac.** Eight `NSCursor`s swapped per frame through

@@ -14,6 +14,9 @@ staging directory.
 roots, for the native-port probes, which read GUI, audio and texture data the replay gate never
 touches. It is a separate object; the trimmed pair keeps the hashes the gate pins.
 
+`--archives movies` and `--archives loose` cover what the installer puts down outside the .big
+files: the .bik video, and the Data/ tree's cursors, WaterPlane textures and scripts.
+
 Usage:
     python3 scripts/ci/pack-gamedata.py \\
         --generals   ~/zh-data/ZH_Generals \\
@@ -78,6 +81,17 @@ FULL_ARCHIVE = "zerohour104_gamedata_full.7z"
 MOVIES_ARCHIVE = "zerohour104_movies.7z"
 MOVIE_SUFFIX = ".bik"
 
+# Everything else the installer puts under Data/ loose: the .ANI mouse cursors (which no .big
+# holds, so docs/porting/mouse-cursor-seam.md could not measure the retail row), the WaterPlane
+# textures and the .scb/.ini scripts.
+#
+# .bik is excluded because the movies object already carries it. .big is excluded because the
+# full object carries every .big in an install root, and the only one that lives under Data/ -
+# Data/INI/INIZH.big - is the duplicate StdBIGFileSystem.cpp deliberately skips to avoid a CRC
+# mismatch, so packing it would ship ~17.8 MiB the engine ignores.
+LOOSE_ARCHIVE = "zerohour104_loose_data.7z"
+LOOSE_EXCLUDED_SUFFIXES = {MOVIE_SUFFIX, ".big"}
+
 # -mx=9 for the trimmed pair, because the hashes CI pins were produced with it and repacking
 # must keep reproducing them.
 #
@@ -90,10 +104,14 @@ MOVIE_SUFFIX = ".bik"
 # on a retail cutscene, -mx=1 gives 1.018x and -mx=5 gives 1.020x. Anything above 1 buys nothing
 # and costs time.
 #
+# -mx=9 for the loose data, which is a few MiB of small files: the whole object packs in about a
+# second, so the level that compresses best is also free.
+#
 # The level is part of what the SHA256 covers, so changing any of these re-hashes that object.
 TRIMMED_COMPRESSION_LEVEL = 9
 FULL_COMPRESSION_LEVEL = 5
 MOVIES_COMPRESSION_LEVEL = 1
+LOOSE_COMPRESSION_LEVEL = 9
 
 
 def find_seven_zip() -> str:
@@ -209,6 +227,19 @@ def build_archive(label: str, root: Path, files: list[str], archive: Path, seven
     return sha256(archive)
 
 
+def stage_source(source: Path, target: Path) -> None:
+    """Put `source` at `target`, hardlinking rather than copying where the filesystem allows it.
+
+    The full archive stages several GB, and both the installs and the temporary directory are
+    normally on the same volume. A copy is the fallback when they are not.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+
+
 def collect_big_archives(label: str, root: Path) -> list[Path]:
     """Every .big directly in an install root, sorted, so the manifest is stable."""
     if not root.is_dir():
@@ -240,14 +271,7 @@ def build_full_archive(generals: Path, generalsmd: Path, archive: Path,
             staged_tree.mkdir()
             for source in collect_big_archives(tree_name, root):
                 manifest.append((tree_name, source, source.stat().st_size))
-                target = staged_tree / source.name
-                # Hardlink rather than copy: this stages several GB, and both the installs and
-                # the temporary directory are normally on the same volume. A copy is the
-                # fallback when they are not.
-                try:
-                    os.link(source, target)
-                except OSError:
-                    shutil.copy2(source, target)
+                stage_source(source, staged_tree / source.name)
 
         staged_bytes = sum(size for _, _, size in manifest)
         print(f"Packing {len(manifest)} .big files ({staged_bytes / 1024**3:.2f} GiB) from "
@@ -301,12 +325,7 @@ def build_movies_archive(generals: Path, generalsmd: Path, archive: Path,
             for source in collect_movies(tree_name, root, exclude):
                 relative = source.relative_to(root)
                 manifest.append((tree_name, relative, source.stat().st_size))
-                target = stage / tree_name / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    os.link(source, target)
-                except OSError:
-                    shutil.copy2(source, target)
+                stage_source(source, stage / tree_name / relative)
 
         staged_bytes = sum(size for _, _, size in manifest)
         print(f"Packing {len(manifest)} {MOVIE_SUFFIX} files "
@@ -314,6 +333,68 @@ def build_movies_archive(generals: Path, generalsmd: Path, archive: Path,
         pack_stage_dir("movies", stage, archive, seven_zip, MOVIES_COMPRESSION_LEVEL)
 
     return sha256(archive), manifest
+
+
+def collect_loose_data(label: str, root: Path) -> list[Path]:
+    """Every file under an install root's Data/ that no other object carries, sorted.
+
+    The sweep is confined to Data/, so the nesting trap collect_movies() guards against does not
+    arise: a depot copy that puts the Generals tree inside the Zero Hour one puts it at the root
+    (`zh-data/ZH_Generals`), not under `zh-data/Data`.
+    """
+    data_dir = resolve_file(root, "Data")
+    if data_dir is None or not data_dir.is_dir():
+        raise SystemExit(f"{label} install has no Data directory under {root}")
+
+    found = [path for path in sorted(data_dir.rglob("*"))
+             if path.is_file() and path.suffix.lower() not in LOOSE_EXCLUDED_SUFFIXES]
+
+    if not found:
+        raise SystemExit(f"{label} install has no loose data files under {data_dir}")
+    return found
+
+
+def build_loose_archive(generals: Path, generalsmd: Path, archive: Path,
+                        seven_zip: str) -> tuple[str, list[tuple[str, Path, int]]]:
+    """Pack the loose Data/ files from both install roots, preserving each path within its root.
+
+    These are installed loose and are in no .big: the .ANI cursors the mouse seam reads with
+    `LoadCursorFromFile("data\\cursors\\<Name>.ANI")`, the WaterPlane textures, and the .scb/.ini
+    scripts. Without them a native install shows the platform's default arrow everywhere.
+
+    Layout matches the full and movies archives: each install root gets its own top-level
+    directory (`Generals/`, `GeneralsMD/`), and paths below it are relative to that root - so an
+    entry reads `GeneralsMD/Data/Cursors/SCCAttack.ani`. Extract to a staging directory and copy
+    each top-level directory's contents into the install path it belongs to.
+    """
+    trees = [("Generals", generals), ("GeneralsMD", generalsmd)]
+    manifest: list[tuple[str, Path, int]] = []
+
+    with tempfile.TemporaryDirectory(prefix="packgamedata-loose-") as temp:
+        stage = Path(temp)
+        for tree_name, root in trees:
+            for source in collect_loose_data(tree_name, root):
+                relative = source.relative_to(root)
+                manifest.append((tree_name, relative, source.stat().st_size))
+                stage_source(source, stage / tree_name / relative)
+
+        staged_bytes = sum(size for _, _, size in manifest)
+        print(f"Packing {len(manifest)} loose data files "
+              f"({staged_bytes / 1024**2:.1f} MiB) from {generals} and {generalsmd}", flush=True)
+        pack_stage_dir("loose data", stage, archive, seven_zip, LOOSE_COMPRESSION_LEVEL)
+
+    return sha256(archive), manifest
+
+
+def print_directory_summary(archive_name: str, manifest: list[tuple[str, Path, int]]) -> None:
+    """One line per directory the archive drew from: file count and bytes."""
+    by_directory: dict[str, list[int]] = {}
+    for tree_name, relative, size in manifest:
+        by_directory.setdefault(f"{tree_name}/{relative.parent}", []).append(size)
+
+    print(f"\n{archive_name} holds, by directory:")
+    for directory, sizes in sorted(by_directory.items()):
+        print(f"  {directory:<40} {len(sizes):>3} files  {sum(sizes):>12,} bytes")
 
 
 def main() -> int:
@@ -329,12 +410,13 @@ def main() -> int:
     parser.add_argument("--no-dll-fallback", action="store_true",
                         help="Fail instead of taking a missing BINKW32.DLL or mss32.dll for the "
                              "Generals archive from the Zero Hour install.")
-    parser.add_argument("--archives", choices=("trimmed", "full", "movies", "all"),
+    parser.add_argument("--archives", choices=("trimmed", "full", "movies", "loose", "all"),
                         default="trimmed",
                         help="Which objects to pack: the replay gate's trimmed pair (default), "
                              f"the {FULL_ARCHIVE} object holding every .big from both installs, "
-                             f"the {MOVIES_ARCHIVE} object holding every loose .bik, or all "
-                             "three.")
+                             f"the {MOVIES_ARCHIVE} object holding every loose .bik, the "
+                             f"{LOOSE_ARCHIVE} object holding the rest of the loose Data/ files "
+                             "(cursors, WaterPlane, scripts), or all four.")
     args = parser.parse_args()
 
     seven_zip = find_seven_zip()
@@ -379,13 +461,15 @@ def main() -> int:
             generals, generalsmd, movies_archive, seven_zip)
         uploads.append(movies_archive)
         variables.append(("GAMEDATA_MOVIES_SHA256", movies_hash))
+        print_directory_summary(MOVIES_ARCHIVE, movies_manifest)
 
-        print(f"\n{MOVIES_ARCHIVE} holds, by directory:")
-        by_directory: dict[str, list[int]] = {}
-        for tree_name, relative, size in movies_manifest:
-            by_directory.setdefault(f"{tree_name}/{relative.parent}", []).append(size)
-        for directory, sizes in sorted(by_directory.items()):
-            print(f"  {directory:<40} {len(sizes):>3} files  {sum(sizes):>12,} bytes")
+    if args.archives in ("loose", "all"):
+        loose_archive = output_dir / LOOSE_ARCHIVE
+        loose_hash, loose_manifest = build_loose_archive(
+            generals, generalsmd, loose_archive, seven_zip)
+        uploads.append(loose_archive)
+        variables.append(("GAMEDATA_LOOSE_SHA256", loose_hash))
+        print_directory_summary(LOOSE_ARCHIVE, loose_manifest)
 
     print(f"\nArchives written to {output_dir}")
     for archive in uploads:

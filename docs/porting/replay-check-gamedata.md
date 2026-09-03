@@ -101,6 +101,42 @@ install with `7z x -o<install path>` buries them one level deep, where the game 
 > the Zero Hour root claims Generals' movies too and packs them twice, under the wrong root.
 > `collect_movies()` takes the other root as `exclude` for exactly this reason.
 
+### The fifth object: `zerohour104_loose_data.7z`
+
+The `.big` files and the `.bik` movies are not the whole install. The installer also puts a
+`Data/` tree down loose, and none of it was hosted — which is what stalled the mouse-cursor slice:
+`mouse-cursor-seam.md` §6 could not measure a single retail cursor, because
+`LoadCursorFromFile("data\cursors\<Name>.ANI")` reads files that are in no `.big` and in no object.
+`--archives loose` packs what is left, 173 files and 4.1 MiB (measured 2026-09-03):
+
+| Directory | Files | Bytes |
+|---|---:|---:|
+| `Generals/Data/Cursors` | 52 | 236,304 |
+| `Generals/Data/Scripts` | 2 | 474,440 |
+| `Generals/Data/WaterPlane` | 32 | 525,696 |
+| `GeneralsMD/Data/Cursors` | 52 | 236,304 |
+| `GeneralsMD/Data/Scripts` | 3 | 2,351,753 |
+| `GeneralsMD/Data/WaterPlane` | 32 | 525,696 |
+
+Two exclusions, both deliberate:
+
+- **`.bik`**, because [the movies object](#the-fourth-object-zerohour104_movies7z) carries it. The
+  two objects together are exactly the `Data/` tree.
+- **`.big`**, because [the full object](#the-third-object-zerohour104_gamedata_full7z) carries every
+  `.big` in an install root — and the one that lives *under* `Data/`, `Data/INI/INIZH.big`, is the
+  duplicate `StdBIGFileSystem.cpp` skips by name to avoid a CRC mismatch (the English, Chinese and
+  Korean SKUs shipped two). Packing it would ship 17.8 MiB the engine ignores.
+
+The 52 `.ani` per root are byte-identical between the two trees, and both are packed: the game
+resolves `data\cursors\` against whichever root it is running from, so dropping either would make
+the object depend on which install the reader points at. Note that 52 files back the **27** cursors
+`Mouse.ini` names — `SCCScroll` alone is eight files, and most shapes have an `_S` variant.
+
+Layout matches the other two multi-root objects: `Generals/` and `GeneralsMD/` on top, paths below
+relative to that install root, so an entry reads `GeneralsMD/Data/Cursors/SCCAttack.ani`. The
+nesting trap `collect_movies()` guards against does not apply here — the sweep is confined to
+`Data/`, and a depot copy nests the Generals tree at the root (`zh-data/ZH_Generals`), not under it.
+
 ### Compression levels are per-object, and measured
 
 | Object | Level | Why |
@@ -108,6 +144,7 @@ install with `7z x -o<install path>` buries them one level deep, where the game 
 | trimmed pair | `-mx=9` | the hashes CI pins were produced with it; repacking must reproduce them |
 | full | `-mx=5` | on a 216 MB slice of the real payload, `-mx=5` finished in 78 s and `-mx=9` had not finished after 510 s — ~15 min against 96+ over the whole object, to land ~1% smaller |
 | movies | `-mx=1` | Bink is already-compressed video: `-mx=1` gives 1.018x, `-mx=5` gives 1.020x. The whole 589.5 MiB packs in 18 s |
+| loose | `-mx=9` | 4.1 MiB of small files, and the best level is free: the whole object packs in 1.8 s, 4.1 MiB down to 202 KiB |
 
 The level is part of what the SHA256 covers, so changing one re-hashes that object. A first attempt
 at packing the full archive at `-mx=9` was abandoned after 40 minutes, having written 184 MB with
@@ -259,9 +296,10 @@ Packing does **not** need Windows; only running the check does.
 
    `--archives` selects what to pack: `trimmed` (the default, the replay gate's pair), `full`
    ([the probe object](#the-third-object-zerohour104_gamedata_full7z)), `movies`
-   ([the video object](#the-fourth-object-zerohour104_movies7z)), or `all`. Nothing but `trimmed`
-   touches the trimmed pair, so their pinned hashes keep matching. Only the Python packer has
-   this; `pack-gamedata.ps1` still packs the trimmed pair alone.
+   ([the video object](#the-fourth-object-zerohour104_movies7z)), `loose`
+   ([the cursors and the rest of `Data/`](#the-fifth-object-zerohour104_loose_data7z)), or `all`.
+   Nothing but `trimmed` touches the trimmed pair, so their pinned hashes keep matching. Only the
+   Python packer has this; `pack-gamedata.ps1` still packs the trimmed pair alone.
 
 2. **Upload both files** to a private bucket, keeping the file names
    (`generals108_gamedata_trimmed.7z`, `zerohour104_gamedata_trimmed.7z`). Plain AWS S3 and any
@@ -294,6 +332,7 @@ Packing does **not** need Windows; only running the check does.
    | `GAMEDATA_GENERALSMD_SHA256` | hash printed for `zerohour104_gamedata_trimmed.7z` |
    | `GAMEDATA_FULL_SHA256` | hash printed for `zerohour104_gamedata_full.7z`, if that object is hosted |
    | `GAMEDATA_MOVIES_SHA256` | hash printed for `zerohour104_movies.7z`, if that object is hosted |
+| `GAMEDATA_LOOSE_SHA256` | hash printed for `zerohour104_loose_data.7z`, if that object is hosted |
 
 4. **Set repository secrets** (same page, *Secrets* tab):
 
