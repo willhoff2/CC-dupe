@@ -270,6 +270,8 @@ struct TextureHandle {
 	// D3DUSAGE_RENDERTARGET: the image can be a colour attachment as well as sampled,
 	// and Get_Surface_Level hands out a SurfaceHandle for it.
 	bool render_target = false;
+	// The level-0 surface once Get_Surface_Level has made it; owned by the texture.
+	SurfaceHandle* level0 = nullptr;
 
 	// --- lockable path (see docs/porting/renderer-resource-seam.md) ------------
 	bool lockable = false;
@@ -1724,9 +1726,7 @@ bool VulkanBackend::Flush_Frame_Commands(bool end_pass_first) {
 void VulkanBackend::Note_Texture_Layout(TextureHandle* texture, VkImageLayout layout) {
 	if (texture == nullptr) return;
 	texture->layout = layout;
-	for (SurfaceHandle* surface : owned_surfaces_) {
-		if (surface->owner == texture) surface->layout = layout;
-	}
+	if (texture->level0 != nullptr) texture->level0->layout = layout;
 }
 
 void VulkanBackend::Mark_Gpu_Write(Image* image) {
@@ -4787,10 +4787,9 @@ SurfaceHandle* VulkanBackend::Get_Surface_Level(TextureHandle* texture, uint32_t
 	}
 	// The same surface pointer every time: the engine compares the surface it saved
 	// against the one it restores, and the framebuffer cache is keyed on identity.
-	for (SurfaceHandle* existing : owned_surfaces_) {
-		if (existing->owner == texture) return existing;
-	}
+	if (texture->level0 != nullptr) return texture->level0;
 	auto* surface = new SurfaceHandle();
+	texture->level0 = surface;
 	surface->image = &texture->image;
 	surface->owner = texture;
 	surface->width = texture->image.width;
@@ -4979,8 +4978,9 @@ void VulkanBackend::Destroy_Texture(TextureHandle* texture) {
 		if (bound == texture) bound = nullptr;
 	}
 	// The level surface has no life of its own; it goes with the texture.
-	for (SurfaceHandle* surface : std::vector<SurfaceHandle*>(owned_surfaces_)) {
-		if (surface->owner == texture) Retire_Surface(surface);
+	if (texture->level0 != nullptr) {
+		Retire_Surface(texture->level0);
+		texture->level0 = nullptr;
 	}
 	Trace("destroy texture=%p live=%zu", static_cast<void*>(texture), owned_textures_.size());
 	retired_textures_.push_back(texture);
