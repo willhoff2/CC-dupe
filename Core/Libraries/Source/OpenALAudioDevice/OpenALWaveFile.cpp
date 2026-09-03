@@ -381,6 +381,8 @@ bool decodeWaveImage(const void* image, unsigned int imageSize, DecodedAudio& ou
 	}
 
 	const ALenum format = alFormatFor((unsigned int)info.channels, bits);
+	diagnosticsBufferData(format, (unsigned int)info.channels, bits, (unsigned int)info.rate,
+		pcmBytes, "sample");
 	alBufferData(buffer, format, pcm, (ALsizei)pcmBytes, (ALsizei)info.rate);
 	std::free(decoded);
 

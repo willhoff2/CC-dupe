@@ -566,8 +566,24 @@ void serviceStream(StreamVoice& stream, bool& finished)
 		return;
 	}
 
+	Diagnostics& d = diagnostics();
+	if (d.enabled) {
+		d.streamServiceCalls.fetch_add(1);
+		const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+		if (stream.lastServiced != std::chrono::steady_clock::time_point()) {
+			diagnosticsMax(d.streamServiceGapMaxUs, (unsigned long)
+				std::chrono::duration_cast<std::chrono::microseconds>(now - stream.lastServiced).count());
+		}
+		stream.lastServiced = now;
+	}
+
 	ALint processed = 0;
 	alGetSourcei(stream.source, AL_BUFFERS_PROCESSED, &processed);
+	if (d.enabled && !stream.exhausted && processed >= (ALint)StreamVoice::BUFFER_COUNT) {
+		d.streamQueueEmptied.fetch_add(1);
+		diagnosticsLog("stream %p: every buffer processed before refill (mixer ran dry)",
+			(void*)&stream);
+	}
 	while (processed-- > 0) {
 		ALuint buffer = 0;
 		alSourceUnqueueBuffers(stream.source, 1, &buffer);
@@ -585,8 +601,13 @@ void serviceStream(StreamVoice& stream, bool& finished)
 			stream.exhausted = true;
 			continue;
 		}
+		diagnosticsBufferData(stream.format, stream.channels, stream.bits, stream.rate, read,
+			"stream refill");
 		alBufferData(buffer, stream.format, chunk.data(), (ALsizei)read, (ALsizei)stream.rate);
 		alSourceQueueBuffers(stream.source, 1, &buffer);
+		if (d.enabled) {
+			d.streamBuffersRequeued.fetch_add(1);
+		}
 	}
 
 	ALint queued = 0;
@@ -599,6 +620,19 @@ void serviceStream(StreamVoice& stream, bool& finished)
 	// A starved source stops on its own; restart it so playback continues after a slow refill.
 	ALint state = 0;
 	alGetSourcei(stream.source, AL_SOURCE_STATE, &state);
+	if (d.enabled) {
+		ALint processedNow = 0;
+		alGetSourcei(stream.source, AL_BUFFERS_PROCESSED, &processedNow);
+		const unsigned long pending = (queued > processedNow) ? (unsigned long)(queued - processedNow) : 0;
+		unsigned long seen = d.streamQueuedMin.load();
+		while (pending < seen && !d.streamQueuedMin.compare_exchange_weak(seen, pending)) {
+		}
+		if (state == AL_STOPPED) {
+			d.streamStoppedWithData.fetch_add(1);
+			diagnosticsLog("stream %p: AL_STOPPED with %d buffers queued, restarting",
+				(void*)&stream, (int)queued);
+		}
+	}
 	if (state == AL_STOPPED) {
 		alSourcePlay(stream.source);
 	}
@@ -617,7 +651,7 @@ HSTREAM AIL_open_stream(HDIGDRIVER dig, const char* filename, int stream_mem)
 	(void)stream_mem;
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 
 	if (!l.started || filename == nullptr) {
 		return nullptr;
@@ -668,7 +702,7 @@ void AIL_close_stream(HSTREAM stream_handle)
 	}
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 
 	if (stream->source != 0) {
 		alSourceStop(stream->source);
@@ -695,7 +729,7 @@ void AIL_start_stream(HSTREAM stream_handle)
 	}
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 
 	// Prime the queue before starting so the source does not immediately starve.
 	for (unsigned int i = 0; i < StreamVoice::BUFFER_COUNT; ++i) {
@@ -704,11 +738,20 @@ void AIL_start_stream(HSTREAM stream_handle)
 		if (read == 0) {
 			break;
 		}
+		diagnosticsBufferData(stream->format, stream->channels, stream->bits, stream->rate, read,
+			"stream start");
 		alBufferData(stream->buffers[i], stream->format, chunk.data(), (ALsizei)read,
 			(ALsizei)stream->rate);
 		alSourceQueueBuffers(stream->source, 1, &stream->buffers[i]);
 	}
 
+	if (diagnostics().enabled) {
+		diagnostics().streamStarts.fetch_add(1);
+		stream->lastServiced = std::chrono::steady_clock::time_point();
+		diagnosticsLog("stream %p start: %s rate=%u channels=%u bits=%u frames=%u loop=%d",
+			(void*)stream, stream->fileName.c_str(), stream->rate, stream->channels, stream->bits,
+			stream->totalFrames, stream->loopCount);
+	}
 	alSourcePlay(stream->source);
 	stream->playing = true;
 	stream->completionPending = false;
@@ -723,7 +766,7 @@ void AIL_pause_stream(HSTREAM stream_handle, int onoff)
 	if (stream == nullptr || stream->source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	if (onoff != 0) {
 		alSourcePause(stream->source);
 		stream->paused = true;
@@ -751,7 +794,7 @@ void AIL_set_stream_volume(HSTREAM stream_handle, int volume)
 	if (stream == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	stream->volume = (float)volume / (float)MILES_MAX_INT_VOLUME;
 	applyVolumePan(stream->source, stream->volume, stream->pan);
 }
@@ -770,7 +813,7 @@ void AIL_set_stream_pan(HSTREAM stream_handle, int pan)
 	if (stream == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	stream->pan = (float)pan / (float)MILES_MAX_INT_VOLUME;
 	applyVolumePan(stream->source, stream->volume, stream->pan);
 }
@@ -793,7 +836,7 @@ void AIL_set_stream_volume_pan(HSTREAM stream_handle, float volume, float pan)
 	if (stream == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	stream->volume = volume;
 	stream->pan = pan;
 	applyVolumePan(stream->source, volume, pan);
@@ -827,7 +870,7 @@ void AIL_set_stream_loop_block(HSTREAM stream_handle, int loop_start, int loop_e
 	if (stream == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 
 	stream->loopStart = alignToCodecBoundary(*stream,
 		(loop_start > 0) ? (unsigned int)loop_start : 0u);
@@ -849,7 +892,7 @@ void AIL_stream_ms_position(HSTREAM stream_handle, S32* total_milliseconds, S32*
 		return;
 	}
 
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 
 	// MilesAudioManager opens a stream purely to read its length before playing anything, so the
 	// total must be known from the header rather than from playback progress.
@@ -880,7 +923,7 @@ void AIL_set_stream_ms_position(HSTREAM stream_handle, int pos)
 		return;
 	}
 
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 
 	const unsigned long long frame = (unsigned long long)(pos > 0 ? pos : 0) * stream->rate / 1000ull;
 	unsigned int byteOffset = 0;
@@ -946,7 +989,7 @@ void AIL_set_stream_playback_rate(HSTREAM stream_handle, int rate)
 	if (stream == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	stream->playbackRate = rate;
 	applyPlaybackRate(stream->source, rate, stream->rate);
 }
@@ -958,7 +1001,7 @@ AIL_stream_callback AIL_register_stream_callback(HSTREAM stream_handle, AIL_stre
 	if (stream == nullptr) {
 		return nullptr;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	AIL_stream_callback previous = stream->endOfStream;
 	stream->endOfStream = callback;
 	return previous;
