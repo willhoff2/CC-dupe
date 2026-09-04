@@ -51,7 +51,14 @@ extern "C" {
 #include "OpenALAudioDevice/OpenALAudioStream.h"
 #endif
 
+#ifndef RTS_USE_OPENAL
+// MilesAudioManager path: the movie's PCM is fed to the sample handle the audio manager lends out
+// for the movie, through the AIL raw-buffer feed Bink itself used when it played through Miles.
+#include "mss/mss.h"
+#endif
+
 #include <chrono>
+#include <cmath>
 
 //----------------------------------------------------------------------------
 //         Externals
@@ -214,6 +221,13 @@ VideoStreamInterface* FFmpegVideoPlayer::createStream( File* file )
 		DEBUG_LOG(("FFmpegVideoPlayer::createStream() - About to set volume (%g -> %d -> %d",
 			TheAudio->getVolume(AudioAffect_Speech), mod, volume));
 		//BinkSetVolume( stream->m_handle,0, volume);
+#ifdef MSS_SAMPLE_BUFFER_API
+		if (stream->m_audioSample != nullptr)
+		{
+			// Bink's 0..32768 scale onto Miles' 0..127.
+			AIL_set_sample_volume((HSAMPLE)stream->m_audioSample, (127 * mod) / 100);
+		}
+#endif
 		DEBUG_LOG(("FFmpegVideoPlayer::createStream() - set volume"));
 	}
 
@@ -317,6 +331,22 @@ FFmpegVideoStream::FFmpegVideoStream(FFmpegFile* file)
 	audioStream->reset();
 #endif
 
+#ifdef MSS_SAMPLE_BUFFER_API
+	if (m_ffmpegFile->hasAudio())
+	{
+		m_audioSample = TheAudio->getHandleForBink();
+	}
+	if (m_audioSample != nullptr)
+	{
+		HSAMPLE sample = (HSAMPLE)m_audioSample;
+		// Decoded frames are handed over as 16-bit interleaved PCM whatever the codec produced.
+		AIL_set_sample_type(sample,
+			m_ffmpegFile->getNumChannels() >= 2 ? DIG_F_STEREO_16 : DIG_F_MONO_16, DIG_PCM_SIGN);
+		AIL_set_sample_playback_rate(sample, m_ffmpegFile->getSampleRate());
+		AIL_start_sample(sample);
+	}
+#endif
+
 	// Decode until we have our first video frame
 	while (m_good && m_gotFrame == false)
 		m_good = m_ffmpegFile->decodePacket();
@@ -335,6 +365,12 @@ FFmpegVideoStream::FFmpegVideoStream(FFmpegFile* file)
 
 FFmpegVideoStream::~FFmpegVideoStream()
 {
+#ifdef MSS_SAMPLE_BUFFER_API
+	if (m_audioSample != nullptr)
+	{
+		AIL_end_sample((HSAMPLE)m_audioSample);
+	}
+#endif
 	av_freep(&m_audioBuffer);
 	av_frame_free(&m_frame);
 	sws_freeContext(m_swsContext);
@@ -383,6 +419,62 @@ void FFmpegVideoStream::onFrame(AVFrame *frame, int stream_idx, int stream_type,
 
 		ALenum format = OpenALAudioManager::getALFormat(frame->ch_layout.nb_channels, bytesPerSample * 8);
 		audioStream->bufferData(frameData, frameSize, format, frame->sample_rate);
+	}
+#endif
+#ifdef MSS_SAMPLE_BUFFER_API
+	else if (stream_type == AVMEDIA_TYPE_AUDIO) {
+		HSAMPLE sample = (HSAMPLE)videoStream->m_audioSample;
+		if (sample == nullptr)
+			return;
+
+		const AVSampleFormat sampleFmt = static_cast<AVSampleFormat>(frame->format);
+		const int channels = frame->ch_layout.nb_channels >= 2 ? 2 : 1;
+		const int frameSize = frame->nb_samples * channels * (int)sizeof(int16_t);
+		videoStream->m_audioBuffer = static_cast<uint8_t*>(av_realloc(videoStream->m_audioBuffer, frameSize));
+		if (videoStream->m_audioBuffer == nullptr)
+		{
+			DEBUG_LOG(("Failed to allocate audio buffer"));
+			return;
+		}
+
+		// Interleave to S16 the way libswresample does (round to nearest, saturate), so the result
+		// is what `ffmpeg -f s16le` decodes from the same file.
+		int16_t* dst = reinterpret_cast<int16_t*>(videoStream->m_audioBuffer);
+		const Bool planar = av_sample_fmt_is_planar(sampleFmt);
+		const int srcChannels = frame->ch_layout.nb_channels;
+		for (int sampleIdx = 0; sampleIdx < frame->nb_samples; sampleIdx++)
+		{
+			for (int channelIdx = 0; channelIdx < channels; channelIdx++)
+			{
+				const int plane = planar ? channelIdx : 0;
+				const int index = planar ? sampleIdx : sampleIdx * srcChannels + channelIdx;
+				int value = 0;
+				switch (av_get_packed_sample_fmt(sampleFmt))
+				{
+					case AV_SAMPLE_FMT_FLT:
+						value = lrintf(reinterpret_cast<const float*>(frame->data[plane])[index] * 32768.0f);
+						break;
+					case AV_SAMPLE_FMT_DBL:
+						value = (int)lrint(reinterpret_cast<const double*>(frame->data[plane])[index] * 32768.0);
+						break;
+					case AV_SAMPLE_FMT_S32:
+						value = reinterpret_cast<const int32_t*>(frame->data[plane])[index] >> 16;
+						break;
+					case AV_SAMPLE_FMT_U8:
+						value = ((int)frame->data[plane][index] - 128) << 8;
+						break;
+					case AV_SAMPLE_FMT_S16:
+					default:
+						value = reinterpret_cast<const int16_t*>(frame->data[plane])[index];
+						break;
+				}
+				*dst++ = (int16_t)av_clip_int16(value);
+			}
+		}
+
+		const int slot = AIL_sample_buffer_ready(sample);
+		if (slot >= 0)
+			AIL_load_sample_buffer(sample, (unsigned int)slot, videoStream->m_audioBuffer, (unsigned int)frameSize);
 	}
 #endif
 }

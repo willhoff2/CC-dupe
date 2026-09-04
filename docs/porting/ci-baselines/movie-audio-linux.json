@@ -1,0 +1,147 @@
+{
+  "what": "Native Linux movie-audio route: FFmpegVideoStream -> MilesAudioManager::getHandleForBink (HSAMPLE) -> AIL_set_sample_type/AIL_load_sample_buffer on the OpenAL shim, measured by scripts/native-movie-audio-run.py (Core/GameEngineDevice/Source/VideoDevice/FFmpeg/tests/native_movie_audio_run.cpp) on retail Zero Hour 1.04 movies, OpenAL Soft wave backend, rendered PCM compared with an independent /usr/bin/ffmpeg decode. Evidence class: Linux / rendered PCM / retail input. Mac human audibility: UNMEASURED.",
+  "platform": "Linux x86-64, Ubuntu 22.04, clang++-14, OpenAL Soft wave backend",
+  "compile_state": {
+    "RTS_USE_OPENAL_defined": false,
+    "MSS_SAMPLE_BUFFER_API_defined": true
+  },
+  "before_fix_control": {
+    "how": "same harness with the sink change stashed (main b905296b3 audio path)",
+    "movie": "EA_LOGO.BIK",
+    "decoder_audio_stream_found": true,
+    "decoder_audio_frames": 80,
+    "decoder_audio_samples": 153600,
+    "getHandleForBink_calls_in_createStream": 0,
+    "handle_non_null": false,
+    "audio_loaded_ms": 0,
+    "audio_played_ms": 0,
+    "first_broken_link": "FFmpegVideoStream::onFrame has no audio branch outside RTS_USE_OPENAL: 80 decoded audio frames, 0 submitted to any sink, getHandleForBink never called",
+    "harness_failures": 4,
+    "verdict": "fail"
+  },
+  "movies": [
+    {
+      "movie": "EA_LOGO.BIK",
+      "pump_ms": 1,
+      "audio_stream": {
+        "channels": 2,
+        "codec": "binkaudio_dct",
+        "rate": 48000,
+        "sample_fmt": "fltp"
+      },
+      "decoder": {
+        "audio_stream_found": true,
+        "audio_frames": 80,
+        "audio_samples": 153600,
+        "video_frames": 96,
+        "video_frame_ms": 33
+      },
+      "sink": {
+        "getHandleForBink_calls_in_createStream": 1,
+        "handle_non_null": true,
+        "audio_loaded_ms": 3200,
+        "audio_played_ms_at_last_frame": 3093,
+        "video_frames_delivered": 94,
+        "tail_dropped_at_close_ms": 132.0
+      },
+      "av_sync": {
+        "worst_video_minus_audio_ms": 24,
+        "frames_beyond_one_video_frame": 0
+      },
+      "release": {
+        "pooled_sample_ms_after_release": 0,
+        "music_stream_played_ms_after_movie": 512
+      },
+      "pcm_vs_system_ffmpeg": {
+        "comparison": "tolerance-based: FFT-fitted lag, per-channel fitted gain (AudioAffect_Speech), correlation >= 0.999, residual RMS <= 2% of reference, overlap >= 99.9%; no resampling (rendered at the movie's own rate)",
+        "non_silent": true,
+        "rendered_rms": 2689.1,
+        "reference_rms": 3139.2,
+        "lag_frames": 48,
+        "gain_per_channel": [
+          0.5669,
+          0.5669
+        ],
+        "correlation_per_channel": [
+          1.0,
+          1.0
+        ],
+        "residual_rms_per_channel": [
+          0.5,
+          0.5
+        ],
+        "residual_ratio": 0.00016,
+        "overlap_of_reference": 1.0,
+        "within_one_lsb_fraction_per_channel": [
+          0.897,
+          0.899
+        ],
+        "pass": true
+      },
+      "harness_failures": 0,
+      "verdict": "pass"
+    },
+    {
+      "movie": "sizzle_review.bik",
+      "pump_ms": 33,
+      "audio_stream": {
+        "channels": 2,
+        "codec": "binkaudio_dct",
+        "rate": 44100,
+        "sample_fmt": "fltp"
+      },
+      "decoder": {
+        "audio_stream_found": true,
+        "audio_frames": 1502,
+        "audio_samples": 2883840,
+        "video_frames": 1961,
+        "video_frame_ms": 33
+      },
+      "sink": {
+        "getHandleForBink_calls_in_createStream": 1,
+        "handle_non_null": true,
+        "audio_loaded_ms": 65393,
+        "audio_played_ms_at_last_frame": 64644,
+        "video_frames_delivered": 1959,
+        "tail_dropped_at_close_ms": 774.2
+      },
+      "av_sync": {
+        "worst_video_minus_audio_ms": -35,
+        "frames_beyond_one_video_frame": 0
+      },
+      "release": {
+        "pooled_sample_ms_after_release": 0,
+        "music_stream_played_ms_after_movie": 510
+      },
+      "pcm_vs_system_ffmpeg": {
+        "comparison": "tolerance-based: FFT-fitted lag, per-channel fitted gain (AudioAffect_Speech), correlation >= 0.999, residual RMS <= 2% of reference, overlap >= 99.9%; no resampling (rendered at the movie's own rate)",
+        "non_silent": true,
+        "rendered_rms": 2894.2,
+        "reference_rms": 5048.7,
+        "lag_frames": 44,
+        "gain_per_channel": [
+          0.5669,
+          0.5669
+        ],
+        "correlation_per_channel": [
+          1.0,
+          1.0
+        ],
+        "residual_rms_per_channel": [
+          0.5,
+          0.5
+        ],
+        "residual_ratio": 0.0001,
+        "overlap_of_reference": 1.0,
+        "within_one_lsb_fraction_per_channel": [
+          0.909,
+          0.909
+        ],
+        "pass": true
+      },
+      "harness_failures": 0,
+      "verdict": "pass"
+    }
+  ],
+  "verdict": "pass"
+}

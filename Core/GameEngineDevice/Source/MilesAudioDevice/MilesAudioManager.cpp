@@ -2878,9 +2878,15 @@ void *MilesAudioManager::getHandleForBink()
 		m_binkHandle = aud;
 	}
 
+#ifdef MSS_SAMPLE_BUFFER_API
+	// No DirectSound behind this Miles: the video player feeds the sample itself through
+	// AIL_load_sample_buffer, so the handle it needs is the sample.
+	return m_binkHandle->m_sample;
+#else
 	AILLPDIRECTSOUND lpDS;
 	AIL_get_DirectSound_info(m_binkHandle->m_sample, &lpDS, nullptr);
 	return lpDS;
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------

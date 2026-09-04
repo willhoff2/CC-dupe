@@ -461,8 +461,9 @@ int main(int argc, char ** argv)
 
 	// `FFmpegVideoPlayer::createStream` reads the speech volume off TheAudio to scale the movie's
 	// audio track, so a null TheAudio is a null dereference before any decoding happens. This is
-	// the engine's own headless AudioManager, the one --headless runs with; movie audio itself is
-	// behind RTS_USE_OPENAL, which nothing in the tree defines (video-path-findings.md §3).
+	// the engine's own headless AudioManager, the one --headless runs with; its getHandleForBink
+	// returns null, so the stream decodes its audio and has nowhere to send it. The sound track is
+	// native_movie_audio_run.cpp's business, with an AudioManager that lends a real AIL sample.
 	TheAudio = NEW MilesAudioManagerDummy;
 
 	if (measure_gaps) {

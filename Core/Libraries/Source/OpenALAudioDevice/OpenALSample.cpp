@@ -38,20 +38,51 @@ SampleVoice* voiceOf(HSAMPLE handle)
 	return reinterpret_cast<SampleVoice*>(handle);
 }
 
-void releaseAudio(Voice& voice)
+void releaseAudio(SampleVoice& voice)
 {
 	if (voice.source != 0) {
 		alSourceStop(voice.source);
+		// Detaching the buffer also unqueues everything a raw PCM feed left on the source.
 		alSourcei(voice.source, AL_BUFFER, 0);
 	}
 	if (voice.audio.buffer != 0) {
 		alDeleteBuffers(1, &voice.audio.buffer);
-		voice.audio = DecodedAudio{};
+	}
+	if (!voice.queuedBuffers.empty()) {
+		alDeleteBuffers((ALsizei)voice.queuedBuffers.size(), voice.queuedBuffers.data());
+		voice.queuedBuffers.clear();
+	}
+	voice.audio = DecodedAudio{};
+	voice.rawPcm = false;
+	voice.buffersLoaded = 0;
+	voice.framesLoaded = 0;
+	voice.framesRetired = 0;
+}
+
+/// Buffers the source has finished with are returned to OpenAL; the frame count they carried moves
+/// from "queued" to "retired" so the play position stays continuous across them.
+void retireProcessedBuffers(SampleVoice& voice)
+{
+	ALint processed = 0;
+	alGetSourcei(voice.source, AL_BUFFERS_PROCESSED, &processed);
+	while (processed-- > 0 && !voice.queuedBuffers.empty()) {
+		ALuint buffer = voice.queuedBuffers.front();
+		alSourceUnqueueBuffers(voice.source, 1, &buffer);
+		ALint bytes = 0;
+		alGetBufferi(buffer, AL_SIZE, &bytes);
+		const unsigned int frameBytes = voice.audio.channels * (voice.audio.bits / 8);
+		voice.framesRetired += frameBytes ? (unsigned int)bytes / frameBytes : 0;
+		alDeleteBuffers(1, &buffer);
+		voice.queuedBuffers.erase(voice.queuedBuffers.begin());
 	}
 }
 
+/// Depth of the raw PCM queue before AIL_sample_buffer_ready reports "not ready". Bink fed Miles
+/// one video frame's worth of audio per frame; this is a few seconds of that at any frame rate.
+constexpr unsigned int RAW_PCM_QUEUE_DEPTH = 256;
+
 /// Miles' AIL_set_*_sample_file family takes a raw file image and returns 1 on success.
-int loadImage(Voice& voice, const void* image, unsigned int size)
+int loadImage(SampleVoice& voice, const void* image, unsigned int size)
 {
 	releaseAudio(voice);
 	if (!decodeWaveImage(image, size, voice.audio)) {
@@ -265,6 +296,11 @@ void AIL_end_sample(HSAMPLE sample)
 	}
 	LibraryGuard guard;
 	alSourceStop(voice->source);
+	if (voice->rawPcm) {
+		// Ending a raw PCM feed discards what was still queued; a file-backed sample keeps its
+		// buffer so it can be restarted.
+		releaseAudio(*voice);
+	}
 	voice->started = false;
 	voice->completionPending = false;
 	voice->paused = false;
@@ -367,6 +403,21 @@ void AIL_sample_ms_position(HSAMPLE sample, long* total_ms, long* current_ms)
 	}
 
 	LibraryGuard guard;
+	if (voice->rawPcm) {
+		// A fed sample has no fixed length: total is what has been loaded so far, current is what has
+		// played of it, counting the retired buffers plus the offset into the one playing.
+		retireProcessedBuffers(*voice);
+		ALint offset = 0;
+		alGetSourcei(voice->source, AL_SAMPLE_OFFSET, &offset);
+		const unsigned int rate = voice->audio.rate ? voice->audio.rate : 1;
+		if (total_ms != nullptr) {
+			*total_ms = (long)((voice->framesLoaded * 1000ull) / rate);
+		}
+		if (current_ms != nullptr) {
+			*current_ms = (long)(((voice->framesRetired + (unsigned int)offset) * 1000ull) / rate);
+		}
+		return;
+	}
 	if (total_ms != nullptr) {
 		*total_ms = (long)voice->audio.lengthMs();
 	}
@@ -374,6 +425,83 @@ void AIL_sample_ms_position(HSAMPLE sample, long* total_ms, long* current_ms)
 		ALfloat seconds = 0.0f;
 		alGetSourcef(voice->source, AL_SEC_OFFSET, &seconds);
 		*current_ms = (long)(seconds * 1000.0f);
+	}
+}
+
+// ------------------------------------------------------------------------- raw PCM feed
+
+void AIL_set_sample_type(HSAMPLE sample, int format, unsigned int flags)
+{
+	ApiCall api;
+	(void)flags;	// Miles' DIG_PCM_SIGN: 16-bit PCM is always signed in OpenAL, 8-bit always unsigned
+	SampleVoice* voice = voiceOf(sample);
+	if (voice == nullptr || voice->source == 0) {
+		return;
+	}
+	LibraryGuard guard;
+	releaseAudio(*voice);
+	voice->rawPcm = true;
+	voice->audio.channels = (format & DIG_F_STEREO_8) ? 2 : 1;
+	voice->audio.bits = (format & DIG_F_MONO_16) ? 16 : 8;
+	voice->audio.format = alFormatFor(voice->audio.channels, voice->audio.bits);
+	// The rate is whatever AIL_set_sample_playback_rate says; until it does, the driver's.
+	voice->audio.rate = voice->playbackRate > 0 ? (unsigned int)voice->playbackRate
+		: (unsigned int)lib().driver.rate;
+}
+
+int AIL_sample_buffer_ready(HSAMPLE sample)
+{
+	ApiCall api;
+	SampleVoice* voice = voiceOf(sample);
+	if (voice == nullptr || voice->source == 0 || !voice->rawPcm) {
+		return -1;
+	}
+	LibraryGuard guard;
+	retireProcessedBuffers(*voice);
+	if (voice->queuedBuffers.size() >= RAW_PCM_QUEUE_DEPTH) {
+		return -1;
+	}
+	return (int)(voice->buffersLoaded % RAW_PCM_QUEUE_DEPTH);
+}
+
+void AIL_load_sample_buffer(HSAMPLE sample, unsigned int buff_num, const void* buffer, unsigned int len)
+{
+	ApiCall api;
+	(void)buff_num;	// Miles' slot number; the queue keeps arrival order, which is what it encoded
+	SampleVoice* voice = voiceOf(sample);
+	if (voice == nullptr || voice->source == 0 || !voice->rawPcm || buffer == nullptr || len == 0) {
+		return;
+	}
+	LibraryGuard guard;
+	retireProcessedBuffers(*voice);
+
+	if (voice->playbackRate > 0) {
+		voice->audio.rate = (unsigned int)voice->playbackRate;
+	}
+	ALuint al = 0;
+	alGenBuffers(1, &al);
+	if (al == 0) {
+		setLastError("alGenBuffers failed for a raw PCM buffer");
+		return;
+	}
+	diagnosticsBufferData(voice->audio.format, voice->audio.channels, voice->audio.bits,
+		voice->audio.rate, len, "sample buffer feed");
+	alBufferData(al, voice->audio.format, buffer, (ALsizei)len, (ALsizei)voice->audio.rate);
+	alSourceQueueBuffers(voice->source, 1, &al);
+	voice->queuedBuffers.push_back(al);
+	voice->buffersLoaded++;
+	const unsigned int frameBytes = voice->audio.channels * (voice->audio.bits / 8);
+	voice->framesLoaded += frameBytes ? len / frameBytes : 0;
+
+	// A feed that outran its producer stops the source; the next buffer resumes it. Miles' Bink
+	// path behaved the same way: the sample kept playing as long as buffers kept arriving.
+	if (voice->started && !voice->paused) {
+		ALint state = 0;
+		alGetSourcei(voice->source, AL_SOURCE_STATE, &state);
+		if (state != AL_PLAYING) {
+			alSourcePlay(voice->source);
+			voice->completionPending = false;
+		}
 	}
 }
 
@@ -407,6 +535,14 @@ void AIL_set_sample_playback_rate(HSAMPLE sample, int playback_rate)
 	}
 	LibraryGuard guard;
 	voice->playbackRate = playback_rate;
+	if (voice->rawPcm) {
+		// A raw feed is tagged with this rate as it is buffered, so the source plays it at pitch 1.
+		if (playback_rate > 0) {
+			voice->audio.rate = (unsigned int)playback_rate;
+		}
+		alSourcef(voice->source, AL_PITCH, 1.0f);
+		return;
+	}
 	applyPlaybackRate(voice->source, playback_rate, voice->audio.rate);
 }
 

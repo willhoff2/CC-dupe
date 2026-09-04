@@ -79,6 +79,13 @@ struct Voice
 struct SampleVoice : Voice
 {
 	AIL_sample_callback endOfSample = nullptr;
+	/// AIL_set_sample_type puts the voice in raw PCM mode: buffers arrive through
+	/// AIL_load_sample_buffer and are queued on the source instead of `audio.buffer`.
+	bool rawPcm = false;
+	std::vector<ALuint> queuedBuffers;
+	unsigned int buffersLoaded = 0;
+	unsigned int framesLoaded = 0;
+	unsigned int framesRetired = 0;		///< frames in buffers already unqueued (fully played)
 	HPROVIDER processor[N_SAMPLE_STAGES] = {};
 	/// Filter preferences are recorded so queries stay consistent; they are not audible yet.
 	std::vector<std::pair<std::string, float>> filterPreferences;
