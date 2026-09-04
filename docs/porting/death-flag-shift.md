@@ -108,8 +108,10 @@ inline UnsignedInt deathTypeFlagBit(DeathType dt)
 `1U` rather than `1UL` because `unsigned long` is the whole problem; `& 31U` because that is what
 `shl` does with a 5-bit count field; `static_cast<UnsignedInt>` first so the subtraction is unsigned
 and there is no signed overflow or implementation-defined `&` on a negative value left in the
-expression. The result is identical to today's on 32-bit Windows for every enumerator, including
-`DEATH_NORMAL`, and identical to Windows on LP64.
+expression. The *value* is identical to today's on 32-bit Windows for every enumerator, including
+`DEATH_NORMAL`, and identical to Windows on LP64. The object code may differ — `shl` already
+truncates the count, so the explicit `& 31U` is free to be elided or not. The equivalence claimed
+here is behavioural, and §6 says what measures it.
 
 **Renumbering was considered and rejected.** `1U << dt` is the cleaner C++ and would need no mask at
 all. It also moves every flag by one bit, so `DeathTypes = ALL -CRUSHED` in INI produces a different
@@ -147,10 +149,10 @@ The only things that build or read these masks are:
 
 There is no third way in and no serialisation out: the masks are `DieMuxData` members built from INI
 text at load and never `Xfer`ed, so a save game and a replay both re-derive them from the same INI.
-Because set/get/clear now share one `*FlagBit` helper they cannot disagree with each other, and both
-hardcoded constants stay correct by inspection: `_FLAGS_ALL` is `0xffffffff`, which contains bit 31
-and bits 0…19, so it accepts every enumerator; `_FLAGS_NONE` is `0`, which accepts none. Those two
-are asserted in the unit test rather than left to inspection.
+Because set/get/clear now share one `*FlagBit` helper they cannot disagree with each other. The two
+hardcoded constants still hold: `_FLAGS_ALL` is `0xffffffff`, which contains bit 31 and bits 0…19, so
+it accepts every enumerator; `_FLAGS_NONE` is `0`, which accepts none. Both are asserted in the unit
+test rather than left to that argument.
 
 ## 3. The unit test
 
