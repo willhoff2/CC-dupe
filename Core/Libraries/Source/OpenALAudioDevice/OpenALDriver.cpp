@@ -25,10 +25,19 @@
 #include "OpenALAudioInternal.h"
 
 #include <chrono>
+#include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 #include <vector>
+
+#include <pthread.h>
+#if defined(__APPLE__)
+#include <sys/qos.h>
+#else
+#include <sched.h>
+#endif
 
 namespace OpenALAudio
 {
@@ -37,6 +46,175 @@ Library& lib()
 {
 	static Library instance;
 	return instance;
+}
+
+// ------------------------------------------------------------------------------- diagnostics
+
+Diagnostics& diagnostics()
+{
+	static Diagnostics instance;
+	return instance;
+}
+
+namespace
+{
+
+unsigned long elapsedUs(std::chrono::steady_clock::time_point from,
+	std::chrono::steady_clock::time_point to)
+{
+	return (unsigned long)std::chrono::duration_cast<std::chrono::microseconds>(to - from).count();
+}
+
+/// Seconds between periodic `counters` lines from the service thread.
+constexpr unsigned long DIAG_REPORT_SECONDS = 10;
+
+/// A gap between service passes worth its own log line: 100 ms is ten missed polls.
+constexpr unsigned long SERVICE_STALL_LOG_US = 100000;
+
+} // namespace
+
+void diagnosticsInit()
+{
+	Diagnostics& d = diagnostics();
+	if (d.enabled) {
+		return;
+	}
+	const char* where = std::getenv("OPENAL_AUDIO_DIAG");
+	if (where == nullptr || *where == '\0' || std::strcmp(where, "0") == 0) {
+		return;
+	}
+	if (std::strcmp(where, "stderr") == 0 || std::strcmp(where, "1") == 0) {
+		d.log = stderr;
+	} else {
+		d.log = std::fopen(where, "a");
+		if (d.log == nullptr) {
+			d.log = stderr;
+		}
+	}
+	d.started = std::chrono::steady_clock::now();
+	d.lastReport = d.started;
+	d.lastPassEnd = std::chrono::steady_clock::time_point();
+	const char* stall = std::getenv("OPENAL_AUDIO_DIAG_STALL");
+	if (stall != nullptr) {
+		unsigned long atMs = 0;
+		unsigned long forMs = 0;
+		if (std::sscanf(stall, "%lu:%lu", &atMs, &forMs) == 2 && forMs != 0) {
+			d.stallAtUs = atMs * 1000ul;
+			d.stallForUs = forMs * 1000ul;
+		}
+	}
+	d.enabled = true;
+}
+
+void diagnosticsLog(const char* format, ...)
+{
+	Diagnostics& d = diagnostics();
+	if (!d.enabled || d.log == nullptr) {
+		return;
+	}
+	const unsigned long ms = elapsedUs(d.started, std::chrono::steady_clock::now()) / 1000;
+	std::fprintf(d.log, "[openal-diag %lu.%03lu] ", ms / 1000, ms % 1000);
+	va_list args;
+	va_start(args, format);
+	std::vfprintf(d.log, format, args);
+	va_end(args);
+	std::fputc('\n', d.log);
+	std::fflush(d.log);
+}
+
+void diagnosticsReport(const char* when)
+{
+	Diagnostics& d = diagnostics();
+	if (!d.enabled) {
+		return;
+	}
+	diagnosticsLog("counters %s"
+		" stream_service_calls=%lu stream_buffers_requeued=%lu stream_queue_emptied=%lu"
+		" stream_stopped_with_data=%lu stream_queued_min=%lu stream_service_gap_max_us=%lu"
+		" stream_starts=%lu"
+		" sample_starts=%lu sample_restarts_while_playing=%lu"
+		" object_starts=%lu object_restarts_while_playing=%lu"
+		" buffer_data_calls=%lu buffer_data_mismatches=%lu"
+		" gain_writes=%lu position_writes=%lu"
+		" service_passes=%lu service_pass_gap_max_us=%lu service_hold_max_us=%lu"
+		" service_wait_max_us=%lu api_hold_max_us=%lu api_wait_max_us=%lu al_errors=%lu",
+		when,
+		d.streamServiceCalls.load(), d.streamBuffersRequeued.load(), d.streamQueueEmptied.load(),
+		d.streamStoppedWithData.load(), d.streamQueuedMin.load(), d.streamServiceGapMaxUs.load(),
+		d.streamStarts.load(),
+		d.sampleStarts.load(), d.sampleRestartsWhilePlaying.load(),
+		d.objectStarts.load(), d.objectRestartsWhilePlaying.load(),
+		d.bufferDataCalls.load(), d.bufferDataMismatches.load(),
+		d.gainWrites.load(), d.positionWrites.load(),
+		d.servicePasses.load(), d.servicePassGapMaxUs.load(), d.serviceHoldMaxUs.load(),
+		d.serviceWaitMaxUs.load(),
+		d.apiHoldMaxUs.load(), d.apiWaitMaxUs.load(), d.alErrors.load());
+}
+
+void diagnosticsMax(std::atomic<unsigned long>& slot, unsigned long value)
+{
+	unsigned long seen = slot.load();
+	while (value > seen && !slot.compare_exchange_weak(seen, value)) {
+	}
+}
+
+void diagnosticsBufferData(ALenum format, unsigned int channels, unsigned int bits,
+	unsigned int rate, unsigned int bytes, const char* who)
+{
+	Diagnostics& d = diagnostics();
+	if (!d.enabled) {
+		return;
+	}
+	d.bufferDataCalls.fetch_add(1);
+	const unsigned int frameBytes = channels * (bits / 8);
+	const bool formatAgrees = (format == alFormatFor(channels, bits))
+		&& (channels == 1 || channels == 2) && (bits == 8 || bits == 16);
+	const bool wholeFrames = frameBytes != 0 && (bytes % frameBytes) == 0;
+	if (!formatAgrees || !wholeFrames || rate == 0) {
+		d.bufferDataMismatches.fetch_add(1);
+		diagnosticsLog("alBufferData mismatch (%s): format=0x%x channels=%u bits=%u rate=%u bytes=%u",
+			who, (unsigned int)format, channels, bits, rate, bytes);
+	}
+}
+
+void diagnosticsCheckAlError(const char* where)
+{
+	Diagnostics& d = diagnostics();
+	if (!d.enabled) {
+		return;
+	}
+	for (ALenum error = alGetError(); error != AL_NO_ERROR; error = alGetError()) {
+		d.alErrors.fetch_add(1);
+		diagnosticsLog("alGetError 0x%x at %s", (unsigned int)error, where);
+	}
+}
+
+LibraryGuard::LibraryGuard()
+{
+	Library& l = lib();
+	Diagnostics& d = diagnostics();
+	m_timed = d.enabled;
+	m_service = false;
+	if (!m_timed) {
+		l.lock.lock();
+		return;
+	}
+	m_service = std::this_thread::get_id() == l.serviceThread;
+	const std::chrono::steady_clock::time_point asked = std::chrono::steady_clock::now();
+	l.lock.lock();
+	m_acquired = std::chrono::steady_clock::now();
+	diagnosticsMax(m_service ? d.serviceWaitMaxUs : d.apiWaitMaxUs, elapsedUs(asked, m_acquired));
+}
+
+LibraryGuard::~LibraryGuard()
+{
+	Library& l = lib();
+	if (m_timed) {
+		Diagnostics& d = diagnostics();
+		diagnosticsMax(m_service ? d.serviceHoldMaxUs : d.apiHoldMaxUs,
+			elapsedUs(m_acquired, std::chrono::steady_clock::now()));
+	}
+	l.lock.unlock();
 }
 
 void setLastError(const char* message)
@@ -58,6 +236,10 @@ void applyVolumePan(ALuint source, float volume, float pan)
 	// OpenAL has no pan control. For a listener-relative source with no attenuation, offsetting
 	// along x reproduces a constant-power pan closely enough for 2D voices.
 	alSource3f(source, AL_POSITION, (pan * 2.0f) - 1.0f, 0.0f, 0.0f);
+	if (diagnostics().enabled) {
+		diagnostics().gainWrites.fetch_add(1);
+		diagnostics().positionWrites.fetch_add(1);
+	}
 }
 
 void applyPlaybackRate(ALuint source, int playbackRate, unsigned int nativeRate)
@@ -78,10 +260,45 @@ char FILTER_NAME[] = "OpenAL Filter";
 h3DPOBJECT THE_3D_PROVIDER = {};
 h3DPOBJECT THE_FILTER_PROVIDER = {};
 
+/// Ask the scheduler to run the refill thread ahead of the renderer and game threads. The queue
+/// only covers BUFFER_COUNT * BUFFER_FRAMES of playback, so a long enough scheduling stall of this
+/// thread is a mixer underrun. Best effort: a refusal (no realtime privilege) is only logged.
+void raiseServiceThreadPriority()
+{
+	int result = -1;
+#if defined(__APPLE__)
+	result = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#else
+	sched_param param = {};
+	param.sched_priority = sched_get_priority_min(SCHED_RR);
+	result = pthread_setschedparam(pthread_self(), SCHED_RR, &param);
+#endif
+	diagnosticsLog("service thread: priority raise %s", result == 0 ? "accepted" : "refused");
+}
+
 void serviceLoop()
 {
 	Library& l = lib();
+	Diagnostics& d = diagnostics();
+	raiseServiceThreadPriority();
 	while (!l.serviceQuit.load()) {
+		if (d.enabled) {
+			const std::chrono::steady_clock::time_point woke = std::chrono::steady_clock::now();
+			if (!d.stallDone && d.stallForUs != 0 && elapsedUs(d.started, woke) >= d.stallAtUs) {
+				d.stallDone = true;
+				diagnosticsLog("service thread: injected stall of %lu ms", d.stallForUs / 1000);
+				std::this_thread::sleep_for(std::chrono::microseconds(d.stallForUs));
+			}
+			if (d.lastPassEnd != std::chrono::steady_clock::time_point()) {
+				const unsigned long gap = elapsedUs(d.lastPassEnd, std::chrono::steady_clock::now());
+				diagnosticsMax(d.servicePassGapMaxUs, gap);
+				if (gap >= SERVICE_STALL_LOG_US) {
+					diagnosticsLog("service thread: %lu ms between passes (poll is 10 ms)",
+						gap / 1000);
+				}
+			}
+		}
+
 		// Poll source state and mark voices that ran out. Nothing is called back from here: the
 		// engine's completion handlers (MilesAudioManager::notifyOfAudioCompletion and what it
 		// reaches) read and rewrite PlayingAudio/AudioEventRTS state with no lock against the main
@@ -89,7 +306,10 @@ void serviceLoop()
 		// observed between its own AIL_* calls. deliverCompletions() keeps that contract by firing
 		// the callbacks on the API thread as its AIL_* calls return.
 		{
-			std::lock_guard<std::recursive_mutex> guard(l.lock);
+			LibraryGuard guard;
+			if (d.enabled) {
+				d.servicePasses.fetch_add(1);
+			}
 
 			for (SampleVoice* sample : l.samples) {
 				if (!sample->started || sample->paused || sample->source == 0) {
@@ -127,6 +347,16 @@ void serviceLoop()
 					stream->completionPending = true;
 				}
 			}
+
+			if (d.enabled) {
+				diagnosticsCheckAlError("service pass");
+				const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+				if (elapsedUs(d.lastReport, now) >= DIAG_REPORT_SECONDS * 1000000ul) {
+					d.lastReport = now;
+					diagnosticsReport("periodic");
+				}
+				d.lastPassEnd = std::chrono::steady_clock::now();
+			}
 		}
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -143,6 +373,7 @@ void startServiceThread()
 	}
 	l.serviceQuit.store(false);
 	l.service = std::thread(serviceLoop);
+	l.serviceThread = l.service.get_id();
 }
 
 void stopServiceThread()
@@ -163,7 +394,7 @@ void deliverCompletions()
 	std::vector<std::pair<AIL_stream_callback, HSTREAM>> streamDone;
 
 	{
-		std::lock_guard<std::recursive_mutex> guard(l.lock);
+		LibraryGuard guard;
 
 		for (SampleVoice* sample : l.samples) {
 			if (!sample->completionPending) {
@@ -235,12 +466,13 @@ using namespace OpenALAudio;
 int AIL_startup(void)
 {
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 
 	if (l.started) {
 		return AIL_NO_ERROR;
 	}
 	l.apiThread = std::this_thread::get_id();
+	diagnosticsInit();
 
 	l.device = alcOpenDevice(nullptr);
 	if (l.device == nullptr) {
@@ -248,7 +480,20 @@ int AIL_startup(void)
 		return -1;
 	}
 
-	l.context = alcCreateContext(l.device, nullptr);
+	// Miles mixed at the rate the engine asked for (AIL_quick_startup: 44,100 Hz) and every retail
+	// asset is authored at or below it. Ask the implementation for that mixer rate explicitly so a
+	// default derived from the output device (48 kHz on most external DACs) does not add a second
+	// resampling stage, and so the effective value can be read back and compared. ALC_REFRESH is
+	// deliberately not requested: where OpenAL Soft honours it, it shrinks the device period below
+	// the backend's own default and only makes real-time underruns more likely.
+	const ALCint attributes[] = { ALC_FREQUENCY, (ALCint)Library::MIXER_RATE, 0 };
+	l.context = alcCreateContext(l.device, attributes);
+	l.contextAttributesHonoured = (l.context != nullptr);
+	if (l.context == nullptr) {
+		// Apple's OpenAL.framework and older implementations may reject attribute lists they do not
+		// understand; the attribute-less context is what every earlier build ran on.
+		l.context = alcCreateContext(l.device, nullptr);
+	}
 	if (l.context == nullptr || alcMakeContextCurrent(l.context) == ALC_FALSE) {
 		if (l.context != nullptr) {
 			alcDestroyContext(l.context);
@@ -264,6 +509,28 @@ int AIL_startup(void)
 	// its distance model is driven by per-sample min/max distances.
 	alDistanceModel(AL_LINEAR_DISTANCE_CLAMPED);
 
+	alcGetIntegerv(l.device, ALC_FREQUENCY, 1, &l.contextFrequency);
+	alcGetIntegerv(l.device, ALC_REFRESH, 1, &l.contextRefresh);
+	if (diagnostics().enabled) {
+		const char* vendor = alGetString(AL_VENDOR);
+		const char* renderer = alGetString(AL_RENDERER);
+		const char* version = alGetString(AL_VERSION);
+		const char* deviceName = alcGetString(l.device, ALC_DEVICE_SPECIFIER);
+		ALCint sync = 0, monoSources = 0, stereoSources = 0;
+		alcGetIntegerv(l.device, ALC_SYNC, 1, &sync);
+		alcGetIntegerv(l.device, ALC_MONO_SOURCES, 1, &monoSources);
+		alcGetIntegerv(l.device, ALC_STEREO_SOURCES, 1, &stereoSources);
+		diagnosticsLog("implementation vendor=\"%s\" renderer=\"%s\" version=\"%s\" device=\"%s\"",
+			vendor ? vendor : "", renderer ? renderer : "", version ? version : "",
+			deviceName ? deviceName : "");
+		diagnosticsLog("context requested_frequency=%d attributes_accepted=%d "
+			"frequency=%d refresh=%d sync=%d mono_sources=%d stereo_sources=%d",
+			(int)Library::MIXER_RATE, l.contextAttributesHonoured ? 1 : 0,
+			(int)l.contextFrequency, (int)l.contextRefresh, (int)sync, (int)monoSources,
+			(int)stereoSources);
+		diagnosticsCheckAlError("AIL_startup");
+	}
+
 	l.started = true;
 	setLastError(nullptr);
 	startServiceThread();
@@ -276,10 +543,11 @@ void AIL_shutdown(void)
 
 	stopServiceThread();
 
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 	if (!l.started) {
 		return;
 	}
+	diagnosticsReport("shutdown");
 
 	for (SampleVoice* sample : l.samples) {
 		if (sample->source != 0) alDeleteSources(1, &sample->source);
@@ -381,7 +649,7 @@ int AIL_waveOutOpen(HDIGDRIVER* driver, LPHWAVEOUT* waveout, int id, LPWAVEFORMA
 	(void)id;
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 
 	if (!l.started && AIL_startup() != AIL_NO_ERROR) {
 		return -1;
@@ -479,7 +747,7 @@ void AIL_set_file_callbacks(AIL_file_open_callback opencb, AIL_file_close_callba
 	AIL_file_seek_callback seekcb, AIL_file_read_callback readcb)
 {
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 	l.fileOpen = opencb;
 	l.fileClose = closecb;
 	l.fileSeek = seekcb;

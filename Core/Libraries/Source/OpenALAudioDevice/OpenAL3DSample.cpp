@@ -53,6 +53,9 @@ void applyGain(Object3D& object)
 	if (gain < 0.0f) gain = 0.0f;
 	if (gain > 1.0f) gain = 1.0f;
 	alSourcef(object.voice.source, AL_GAIN, gain);
+	if (diagnostics().enabled) {
+		diagnostics().gainWrites.fetch_add(1);
+	}
 }
 
 unsigned int riffSize(const void* image)
@@ -79,7 +82,7 @@ H3DSAMPLE AIL_allocate_3D_sample_handle(HPROVIDER lib_handle)
 	(void)lib_handle;
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 	if (!l.started) {
 		return nullptr;
 	}
@@ -110,7 +113,7 @@ void AIL_release_3D_sample_handle(H3DSAMPLE sample)
 	}
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 
 	if (object->voice.source != 0) {
 		alSourceStop(object->voice.source);
@@ -132,7 +135,7 @@ int AIL_set_3D_sample_file(H3DSAMPLE sample, const void* file_image)
 		return 0;
 	}
 
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 
 	if (object->voice.audio.buffer != 0) {
 		alSourceStop(object->voice.source);
@@ -162,7 +165,15 @@ void AIL_start_3D_sample(H3DSAMPLE sample)
 	if (object == nullptr || object->voice.source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
+	if (diagnostics().enabled) {
+		diagnostics().objectStarts.fetch_add(1);
+		ALint state = 0;
+		alGetSourcei(object->voice.source, AL_SOURCE_STATE, &state);
+		if (state == AL_PLAYING) {
+			diagnostics().objectRestartsWhilePlaying.fetch_add(1);
+		}
+	}
 	alSourcei(object->voice.source, AL_LOOPING, object->voice.loopCount == 0 ? AL_TRUE : AL_FALSE);
 	alSourceRewind(object->voice.source);
 	alSourcePlay(object->voice.source);
@@ -178,7 +189,7 @@ void AIL_stop_3D_sample(H3DSAMPLE sample)
 	if (object == nullptr || object->voice.source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	alSourcePause(object->voice.source);
 	object->voice.paused = true;
 }
@@ -190,7 +201,7 @@ void AIL_resume_3D_sample(H3DSAMPLE sample)
 	if (object == nullptr || object->voice.source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	alSourcePlay(object->voice.source);
 	object->voice.paused = false;
 	object->voice.started = true;
@@ -204,7 +215,7 @@ void AIL_end_3D_sample(H3DSAMPLE sample)
 	if (object == nullptr || object->voice.source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	alSourceStop(object->voice.source);
 	object->voice.started = false;
 	object->voice.completionPending = false;
@@ -227,7 +238,7 @@ void AIL_set_3D_sample_volume(H3DSAMPLE sample, float volume)
 	if (object == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	object->voice.volume = volume;
 	applyGain(*object);
 }
@@ -240,7 +251,7 @@ void AIL_set_3D_sample_distances(H3DSAMPLE sample, float max_dist, float min_dis
 	if (object == nullptr || object->voice.source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	object->maxDistance = max_dist;
 	object->minDistance = min_dist;
 	alSourcef(object->voice.source, AL_REFERENCE_DISTANCE, min_dist);
@@ -254,7 +265,7 @@ void AIL_set_3D_sample_occlusion(H3DSAMPLE sample, float occlusion)
 	if (object == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	object->occlusion = occlusion;
 	applyGain(*object);
 }
@@ -285,7 +296,7 @@ void AIL_set_3D_sample_loop_count(H3DSAMPLE sample, unsigned int count)
 	if (object == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	object->voice.loopCount = (int)count;
 	alSourcei(object->voice.source, AL_LOOPING, count == 0 ? AL_TRUE : AL_FALSE);
 }
@@ -310,7 +321,7 @@ void AIL_set_3D_sample_offset(H3DSAMPLE sample, unsigned int offset)
 	if (object == nullptr || object->voice.source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	alSourcei(object->voice.source, AL_BYTE_OFFSET, (ALint)offset);
 }
 
@@ -339,7 +350,7 @@ void AIL_set_3D_sample_playback_rate(H3DSAMPLE sample, int playback_rate)
 	if (object == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	object->voice.playbackRate = playback_rate;
 	applyPlaybackRate(object->voice.source, playback_rate, object->voice.audio.rate);
 }
@@ -353,11 +364,14 @@ void AIL_set_3D_position(H3DPOBJECT obj, float X, float Y, float Z)
 	if (object == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	if (object->isListener) {
 		alListener3f(AL_POSITION, X, Y, milesToAlZ(Z));
 	} else if (object->voice.source != 0) {
 		alSource3f(object->voice.source, AL_POSITION, X, Y, milesToAlZ(Z));
+	}
+	if (diagnostics().enabled) {
+		diagnostics().positionWrites.fetch_add(1);
 	}
 }
 
@@ -369,7 +383,7 @@ void AIL_set_3D_orientation(
 	if (object == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	if (object->isListener) {
 		const ALfloat orientation[6] = { X_face, Y_face, milesToAlZ(Z_face),
 			X_up, Y_up, milesToAlZ(Z_up) };
@@ -387,7 +401,7 @@ void AIL_set_3D_velocity_vector(H3DSAMPLE sample, float x, float y, float z)
 	if (object == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	if (object->isListener) {
 		alListener3f(AL_VELOCITY, x, y, milesToAlZ(z));
 	} else if (object->voice.source != 0) {
@@ -422,7 +436,7 @@ AIL_3dsample_callback AIL_register_3D_EOS_callback(H3DSAMPLE sample, AIL_3dsampl
 	if (object == nullptr) {
 		return nullptr;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	AIL_3dsample_callback previous = object->endOfSample;
 	object->endOfSample = EOS;
 	return previous;
@@ -436,7 +450,7 @@ H3DPOBJECT AIL_open_3D_listener(HPROVIDER lib_handle)
 	(void)lib_handle;
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 	if (!l.started) {
 		return nullptr;
 	}
@@ -460,7 +474,7 @@ void AIL_close_3D_listener(H3DPOBJECT listener)
 	}
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 	l.objects.erase(std::remove(l.objects.begin(), l.objects.end(), object), l.objects.end());
 	if (l.listener == object) {
 		l.listener = nullptr;

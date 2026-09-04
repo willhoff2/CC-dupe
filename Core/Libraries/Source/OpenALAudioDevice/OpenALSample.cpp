@@ -100,7 +100,7 @@ HSAMPLE AIL_allocate_sample_handle(HDIGDRIVER dig)
 	(void)dig;
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 	if (!l.started) {
 		return nullptr;
 	}
@@ -133,7 +133,7 @@ void AIL_release_sample_handle(HSAMPLE sample)
 	}
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 
 	releaseAudio(*voice);
 	if (voice->source != 0) {
@@ -152,7 +152,7 @@ void AIL_init_sample(HSAMPLE sample)
 	}
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 
 	releaseAudio(*voice);
 	voice->volume = 1.0f;
@@ -179,7 +179,7 @@ int AIL_set_sample_file(HSAMPLE sample, const void* file_image, int block)
 	if (voice == nullptr) {
 		return 0;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	return loadImage(*voice, file_image, riffSize(file_image));
 }
 
@@ -194,7 +194,7 @@ int AIL_set_named_sample_file(
 	if (voice == nullptr) {
 		return 0;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	const unsigned int size = (file_size > 0) ? (unsigned int)file_size : riffSize(file_image);
 	return loadImage(*voice, file_image, size);
 }
@@ -208,11 +208,19 @@ void AIL_start_sample(HSAMPLE sample)
 	if (voice == nullptr || voice->source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 
 	// Miles' loop count of 0 means "forever". OpenAL can only express infinite looping natively;
 	// finite repeat counts above one are approximated by a single pass, which matches how the
 	// engine uses them (it retriggers effects itself).
+	if (diagnostics().enabled) {
+		diagnostics().sampleStarts.fetch_add(1);
+		ALint state = 0;
+		alGetSourcei(voice->source, AL_SOURCE_STATE, &state);
+		if (state == AL_PLAYING) {
+			diagnostics().sampleRestartsWhilePlaying.fetch_add(1);
+		}
+	}
 	alSourcei(voice->source, AL_LOOPING, voice->loopCount == 0 ? AL_TRUE : AL_FALSE);
 	alSourceRewind(voice->source);
 	alSourcePlay(voice->source);
@@ -228,7 +236,7 @@ void AIL_stop_sample(HSAMPLE sample)
 	if (voice == nullptr || voice->source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	// Miles' stop is a pause that keeps the play position; AIL_end_sample is the hard stop.
 	alSourcePause(voice->source);
 	voice->paused = true;
@@ -241,7 +249,7 @@ void AIL_resume_sample(HSAMPLE sample)
 	if (voice == nullptr || voice->source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	alSourcePlay(voice->source);
 	voice->paused = false;
 	voice->started = true;
@@ -255,7 +263,7 @@ void AIL_end_sample(HSAMPLE sample)
 	if (voice == nullptr || voice->source == 0) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	alSourceStop(voice->source);
 	voice->started = false;
 	voice->completionPending = false;
@@ -278,7 +286,7 @@ void AIL_set_sample_volume(HSAMPLE sample, int volume)
 	if (voice == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	voice->volume = (float)volume / (float)MILES_MAX_INT_VOLUME;
 	applyVolumePan(voice->source, voice->volume, voice->pan);
 }
@@ -297,7 +305,7 @@ void AIL_set_sample_pan(HSAMPLE sample, int pan)
 	if (voice == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	voice->pan = (float)pan / (float)MILES_MAX_INT_VOLUME;
 	applyVolumePan(voice->source, voice->volume, voice->pan);
 }
@@ -321,7 +329,7 @@ void AIL_set_sample_volume_pan(HSAMPLE sample, float volume, float pan)
 	if (voice == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	voice->volume = volume;
 	voice->pan = pan;
 	applyVolumePan(voice->source, volume, pan);
@@ -343,7 +351,7 @@ void AIL_set_sample_loop_count(HSAMPLE sample, int count)
 	if (voice == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	voice->loopCount = count;
 	alSourcei(voice->source, AL_LOOPING, count == 0 ? AL_TRUE : AL_FALSE);
 }
@@ -358,7 +366,7 @@ void AIL_sample_ms_position(HSAMPLE sample, long* total_ms, long* current_ms)
 		return;
 	}
 
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	if (total_ms != nullptr) {
 		*total_ms = (long)voice->audio.lengthMs();
 	}
@@ -376,7 +384,7 @@ void AIL_set_sample_ms_position(HSAMPLE sample, int pos)
 	if (voice == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	alSourcef(voice->source, AL_SEC_OFFSET, (float)pos / 1000.0f);
 }
 
@@ -397,7 +405,7 @@ void AIL_set_sample_playback_rate(HSAMPLE sample, int playback_rate)
 	if (voice == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	voice->playbackRate = playback_rate;
 	applyPlaybackRate(voice->source, playback_rate, voice->audio.rate);
 }
@@ -431,7 +439,7 @@ AIL_sample_callback AIL_register_EOS_callback(HSAMPLE sample, AIL_sample_callbac
 	if (voice == nullptr) {
 		return nullptr;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	AIL_sample_callback previous = voice->endOfSample;
 	voice->endOfSample = EOS;
 	return previous;
@@ -447,7 +455,7 @@ HPROVIDER AIL_set_sample_processor(HSAMPLE sample, SAMPLESTAGE pipeline_stage, H
 		return nullptr;
 	}
 	// Recorded but not applied: EFX is the intended route for reverb and mono delay.
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	HPROVIDER previous = voice->processor[pipeline_stage];
 	voice->processor[pipeline_stage] = provider;
 	return previous;
@@ -462,7 +470,7 @@ void AIL_set_filter_sample_preference(HSAMPLE sample, const char* name, const vo
 	}
 	// All engine callers pass a float by address.
 	const float value = (val != nullptr) ? *(const float*)val : 0.0f;
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	voice->filterPreferences.emplace_back(name, value);
 }
 
@@ -481,7 +489,7 @@ int AIL_quick_startup(
 	}
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 	if (output_rate != 0) l.driver.rate = output_rate;
 	if (output_bits != 0) l.driver.bits = (unsigned int)output_bits;
 	if (output_channels != 0) l.driver.channels = (unsigned int)output_channels;
@@ -513,7 +521,7 @@ HAUDIO AIL_quick_load_and_play(const char* filename, unsigned int loop_count, in
 	(void)wait_request;
 
 	Library& l = lib();
-	std::lock_guard<std::recursive_mutex> guard(l.lock);
+	LibraryGuard guard;
 
 	if (!l.started || filename == nullptr || l.fileOpen == nullptr || l.fileRead == nullptr
 		|| l.fileSeek == nullptr || l.fileClose == nullptr) {
@@ -573,7 +581,7 @@ void AIL_quick_set_volume(HAUDIO audio, float volume, float extravol)
 	}
 	// Miles' second argument is an additional pan/volume trim; the engine passes a pan of 0.5.
 	(void)extravol;
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	alSourcef(quick->source, AL_GAIN, volume);
 }
 
@@ -584,7 +592,7 @@ void AIL_quick_unload(HAUDIO audio)
 	if (quick == nullptr) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> guard(lib().lock);
+	LibraryGuard guard;
 	alSourceStop(quick->source);
 	alSourcei(quick->source, AL_BUFFER, 0);
 	alDeleteSources(1, &quick->source);

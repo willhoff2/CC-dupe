@@ -220,6 +220,19 @@ from git and must report the defect; `--json` writes the facts for a doc row.
 CLANGXX=clang++-14 python3 scripts/native-audio-callback-test.py
 ```
 
+The rendered-PCM gate is `scripts/native-audio-render-test.py` (`tests/openal_render_test.cpp`,
+OpenAL Soft `wave` backend, needs `libopenal-dev`, `clang++-14`, NumPy and the minimp3 header —
+`MINIMP3_INCLUDE_DIR=build/native/_deps/minimp3-src` after a native build). It plays synthetic
+tones through the stream, one-shot and EOS-loop paths, judges the output with
+`scripts/audio-pcm-discontinuity.py` and the shim's `OPENAL_AUDIO_DIAG` counters, and its `stall`
+case injects a 1.2 s service-thread stall (`OPENAL_AUDIO_DIAG_STALL`) that the 4-buffer stream
+queue fails and the 8-buffer queue survives (`ci-baselines/audio-render-discontinuity.json`).
+
+```sh
+CLANGXX=clang++-14 MINIMP3_INCLUDE_DIR=build/native/_deps/minimp3-src \
+  python3 scripts/native-audio-render-test.py
+```
+
 Ubuntu 22.04 ships CMake 3.22, which the top-level `cmake_minimum_required(3.25)` rejects; the
 `audio-surface-scan.py --check` half of the pair still runs without a build, but the symbol gate does
 not. `pip install --user 'cmake==4.1.2'` provides a new enough `~/.local/bin/cmake` without touching

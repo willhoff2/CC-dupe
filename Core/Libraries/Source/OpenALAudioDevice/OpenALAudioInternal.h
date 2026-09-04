@@ -30,6 +30,8 @@
 #include <AL/alc.h>
 
 #include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -156,7 +158,10 @@ struct StreamVoice
 {
 	~StreamVoice();
 
-	static constexpr unsigned int BUFFER_COUNT = 4;
+	/// Queue depth. Refill only happens on the service thread's 10 ms poll, so the queue is the
+	/// whole tolerance for that thread not running: 8 x 8192 frames is 1.49 s at 44.1 kHz, more than
+	/// the ~1.2 s scheduling stalls measured during a lavapipe map load (4 buffers, 0.74 s, ran dry).
+	static constexpr unsigned int BUFFER_COUNT = 8;
 	static constexpr unsigned int BUFFER_FRAMES = 8192;
 
 	ALuint source = 0;
@@ -209,6 +214,9 @@ struct StreamVoice
 	/// "to the end of the payload", which is what AIL_set_stream_loop_block(h, 0, -1) asks for.
 	unsigned int loopStart = 0;
 	unsigned int loopEnd = 0;
+
+	/// Diagnostics only: when serviceStream last ran for this stream.
+	std::chrono::steady_clock::time_point lastServiced;
 };
 
 /// The digital driver. Must begin with DIG_DRIVER because WWAudio.cpp reads emulated_ds.
@@ -229,6 +237,13 @@ struct Library
 	ALCdevice* device = nullptr;
 	ALCcontext* context = nullptr;
 	bool started = false;
+
+	/// The mixer rate the engine asks Miles for (AIL_quick_startup's 44,100), requested from the
+	/// implementation at context creation; what it actually gave back is read after creation.
+	static constexpr unsigned int MIXER_RATE = 44100;
+	bool contextAttributesHonoured = false;
+	ALCint contextFrequency = 0;
+	ALCint contextRefresh = 0;
 
 	DigitalDriver driver;
 	Object3D* listener = nullptr;
@@ -255,10 +270,101 @@ struct Library
 	/// The thread that called AIL_startup. End-of-sample callbacks are delivered on this thread
 	/// only, when an AIL_* entry point returns and no other entry point is active on it.
 	std::thread::id apiThread;
+	std::thread::id serviceThread;
 	int apiDepth = 0;				///< nesting of AIL_* entry points on apiThread; touched by it alone
 };
 
 Library& lib();
+
+/// Opt-in counters and log for the audio path, below the AIL_* surface. Enabled by the environment
+/// variable OPENAL_AUDIO_DIAG: "stderr", or a path the log is appended to. Off, nothing here costs
+/// more than a load of `enabled`. The counters are what an audible defect has to show up in: a
+/// stream that ran dry, a source restarted mid-waveform, a buffer whose declared format does not
+/// match its bytes, or a library lock held long enough to starve the other thread.
+struct Diagnostics
+{
+	bool enabled = false;
+	std::FILE* log = nullptr;
+	std::chrono::steady_clock::time_point started;
+	std::chrono::steady_clock::time_point lastReport;
+
+	// Stream queue, counted in serviceStream.
+	std::atomic<unsigned long> streamServiceCalls{0};
+	std::atomic<unsigned long> streamBuffersRequeued{0};
+	std::atomic<unsigned long> streamQueueEmptied{0};		///< every buffer processed: the mixer ran dry
+	std::atomic<unsigned long> streamStoppedWithData{0};	///< AL_STOPPED with buffers queued: forced restart
+	std::atomic<unsigned long> streamQueuedMin{StreamVoice::BUFFER_COUNT};	///< fewest buffers queued after a refill
+	std::atomic<unsigned long> streamServiceGapMaxUs{0};	///< longest gap between two service passes
+	std::atomic<unsigned long> streamStarts{0};
+
+	// One-shot voices.
+	std::atomic<unsigned long> sampleStarts{0};
+	std::atomic<unsigned long> sampleRestartsWhilePlaying{0};	///< AIL_start_sample on an AL_PLAYING source
+	std::atomic<unsigned long> objectStarts{0};
+	std::atomic<unsigned long> objectRestartsWhilePlaying{0};	///< AIL_start_3D_sample on an AL_PLAYING source
+
+	// Every alBufferData the shim makes, checked against the decoded data.
+	std::atomic<unsigned long> bufferDataCalls{0};
+	std::atomic<unsigned long> bufferDataMismatches{0};	///< format/channels/bits disagree or a partial frame
+
+	// Parameter writes the mixer sees as steps.
+	std::atomic<unsigned long> gainWrites{0};
+	std::atomic<unsigned long> positionWrites{0};
+
+	// Library lock, per thread class.
+	std::atomic<unsigned long> serviceHoldMaxUs{0};
+	std::atomic<unsigned long> serviceWaitMaxUs{0};
+	std::atomic<unsigned long> apiHoldMaxUs{0};
+	std::atomic<unsigned long> apiWaitMaxUs{0};
+	std::atomic<unsigned long> servicePasses{0};
+	std::atomic<unsigned long> servicePassGapMaxUs{0};	///< longest time between two service passes
+	std::chrono::steady_clock::time_point lastPassEnd;
+
+	// Fault injection, OPENAL_AUDIO_DIAG_STALL="<at_ms>:<for_ms>": once, the first time the service
+	// thread wakes at or past at_ms, it sleeps for_ms before its pass, imitating a scheduling stall.
+	unsigned long stallAtUs = 0;
+	unsigned long stallForUs = 0;
+	bool stallDone = false;
+
+	std::atomic<unsigned long> alErrors{0};
+};
+
+Diagnostics& diagnostics();
+
+/// Reads OPENAL_AUDIO_DIAG and opens the log. Called once by AIL_startup.
+void diagnosticsInit();
+
+/// Appends one line to the log when diagnostics are on. printf-style.
+void diagnosticsLog(const char* format, ...);
+
+/// Writes every counter as one `counters` line; `when` names the moment (periodic, shutdown).
+void diagnosticsReport(const char* when);
+
+/// Raises `slot` to `value` if larger.
+void diagnosticsMax(std::atomic<unsigned long>& slot, unsigned long value);
+
+/// Counts an alBufferData and checks the declared format against the bytes being queued.
+void diagnosticsBufferData(ALenum format, unsigned int channels, unsigned int bits,
+	unsigned int rate, unsigned int bytes, const char* who);
+
+/// Drains alGetError into the counters and log. No-op when diagnostics are off.
+void diagnosticsCheckAlError(const char* where);
+
+/// The library lock, timed when diagnostics are on: how long the caller waited for it and how long
+/// it held it, per thread class (the service thread against everyone else).
+class LibraryGuard
+{
+public:
+	LibraryGuard();
+	~LibraryGuard();
+	LibraryGuard(const LibraryGuard&) = delete;
+	LibraryGuard& operator=(const LibraryGuard&) = delete;
+
+private:
+	std::chrono::steady_clock::time_point m_acquired;
+	bool m_timed;
+	bool m_service;
+};
 
 /// Delivers every pending end-of-sample/stream callback on the calling thread. Callbacks are read
 /// at delivery time, so one unregistered since the voice stopped is dropped, and a voice restarted

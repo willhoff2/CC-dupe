@@ -30,7 +30,7 @@ with real SDL input (main menu → Skirmish → Start), player GLA, one AI.
 | Fix | Both fixed in this slice, 21 lines in `MilesAudioManager.cpp`, 3 declarations widened to `uintptr_t`. No `AIL_*` added, no music-path or renderer change. |
 | Device-level evidence | During a real skirmish on Linux: `m_num2DSamples` 4, `m_num3DSamples` 25, `OpenALAudio::lib().objects` 26 (25 voices + listener), 5 2D and 234 3D `AIL_start_*` calls in 3.5 minutes, up to 1 sample and 7 object sources in `AL_PLAYING` at once, `AL_SAMPLE_OFFSET` advancing between samples on named events (`WorkerVoiceMove`, `CommandCenterGLASelect`, `IndustrialYardAmbientLoop`, …), 69 `alSourcePlay` calls seen by an `LD_PRELOAD` interposer, a 148 MB non-silent 32-bit-float stereo 44.1 kHz `.wav` from the `wave` backend. |
 | Heard | **No.** Nobody listened; the device was a file. |
-| Apple Silicon | **Engine state MEASURED, Waves 11–12** (pools, started voices, OpenAL device/context; §7). The Wave 11 **PORT DEFECT** (SIGSEGV in the completion callback after 16.2 min) is **FIXED and RE-MEASURED**: Wave 12 soak on `c6fd1bd7c`, ~29 running min + 265 s paused, 20 220 callbacks, 0 off the main thread, no crash (§6 item 1). **HUMAN AUDIBILITY MEASURED, Mac / live**: music and ambient SFX audible, with a **constant crackle/pop — new PORT DEFECT** (§6 item 0), mechanism INFERRED. Recorded output UNMEASURED (no loopback). |
+| Apple Silicon | **Engine state MEASURED, Waves 11–12** (pools, started voices, OpenAL device/context; §7). The Wave 11 **PORT DEFECT** (SIGSEGV in the completion callback after 16.2 min) is **FIXED and RE-MEASURED**: Wave 12 soak on `c6fd1bd7c`, ~29 running min + 265 s paused, 20 220 callbacks, 0 off the main thread, no crash (§6 item 1). **HUMAN AUDIBILITY MEASURED, Mac / live**: music and ambient SFX audible, with a **constant crackle/pop — new PORT DEFECT** (§6 item 0), mechanism INFERRED. Recorded output UNMEASURED (no loopback). **Wave 13 (Linux)**: shim data path PROVEN clean (rendered PCM, retail music sample-identical to ffmpeg); one real-time mechanism MEASURED on a PulseAudio sink — a >1 s service-thread scheduling stall drained the 4-buffer stream queue and forced a restart (a pop) — fixed by an 8-buffer queue with deterministic red/green PCM evidence; a *constant* crackle NOT REPRODUCED; shim instrumented (`OPENAL_AUDIO_DIAG`) and `ALC_FREQUENCY=44100` requested explicitly; Mac audibility after it UNMEASURED. |
 | Third broken link (found by the M1 Pro crash) | The OpenAL shim delivered end-of-sample callbacks from its own service thread; the engine's handlers (`notifyOfAudioCompletion` → `startNextLoop` → `playSample3D`) edit `m_playingSounds`/`PlayingAudio`/`AudioEventRTS` with no lock, as they did against retail Miles. Fixed below the `AIL_*` surface (§4.1): the shim now queues completions and delivers them on the thread that calls `AIL_*`, as that thread's `AIL_*` calls return. Linux soak 22 min, 16 641 callbacks, 0 off the main thread; Mac soak ~29 running min, 20 220 callbacks, 0 off the main thread, no crash (§6 item 1). |
 
 ## 1. The chain, as read from source
@@ -399,9 +399,9 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
      context rate is alsoft's default and the effective rate is **UNMEASURED** (reading it is an
      `alcGetIntegerv`, forbidden from the debugger; Wave 13 can log it once at `AIL_startup`).
    - Stream refill (source, `OpenALStream.cpp` `serviceStream`, `OpenALAudioInternal.h`):
-     `BUFFER_COUNT = 4` buffers of up to `BUFFER_FRAMES = 8192` PCM frames each — 186 ms per buffer
-     at 44.1 kHz (372 ms at 22.05 kHz), 0.74–1.5 s queued. Refill runs **only on the shim's
-     service thread** (`serviceLoop` polls every 10 ms under the library lock; `serviceStream` has
+     `BUFFER_COUNT = 4` buffers (Wave 12 state; 8 after Wave 13) of up to `BUFFER_FRAMES = 8192`
+     PCM frames each — 186 ms per buffer at 44.1 kHz (372 ms at 22.05 kHz), 0.74–1.5 s queued.
+     Refill runs **only on the shim's service thread** (`serviceLoop` polls every 10 ms under the library lock; `serviceStream` has
      no other caller), never inside an `AIL_*` call on the engine thread, so a late render frame
      cannot starve the music queue. The shim mirror's `framesQueued` read 0 throughout while
      `framesPlayed` advanced (the field is not maintained by the refill path), so the live queue
@@ -427,6 +427,98 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
    only the stream plays, unless the menu also loops a 2D sample (48 `setSampleCompleted` per
    soak; 42 of them before the mission). Cost: `alsoft` `ALSOFT_LOGLEVEL=3` + a one-line
    `alcGetIntegerv(ALC_FREQUENCY/ALC_REFRESH)` log at startup, and a loopback device.
+
+   **Wave 13 (Linux, this slice): the data path is ruled out, the real-time path is instrumented,
+   one starvation mechanism is MEASURED live and fixed with deterministic red/green evidence, and
+   a *constant* crackle did NOT reproduce on Linux.** The
+   shim now has opt-in diagnostics (`OPENAL_AUDIO_DIAG=stderr|<path>`, `OpenALDriver.cpp`
+   `diagnostics()`): implementation and effective context attributes at `AIL_startup`, and
+   counters for stream starvation (`stream_queue_emptied`: every buffer processed before a refill;
+   `stream_stopped_with_data`: `AL_STOPPED` with data queued → forced restart), `stream_queued_min`,
+   `stream_service_gap_max_us`, one-shot/3D `*_restarts_while_playing`, `alBufferData` declared
+   format vs decoded bytes (`buffer_data_mismatches`), gain/position write counts, and lock hold /
+   wait maxima on the service and API threads. Measured with them, all on `main` `b905296b3`'s
+   shim unless stated (`ci-baselines/audio-render-discontinuity.json`):
+   - **Which OpenAL the M1 Pro links — PROVEN from the Wave 11 Mac backtrace**
+     (`renderer-integration-arm64.md`: `libopenal.1.dylib std::basic_ofstream::~basic_ofstream`):
+     a C++ `libopenal.1.dylib` is OpenAL Soft (Homebrew keg, `scripts/native-build.py`
+     `OPENAL_CANDIDATES`), not Apple's `OpenAL.framework`. Candidate (iv) is closed; no pin needed.
+   - **Data path clean — PROVEN, rendered PCM, Linux x86-64, OpenAL Soft 1.19.1 `wave`
+     (file backend, SYNTHETIC, cannot underrun).** Retail shell music `USA_11.mp3` (full-archive
+     `Data/Audio/Tracks`) rendered through `AIL_open_stream`/minimp3 for 45 s is sample-identical
+     to an ffmpeg decode of the same file (0 discontinuities beyond the 9 the source material has
+     at a 0.3 jump threshold; both files report the same 9). A retail bird one-shot rendered
+     through `AIL_set_sample_file`/`AIL_start_sample` has 0 jumps and 0 gaps. Synthetic 440 Hz
+     tones through all three paths (stream, one-shot, EOS-callback loop) have 0 jumps at a 0.1
+     threshold, on `main` and after the fix alike (`scripts/native-audio-render-test.py`).
+     `buffer_data_mismatches=0` across every upload. Candidates (b: format/decl) and (d: restart
+     cutting a playing source) do not occur: `sample_restarts_while_playing=0`,
+     `object_restarts_while_playing=0` over 2 514 3D starts in game.
+   - **Real-time path, Linux, PulseAudio null sink with a real clock (OpenAL Soft `pulse`
+     backend), lavapipe `zh`, main menu + skirmish, pre-fix shim (4 buffers):**
+     `stream_queue_emptied=1`, `stream_stopped_with_data=1`, `stream_queued_min=0`,
+     `stream_service_gap_max_us≈1 140 000` against 743 ms of queued music, `al_errors=0`. **That
+     is the one starvation mechanism MEASURED in this slice:** the service thread (the shim's
+     10 ms poller) was not scheduled for >1 s — longer than the whole queued stream — the queue
+     drained, OpenAL Soft reported the source `AL_STOPPED` with buffers still queued, and the shim
+     force-restarted it: a gap in the music, i.e. a pop. Lock contention is NOT the cause of the
+     stall: `service_hold_max_us=3 999`, `api_hold_max_us=3 638`, `service_wait_max_us=3 536`,
+     `api_wait_max_us=638` — milliseconds, two orders of magnitude below the queue — so
+     candidate (ii)'s "poll under the lock" part is **REFUTED on Linux** and decode stays under the
+     lock. The stall is host scheduling (a software-rasterised game at 100 % CPU on a shared box).
+     The stall is intermittent (once in ~10 min here), which is a **pop, not a constant crackle**:
+     a constant crackle on the Mac is NOT explained by this counter unless the Mac counters show it
+     firing continuously. Human audibility of the Linux capture: UNMEASURED (no listener).
+   - **Fix shipped for that mechanism: stream queue depth 4 → 8 (`StreamVoice::BUFFER_COUNT`,
+     1.49 s of queued 44.1 kHz audio instead of 0.74 s).** Red/green, deterministic, Linux, rendered
+     PCM (`scripts/native-audio-render-test.py` case `stall`, `OPENAL_AUDIO_DIAG_STALL=1000:1200`
+     makes the service thread sleep 1.2 s once, 1 s into a 6 s synthetic stream, `wave` backend):
+     4 buffers → `stream_queue_emptied=1 stream_stopped_with_data=1 stream_queued_min=0`,
+     `rendered_pcm_jumps=2 rendered_pcm_gaps=1` (534 ms of silence), **FAIL**; 8 buffers → all
+     counters 0, `rendered_pcm_jumps=0 rendered_pcm_gaps=0`, **pass**, same input and same
+     injected stall (`service_pass_gap_max_us` 1.21 s in both). Live re-run after the fix
+     (pulse null sink, lavapipe, menu + skirmish, ~13 min): a natural stall of
+     `service_pass_gap_max_us=1 128 259` occurred again and this time
+     `stream_queue_emptied=0 stream_stopped_with_data=0 stream_queued_min=1`, `al_errors=0`,
+     `buffer_data_mismatches=0`, `*_restarts_while_playing=0`. The service thread also asks for a
+     best-effort priority raise (`SCHED_RR` min / `QOS_CLASS_USER_INTERACTIVE` on macOS, logged
+     `accepted`/`refused`, refused unprivileged on Linux); it never fails startup.
+   - **Effective context — MEASURED, Linux:** `alcCreateContext(device, nullptr)` gave
+     `ALC_FREQUENCY=44100 ALC_REFRESH=43` (OpenAL Soft's default when the backend reports
+     44.1 kHz). With `alsoft.conf frequency=48000` the same call, and the explicit request
+     alike, give `48000/23`: alsoft's config file outranks the attribute list, so that probe
+     shows the default follows the backend, not that the request is powerless. **On the Mac this
+     is still UNMEASURED** (the log line now exists; nobody has run it there). **INFERRED from
+     alsoft source** (`alc/backends/coreaudio.cpp` `CoreAudioPlayback::reset`, tag 1.24.3): the
+     CoreAudio backend overwrites `mDevice->mSampleRate` with the output unit's stream-format
+     rate regardless of the request, so on the M1 Pro's 44.1 kHz speakers the context was
+     already 44.1 kHz and the fix below is expected to be a no-op there.
+   - **Also shipped (candidate (i), defensive):** `AIL_startup` now
+     requests `ALC_FREQUENCY = 44100` (`Library::MIXER_RATE`, the rate the engine's
+     `AIL_quick_startup` asks Miles for), falls back to the attribute-less context if the
+     implementation rejects the list, and reads back the effective `ALC_FREQUENCY`/`ALC_REFRESH`
+     (`Library::contextFrequency/contextRefresh`). `ALC_REFRESH` is deliberately not requested:
+     where alsoft honours it, it shrinks the device period and only makes real-time underruns more
+     likely. Linux: attribute list accepted, effective 44 100 / 43, renders unchanged (they were
+     already at 44.1 kHz here). It protects the Linux/PulseAudio and 48 kHz-DAC cases and makes
+     the rate observable; **it is NOT claimed to fix the Mac crackle** — see the CoreAudio
+     inference above; the new startup line is what confirms or refutes that.
+   - **Still INFERRED, and the Mac measurement that decides it:** run `OPENAL_AUDIO_DIAG=stderr
+     ./zh` on the M1 Pro through the menu and a 10-minute skirmish, then read (1) the
+     `implementation`/`context` lines — a `frequency` ≠ 44100 before this fix or an
+     `attributes_accepted=0` names the rate path; (2) `stream_queue_emptied` /
+     `stream_stopped_with_data` / `service_pass_gap_max_us` — non-zero starvation, or a service
+     gap approaching 1.49 s, names the scheduling mechanism measured on Linux (a count that grows
+     steadily is the first thing that could explain a *constant* crackle);
+     (3) if both are clean and the crackle persists, the mechanism is below the shim (candidate
+     (a): alsoft's `renderSamples` missing the 11.6 ms CoreAudio IOProc deadline), and the next
+     lever is `alsoft.conf` `period_size`/`periods` or alsoft's own `ALSOFT_LOGLEVEL=3` output,
+     not shim code. Human audibility after the fix, Mac: **UNMEASURED**, owed to the next Mac
+     slot. #153 regression on this slice: `scripts/native-audio-callback-test.py` green (all
+     completions on the API thread inside an `AIL_*` call, 0 idle deliveries); a live 10-minute
+     callback soak did not run here because this session's lavapipe skirmish ended in an instant
+     "You are victorious" screen (no starting units placed — an unrelated, unexplained Linux
+     run-directory issue), so the live callback count is **UNMEASURED for this slice**.
 1. **PORT DEFECT, measured on the M1 Pro, FIXED in the shim (§4.1), RE-MEASURED on the Mac
    (`ci-baselines/audio-callback-soak-macos-arm64.json`): SIGSEGV in
    `MilesAudioManager::initFilters3D` on the OpenAL service thread.** 16.2 resumed
@@ -497,9 +589,13 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
 | Miles 6 EOS callback thread (the retail oracle) | **INFERRED** (§4.1): the pinned `mss.h` is a stub without vendor prose; the engine takes no `AIL_lock`/`AIL_serve` | the Miles 6 SDK manual, if anyone has it; not needed for the fix |
 | CoreAudio output open | **MEASURED, engine/OS state**: non-null OpenAL device/context, advancing music `framesPlayed`, and `com.apple.audio.IOThread.client` in `HALC_ProxyIOContext`; this proves the output client exists, not audibility | — |
 | CoreAudio output device format (Mac) | **MEASURED, OS state, standalone tool**: `MacBook Pro Speakers`, 44 100 Hz nominal, 2 ch Float32, HAL buffer 512 frames (14–4096 allowed), latency 65 frames, safety offset 74 | — |
-| OpenAL context format the shim actually got | **UNMEASURED** (`alcCreateContext(device, nullptr)`; reading `ALC_FREQUENCY`/`ALC_REFRESH` is a function call the debugger must not make) | one startup log line in the shim (Wave 13) |
-| Music stream queue depth / refill cadence | **MEASURED, source**: 4 × ≤8192-frame buffers (186 ms each at 44.1 kHz), refilled only by the service thread's 10 ms poll; **UNMEASURED, live**: the `framesQueued` mirror stayed 0 (not maintained by the refill path) | maintain `framesQueued` in `serviceStream`, or count `alSourceQueueBuffers` |
-| Human-observed audibility — Mac | **MEASURED, HUMAN AUDIBILITY, Mac / live** (2026-09-03, owner at the M1 Pro): main-menu music audible; skirmish ambient SFX (birds) audible; **constant crackle/pop in both** — PORT DEFECT, §6 item 0 | — (fix is Wave 13) |
+| OpenAL context format the shim actually got | **MEASURED, Linux** (Wave 13, `OPENAL_AUDIO_DIAG`): OpenAL Soft 1.19.1, `ALC_FREQUENCY=44100 ALC_REFRESH=43 ALC_SYNC=0`, 255 mono / 1 stereo sources; the shim now requests 44 100 explicitly and logs the readback. **UNMEASURED, Mac** | `OPENAL_AUDIO_DIAG=stderr ./zh` on the M1 Pro, read the `context` line |
+| Which OpenAL the Mac binary links | **PROVEN, Mac backtrace** (Wave 11, `renderer-integration-arm64.md`): `libopenal.1.dylib` with a C++ static destructor = OpenAL Soft (Homebrew keg), not `OpenAL.framework` | — |
+| Music stream queue depth / refill cadence | **MEASURED, live, Linux** (Wave 13, PulseAudio null sink, lavapipe): pre-fix 4 buffers, one >1.1 s service-thread stall → `stream_queue_emptied=1`, `stream_stopped_with_data=1` (forced restart), `stream_queued_min=0`; post-fix 8 buffers, ~13 min, `service_pass_gap_max_us=1 128 259` → `stream_queue_emptied=0`, `stream_stopped_with_data=0`, `stream_queued_min=1`. Deterministic red/green in `scripts/native-audio-render-test.py` (`stall` case). **UNMEASURED, Mac** | same run on the M1 Pro |
+| Shim data path (decode → `alBufferData` → mix) | **PROVEN clean, rendered PCM, Linux `wave` (SYNTHETIC)**: retail `USA_11.mp3` sample-identical to ffmpeg; retail bird one-shot 0 jumps / 0 gaps; synthetic tones 0 jumps on `main` and fixed shim (`ci-baselines/audio-render-discontinuity.json`) | — |
+| Library lock contention | **MEASURED, live, Linux** (post-fix run): `service_hold_max_us=3 999`, `api_hold_max_us=3 638`, `service_wait_max_us=3 536`, `api_wait_max_us=638`, two orders below the queue; not a starvation mechanism here | Mac numbers from the same diag run |
+| Human-observed audibility — Mac | **MEASURED, HUMAN AUDIBILITY, Mac / live** (2026-09-03, owner at the M1 Pro): main-menu music audible; skirmish ambient SFX (birds) audible; **constant crackle/pop in both** — PORT DEFECT, §6 item 0. **After the Wave 13 fix: UNMEASURED** | a listener at the M1 Pro on a build with this slice, `OPENAL_AUDIO_DIAG=stderr` on |
+| Crackle reproduction on Linux | **Constant crackle NOT REPRODUCED; one intermittent pop MEASURED** (Wave 13): `wave` renders have no shim-generated discontinuity and no restart cut; the PulseAudio real-time run showed one stream starvation + forced restart on a >1 s service-thread scheduling stall (pre-fix), none after the 8-buffer fix | Mac counters from the same diag run |
 | Recorded (non-human) output — Mac | **UNMEASURED**: no `ffmpeg`/BlackHole/aggregate loopback on this Mac; ScreenCaptureKit system capture recorded a system sound (−26.7 dBFS) but the game as −120 dBFS silence in every 0.5 s window, so it does not tap the game's client | BlackHole or an aggregate device, then a 30 s capture and a discontinuity count |
 | Human-observed audibility — Linux | **UNMEASURED** (lavapipe soak runs the `wave` backend to a file; no listener, no output route) | a Linux box with speakers or a `pulse` sink |
 | Speech / EVA | UNMEASURED | longer skirmish, `Eva::playSound` in the probe |

@@ -1,0 +1,97 @@
+{
+  "what": "Wave 13: OpenAL shim stream-starvation mechanism and queue-depth fix. Deterministic part: scripts/native-audio-render-test.py renders synthetic tones through the shim on OpenAL Soft's wave backend (real mixer clock, file output) and judges the shim's opt-in OPENAL_AUDIO_DIAG counters plus the rendered PCM (scripts/audio-pcm-discontinuity.py); the `stall` case replays the service-thread scheduling stall measured in the game with OPENAL_AUDIO_DIAG_STALL fault injection. Live part: lavapipe skirmish soak of the strict-link binary on a PulseAudio null sink with a real clock. Apple Silicon: UNMEASURED for every number here.",
+  "platform": "Linux x86-64, Ubuntu 22.04, clang++-14, OpenAL Soft 1.19.1 (wave backend for the deterministic renders, pulse backend on a null sink for the live soak), lavapipe",
+  "context_at_AIL_startup": {
+    "vendor": "OpenAL Community",
+    "renderer": "OpenAL Soft",
+    "version": "1.1 ALSOFT 1.19.1",
+    "requested_frequency": 44100,
+    "attributes_accepted": 1,
+    "frequency": 44100,
+    "refresh": 43,
+    "sync": 0,
+    "mono_sources": 255,
+    "stereo_sources": 1
+  },
+  "mechanism": {
+    "name": "stream refill starvation: the service thread that refills the music/stream queue on a 10 ms poll was not scheduled for over a second during map load, the 4 x 8192-frame queue (0.74 s at 44.1 kHz) drained, the source fell to AL_STOPPED and was force-restarted",
+    "evidence_class": "real-time device counters (shim), Linux; confirmed deterministically with fault injection on rendered PCM",
+    "pre_fix_live_runs": [
+      {"stream_service_gap_max_us": 1142884, "stream_queue_emptied": 1, "stream_stopped_with_data": 1, "stream_queued_min": 0, "buffer_count": 4},
+      {"stream_service_gap_max_us": 1163825, "stream_queue_emptied": 1, "stream_stopped_with_data": 1, "stream_queued_min": 0, "buffer_count": 4}
+    ],
+    "lock_contention_not_the_cause": {"service_hold_max_us": 3999, "api_hold_max_us": 3638, "service_wait_max_us": 3536, "api_wait_max_us": 638, "note": "post-fix live run maxima; milliseconds against a 0.74-1.49 s queue"},
+    "constant_crackle_reproduced_on_linux": false,
+    "note": "one starvation event in ~10 min is an intermittent pop; a constant crackle on the Mac is explained by this mechanism only if the Mac counters show it firing continuously"
+  },
+  "fix": "StreamVoice::BUFFER_COUNT 4 -> 8 (1.49 s of queue at 44.1 kHz); service thread asks for elevated scheduling (QoS USER_INTERACTIVE on macOS, SCHED_RR on Linux, best effort, refused without privilege and logged); ALC_FREQUENCY=44100 requested explicitly and read back",
+  "deterministic_red_green": {
+    "driver": "CLANGXX=clang++-14 python3 scripts/native-audio-render-test.py",
+    "injected_stall": "OPENAL_AUDIO_DIAG_STALL=1000:1200 (1.2 s stall of the service thread at t=1 s, the stall class the live soak measured)",
+    "red_main_b905296b3_shim_BUFFER_COUNT_4": {
+      "service_pass_gap_max_us": 1215878,
+      "stream_queue_emptied": 1,
+      "stream_stopped_with_data": 1,
+      "stream_queued_min": 0,
+      "rendered_pcm_jumps": 2,
+      "rendered_pcm_gaps": 1,
+      "rendered_pcm_first_gap": {"at_s": 1.673, "ms": 534.1},
+      "verdict": "FAIL"
+    },
+    "green_fixed_shim_BUFFER_COUNT_8": {
+      "service_pass_gap_max_us": 1211399,
+      "stream_queue_emptied": 0,
+      "stream_stopped_with_data": 0,
+      "stream_queued_min": 1,
+      "rendered_pcm_jumps": 0,
+      "rendered_pcm_gaps": 0,
+      "verdict": "pass"
+    },
+    "unstalled_renders_fixed_shim": {
+      "stream": {"frames": 276480, "jumps": 0, "gaps": 0, "buffer_data_mismatches": 0, "al_errors": 0},
+      "sample": {"frames": 77824, "jumps": 0, "gaps": 0, "sample_restarts_while_playing": 0},
+      "loop": {"frames": 217088, "jumps": 0, "inter_loop_gaps_reported_not_judged": 8}
+    }
+  },
+  "retail_data_renders_wave_backend": {
+    "menu_music_USA_11_mp3_45s": "sample-identical to an ffmpeg decode of the same file (both report the same 9 source-material jumps at a 0.3 threshold; 0 extra)",
+    "bird_one_shot": {"jumps": 0, "gaps": 0}
+  },
+  "post_fix_live_soak": {
+    "how": "strict-link zh, lavapipe, OpenAL Soft pulse backend on a PulseAudio null sink (s16le 2ch 44100), OPENAL_AUDIO_DIAG on, skirmish entered from the menu",
+    "wall_seconds": 680,
+    "service_thread_priority_raise": "refused (unprivileged Linux)",
+    "map_load_stall_observed": "service thread: 1128 ms between passes at t=92 s",
+    "service_passes": 60432,
+    "stream_buffers_requeued": 3046,
+    "object_starts": 124,
+    "sample_starts": 23,
+    "counters_at_end": {
+      "stream_service_gap_max_us": 1128292,
+      "service_pass_gap_max_us": 1128259,
+      "stream_queue_emptied": 0,
+      "stream_stopped_with_data": 0,
+      "stream_queued_min": 1,
+      "sample_restarts_while_playing": 0,
+      "object_restarts_while_playing": 0,
+      "buffer_data_mismatches": 0,
+      "service_hold_max_us": 3999,
+      "service_wait_max_us": 3536,
+      "api_hold_max_us": 3638,
+      "api_wait_max_us": 638,
+      "al_errors": 0,
+      "crash": false
+    },
+    "headroom_note": "queued_min=1 of 8 after a 1.13 s stall: the fix covers the measured stall with one buffer (186 ms) to spare, not by an order of magnitude"
+  },
+  "callback_regression_pr153": {
+    "deterministic": "scripts/native-audio-callback-test.py on this slice: pass (all completions on the API thread inside an AIL_* call, 0 idle deliveries, defect observed false)",
+    "live_soak": "UNMEASURED for this slice: the lavapipe skirmish in this session ended in an instant victory screen with no starting units, so no 10-minute callback soak ran; the Wave 12 numbers in audio-callback-soak.json are the last live measurement"
+  },
+  "unmeasured": [
+    "Mac effective ALC_FREQUENCY/ALC_REFRESH (log line exists, never run on the M1 Pro)",
+    "Mac stream_queue_emptied / stream_stopped_with_data / service_pass_gap_max_us",
+    "human audibility after the fix, Mac"
+  ],
+  "verdict": "pass"
+}
