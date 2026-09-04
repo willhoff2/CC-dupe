@@ -100,7 +100,7 @@ native install without `Data/Cursors` gets an arrow everywhere, never a crash an
 |---|---|---|
 | Windows | real `user32` `LoadCursorFromFile`/`SetCursor`; animation by the OS | unchanged, byte-identical source in the `_WIN32` path |
 | Linux / SDL2 | `SDL_CreateColorCursor` from the first frame | **compiles and links** (native build, level 4, strict link); behaviour needs a display server — UNMEASURED |
-| macOS / Cocoa | `NSCursor` from `NSImage`, set via `-resetCursorRects` on the content view | **MEASURED, Mac / live / real input** (§6.1): visible at fresh launch, main menu and in-mission; `NSCursor.currentSystem` is a 32×32 non-arrow image whose hotspot matches the retail file for each state (13,13 pointer; 15,15 in-mission; 22,16 `SCCScroll0` at the right screen edge); real coordinate clicks land on menu buttons. Hidden-during-cinematic, button-*edge* click and the other seven scroll directions — UNMEASURED (§6.1) |
+| macOS / Cocoa | `NSCursor` from `NSImage`, set via `-resetCursorRects` on the content view | **MEASURED, Mac / live / real input** (§6.1): visible at fresh launch, main menu and in-mission; `NSCursor.currentSystem` is a 32×32 non-arrow image whose hotspot matches the retail file for each state (13,13 pointer; 15,15 in-mission; 22,16 `SCCScroll0` at the right screen edge); absolute-coordinate synthetic clicks land on menu buttons. Under capture the pointer follows relative HID motion, is confined to the content view and clicks land at its tip, windowed and fullscreen (§6.2, synthetic relative-delta; human confirmation pending). Hidden-during-cinematic, button-*edge* click and the other seven scroll directions — UNMEASURED (§6.1) |
 | Headless test (fake seam) | `win32_user32_test.cpp` records what reached `Window_Create_Cursor`/`Window_Set_Cursor` | **proven** — §5 |
 
 Animation is not presented on any non-Windows platform: the first step's frame is a still cursor.
@@ -247,10 +247,60 @@ table as above (the Mac's install and the S3 bundle decode identically).
 | Main menu | Mac / live, screenshot + `NSCursor` | visible; same 32×32 (13,13) non-arrow image |
 | In-mission (over terrain) | Mac / live, screenshot + `NSCursor` | visible; `logical_size=32x32 hotspot=15,15 is_system_arrow=false` — the in-mission set (`SCCNoAction`/`SCCMove`/… all carry (15,15)); `rep[0] pixels=32x32 points=32x32 class=NSBitmapImageRep` |
 | Retail identity | Mac / live vs. Linux+Mac decode | the hotspots the OS reports are the decoded files' hotspots, so the image set is the retail set, not the system arrow (pixel-for-pixel comparison of the frame: UNMEASURED) |
-| Hotspot / click | Mac / live / real input | coordinate clicks (SKIRMISH, PLAY GAME, Escape menu EXIT GAME / YES, score EXIT, MAIN MENU, EXIT GAME) all activated the button under the pointer tip; a click at a button *edge* pixel: UNMEASURED |
+| Hotspot / click | Mac / live / synthetic **absolute-coordinate** input | coordinate clicks (SKIRMISH, PLAY GAME, Escape menu EXIT GAME / YES, score EXIT, MAIN MENU, EXIT GAME) all activated the button under the pointer tip. **Correction (Wave 14):** these were CGEvents posted at absolute screen coordinates, which move the pointer regardless of `CGAssociateMouseAndMouseCursorPosition`, so they did *not* test whether the pointer follows the mouse while the engine has capture — it did not (§6.2). A click at a button *edge* pixel: UNMEASURED |
 | Scroll direction | Mac / live / real input, pointer dragged to the right screen edge | `logical_size=32x32 hotspot=22,16 is_system_arrow=false` = `SCCScroll0` (22,16) — one direction measured, the other seven UNMEASURED |
 | Hidden when the game hides it | — | UNMEASURED: no cinematic in a skirmish, `SetCursor(nullptr)` path not reached |
 | Retina | Mac / live | the `NSImage` has a single 32×32-pixel rep at 32×32 points, so AppKit draws it at 32 points = 64 device pixels (2× upscale) — the same physical size as Windows' 32-px cursor on a 1× display; crispness by eye not assessed |
+
+### 6.2 MEASURED (Mac / live / synthetic relative-delta): the pointer under cursor capture
+
+**Same M1 Pro, 2026-09-04, `main` `fbfc0f574`, build `native-build.py` levels 1-4 strict link,
+arm64.** Figures are in `ci-baselines/cursor-capture-macos-arm64.json`; the prose here restates
+them. Pointer motion came from `IOHIDPostEvent(NX_MOUSEMOVED, kIOHIDSetRelativeCursorPosition)`
+— relative deltas through the HID system, the path a hardware mouse takes, validated in a
+standalone window to move 0 px while dissociated. Clicks were HID button events at the current
+pointer, no coordinates. Engine state (`m_isCursorCaptured`, `Cursor_Clipped`,
+`m_currMouse.pos`, quit-menu flag) was read by LLDB; no OpenAL/`AIL_*` call from the debugger.
+The user's report ("mouse works on the pause menu, not in the game / main menu") led here.
+
+**Mechanism, proven, not inferred.** `Mouse::refreshCursorCapture()` captures whenever the window
+is focused and nothing blocks it (pause blocks it); on macOS that reached
+`Window_Set_Cursor_Clip(true)` = `CGAssociateMouseAndMouseCursorPosition(false)`, which stops the
+pointer following the mouse. Before the fix, +100,+50 of relative motion moved the pointer 0,0 in
+the unpaused windowed skirmish (`captured=1 clipped=1`) and at the fullscreen main menu
+(`captured=1 clipped=1`); it moved 100,50 on the pause menu (`captured=0`) — exactly the user's
+split. The pointer stayed visible (retail arrow) throughout: the symptom is *frozen*, not
+invisible. Second, independent fullscreen defect: the borderless window's `canBecomeKeyWindow`
+was NO, so it was never key, AppKit sent it no mouse-moved events and `Window_Is_Active()` was
+false.
+
+| State | Pre-fix | Post-fix |
+|---|---|---|
+| Windowed (`-win`) main menu | **MEASURED-WORKING**: `captured=0 clipped=0` (default `CursorCaptureMode` has no windowed-menu bit); pointer moved 100,50, engine 400,299 → 500,349; HID click at the tip opened Options | unchanged; HID clicks at the tip took SINGLE PLAYER → SKIRMISH → PLAY GAME |
+| Windowed unpaused skirmish | `captured=1 clipped=1`; pointer moved **0,0** for +100,+50 | pointer moved 100,50 then −50,−20; engine 450,330; HID click at the tip on the control bar's `ButtonOptions` opened the quit menu |
+| Windowed confinement | (dissociated, could not leave) | 800 px requested to the right stopped at global x 1263 = content origin 464 + 799; 600 px down stopped at y 762 = 163 + 599; engine 799,599. −1500,−1500 stopped at 464,163; engine 0,0 |
+| Windowed pause menu | `captured=0 clipped=0 quit_menu=1`; pointer moved 100,50 | same; HID click at the tip on `ButtonReturn` closed the menu and capture re-engaged |
+| Focus loss (Finder activated) | — | `captured=0 clipped=0 active=false`; pointer left the window to the screen corner 1728,1117; on re-activation the first move pulled it back to 1263,762 with `captured=1 clipped=1` |
+| Fullscreen main menu | `captured=1 clipped=1 active=false`; pointer moved **0,0**; engine never updated (not key) | `active=true`; pointer moved 100,50, engine 500,350; confined to the window's 0,32–799,631; HID clicks at the tip navigated to the skirmish menu |
+| Fullscreen unpaused skirmish | UNMEASURED | `captured=1 clipped=1`; pointer moved 100,−100, engine 181,531 → 281,431 |
+| Fullscreen pause menu | UNMEASURED | `captured=0`; pointer moved 119,−36; HID click on `ButtonReturn` at the tip closed it |
+| Fullscreen focus loss | UNMEASURED | released (`captured=0 clipped=0`), pointer left to 1400,1117; re-activation pulled it to 799,631 |
+
+The fix (this file's seam only): `Window_Set_Cursor_Clip()` records `Cursor_Clipped` and, when a
+mouse-moved/dragged/button event arrives outside the content view while clipped and active,
+clamps it to `[0,w-1]×[0,h-1]` and `CGWarpMouseCursorPosition`s the pointer there
+(re-associating immediately to cancel the post-warp motion suppression); clipping a pointer
+already outside pulls it onto the edge at once, as `ClipCursor()` does. The pointer is never
+dissociated. `WWGameWindow` answers `canBecomeKeyWindow` YES so the fullscreen popup is key.
+`Window_Show_System_Cursor`, `Window_Set_Cursor` and the retail hotspots are untouched; nothing
+under `_WIN32` changed.
+
+**Still UNMEASURED:** the user's own confirmation by hand (the exit criterion; his main-menu
+report is UNEXPLAINED until he says windowed vs fullscreen — the windowed menu never captured,
+the fullscreen one froze); "fullscreen" on this Mac is an 800×600 borderless window at the
+screen's top-left rather than screen-covering (a window-mode seam, not this one); dragging with a
+button held across the edge; multi-display; hide-on-cinematic and the seven remaining scroll
+directions as before.
 
 The `CGCursorIsVisible()` API is gone from the current SDK, so "visible" is a screenshot of the
 window with the cursor drawn plus a non-nil `NSCursor.currentSystem`; screenshots are session
@@ -272,9 +322,11 @@ fabricates a row.
 
 ## 7. Residual risks, ranked
 
-1. **Mac partly measured (§6.1).** Visible, retail image, hotspots matching the files, centre
-   clicks landing, one scroll direction, Retina size — seen. Still UNMEASURED: hide-on-cinematic,
-   button-edge click, seven scroll directions, fullscreen window.
+1. **Mac partly measured (§6.1, §6.2).** Visible, retail image, hotspots matching the files,
+   pointer following relative motion under capture, confinement, focus-loss release, clicks at
+   the tip in windowed and fullscreen — seen with synthetic HID input; human trackpad confirmation
+   still pending. Still UNMEASURED: hide-on-cinematic, button-edge click, seven scroll directions,
+   a screen-covering fullscreen window.
 2. **Retail `.ANI` format assumptions — resolved on Linux (§6).** All 34 engine-named cursors are
    `AF_ICON` 32×32 4-bpp `BI_RGB` frames and decode with in-range hotspots; no fallback to the
    arrow was taken. What remains is whether the decoded pixels look right on screen (UNMEASURED).
