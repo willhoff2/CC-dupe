@@ -156,7 +156,8 @@ def judge(runs):
             f"fatal={facts.get('fatal')!r}")
         add(f"[{variant}] process exited 0 through static destruction, no std::terminate",
             facts.get("exit_code") == 0 and not facts.get("terminate_message"),
-            f"exit_code={facts.get('exit_code')} terminate_message={facts.get('terminate_message')}")
+            f"exit_code={facts.get('exit_code')} "
+            f"terminate_message={facts.get('terminate_message')}")
 
     by_variant = {facts["variant"]: facts for facts in runs}
     stderr_run = by_variant.get("stderr", {})

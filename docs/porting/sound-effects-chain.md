@@ -437,7 +437,12 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
    `stream_stopped_with_data`: `AL_STOPPED` with data queued → forced restart), `stream_queued_min`,
    `stream_service_gap_max_us`, one-shot/3D `*_restarts_while_playing`, `alBufferData` declared
    format vs decoded bytes (`buffer_data_mismatches`), gain/position write counts, and lock hold /
-   wait maxima on the service and API threads. Measured with them, all on `main` `b905296b3`'s
+   wait maxima on the service and API threads. (Wave 14: `Diagnostics` is a heap-allocated,
+   never-freed singleton and a file log is closed by `~Library` via `diagnosticsClose()`, so the
+   service thread and the destructor can use it at any point of static destruction; a
+   `static destruction: AIL_shutdown was not called` line means the engine quit route skipped
+   `AIL_shutdown` — see `memory-shutdown-order.md`, third mechanism, and
+   `ci-baselines/quit-path-static-destruction.json`.) Measured with them, all on `main` `b905296b3`'s
    shim unless stated (`ci-baselines/audio-render-discontinuity.json`):
    - **Which OpenAL the M1 Pro links — PROVEN from the Wave 11 Mac backtrace**
      (`renderer-integration-arm64.md`: `libopenal.1.dylib std::basic_ofstream::~basic_ofstream`):
