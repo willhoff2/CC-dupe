@@ -236,19 +236,32 @@ typedef UnsignedInt DeathTypeFlags;
 const DeathTypeFlags DEATH_TYPE_FLAGS_ALL = 0xffffffff;
 const DeathTypeFlags DEATH_TYPE_FLAGS_NONE = 0x00000000;
 
+// TheSuperHackers @bugfix The bit for DeathType dt is 1 << (dt - 1), which for DEATH_NORMAL (0)
+// is a shift by -1: undefined, and on a 32-bit shift the hardware truncates the count to 5 bits
+// and lands on bit 31. Retail relies on that, so the truncation is done explicitly here to keep
+// every target on the 32-bit bit assignment (see docs/porting/death-flag-shift.md).
+inline UnsignedInt deathTypeFlagBit(DeathType dt)
+{
+	return 1U << ((static_cast<UnsignedInt>(dt) - 1U) & 31U);
+}
+
+// STATIC_ASSERT_ALWAYS, not static_assert: VC6 defines the latter away, and Windows is the one
+// toolchain where a silently skipped alias would go unnoticed.
+STATIC_ASSERT_ALWAYS(DEATH_NUM_TYPES <= 32, "A DeathType of 32 would alias DEATH_NORMAL's bit 31");
+
 inline Bool getDeathTypeFlag(DeathTypeFlags flags, DeathType dt)
 {
-	return (flags & (1UL << (dt - 1))) != 0;
+	return (flags & deathTypeFlagBit(dt)) != 0;
 }
 
 inline DeathTypeFlags setDeathTypeFlag(DeathTypeFlags flags, DeathType dt)
 {
-	return (flags | (1UL << (dt - 1)));
+	return (flags | deathTypeFlagBit(dt));
 }
 
 inline DeathTypeFlags clearDeathTypeFlag(DeathTypeFlags flags, DeathType dt)
 {
-	return (flags & ~(1UL << (dt - 1)));
+	return (flags & ~deathTypeFlagBit(dt));
 }
 
 //-------------------------------------------------------------------------------------------------

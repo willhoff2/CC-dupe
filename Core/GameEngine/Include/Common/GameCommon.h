@@ -287,19 +287,29 @@ typedef UnsignedInt VeterancyLevelFlags;
 const VeterancyLevelFlags VETERANCY_LEVEL_FLAGS_ALL = 0xffffffff;
 const VeterancyLevelFlags VETERANCY_LEVEL_FLAGS_NONE = 0x00000000;
 
-inline Bool getVeterancyLevelFlag(VeterancyLevelFlags flags, VeterancyLevel dt)
+// TheSuperHackers @bugfix Same -1 shift as getDeathTypeFlag in Damage.h: LEVEL_REGULAR is 0, so
+// its bit is the one a 32-bit shift truncates onto, bit 31. Truncate explicitly so a 64-bit build
+// agrees with retail (see docs/porting/death-flag-shift.md).
+inline UnsignedInt veterancyLevelFlagBit(VeterancyLevel v)
 {
-	return (flags & (1UL << (dt - 1))) != 0;
+	return 1U << ((static_cast<UnsignedInt>(v) - 1U) & 31U);
 }
 
-inline VeterancyLevelFlags setVeterancyLevelFlag(VeterancyLevelFlags flags, VeterancyLevel dt)
+STATIC_ASSERT_ALWAYS(LEVEL_COUNT <= 32, "A VeterancyLevel of 32 would alias LEVEL_REGULAR's bit 31");
+
+inline Bool getVeterancyLevelFlag(VeterancyLevelFlags flags, VeterancyLevel v)
 {
-	return (flags | (1UL << (dt - 1)));
+	return (flags & veterancyLevelFlagBit(v)) != 0;
 }
 
-inline VeterancyLevelFlags clearVeterancyLevelFlag(VeterancyLevelFlags flags, VeterancyLevel dt)
+inline VeterancyLevelFlags setVeterancyLevelFlag(VeterancyLevelFlags flags, VeterancyLevel v)
 {
-	return (flags & ~(1UL << (dt - 1)));
+	return (flags | veterancyLevelFlagBit(v));
+}
+
+inline VeterancyLevelFlags clearVeterancyLevelFlag(VeterancyLevelFlags flags, VeterancyLevel v)
+{
+	return (flags & ~veterancyLevelFlagBit(v));
 }
 
 // ----------------------------------------------------------------------------------------------

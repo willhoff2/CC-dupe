@@ -580,6 +580,23 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # DeathTypeFlags and VeterancyLevelFlags put enumerator e on bit (e - 1), and both start at
+      # zero, so DEATH_NORMAL and LEVEL_REGULAR shift by -1. 32-bit Windows truncates that count to
+      # bit 31 and works; LP64 truncates to bit 63 and rejects every normal death, so no die module
+      # runs. A compile and a link both see nothing. Needs no game data.
+      # See docs/porting/death-flag-shift.md.
+      - name: Run the death/veterancy flag bit-assignment test
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Death and veterancy flag bits'
+            echo '```'
+            python3 scripts/native-death-veterancy-flags-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The negative control for init-failure reporting: a subsystem whose init() is made to fail
       # must be diagnosable, and the shape it replaces -- detect the failure and return -- must
       # provably not be. Needs no game data. See docs/porting/init-failure-reporting.md.
