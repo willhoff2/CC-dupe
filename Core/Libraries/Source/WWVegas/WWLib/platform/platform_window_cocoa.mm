@@ -1089,6 +1089,13 @@ void Window_Destroy(void * window)
 	if (state == nullptr) return;
 	// Otherwise a process that exits from fullscreen leaves the Dock and the menu bar hidden.
 	[NSApp setPresentationOptions:NSApplicationPresentationDefault];
+	// Same argument for the pointer, and the same scope: NSCursor's hide count belongs to the
+	// application, not to this window, so destroying the window while hidden would strand it.
+	// Window_Show_System_Cursor() keeps at most one outstanding hide, so one unhide balances it.
+	if (state->Cursor_Hidden) {
+		[NSCursor unhide];
+		state->Cursor_Hidden = false;
+	}
 	// The delegates go before the object they point at: AppKit holds both weakly, and a quit
 	// arriving after this point has no engine left to ask.
 	[state->Window setDelegate:nil];
