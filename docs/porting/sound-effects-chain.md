@@ -616,3 +616,79 @@ Soft's responsibility and are exactly the things the M1 Pro music measurement al
   playback and is not used as proof anywhere in this document.
 - **Source inference**: which `canPlayNow` filter rejected an event, why arm64 will behave like x86-64.
   Marked as such where it appears.
+
+## 9. Movie audio (Wave 14.3): the intro plays video with no sound until the main menu
+
+Human report (M1 Pro, `main` #155 = `fbfc0f574`): "there is no audio on the intro at all until the
+main menu". Measured on Linux with the retail movies and fixed in one seam; the numbers below are
+`ci-baselines/movie-audio-linux.json`, written by `scripts/native-movie-audio-run.py`, which builds
+and runs `Core/GameEngineDevice/Source/VideoDevice/FFmpeg/tests/native_movie_audio_run.cpp` (the
+red/green test beside `native_video_frame_run`). **Evidence class for every row: Linux / rendered PCM
+(OpenAL Soft `wave` backend) / retail input.** Mac human audibility: **UNMEASURED** (scheduled by the
+orchestrator, not this slice).
+
+### 9.1 The first broken link, with counts (pre-fix control: same harness, sink change stashed)
+
+`EA_LOGO.BIK`: `FFmpegFile` **finds** the audio stream (Bink DCT, 48 000 Hz, stereo) and **decodes
+80 audio frames / 153 600 samples** alongside 96 video frames. **0 of them reach any sink**:
+`FFmpegVideoStream::onFrame` had an audio branch only under `RTS_USE_OPENAL` (the upstream
+`OpenALAudioManager` path), which the native build does not define, so `getHandleForBink` was called
+**0 times** and the movie handle was null. So the answer to "never opened / decoded but dropped /
+pushed to a null handle" is *decoded but dropped*, at `onFrame`. Behind it, a second link would have
+broken too: `MilesAudioManager::getHandleForBink` returned `AIL_get_DirectSound_info`'s output pointer,
+which the shim sets to null (there is no DirectSound behind it), so even a compiled-in Miles-shaped
+sink would have been handed `nullptr`.
+
+### 9.2 The fix (one seam: the video player's audio sink under the Miles/AIL spelling)
+
+* `mss.h` grows Miles' own raw-PCM feed, `AIL_set_sample_type` / `AIL_sample_buffer_ready` /
+  `AIL_load_sample_buffer` (plus the `DIG_F_*` format constants), advertised by
+  `MSS_SAMPLE_BUFFER_API`. `OpenALSample.cpp` implements them as a queue of OpenAL buffers on the
+  sample's existing source (`SampleVoice::queuedBuffers`), retired as they finish; `AIL_end_sample`
+  and `releaseAudio` unqueue and delete them. No new device, no new source, no change to
+  `OpenALDriver.cpp` startup/shutdown or the service thread.
+* `MilesAudioManager::getHandleForBink` returns the pooled `HSAMPLE` itself when
+  `MSS_SAMPLE_BUFFER_API` is defined; the `AIL_get_DirectSound_info` path stays for real Miles.
+* `FFmpegVideoStream` (outside `RTS_USE_OPENAL`, whose blocks are untouched) takes that handle when
+  the file has audio, sets the sample type/rate, interleaves each decoded frame to S16 (round to
+  nearest, saturate — what `ffmpeg -f s16le` does) and feeds it through the queue; `createStream`
+  applies the existing `AudioAffect_Speech * 0.8` volume as an `AIL_set_sample_volume` (0..127). The
+  destructor ends the sample; `releaseHandleForBink` is unchanged.
+* Windows/Bink: `FFmpegVideoPlayer.cpp` is not compiled there (`RTS_BUILD_OPTION_FFMPEG` OFF), and
+  real Miles' `mss.h` does not define `MSS_SAMPLE_BUFFER_API`, so `MilesAudioManager.cpp` preprocesses
+  to the same text as before.
+
+### 9.3 After the fix (Linux / rendered PCM / retail input)
+
+| movie | decoded | sink | A/V (video − audio clock, worst) | rendered vs `/usr/bin/ffmpeg` |
+|---|---|---|---|---|
+| `EA_LOGO.BIK` (48 kHz stereo, 96 frames @ 30 fps) | 80 audio frames, 153 600 samples | handle non-null, 3 200 ms loaded, 3 093 ms played at the last frame | 24 ms; **0** frames beyond one video frame (1 ms pump) | non-silent (RMS 2689 vs 3139); lag 48 frames; gain 0.5669 per channel; correlation 1.000000; residual RMS 0.50 (0.016 % of reference); 90 % of samples within one LSB after undoing the gain |
+| `sizzle_review.bik` (44.1 kHz stereo, 1961 frames) | 1 502 audio frames, 2 883 840 samples | handle non-null, 65 393 ms loaded, 64 644 ms played at the last frame | −35 ms; **0** frames beyond one video frame (33 ms pump, i.e. one video frame per pump) | non-silent (RMS 2894 vs 5049); lag 44 frames; gain 0.5669; correlation 1.000000; residual RMS 0.50 (0.010 %) |
+
+The comparison is **tolerance-based, not sample-exact**, and the tolerance is explained, not
+absorbed: the lag is fitted (OpenAL Soft's `wave` writer starts a few ms before the first buffer),
+the gain is fitted per channel because `AudioAffect_Speech` deliberately attenuates the movie
+(the harness's speech volume 0.7 → `mod` 57 → `AIL_set_sample_volume(72)` → 72/127 = 0.5669, the
+fitted figure exactly), and
+after undoing it the residual is 0.50 LSB RMS — the quantisation of a 16-bit sample scaled by 0.57
+and re-rounded by the mixer, nothing else. No resampling happens: the sample plays at the movie's own
+rate and the reference is decoded at that rate. Thresholds: correlation ≥ 0.999, residual ≤ 2 % of
+reference RMS, overlap ≥ 99.9 %.
+
+Movie → main-menu transition: after `releaseHandleForBink` the pooled sample reports 0 ms loaded /
+0 ms position (queued buffers unqueued and deleted, source stopped), and an `AIL_open_stream` music
+stream opened on the same driver afterwards plays (512 ms / 510 ms advanced in the two runs) — no
+stuck stream, no leaked source. Known and unchanged by this slice: the engine closes the stream when
+`frameIndex() >= frameCount() - 1`, so the last ~130 ms (EA logo) / ~770 ms (sizzle) of the track is
+still queued at close and is dropped with it; the Bink player had the same cut.
+
+### 9.4 Evidence labels for §9
+
+| claim | class |
+|---|---|
+| Audio stream found, 80 frames decoded, 0 submitted (pre-fix) | **MEASURED, Linux / engine counts / retail input** |
+| Rendered intro PCM non-silent and matching the reference | **MEASURED, Linux / rendered PCM / retail input** (OpenAL Soft `wave`, SYNTHETIC for audibility) |
+| A/V within one video frame | **MEASURED, Linux / engine clocks** (video frame index vs `AIL_sample_ms_position`) |
+| Handle released, no leftover audio, music plays after | **MEASURED, Linux / engine + shim state** |
+| Windows bytes unchanged | **INFERRED from the preprocessor** (`MSS_SAMPLE_BUFFER_API` absent, FFmpeg player not built); the CI Windows build + replay gate is the oracle |
+| Apple Silicon audibility of the intro | **UNMEASURED** |

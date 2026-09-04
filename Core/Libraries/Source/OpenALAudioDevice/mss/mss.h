@@ -175,6 +175,13 @@ typedef void(__stdcall* AIL_sample_callback)(HSAMPLE);
 #define AIL_3D_71_SPEAKER 5
 #define M3D_NOERR 0
 
+// Raw PCM formats for AIL_set_sample_type, as Miles numbered them (bit 0 = 16-bit, bit 1 = stereo).
+#define DIG_F_MONO_8 0
+#define DIG_F_MONO_16 1
+#define DIG_F_STEREO_8 2
+#define DIG_F_STEREO_16 3
+#define DIG_PCM_SIGN 0x0001
+
 /// Miles reported its own version into a caller-supplied buffer; the debug audio overlay prints it.
 void AIL_MSS_version(char* buffer, unsigned int size);
 
@@ -242,6 +249,15 @@ int AIL_sample_playback_rate(HSAMPLE sample);
 void AIL_set_sample_playback_rate(HSAMPLE sample, int playback_rate);
 void* AIL_sample_user_data(HSAMPLE sample, unsigned int index);
 void AIL_set_sample_user_data(HSAMPLE sample, unsigned int index, void* value);
+
+// Miles' raw PCM feed: a sample that plays caller-supplied buffers instead of a file image. This is
+// the path Bink used when it played its sound through Miles, and the one the FFmpeg video player
+// uses here. Miles double-buffered; this backend queues, so AIL_sample_buffer_ready returns the next
+// free slot far more often than Miles' two would, and -1 only when the queue is full.
+#define MSS_SAMPLE_BUFFER_API 1
+void AIL_set_sample_type(HSAMPLE sample, int format, unsigned int flags);
+int AIL_sample_buffer_ready(HSAMPLE sample);
+void AIL_load_sample_buffer(HSAMPLE sample, unsigned int buff_num, const void* buffer, unsigned int len);
 
 // -------------------------------------------------------------------------------- streaming
 HSTREAM AIL_open_stream(HDIGDRIVER dig, const char* filename, int stream_mem);
