@@ -239,6 +239,16 @@ struct DigitalDriver
 /// Process-wide state.
 struct Library
 {
+	Library() = default;
+
+	/// Runs at static destruction when the engine did not (or could not) call AIL_shutdown. A
+	/// joinable std::thread's destructor is std::terminate, so the service thread is stopped and
+	/// joined here, then the device is closed; nothing in the body can throw.
+	~Library() noexcept;
+
+	Library(const Library&) = delete;
+	Library& operator=(const Library&) = delete;
+
 	std::recursive_mutex lock;		///< backs AIL_lock / AIL_unlock
 
 	ALCdevice* device = nullptr;
@@ -336,10 +346,15 @@ struct Diagnostics
 	std::atomic<unsigned long> alErrors{0};
 };
 
+/// Heap-allocated once and never freed, so it outlives every static and the service thread:
+/// serviceLoop and LibraryGuard read it without regard to static destruction order.
 Diagnostics& diagnostics();
 
 /// Reads OPENAL_AUDIO_DIAG and opens the log. Called once by AIL_startup.
 void diagnosticsInit();
+
+/// Flushes and closes a file log (never stderr) and turns diagnostics off. Does not throw.
+void diagnosticsClose() noexcept;
 
 /// Appends one line to the log when diagnostics are on. printf-style.
 void diagnosticsLog(const char* format, ...);

@@ -233,6 +233,19 @@ CLANGXX=clang++-14 MINIMP3_INCLUDE_DIR=build/native/_deps/minimp3-src \
   python3 scripts/native-audio-render-test.py
 ```
 
+The static-destruction gate is `scripts/native-audio-static-destruction-test.py`
+(`tests/openal_static_destruction_test.cpp`, `null` driver, same deps as the callback test). It
+starts the library, plays a 2D voice, a 3D voice and a looping stream, and returns from main with
+AIL_shutdown never called; the process must exit 0 with diagnostics off, `OPENAL_AUDIO_DIAG=stderr`
+and `OPENAL_AUDIO_DIAG=<file>` (the file's last line must be the `static-destruction` report).
+`--shim-rev fbfc0f574 --expect-defect` (or `c6fd1bd7c`) rebuilds the pre-fix shim and must observe
+the `std::terminate` abort (`memory-shutdown-order.md`, the OpenAL static-destruction section).
+
+```sh
+CLANGXX=clang++-14 MINIMP3_INCLUDE_DIR=build/native/_deps/minimp3-src \
+  python3 scripts/native-audio-static-destruction-test.py
+```
+
 Ubuntu 22.04 ships CMake 3.22, which the top-level `cmake_minimum_required(3.25)` rejects; the
 `audio-surface-scan.py --check` half of the pair still runs without a build, but the symbol gate does
 not. `pip install --user 'cmake==4.1.2'` provides a new enough `~/.local/bin/cmake` without touching

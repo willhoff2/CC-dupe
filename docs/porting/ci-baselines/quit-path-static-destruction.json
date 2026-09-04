@@ -1,0 +1,74 @@
+{
+  "what": "Wave 14 slice 2: the clean-quit std::terminate reported from the M1 Pro on main #155 (fbfc0f574), localised to OpenALAudio::Library's static destruction, fixed in the OpenAL shim only, and re-measured on every quit path reachable on Linux with the real game plus a deterministic standalone reproduction. This file is the authoritative record; the prose in docs/porting/memory-shutdown-order.md quotes it.",
+  "platform_measured": "Linux x86-64 (Ubuntu 22.04, clang++-14), Xvfb :99 1600x1200x24, lavapipe (VK_ICD_FILENAMES=lvp_icd.x86_64.json), OpenAL Soft 1.19.1 with ALSOFT_DRIVERS=null, retail Zero Hour 1.04 data outside the repo",
+  "date_utc": "2026-09-04",
+  "base": "origin/main fbfc0f574 (#155); pre-#155 bisect point c6fd1bd7c (#153)",
+  "termination": {
+    "mechanism": "std::thread::~thread on OpenALAudio::Library::service while the thread is still joinable. The C++ standard makes that a direct call to std::terminate; libstdc++ prints 'terminate called without an active exception'. No C++ exception is thrown anywhere on the path; the report's 'exception escaping ~Library' reading is the same std::terminate frame seen from the implicit noexcept destructor.",
+    "frame": "#0 std::terminate() / #1 std::thread::~thread (this=<OpenALAudio::lib()::instance+464>) c++/11/bits/std_thread.h:152 / #2 OpenALAudio::Library::~Library (this=<OpenALAudio::lib()::instance>) OpenALAudioInternal.h:233 (the implicit destructor, pre-fix) / #3 __run_exit_handlers / #4 exit()",
+    "exception_type": "none (terminate called without an active exception)",
+    "precondition": "the process reaches static destruction with the service thread running, i.e. AIL_shutdown was never called (or the library was restarted after it). Only AIL_startup starts the thread and only AIL_shutdown -> stopServiceThread joins it; nothing else in the shim touches Library::service.",
+    "not_the_mechanism": "std::recursive_mutex destroyed while locked (it is not held at exit); Diagnostics destroyed before Library (function-local static Diagnostics was constructed after Library on every path, so it was destroyed first, but the service thread only reaches it while alive and joinable, which is the same precondition as above)"
+  },
+  "bisect": {
+    "method": "scripts/native-audio-static-destruction-test.py --shim-rev REV --expect-defect: compile the shim sources from `git show REV:...` against the HEAD harness, run the three diagnostics variants, record exit status",
+    "c6fd1bd7c_pre_155": {"off": -6, "stderr": -6, "file": -6, "terminate_message": true},
+    "fbfc0f574_155": {"off": -6, "stderr": -6, "file": -6, "terminate_message": true},
+    "introduced_by_155": false,
+    "note": "The joinable-thread-at-exit defect is in every revision that has the service thread and no user-declared ~Library, i.e. both bisect points. #155 changed nothing about Library::service's lifetime; it added Diagnostics and LibraryGuard, which the fix also makes static-destruction safe. Whether #155 changed which engine quit path skips AIL_shutdown on macOS is UNMEASURED; on Linux no quit path skips it (see game_paths)."
+  },
+  "fix": {
+    "files": ["Core/Libraries/Source/OpenALAudioDevice/OpenALAudioInternal.h", "Core/Libraries/Source/OpenALAudioDevice/OpenALDriver.cpp"],
+    "library_destructor": "explicit Library::~Library() noexcept: serviceQuit=true; if service.joinable(): detach when running on the service thread itself, else join; log and report to diagnostics; release the OpenAL context and device; diagnosticsClose()",
+    "diagnostics_lifetime": "Diagnostics is heap-allocated once in diagnostics() and never freed, so serviceLoop, LibraryGuard and ~Library can read it regardless of static destruction order; diagnosticsClose() flushes and fcloses a file log (never stderr) without throwing",
+    "engine_call_sites_changed": false,
+    "ail_shutdown_timing_changed": false,
+    "windows_sources_changed": false
+  },
+  "standalone_repro": {
+    "harness": "Core/Libraries/Source/OpenALAudioDevice/tests/openal_static_destruction_test.cpp",
+    "runner": "scripts/native-audio-static-destruction-test.py",
+    "ci_job": ".github/workflows/native-port-ci.yml step 'Check the shim survives process exit without AIL_shutdown' (same job as the #153 callback-thread and #155 render tests)",
+    "activity": "AIL_startup + AIL_quick_startup, 3D provider + listener, one 2D sample, one 3D sample and one memory stream started (5 s voices), 300 ms of service-thread work, then return from main without AIL_shutdown",
+    "variants": ["diagnostics off", "OPENAL_AUDIO_DIAG=stderr", "OPENAL_AUDIO_DIAG=<file>"],
+    "before_fix": {"exit": -6, "stderr": "terminate called without an active exception", "diagnostics_file_last_line_is_report": false},
+    "after_fix": {"exit": 0, "stderr_report": "[openal-diag] static destruction: AIL_shutdown was not called; service thread joined", "diagnostics_file_last_line_is_report": true}
+  },
+  "game_paths": {
+    "binary": "scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims --strict-link on the fix branch: 981/981 objects, 0 undefined, strict link exit 0 (ELF x86-64)",
+    "method": "the real game (`zh -win -noshellmap -nologo -xres 800 -yres 600`, retail data) under `gdb -batch` with `break std::terminate`, `catch throw`, SIGTERM stop-and-pass; real X11 input via xdotool; window close is a WM_DELETE_WINDOW ClientMessage sent by ~/work/wmdel (xdotool's windowquit was not seen by SDL 2.0.18 under Xvfb); each run's exit code and gdb stop count recorded; diagnostics runs use OPENAL_AUDIO_DIAG=<file> and the file's last line is checked",
+    "columns": "exit_code | gdb stops (std::terminate, throw, signals) | AIL_shutdown reached (diagnostics file ends with 'counters shutdown')",
+    "linux_fixed_binary": [
+      {"path": "main-menu Exit Game", "diag": "off", "exit_code": 0, "gdb_stops": 0, "terminate": false},
+      {"path": "main-menu Exit Game", "diag": "file", "exit_code": 0, "gdb_stops": 0, "terminate": false, "ail_shutdown_reached": true},
+      {"path": "in-mission quit-to-menu then Exit Game (Escape -> Exit Game -> Yes -> score screen -> Main Menu -> Exit Game)", "diag": "off", "exit_code": 0, "gdb_stops": 0, "terminate": false},
+      {"path": "in-mission quit-to-menu then Exit Game (Escape -> Exit Game -> Yes -> score screen -> Main Menu -> Exit Game)", "diag": "file", "exit_code": 0, "gdb_stops": 0, "terminate": false, "ail_shutdown_reached": true},
+      {"path": "in-mission window close (WM_DELETE_WINDOW -> MSG_META_DEMO_INSTANT_QUIT -> GameLogic::quit(toDesktop))", "diag": "off", "exit_code": 0, "gdb_stops": 0, "terminate": false},
+      {"path": "in-mission window close (WM_DELETE_WINDOW -> MSG_META_DEMO_INSTANT_QUIT -> GameLogic::quit(toDesktop))", "diag": "file", "exit_code": 0, "gdb_stops": 0, "terminate": false, "ail_shutdown_reached": true},
+      {"path": "main-menu window close", "diag": "off", "exit_code": 0, "gdb_stops": 0, "terminate": false},
+      {"path": "main-menu window close", "diag": "file", "exit_code": 0, "gdb_stops": 0, "terminate": false, "ail_shutdown_reached": true},
+      {"path": "SIGTERM at the main menu", "diag": "off", "exit_code": "killed by SIGTERM", "gdb_stops": 1, "terminate": false, "note": "no handler is installed; the default disposition ends the process before any C++ teardown, so static destruction never runs (Windows has no SIGTERM). gdb 12 itself segfaults after the inferior is gone ('Fatal signal: Segmentation fault' in gdb's Python exit handling), which is a debugger artefact, not the game's"},
+      {"path": "SIGTERM at the main menu", "diag": "file", "exit_code": "killed by SIGTERM", "gdb_stops": 1, "terminate": false, "ail_shutdown_reached": false}
+    ],
+    "linux_main_fbfc0f574_binary": [
+      {"path": "main-menu Exit Game", "diag": "off", "exit_code": 0, "gdb_stops": 0, "terminate": false},
+      {"path": "main-menu Exit Game", "diag": "file", "exit_code": 0, "gdb_stops": 0, "terminate": false, "ail_shutdown_reached": true},
+      {"path": "in-mission quit-to-menu then Exit Game", "diag": "file", "exit_code": 0, "gdb_stops": 0, "terminate": false, "ail_shutdown_reached": true},
+      {"path": "in-mission window close", "diag": "file", "exit_code": 0, "gdb_stops": 0, "terminate": false, "ail_shutdown_reached": true},
+      {"note": "same strict-link recipe on a worktree at fbfc0f574 (981/981 objects, strict link exit 0); the pre-fix game does not abort on Linux either because every route reaches AIL_shutdown"}
+    ],
+    "linux_finding": "Every clean quit path reachable on Linux tears down through GameEngine::~GameEngine -> SubsystemInterfaceList::shutdownAll -> MilesAudioManager::~MilesAudioManager -> closeDevice -> AIL_shutdown, which joins the service thread before exit(); ~Library then runs with nothing joinable. The Linux game therefore did NOT reproduce the abort on any path, before or after the fix; the defect reproduces deterministically as soon as AIL_shutdown is skipped (standalone_repro).",
+    "in_mission_quit_to_desktop_note": "Zero Hour's in-game menu has no direct quit-to-desktop; the closest are the window close (GameLogic::quit(TRUE) from MSG_META_DEMO_INSTANT_QUIT, measured above) and Escape -> Exit Game, which returns to the shell. Both are measured.",
+    "macos_arm64": [
+      {"path": "main-menu Exit Game", "diag": "off", "result": "UNMEASURED"},
+      {"path": "main-menu Exit Game", "diag": "on", "result": "UNMEASURED"},
+      {"path": "in-mission quit-to-menu then Exit Game", "diag": "off", "result": "UNMEASURED"},
+      {"path": "in-mission quit-to-menu then Exit Game", "diag": "on", "result": "UNMEASURED"},
+      {"path": "in-mission window close / Cmd-Q", "diag": "off", "result": "UNMEASURED"},
+      {"path": "in-mission window close / Cmd-Q", "diag": "on", "result": "UNMEASURED"},
+      {"path": "main-menu window close / Cmd-Q", "diag": "off", "result": "UNMEASURED"},
+      {"path": "main-menu window close / Cmd-Q", "diag": "on", "result": "UNMEASURED"},
+      {"path": "which macOS quit route reaches exit() with the service thread joinable (the reported abort's precondition)", "result": "UNMEASURED; run OPENAL_AUDIO_DIAG=stderr ./zh on the M1 Pro and look for 'static destruction: AIL_shutdown was not called' after the fix"}
+    ]
+  }
+}

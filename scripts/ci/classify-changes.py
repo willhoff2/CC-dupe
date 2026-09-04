@@ -88,6 +88,7 @@ AREAS = {
         "scripts/audio-surface-scan.py",
         "scripts/native-audio-callback-test.py",
         "scripts/native-audio-render-test.py",
+        "scripts/native-audio-static-destruction-test.py",
         "scripts/audio-pcm-discontinuity.py",
     ),
 }

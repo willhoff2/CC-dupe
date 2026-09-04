@@ -193,6 +193,81 @@ timeouts, not game hangs, and they are not the measured runs. `/usr/bin/sample` 
 thread state on this machine without elevation, so a hang, had one occurred, would have been
 recorded from `ps` state and the timeout only.
 
+## The third mechanism: `OpenALAudio::Library::~Library()` with a joinable service thread
+
+Reported from the M1 Pro on `main` #155 (`fbfc0f574`): a clean quit aborts in `std::terminate()`
+with `OpenALAudio::Library::~Library()` on the stack during static destruction, "every clean quit".
+The authoritative record is `ci-baselines/quit-path-static-destruction.json`; this section reads it.
+
+**Mechanism.** `lib()` returns a function-local static `Library`. Its `std::thread service` is
+started by `AIL_startup` and joined only by `AIL_shutdown` → `stopServiceThread()`. Until this fix
+`Library` had no user-declared destructor, so `exit()` ran the implicit one, which destroys the
+members in reverse order and reaches `std::thread::~thread` with the thread still joinable
+whenever `AIL_shutdown` was not called. The standard makes that a direct `std::terminate()`; there
+is **no exception**. The exact frame, from gdb on the standalone reproduction:
+
+```
+#0  std::terminate ()
+#1  std::thread::~thread (this=<OpenALAudio::lib()::instance+464>) at bits/std_thread.h:152
+#2  OpenALAudio::Library::~Library (this=<OpenALAudio::lib()::instance>)
+#3  __run_exit_handlers / #4 exit ()
+```
+
+libstdc++ prints `terminate called without an active exception`. The report's "exception escaping
+`~Library`" is this same frame read from a `noexcept` destructor; `catch throw` never fires. The
+other candidates were checked and are not it: the recursive mutex is not held at exit, and the
+#155 `Diagnostics` static, though destroyed *before* `Library`, is only reached from the service
+thread — which is the same precondition (thread alive at exit) as the terminate itself.
+
+**Bisect.** `scripts/native-audio-static-destruction-test.py --shim-rev REV --expect-defect`
+compiles the shim from `c6fd1bd7c` (#153, pre-#155) and from `fbfc0f574` (#155) against the same
+harness. Both abort with `-6` (SIGABRT) in all three diagnostics variants. **#155 did not introduce
+it**: the defect is as old as the service thread. #155 changed nothing about the thread's lifetime;
+it added `Diagnostics` and `LibraryGuard`, which the fix also makes order-independent. Wave 12's
+"exit 0 on the #153 binary" row above is consistent with this: that quit path reached
+`AIL_shutdown`, so nothing was joinable. What the fix does not tell us is *which* macOS quit route
+reaches `exit()` without `AIL_shutdown` — that is UNMEASURED and is the Mac follow-up (after the fix,
+`OPENAL_AUDIO_DIAG=stderr` prints `static destruction: AIL_shutdown was not called; service thread
+joined` on exactly that route).
+
+**Fix (shim only, `OpenALDriver.cpp` / `OpenALAudioInternal.h`).** An explicit
+`Library::~Library() noexcept` sets `serviceQuit`, joins the service thread if it is joinable
+(detaches instead if the destructor is somehow running *on* that thread), reports the skipped
+shutdown to the diagnostics log, releases the OpenAL context and device, and closes the diagnostics
+file. `Diagnostics` is now heap-allocated once and never freed, so `serviceLoop`, `LibraryGuard` and
+the destructor read it regardless of static destruction order; `diagnosticsClose()` flushes and
+`fclose`s a file log (never `stderr`) and cannot throw. Nothing is wrapped in `catch (...)`: the one
+operation that could terminate is removed, not hidden. `AIL_shutdown`'s own timing and the engine
+call sites are unchanged; the shim is not compiled on Windows.
+
+**Red/green.** `Core/Libraries/Source/OpenALAudioDevice/tests/openal_static_destruction_test.cpp`
+starts the library, plays a 2D sample, a 3D sample and a memory stream (5 s voices) for 300 ms of
+service-thread work, and returns from `main` without `AIL_shutdown`, in three variants (diagnostics
+off, `OPENAL_AUDIO_DIAG=stderr`, `OPENAL_AUDIO_DIAG=<file>`). Before the fix: exit `-6`,
+`terminate called without an active exception`, the diagnostics file cut off mid-run. After: exit
+`0`, and the file's last line is the `static-destruction` counters report. It runs in the same
+Native Port CI job as the #153 callback-thread and #155 render tests.
+
+**Measured quit paths.** Linux x86-64, real game and retail data under Xvfb + lavapipe + OpenAL Soft
+`null`, each run under `gdb -batch` with `break std::terminate`, `catch throw` and SIGTERM
+stop-and-pass, real X11 input, window close as a `WM_DELETE_WINDOW` ClientMessage. Rows are the
+fixed binary; the pre-fix `fbfc0f574` game rows are in the JSON.
+
+| Path | Diag | Linux x86-64 (fixed binary) | Apple Silicon |
+| --- | --- | --- | --- |
+| Main menu → Exit Game | off / file | **exit 0**, 0 gdb stops, no terminate; diag file ends `counters shutdown` | UNMEASURED |
+| In mission → Escape → Exit Game → Yes → score screen → Main Menu → Exit Game | off / file | **exit 0**, 0 stops, no terminate; `AIL_shutdown` reached | UNMEASURED |
+| In mission → window close (`WM_DELETE_WINDOW` → `MSG_META_DEMO_INSTANT_QUIT` → `GameLogic::quit(TRUE)`) | off / file | **exit 0**, 0 stops, no terminate; `AIL_shutdown` reached | UNMEASURED |
+| Main menu → window close | off / file | **exit 0**, 0 stops, no terminate | UNMEASURED |
+| SIGTERM at the main menu | off / file | killed by SIGTERM, 1 gdb stop (the signal itself), no terminate; no handler is installed, so no C++ teardown runs and static destruction never happens | n/a (no SIGTERM path on Windows) |
+
+Zero Hour's in-game menu has no direct quit-to-desktop; the window close is the only in-mission
+route that calls `GameLogic::quit(toDesktop=TRUE)`. Every clean route on Linux tears down through
+`GameEngine::~GameEngine` → `SubsystemInterfaceList::shutdownAll` → `MilesAudioManager::closeDevice`
+→ `AIL_shutdown`, so **the Linux game does not reproduce the abort on any reachable path, before or
+after the fix**; the defect only reproduces once `AIL_shutdown` is skipped, which the standalone
+test does deterministically. The Mac rows are UNMEASURED in this slice.
+
 ## The input wedge is a different finding
 
 `docs/porting/playability-probe.md` §8.1 (rendering and mouse motion continued while clicks and
