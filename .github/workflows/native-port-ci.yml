@@ -1506,6 +1506,23 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # A quit that reaches static destruction without AIL_shutdown must not abort: the shim's
+      # Library owns the service thread, and a joinable std::thread destroyed is std::terminate
+      # (memory-shutdown-order.md, the OpenAL section). Runs with diagnostics off, to stderr and to
+      # a file; --shim-rev fbfc0f574 --expect-defect reproduces the abort against the old shim.
+      - name: Check the shim survives process exit without AIL_shutdown
+        env:
+          CLANGXX: clang++-14
+          MINIMP3_INCLUDE_DIR: build/native/_deps/minimp3-src
+        run: |
+          set -o pipefail
+          {
+            echo '## OpenAL backend: static destruction without AIL_shutdown'
+            echo '```'
+            python3 scripts/native-audio-static-destruction-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The shim's data path (decode -> alBufferData -> stream refill -> mix) must render a known
       # tone with no discontinuity, no starvation and no format mismatch, at the engine's 44.1 kHz
       # mixer rate (sound-effects-chain.md §6 item 0). OpenAL Soft's wave backend writes the mix to

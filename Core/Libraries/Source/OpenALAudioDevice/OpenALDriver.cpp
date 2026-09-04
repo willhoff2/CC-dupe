@@ -48,12 +48,41 @@ Library& lib()
 	return instance;
 }
 
+Library::~Library() noexcept
+{
+	// std::thread::join throws std::system_error for exactly three reasons: not joinable (checked),
+	// joining oneself (the destructor runs on the thread that called exit; if that is ever the
+	// service thread, detaching is the only non-throwing option), and no such thread (a process
+	// whose service thread has already gone, which joinable() rules out for a thread we own).
+	serviceQuit.store(true);
+	if (service.joinable()) {
+		if (service.get_id() == std::this_thread::get_id()) {
+			service.detach();
+		} else {
+			service.join();
+		}
+		diagnosticsLog("static destruction: AIL_shutdown was not called; service thread joined");
+		diagnosticsReport("static-destruction");
+	}
+	// This static is constructed on the first AIL_* call, after the linked OpenAL library
+	// initialised, so it is destroyed before that library's own cleanup: closing the device here is
+	// in order. The voices are not walked; their heap goes with the process.
+	if (device != nullptr) {
+		alcMakeContextCurrent(nullptr);
+		if (context != nullptr) alcDestroyContext(context);
+		alcCloseDevice(device);
+		context = nullptr;
+		device = nullptr;
+	}
+	diagnosticsClose();
+}
+
 // ------------------------------------------------------------------------------- diagnostics
 
 Diagnostics& diagnostics()
 {
-	static Diagnostics instance;
-	return instance;
+	static Diagnostics* instance = new Diagnostics;
+	return *instance;
 }
 
 namespace
@@ -104,6 +133,16 @@ void diagnosticsInit()
 		}
 	}
 	d.enabled = true;
+}
+
+void diagnosticsClose() noexcept
+{
+	Diagnostics& d = diagnostics();
+	if (d.log != nullptr && d.log != stderr) {
+		std::fclose(d.log);
+	}
+	d.log = nullptr;
+	d.enabled = false;
 }
 
 void diagnosticsLog(const char* format, ...)
