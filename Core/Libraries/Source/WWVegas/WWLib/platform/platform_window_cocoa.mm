@@ -55,6 +55,7 @@
 // CoreGraphics/CGRemoteOperation.h, which AppKit does not promise to pull in.
 #import <CoreGraphics/CoreGraphics.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <deque>
 #include <dlfcn.h>
@@ -134,6 +135,29 @@
 	if (Game_Cursor != nil) {
 		[self addCursorRect:[self bounds] cursor:Game_Cursor];
 	}
+}
+
+@end
+
+/*
+**	The window. NSWindow answers canBecomeKeyWindow with NO for a borderless style mask, and
+**	AppKit only delivers mouse-moved events to the key window - so the engine's WS_POPUP
+**	fullscreen window would never see the pointer move and never be reported active. A Win32
+**	popup window takes focus like any other, so this one does too.
+*/
+@interface WWGameWindow : NSWindow
+@end
+
+@implementation WWGameWindow
+
+- (BOOL)canBecomeKeyWindow
+{
+	return YES;
+}
+
+- (BOOL)canBecomeMainWindow
+{
+	return YES;
 }
 
 @end
@@ -567,6 +591,49 @@ void Push(WindowState * state, const WindowEvent & event)
 	state->Queue.push_back(event);
 }
 
+/*
+**	A client point as CGWarpMouseCursorPosition() wants it: global, top-left-origin display
+**	coordinates, converted through the window's frame so the title bar is accounted for.
+*/
+CGPoint Client_To_Global(WindowState * state, int x, int y)
+{
+	NSRect content = [state->Window convertRectToScreen:[state->View frame]];
+	const CGFloat global_x = content.origin.x + x;
+	const CGFloat global_y =
+		Primary_Screen_Height() - (content.origin.y + content.size.height) + y;
+	return CGPointMake(global_x, global_y);
+}
+
+void Warp_Cursor_To_Client(WindowState * state, int x, int y)
+{
+	CGWarpMouseCursorPosition(Client_To_Global(state, x, y));
+	// After a warp the window server ignores hardware motion for a fraction of a second unless
+	// the pointer and mouse are (re)associated straight away; the pair is never dissociated
+	// here, so this only cancels that suppression.
+	CGAssociateMouseAndMouseCursorPosition(true);
+}
+
+/*
+**	The ClipCursor() half of the seam. macOS has no rectangle to hand the window server, so the
+**	clip is enforced from this side: a pointer reported outside the client area while clipped is
+**	warped back to the nearest edge and the event is reported from there. The pointer stays
+**	associated with the mouse throughout - dissociating it would stop it moving at all, and the
+**	game draws the pointer with the OS cursor, not its own.
+*/
+void Confine_Cursor(WindowState * state, int & x, int & y)
+{
+	if (!state->Cursor_Clipped || !state->Active) return;
+	NSRect bounds = [state->View bounds];
+	const int max_x = std::max(0, static_cast<int>(bounds.size.width) - 1);
+	const int max_y = std::max(0, static_cast<int>(bounds.size.height) - 1);
+	const int clamped_x = std::min(std::max(x, 0), max_x);
+	const int clamped_y = std::min(std::max(y, 0), max_y);
+	if (clamped_x == x && clamped_y == y) return;
+	x = clamped_x;
+	y = clamped_y;
+	Warp_Cursor_To_Client(state, x, y);
+}
+
 void Translate_Text(WindowState * state, NSEvent * event, unsigned int time_ms)
 {
 	NSString * characters = [event characters];
@@ -660,6 +727,7 @@ void Translate(WindowState * state, NSEvent * event)
 		case NSEventTypeOtherMouseDragged:
 			out.Type = WINDOW_EVENT_MOUSE_MOVE;
 			Mouse_Position_In_Client(state, event, out.Mouse_X, out.Mouse_Y);
+			Confine_Cursor(state, out.Mouse_X, out.Mouse_Y);
 			out.Modifiers = Modifiers_From_Cocoa([event modifierFlags]);
 			Push(state, out);
 			return;
@@ -684,6 +752,7 @@ void Translate(WindowState * state, NSEvent * event)
 			}
 			out.Click_Count = static_cast<int>([event clickCount]);
 			Mouse_Position_In_Client(state, event, out.Mouse_X, out.Mouse_Y);
+			Confine_Cursor(state, out.Mouse_X, out.Mouse_Y);
 			out.Modifiers = Modifiers_From_Cocoa([event modifierFlags]);
 			Push(state, out);
 			return;
@@ -773,7 +842,7 @@ void * Window_Create(const WindowConfig & config)
 	if (config.Resizable) style |= NSWindowStyleMaskResizable;
 	if (config.Fullscreen) style = NSWindowStyleMaskBorderless;
 
-	NSWindow * window = [[NSWindow alloc] initWithContentRect:frame
+	NSWindow * window = [[WWGameWindow alloc] initWithContentRect:frame
 	                                               styleMask:style
 	                                                 backing:NSBackingStoreBuffered
 	                                                   defer:NO];
@@ -1099,24 +1168,24 @@ void Window_Set_Cursor_Clip(void * window, bool clip)
 {
 	WindowState * state = State(window);
 	if (state == nullptr) return;
-	// macOS has no ClipCursor. The closest thing is dissociating the pointer from the mouse
-	// so it cannot leave, which is what CGAssociateMouseAndMouseCursorPosition(false) does -
-	// and it also stops the pointer moving at all, so the game must then draw its own.
 	state->Cursor_Clipped = clip;
-	CGAssociateMouseAndMouseCursorPosition(clip ? false : true);
+	if (!clip) return;
+	// ClipCursor() moves a pointer that is already outside the rect onto its edge at once,
+	// rather than waiting for it to move; Confine_Cursor() handles every later event.
+	int x = 0;
+	int y = 0;
+	if (!Window_Cursor_Position(window, x, y)) return;
+	NSRect content = [state->Window convertRectToScreen:[state->View frame]];
+	x -= static_cast<int>(content.origin.x);
+	y -= static_cast<int>(Primary_Screen_Height() - (content.origin.y + content.size.height));
+	Confine_Cursor(state, x, y);
 }
 
 void Window_Warp_Cursor(void * window, int x, int y)
 {
 	WindowState * state = State(window);
 	if (state == nullptr) return;
-	// CGWarpMouseCursorPosition is in global, top-left-origin display coordinates, so the
-	// client point is converted through the window's frame rather than passed through.
-	NSRect content = [state->Window convertRectToScreen:[state->View frame]];
-	const CGFloat global_x = content.origin.x + x;
-	const CGFloat global_y =
-		Primary_Screen_Height() - (content.origin.y + content.size.height) + y;
-	CGWarpMouseCursorPosition(CGPointMake(global_x, global_y));
+	Warp_Cursor_To_Client(state, x, y);
 }
 
 void Window_Show_System_Cursor(void * window, bool show)

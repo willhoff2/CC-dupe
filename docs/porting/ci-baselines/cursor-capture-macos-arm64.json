@@ -1,0 +1,45 @@
+{
+  "what": "Apple Silicon (M1 Pro) live measurement of the OS pointer under the engine's cursor capture (Mouse::refreshCursorCapture -> Win32Mouse::capture -> PlatformWindowHost::setCursorClip -> Cocoa Window_Set_Cursor_Clip), before and after the Wave 14 confinement fix in platform_window_cocoa.mm. Hand-written from the session's LLDB/HID output; not produced by a script.",
+  "evidence_label": "Mac / live / synthetic relative-delta",
+  "platform": "macOS 26.6.1 arm64 (Apple M1 Pro), 1728x1117 points at backing scale 2x, Apple clang 21.0.0, MoltenVK 1.4.2",
+  "date_utc": "2026-09-04",
+  "baseline_rev": "main fbfc0f574a3c064343ceff8d6526bc90c2a89575 (#155)",
+  "binary": "scripts/native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims --strict-link: 981/981 objects, 0 undefined, strict link exit 0, build/native/native_strict_link Mach-O 64-bit arm64 (lipo -archs: arm64), run with arch -arm64",
+  "method": {
+    "pointer_motion": "IOHIDPostEvent(NX_MOUSEMOVED, kIOHIDSetRelativeCursorPosition) with dx/dy deltas - the HID-system entry a hardware mouse's deltas take, so CGAssociateMouseAndMouseCursorPosition(false) is honoured (validated in a standalone AppKit window: 0 px moved while dissociated, full delta after re-association). Absolute CGEvent posts, which #154 used, move the pointer regardless of association and therefore did NOT test motion under capture.",
+    "clicks": "IOHIDPostEvent left button down/up at the CURRENT pointer location, no coordinates supplied",
+    "engine_state": "LLDB attach to the running arm64 binary reading TheMouse->m_isCursorCaptured, WWPlatform::TheWindow->Cursor_Clipped, Window_Is_Active(), TheMouse->m_currMouse.pos, TheGameLogic->m_gameMode, TheInGameUI->m_isQuitMenuVisible; no OpenAL/AIL_* function evaluated from the debugger",
+    "focus_loss": "osascript 'tell application Finder to activate', then NSRunningApplication activateWithOptions: to return",
+    "visibility": "screencapture -C (cursor included) inspected by eye; screenshots are session artefacts, not committed"
+  },
+  "pre_fix": {
+    "mechanism": "Window_Set_Cursor_Clip(true) called CGAssociateMouseAndMouseCursorPosition(false): the pointer stops following the mouse whenever the engine has capture. PROVEN for the two states below where capture was on; the pointer stayed visible (retail arrow) in every state.",
+    "windowed_main_menu": {"captured": 0, "clipped": 0, "relative_delta_requested": [100, 50], "pointer_moved": [100, 50], "engine_pos_before": [400, 299], "engine_pos_after": [500, 349], "hid_click_at_pointer": "opened Options", "verdict": "MEASURED-WORKING (default CursorCaptureMode has no windowed-menu bit, so nothing was captured)"},
+    "windowed_unpaused_skirmish": {"captured": 1, "clipped": 1, "relative_delta_requested": [100, 50], "pointer_moved": [0, 0], "verdict": "FROZEN - mechanism confirmed"},
+    "windowed_pause_menu": {"captured": 0, "clipped": 0, "quit_menu_visible": 1, "relative_delta_requested": [100, 50], "pointer_moved": [100, 50], "verdict": "moves; capture released by CursorCaptureBlockReason_Paused"},
+    "fullscreen_main_menu": {"captured": 1, "clipped": 1, "window_is_active": false, "relative_delta_requested": [100, 50], "pointer_moved": [0, 0], "verdict": "FROZEN - mechanism confirmed; the borderless window was also never key (NSWindow canBecomeKeyWindow is NO for a borderless style mask), so AppKit delivered it no mouse-moved events"},
+    "fullscreen_in_game": "UNMEASURED pre-fix"
+  },
+  "fix": {
+    "confinement": "Window_Set_Cursor_Clip records Cursor_Clipped only; every mouse-moved/dragged/button event that arrives outside the content view while clipped and active is clamped to [0,w-1]x[0,h-1] and the pointer warped there (CGWarpMouseCursorPosition + CGAssociateMouseAndMouseCursorPosition(true) to cancel the post-warp motion suppression). Cursor_Clipped(true) also pulls a pointer that is already outside onto the edge at once, as ClipCursor does. The pointer is never dissociated.",
+    "key_window": "WWGameWindow (NSWindow subclass) answers canBecomeKeyWindow/canBecomeMainWindow YES so the borderless fullscreen window is key and receives mouse-moved events, as a Win32 WS_POPUP window does."
+  },
+  "post_fix": {
+    "windowed_main_menu": {"captured": 0, "clipped": 0, "relative_delta_requested": [100, 50], "pointer_moved": [100, 50], "engine_pos_after": [500, 350], "hid_clicks_at_pointer": "ButtonSinglePlayer, ButtonSkirmish, ButtonStart all activated"},
+    "windowed_unpaused_skirmish": {"captured": 1, "clipped": 1, "relative_deltas_requested": [[100, 50], [-50, -20]], "pointer_moved": [[100, 50], [-50, -20]], "engine_pos_after": [450, 330], "hid_click_at_pointer": "ButtonOptions (control bar) at engine 202,502 opened the quit menu"},
+    "windowed_confinement": {"content_rect_global_points": [464, 163, 800, 600], "push_right_requested": 800, "pointer_stopped_at_x": 1263, "push_down_requested": 600, "pointer_stopped_at_y": 762, "engine_pos_at_corner": [799, 599], "push_up_left_requested": [-1500, -1500], "pointer_stopped_at": [464, 163], "engine_pos_at_origin": [0, 0]},
+    "windowed_pause_menu": {"captured": 0, "clipped": 0, "quit_menu_visible": 1, "relative_delta_requested": [100, 50], "pointer_moved": [100, 50], "engine_pos_after": [500, 350], "hid_click_at_pointer": "ButtonReturn at engine 400,395 closed the quit menu; capture re-engaged (captured=1 clipped=1)"},
+    "windowed_focus_loss": {"after_finder_activate": {"captured": 0, "clipped": 0, "window_is_active": false}, "pointer_left_window_to": [1728, 1117], "after_reactivate_first_move": {"captured": 1, "clipped": 1, "pointer_pulled_to": [1263, 762]}},
+    "fullscreen_main_menu": {"window_bounds_points": [0, 32, 800, 600], "window_is_active": true, "captured": 1, "clipped": 1, "relative_delta_requested": [100, 50], "pointer_moved": [100, 50], "engine_pos_after": [500, 350], "confinement_pointer_range": [[0, 32], [799, 631]], "engine_pos_range": [[0, 0], [799, 599]], "hid_clicks_at_pointer": "ButtonSinglePlayer, ButtonSkirmish, ButtonStart all activated"},
+    "fullscreen_unpaused_skirmish": {"captured": 1, "clipped": 1, "relative_delta_requested": [100, -100], "pointer_moved": [100, -100], "engine_pos_before": [181, 531], "engine_pos_after": [281, 431]},
+    "fullscreen_pause_menu": {"captured": 0, "clipped": 0, "quit_menu_visible": 1, "relative_delta_requested": [119, -36], "pointer_moved": [119, -36], "engine_pos_after": [400, 395], "hid_click_at_pointer": "ButtonReturn closed the quit menu; capture re-engaged"},
+    "fullscreen_focus_loss": {"after_finder_activate": {"captured": 0, "clipped": 0, "window_is_active": false}, "pointer_left_window_to": [1400, 1117], "after_reactivate_first_move": {"captured": 1, "clipped": 1, "pointer_pulled_to": [799, 631]}},
+    "cursor_visible": "yes in every state above (retail arrow at menus; SCCScroll diagonal arrow when parked at the fullscreen window's bottom-right corner)"
+  },
+  "unmeasured": [
+    "human confirmation on a real trackpad (exit criterion; the user's original main-menu report is UNEXPLAINED until he says windowed vs fullscreen and invisible/frozen/misclick)",
+    "the engine's 'fullscreen' on this Mac is an 800x600 borderless window at the top-left of the 1728x1117-point screen, not a screen-covering one - a window-mode seam, out of this slice",
+    "first mouse event after re-activation reaches the engine clamped to (800,600) before the warp pulls the pointer to (799,599); harmless, Windows clamps the same way",
+    "hide-on-cinematic, button-edge click, seven of eight scroll cursor directions, dragging with a button held across the edge, multi-display"
+  ]
+}
