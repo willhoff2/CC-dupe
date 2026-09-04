@@ -268,6 +268,49 @@ route that calls `GameLogic::quit(toDesktop=TRUE)`. Every clean route on Linux t
 after the fix**; the defect only reproduces once `AIL_shutdown` is skipped, which the standalone
 test does deterministically. The Mac rows are UNMEASURED in this slice.
 
+## The fourth mechanism: `exit()` from inside the frame loop, and why the Mac had no Quit
+
+Two findings from the same M1 Pro session, both about *how the process is asked to stop* rather
+than about what happens once it is stopping.
+
+**There was no way to quit.** MEASURED on the M1 Pro: the running game's menu bar carried exactly
+two menus, Apple and `zh`, and the `zh` menu was **empty** — no Quit item, therefore no Cmd-Q key
+equivalent for `-[NSApplication sendEvent:]` to match. Cmd-Q was posted both through the session
+event tap and through `CGEventPostToPid` and the process ignored both. The only routes out were the
+shell's own Exit Game button, the window's red close button, and Force Quit. The cause is in
+`platform_window_cocoa.mm`: it created the `NSApplication` and never called `setMainMenu:`, so what
+the menu bar showed was the process name with nothing under it.
+
+**Wiring a Quit item to `-[NSApplication terminate:]` would have made this worse, not better.**
+`terminate:` calls `exit()` from inside whatever frame the game was drawing, so
+`GameEngine::execute()`'s `while (!m_quitting)` never returns, `GameMain()` never deletes
+`TheGameEngine`, and the process falls straight into static destruction with the engine's threads
+and subsystems still live. Two aborts on exactly that route are on record:
+
+| Abort | Where | Status |
+| --- | --- | --- |
+| `OpenALAudio::Library::~Library()` with a joinable service thread | the third mechanism above | fixed in #159 |
+| `ThreadClass::Switch_Thread()` → `WWPlatform::EventClass::Wait()` → `platform_thread.cpp:76`, `std::unique_lock<std::mutex>` → `std::mutex::lock()` throwing `std::system_error` → `std::terminate` → SIGABRT, on thread 8 | reported from the M1 Pro on the #159-fixed binary; crash report `~/Library/Logs/DiagnosticReports/zh-2026-09-04-113305.ips` | **not fixed, not re-measured here** |
+
+The second row is a *relayed* report, not a measurement taken in the slice that wrote this section:
+what was checked here is only that `platform_thread.cpp:76` is indeed the `std::unique_lock`
+construction inside `EventClass::Wait()`, which is consistent with a mutex whose storage has already
+been torn down. Nobody has attached a debugger to it.
+
+**What the window seam does instead.** The Quit menu item, its Cmd-Q key equivalent, the window's
+red close button (`-windowShouldClose:`, which answers `NO`) and the Dock's Quit
+(`-applicationShouldTerminate:`, which answers `NSTerminateCancel`) all raise the seam's
+`WINDOW_EVENT_CLOSE`. `PlatformWindowHost::handleEvent()` turns that into `requestQuit()` — the
+`WM_CLOSE` body from `WinMain.cpp` — which posts `MSG_META_DEMO_INSTANT_QUIT` or sets
+`GameEngine::setQuitting(TRUE)`, the same flag the shell's Exit Game button sets. Nothing in the
+seam calls `terminate:` or `exit()`. The cost, stated once: a macOS logout now waits for the
+engine's own shutdown and is reported as blocked if that shutdown hangs. That is the deliberate
+trade against the aborts above.
+
+Whether this actually exits 0 on the Mac is **UNMEASURED** — see the table in the third mechanism,
+whose Apple Silicon column is still UNMEASURED on every row, and
+`docs/porting/window-event-loop.md` §4.
+
 ## The input wedge is a different finding
 
 `docs/porting/playability-probe.md` §8.1 (rendering and mouse motion continued while clicks and
