@@ -1,5 +1,76 @@
 # Next slice — scope
 
+## Live state and handoff (written 2026-09-04 at `main` = #156)
+
+This section is the orchestration handoff for whoever picks the port up next — a fresh session
+should be able to read only this, `review-and-decisions.md`, the skills under `.agents/skills/`
+and the org knowledge notes, and continue. Everything below the rule is the older phase scoping
+and is kept for history. Evidence categories are kept apart on purpose: **MEASURED** (with the
+method), **INFERRED** (from source, not run), **UNMEASURED**.
+
+### Where the port stands (waves 10–14)
+
+Target unchanged: single-player Zero Hour, skirmish + campaign, native arm64 macOS, no Wine at
+runtime. Explicit cuts unchanged (tools, GameSpy, retail save/replay compatibility, `Generals/Code`).
+
+MEASURED on the M1 Pro against `main`, real game data (see the per-topic docs and the JSON under
+`ci-baselines/` for the figures — do not quote numbers from prose):
+
+- Native arm64 build links, missions and skirmish render, structures textured
+  (`playability-probe.md`, `renderer-first-frame.md`).
+- Skirmish soak with pause and combat, callbacks on the engine thread, no crash, quit exit 0 on
+  the pre-#155 shim (`audio-callback-soak-macos-arm64.json`, `memory-shutdown-order.md`).
+- Radar panel renders; texture/surface counts are in elements and flat apart from AI build-out.
+- Cursor visible with retail `.ANI` hotspots; with #157 the pointer also moves under capture
+  (`mouse-cursor-seam.md` §6.2, `cursor-capture-macos-arm64.json`).
+- Human audibility: music and SFX reach the speakers; the constant crackle reported before #155
+  was not heard again after #155 (one human listen, not instrumented).
+
+MEASURED on Linux only: USA-01 campaign scripts/objectives/triggers execute headless
+(`campaign-flow-probe.md`); movie audio decodes and renders through the Miles/AIL sample
+(`movie-audio-linux.json`, `sound-effects-chain.md` §9).
+
+### Open PRs and in-flight work at the time of writing
+
+| Item | State | What is still owed |
+|---|---|---|
+| #157 cursor confinement (`platform_window_cocoa.mm` only) | open, CI pending | **human trackpad confirmation** on the Mac in both `-win` and fullscreen — the exit criterion. Nobody has done it yet. |
+| Wave 14.2 quit abort (exception out of `OpenALAudio::Library::~Library()` at static destruction → `std::terminate`) | Linux child in flight, no PR | reproduce, bisect #153 vs #155, shim-only non-throwing destruction, red/green test that exits without `AIL_shutdown()`. If no PR exists when you read this, the slice restarts from `docs/porting/memory-shutdown-order.md` and the prompt in this table. |
+| #156 movie audio | merged | Mac human audibility UNMEASURED. |
+
+### Ranked residuals (next slices, in order)
+
+1. **Quit abort** (above) — every clean quit on `main` #155/#156 reportedly aborts; user-observed
+   on the Mac, mechanism INFERRED from source (joinable service thread or diagnostics/static
+   destruction order), not yet reproduced.
+2. **Cursor human confirmation** for #157, then the UNMEASURED cursor rows: drag across the edge
+   with a button held, multi-display, hide-on-cinematic, seven scroll directions.
+3. **Fullscreen is not fullscreen**: on the Mac "fullscreen" is an 800×600 borderless window at
+   the top-left of the display, not screen-covering. Window-mode seam
+   (`WWLib/platform/platform_window_cocoa.mm`), separate slice.
+4. **Mac audibility of movie audio** (#156) and of the stream/SFX path on the current shim, with
+   `OPENAL_AUDIO_DIAG=<file>` counters captured during the listen.
+5. **Campaign beyond mission entry** on the Mac: natural victory / next-mission transition,
+   in-mission movies, EVA (Linux probe exists, Mac UNMEASURED).
+6. Logic FPS without probe overhead; ≥20-min soak on the post-#155 shim.
+
+### Process rules that were learned the hard way
+
+- One Mac session at a time on the `will-mac` outpost; the M1 Pro is the only Apple Silicon
+  machine. Retail data lives in `~/devin-work/zh-data`; the loose files (cursors, movies) are in
+  `s3://cc-mac-game-data/zerohour104_loose_data.7z`. Never commit retail data or screenshots of it.
+- Branch from **current** `origin/main` and check `git rev-parse origin/main` after any VM
+  restart — a stale checkout produced a PR based one merge behind (#156, fixed by rebase).
+- One seam per PR; Windows bytes unchanged; the CI Windows VC6 build + replay gate is the oracle.
+- Never call `AIL_*` or OpenAL from a debugger attached to the game — it deadlocks the shim.
+- Synthetic absolute-coordinate clicks do not test pointer motion under capture; use relative
+  HID deltas (`IOHIDPostEvent` with `kIOHIDSetRelativeCursorPosition`) or a human.
+- Re-measure before quoting any figure from `docs/porting/*.md`; the JSON baselines are truth.
+- When orchestrating children: judge by their messages and ACUs, not `status=working`; a child
+  that reports a VM/outpost failure should stop and be resumed, not retried in a loop.
+
+---
+
 Measured after Phase 0/1. Numbers are from the repo as it stands, not estimates.
 
 ## What the measurement changed
