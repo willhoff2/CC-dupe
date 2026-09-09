@@ -55,6 +55,44 @@
 
 #include <stdio.h>
 
+/*
+**	LINK STUBS. The two headers above declare MemoryPoolObject-derived classes and inline string
+**	destructors; MEMORY_POOL_GLUE emits a getClassMemoryPool() per class, and the inline
+**	~AsciiString/~UnicodeString bodies reference releaseBuffer(). Every check in this file is
+**	arithmetic over inline functions -- nothing is allocated, no string is built, no audio event
+**	is constructed -- so none of these is ever called. They exist only so the emitted references
+**	resolve.
+**
+**	Why the file needs them at all: the two toolchains disagree about which unused functions
+**	survive to the link. With Apple clang the references never reach ld64, so the file linked
+**	with the headers alone; GNU ld on the clang-14 CI runner reported six undefined references
+**	and failed the Native build job. Defining them here keeps the test standalone -- the
+**	alternative, compiling GameMemory.cpp, AsciiString.cpp, UnicodeString.cpp and
+**	AudioEventRTS.cpp beside it, drags in far more engine than the two headers under test.
+*/
+MemoryPoolFactory *TheMemoryPoolFactory = NULL;
+
+MemoryPool *MemoryPoolFactory::createMemoryPool(const char *, Int, Int, Int)
+{
+	return NULL;
+}
+
+void MemoryPool::freeBlock(void *)
+{
+}
+
+void AsciiString::releaseBuffer()
+{
+}
+
+void UnicodeString::releaseBuffer()
+{
+}
+
+AudioEventRTS::~AudioEventRTS()
+{
+}
+
 static int _Failures = 0;
 static int _Checks = 0;
 
