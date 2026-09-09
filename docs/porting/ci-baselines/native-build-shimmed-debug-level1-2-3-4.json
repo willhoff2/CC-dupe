@@ -155,8 +155,8 @@
       "system_library_symbols_matched": []
     },
     "miles": {
-      "evidence_files": 9,
-      "evidence_names": 184,
+      "evidence_files": 12,
+      "evidence_names": 228,
       "label": "Miles AIL_* API \u2014 the `milesstub`/OpenAL backend",
       "owner": "platform/audio-device (the Miles/OpenAL link)",
       "pile": "library-not-linked",
@@ -175,7 +175,7 @@
     },
     "window-backend": {
       "evidence_files": 2,
-      "evidence_names": 65,
+      "evidence_names": 68,
       "label": "The window/input backend this configuration does not choose (SDL2, Cocoa)",
       "owner": "platform/macos-window-compile and platform/window-seam-wiring",
       "pile": "library-not-linked",
@@ -193,7 +193,7 @@
     "agrees_with_nm": true,
     "attempted": true,
     "binary": {
-      "bytes": 92983384,
+      "bytes": 93070240,
       "elf_type": "DYN",
       "format": "ELF",
       "machine": "x86-64",
