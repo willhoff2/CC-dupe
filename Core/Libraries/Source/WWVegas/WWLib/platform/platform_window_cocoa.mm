@@ -56,6 +56,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <deque>
 #include <dlfcn.h>
@@ -158,6 +159,69 @@
 - (BOOL)canBecomeMainWindow
 {
 	return YES;
+}
+
+@end
+
+/*
+**	Every way macOS has of asking this process to quit, routed to the one orderly exit.
+**
+**	Defined below, next to the event queue it pushes into; declared here because Objective-C
+**	classes only exist at file scope and cannot be written inside namespace WWPlatform.
+*/
+namespace WWPlatform
+{
+namespace
+{
+void Request_Quit_From_UI(void);
+}
+}
+
+/*
+**	The menu item's target, the application delegate and the window delegate, all one object
+**	because all three answer the same question: the user asked to quit.
+**
+**	None of them calls -[NSApplication terminate:], and that is the whole point. terminate:
+**	calls exit() from inside whatever frame the game happened to be drawing, so
+**	GameEngine::execute()'s `while (!m_quitting)` never returns, GameMain() never deletes
+**	TheGameEngine, and the process then aborts in static destruction - twice now, once in the
+**	OpenAL service thread (fixed in #159) and once in ThreadClass::Switch_Thread(), where
+**	std::mutex::lock() threw std::system_error (docs/porting/memory-shutdown-order.md, "the
+**	fourth mechanism"). Raising the seam's
+**	WINDOW_EVENT_CLOSE instead lands in PlatformWindowHost::requestQuit(), which posts
+**	MSG_META_DEMO_INSTANT_QUIT or sets GameEngine::setQuitting(TRUE) - the same flag the shell's
+**	own Exit Game button sets, and the only shutdown this port has ever seen exit 0 cleanly.
+**
+**	windowShouldClose: answers NO on purpose: PlatformMain.cpp owns the window's lifetime and
+**	tears it down after GameMain() returns, so the red close button must ask the engine to quit
+**	rather than pull the CAMetalLayer out from under a renderer that is still presenting to it.
+**	applicationShouldTerminate: answers NSTerminateCancel for the same reason, which does mean a
+**	logout waits for the engine's own shutdown (and is reported as blocked if that hangs); the
+**	alternative is the abort above.
+*/
+@interface WWGameQuitTarget : NSObject <NSApplicationDelegate, NSWindowDelegate>
+@end
+
+@implementation WWGameQuitTarget
+
+- (void)requestQuit:(id)sender
+{
+	(void)sender;
+	WWPlatform::Request_Quit_From_UI();
+}
+
+- (BOOL)windowShouldClose:(NSWindow *)sender
+{
+	(void)sender;
+	WWPlatform::Request_Quit_From_UI();
+	return NO;
+}
+
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender
+{
+	(void)sender;
+	WWPlatform::Request_Quit_From_UI();
+	return NSTerminateCancel;
 }
 
 @end
@@ -505,23 +569,27 @@ struct WindowState
 	bool Key_Down[256];
 	bool Active;
 	bool Minimised;
-	bool Closed;
 	bool Cursor_Clipped;
+	bool Cursor_Hidden;				// tracks [NSCursor hide]; see Window_Show_System_Cursor
 	bool Resizable;
 	int Width;
 	int Height;
+	double Wheel_Remainder;			// sub-notch precise scroll carried to the next event
 	NSCursor * Cursor;				// what Window_Set_Cursor() last selected; not owned here
 
 	WindowState()
 		: Window(nil), View(nil), Layer(nil), Last_Modifier_Flags(0), Active(false),
-		  Minimised(false), Closed(false), Cursor_Clipped(false), Resizable(false), Width(0),
-		  Height(0), Cursor(nil)
+		  Minimised(false), Cursor_Clipped(false), Cursor_Hidden(false), Resizable(false),
+		  Width(0), Height(0), Wheel_Remainder(0.0), Cursor(nil)
 	{
 		for (int i = 0; i < 256; ++i) Key_Down[i] = false;
 	}
 };
 
 WindowState * TheWindow = nullptr;
+// Owned here: NSApplication's delegate property does not retain, and the menu item only holds
+// its target weakly too.
+WWGameQuitTarget * TheQuitTarget = nil;
 std::string TheLastError;
 
 WindowState * State(void * window)
@@ -589,6 +657,105 @@ void Apply_Fullscreen(NSWindow * window)
 void Push(WindowState * state, const WindowEvent & event)
 {
 	state->Queue.push_back(event);
+}
+
+/*
+**	The one orderly exit, shared by the Quit menu item, Cmd-Q, the red close button and the
+**	Dock's Quit. It raises exactly what the window's own disappearance used to raise, so the
+**	engine side needs no new case: PlatformWindowHost::handleEvent() turns WINDOW_EVENT_CLOSE
+**	into requestQuit(), which is the WM_CLOSE body WinMain.cpp had.
+**
+**	Every request is raised, not just the first. In a mission the engine answers a close by
+**	opening its own quit menu, which the player can cancel; latching after one request would
+**	leave the close button and Cmd-Q dead for the rest of the session. Repeats are harmless -
+**	requestQuit() already returns early once GameEngine::getQuitting() is true - and this is
+**	what Alt+F4 does twice on Windows.
+*/
+void Request_Quit_From_UI(void)
+{
+	WindowState * state = TheWindow;
+	if (state == nullptr) return;
+	WindowEvent out;
+	out.Type = WINDOW_EVENT_CLOSE;
+	out.Time_Ms = Now_Ms();
+	Push(state, out);
+}
+
+/*
+**	A process with no main menu gets an empty application menu from AppKit and no key
+**	equivalents at all, which is what this port shipped with: the "zh" menu had no items, Cmd-Q
+**	was inert, and Force Quit was the only way out (MEASURED on this Mac). One item is enough to
+**	fix both, because the Cmd-Q key equivalent is matched by NSApplication against the main menu
+**	whether or not the menu bar is on screen - which matters, since the game hides it in
+**	fullscreen (Apply_Fullscreen above).
+*/
+void Install_Main_Menu(WWGameQuitTarget * target)
+{
+	NSString * name = [[NSProcessInfo processInfo] processName];
+	NSMenu * bar = [[NSMenu alloc] initWithTitle:@""];
+	// AppKit takes the first item's submenu as the application menu, and shows that submenu's
+	// title - not the item's - in the menu bar.
+	NSMenuItem * app_item = [[NSMenuItem alloc] initWithTitle:name action:NULL keyEquivalent:@""];
+	NSMenu * app_menu = [[NSMenu alloc] initWithTitle:name];
+	NSMenuItem * quit_item =
+		[[NSMenuItem alloc] initWithTitle:[@"Quit " stringByAppendingString:name]
+		                           action:@selector(requestQuit:)
+		                    keyEquivalent:@"q"];
+	[quit_item setTarget:target];
+	[app_menu addItem:quit_item];
+	[app_item setSubmenu:app_menu];
+	[bar addItem:app_item];
+	[NSApp setMainMenu:bar];
+	// The menu, the item and the submenu are each retained by whatever they were just added to.
+	[quit_item release];
+	[app_menu release];
+	[app_item release];
+	[bar release];
+}
+
+/*
+**	AppKit's scroll delta in WM_MOUSEWHEEL's WHEEL_DELTA (120) units.
+**
+**	scrollingDeltaY is only in lines when hasPreciseScrollingDeltas is NO, which is a classic
+**	notched wheel; that path is unchanged, one line to one notch to 120. A trackpad or a Magic
+**	Mouse answers YES and reports POINTS instead - several per event, sixty to a hundred and
+**	twenty times a second, with a momentum tail - so multiplying those by 120 handed the engine
+**	tens of notches per flick. Mouse.cpp divides by 120 and spends ten camera-height units a
+**	notch against a range (m_minCameraHeight 100 to m_maxCameraHeight 300) only twenty notches
+**	wide, so zoom behaved like a switch.
+**
+**	POINTS_PER_NOTCH is INFERRED, not measured: one Windows notch is three lines
+**	(SPI_GETWHEELSCROLLLINES' default) and AppKit's own line is about ten points, which puts a
+**	notch near thirty; forty is used because the whole zoom range is those twenty notches and a
+**	coarser notch is what makes a swipe a zoom rather than a switch. Nobody has yet put a
+**	trackpad in front of the running game, so the number is a starting point and the sub-notch
+**	remainder below is what keeps it tunable without losing slow scrolling.
+**
+**	The remainder carries across events precisely so that slow scrolling is not truncated to
+**	zero: three points at a time would otherwise round to nothing forever.
+*/
+const double POINTS_PER_NOTCH = 40.0;
+
+int Wheel_Delta_From_Event(WindowState * state, NSEvent * event)
+{
+	double delta_y = [event scrollingDeltaY];
+	// "Natural" scrolling flips the sign the device reported. Wheel_Delta is documented as
+	// WM_MOUSEWHEEL's convention, which is the device's, so flip it back - otherwise the
+	// preference silently inverts zoom relative to Windows.
+	if ([event isDirectionInvertedFromDevice]) delta_y = -delta_y;
+
+	if (![event hasPreciseScrollingDeltas]) {
+		// A leftover fraction from a trackpad must not leak into a wheel's whole notches.
+		state->Wheel_Remainder = 0.0;
+		return static_cast<int>(delta_y * 120.0);
+	}
+
+	state->Wheel_Remainder += delta_y;
+	// trunc, not floor: rounding must be toward zero so that scrolling up and scrolling down
+	// are symmetric.
+	const double notches = std::trunc(state->Wheel_Remainder / POINTS_PER_NOTCH);
+	state->Wheel_Remainder -= notches * POINTS_PER_NOTCH;
+	return static_cast<int>(notches * 120.0);
 }
 
 /*
@@ -761,10 +928,10 @@ void Translate(WindowState * state, NSEvent * event)
 		case NSEventTypeScrollWheel:
 			out.Type = WINDOW_EVENT_MOUSE_WHEEL;
 			Mouse_Position_In_Client(state, event, out.Mouse_X, out.Mouse_Y);
-			// scrollingDeltaY is in lines for a wheel and in points for a trackpad; either
-			// way one wheel notch is scaled to WM_MOUSEWHEEL's WHEEL_DELTA of 120.
-			out.Wheel_Delta = static_cast<int>([event scrollingDeltaY] * 120.0);
+			out.Wheel_Delta = Wheel_Delta_From_Event(state, event);
 			out.Modifiers = Modifiers_From_Cocoa([event modifierFlags]);
+			// A precise device that has not yet accumulated a whole notch reports 0 and is
+			// dropped here, its motion kept in Wheel_Remainder for the next event.
 			if (out.Wheel_Delta != 0) Push(state, out);
 			return;
 
@@ -791,15 +958,13 @@ void Sync_Window_State(WindowState * state)
 		out.Time_Ms = Now_Ms();
 		Push(state, out);
 	}
-	if (![state->Window isVisible] && !state->Closed) {
-		// The close button removes the window rather than sending anything this loop can
-		// see, so a vanished window is reported as WINDOW_EVENT_CLOSE exactly once.
-		state->Closed = true;
-		WindowEvent out;
-		out.Type = WINDOW_EVENT_CLOSE;
-		out.Time_Ms = Now_Ms();
-		Push(state, out);
-	}
+	// The close button used to be inferred here, from the window no longer being visible. It is
+	// reported by -windowShouldClose: through Request_Quit_From_UI() instead, for two reasons:
+	// the delegate answers NO, so the window survives until PlatformMain.cpp tears it down after
+	// GameMain() returns rather than vanishing under a renderer that is still presenting to its
+	// layer; and -[NSWindow isVisible] is also NO for a miniaturised window and for a hidden
+	// application, so the old test would have reported a close for Cmd-M or Cmd-H (INFERRED from
+	// AppKit's documented contract; the port has never been minimised on purpose).
 	NSRect bounds = [state->View bounds];
 	const int width = static_cast<int>(bounds.size.width);
 	const int height = static_cast<int>(bounds.size.height);
@@ -834,6 +999,14 @@ void * Window_Create(const WindowConfig & config)
 	// activation policy, and a window created without both never becomes key.
 	[NSApplication sharedApplication];
 	[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+
+	// Before finishLaunching, which is when AppKit first looks at the main menu.
+	if (TheQuitTarget == nil) {
+		TheQuitTarget = [[WWGameQuitTarget alloc] init];
+		Install_Main_Menu(TheQuitTarget);
+		[NSApp setDelegate:TheQuitTarget];
+	}
+
 	[NSApp finishLaunching];
 
 	const NSRect frame = NSMakeRect(0, 0, config.Width, config.Height);
@@ -854,6 +1027,8 @@ void * Window_Create(const WindowConfig & config)
 	                      config.Title != nullptr ? config.Title : ""]];
 	[window setAcceptsMouseMovedEvents:YES];
 	[window setRestorable:NO];
+	// So the red close button asks the engine to quit instead of removing the window.
+	[window setDelegate:TheQuitTarget];
 	[window center];
 
 	NSView * view = [[WWGameView alloc] initWithFrame:frame];
@@ -897,7 +1072,12 @@ void * Window_Create(const WindowConfig & config)
 
 	[window makeKeyAndOrderFront:nil];
 	[NSApp activateIgnoringOtherApps:YES];
-	if (config.Hide_System_Cursor) [NSCursor hide];
+	if (config.Hide_System_Cursor) {
+		[NSCursor hide];
+		// Recorded, so that the first Window_Show_System_Cursor(false) does not hide a second
+		// time and leave the pointer one unhide short of coming back.
+		TheWindow->Cursor_Hidden = true;
+	}
 
 	TheLastError.clear();
 	return TheWindow;
@@ -909,6 +1089,20 @@ void Window_Destroy(void * window)
 	if (state == nullptr) return;
 	// Otherwise a process that exits from fullscreen leaves the Dock and the menu bar hidden.
 	[NSApp setPresentationOptions:NSApplicationPresentationDefault];
+	// Same argument for the pointer, and the same scope: NSCursor's hide count belongs to the
+	// application, not to this window, so destroying the window while hidden would strand it.
+	// Window_Show_System_Cursor() keeps at most one outstanding hide, so one unhide balances it.
+	if (state->Cursor_Hidden) {
+		[NSCursor unhide];
+		state->Cursor_Hidden = false;
+	}
+	// The delegates go before the object they point at: AppKit holds both weakly, and a quit
+	// arriving after this point has no engine left to ask.
+	[state->Window setDelegate:nil];
+	[NSApp setDelegate:nil];
+	[NSApp setMainMenu:nil];
+	[TheQuitTarget release];
+	TheQuitTarget = nil;
 	[state->Window orderOut:nil];
 	[state->Window close];
 	delete state;
@@ -1188,9 +1382,32 @@ void Window_Warp_Cursor(void * window, int x, int y)
 	Warp_Cursor_To_Client(state, x, y);
 }
 
+/*
+**	ShowCursor()'s seam twin, and the one place where AppKit's contract is the opposite of the
+**	seam's. The seam is level-triggered - platform_win32_user.cpp's SetCursor() calls this on
+**	every call with `cursor != nullptr`, so that "the pointer is shown exactly when Windows
+**	would show it" - while +[NSCursor hide] and +unhide are REFERENCE COUNTED and must balance.
+**
+**	Unbalanced, they do this: W3DMouse::draw() -> Win32Mouse::setCursor() runs every frame, and
+**	while Mouse::m_visible is FALSE (the whole intro and load phase) it passes a null cursor, so
+**	one more [NSCursor hide] was issued per frame. MEASURED in-process under LLDB on an M1 Pro at
+**	4eb0ec3fa: 2179 hides against 727 unhides at the windowed main menu, 1024 against 0 in
+**	fullscreen with CGCursorIsVisible() == 0. When MainMenu.cpp finally calls
+**	setVisibility(TRUE), the unhides arrive one per frame, so the pointer cannot come back until
+**	as many frames pass as the load consumed. Both modes run this same code; only fullscreen
+**	shows it, because a hidden NSCursor is only suppressed while the app is frontmost and a
+**	windowed pointer keeps leaving the window and reappearing.
+**
+**	The state is therefore tracked here and the call is made idempotent, which is what
+**	SDL_ShowCursor() already does for platform_window_sdl2.cpp - so this was a Cocoa-only
+**	divergence from a contract the header already documented.
+*/
 void Window_Show_System_Cursor(void * window, bool show)
 {
-	if (State(window) == nullptr) return;
+	WindowState * state = State(window);
+	if (state == nullptr) return;
+	if (state->Cursor_Hidden == !show) return;
+	state->Cursor_Hidden = !show;
 	if (show) {
 		[NSCursor unhide];
 	} else {

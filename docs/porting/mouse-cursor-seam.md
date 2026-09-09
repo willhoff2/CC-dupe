@@ -156,7 +156,8 @@ direction at the right edge, Retina logical size, and coordinate clicks reaching
 
 - The remaining seven `SCCScroll1..7` directions and the swap latency; a click at a menu button's
   *edge* (only centre clicks were driven); the cursor hidden while the game hides it (cinematic /
-  `SetCursor(nullptr)`) — no cinematic was reached in the skirmish run.
+  `SetCursor(nullptr)`) — no cinematic was reached in the skirmish run. The `SetCursor(nullptr)`
+  half has since been measured by call counting rather than by eye, and was a defect: §6.3.
 - `NSCursor` over a fullscreen/borderless `NSWindow` with the MoltenVK layer as content (the run
   used `-win`).
 - Whether the decoded retail frames *look* right on a display beyond "a non-arrow 32×32 image is
@@ -319,6 +320,43 @@ To re-run the retail row: `aws s3 cp s3://cc-mac-game-data/zerohour104_loose_dat
 project's Mac, `~/devin-work/zh-data` is an install that already has `Data/Cursors`). Without the
 data the test says `SKIP: retail cursor set: no Data/Cursors directory …` and passes; it never
 fabricates a row.
+
+### 6.3 MEASURED (Mac / in-process under LLDB): the `[NSCursor hide]` backlog
+
+The one place where AppKit's contract is the opposite of the seam's, found by counting the calls
+rather than by looking at the screen.
+
+`Window_Show_System_Cursor()` is documented in `platform_window.h` as `ShowCursor()`'s twin and is
+used level-triggered: `platform_win32_user.cpp`'s `SetCursor()` calls it on **every** call, with
+`cursor != nullptr`, so that "the pointer is shown exactly when Windows would show it". But
+`+[NSCursor hide]` and `+[NSCursor unhide]` are **reference counted** and must balance. The Cocoa
+backend forwarded each call straight through, so while `Mouse::m_visible` is `FALSE` — the whole
+intro and load phase — `W3DMouse::draw()` → `W3DMouse::setCursor()` → `Win32Mouse::setCursor()`
+passed a null cursor once a frame and issued one more `hide` per frame.
+
+MEASURED in-process under LLDB on an M1 Pro at `main` 4eb0ec3fa (counts relayed from that session,
+not re-run here):
+
+| Run | `hide` | `unhide` | Net | Note |
+|---|---:|---:|---:|---|
+| windowed, at the main menu | 2179 | 727 | **+1452** | |
+| fullscreen, at the main menu | 1024 | 0 | **+1024** | `CGCursorIsVisible()` == 0 |
+| `SetCursor(NULL)` vs `SetCursor(handle)` | 2178 | 727 | | all 44 `LoadCursorFromFileA` calls succeeded, so the shape path is not implicated |
+
+When `MainMenu.cpp:436` finally calls `TheMouse->setVisibility(TRUE)`, the `unhide`s arrive one per
+frame, so the pointer cannot come back until as many frames pass as the load consumed. **Both modes
+run the identical code**; only fullscreen shows it, because a hidden `NSCursor` is suppressed only
+while its application is frontmost — windowed, the pointer keeps leaving the window and
+reappearing, which is why the human's report was of fullscreen "no cursor at all".
+
+`platform_window_sdl2.cpp` was already correct: `SDL_ShowCursor()` is level-triggered. This was a
+Cocoa-only divergence from a contract the header already documented, and the fix is in the Cocoa
+backend only — `WindowState::Cursor_Hidden` tracks the one outstanding hide, `Window_Create()`
+records the `Hide_System_Cursor` hide, and `Window_Show_System_Cursor()` returns early when the
+state already matches.
+
+**UNVERIFIED:** the fix itself. The game has not been launched since; nobody has watched the cursor
+come back at the main menu, and the counts above have not been re-taken on the fixed binary.
 
 ## 7. Residual risks, ranked
 

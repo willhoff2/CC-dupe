@@ -163,6 +163,24 @@ already divides by 120), a `Click_Count` of 2 for the `WM_?BUTTONDBLCLK` case, a
 `Time_Ms` replacing `MSG::time`, which the engine currently smuggles through the global
 `TheMessageTime` into `MouseIO::time`.
 
+**`Wheel_Delta` on Cocoa is unit-dependent, and the two units are converted separately.** A classic
+notched wheel answers `hasPreciseScrollingDeltas` `NO` and reports lines: one line is one notch is
+120, unchanged. A trackpad or a Magic Mouse answers `YES` and reports *points* — several per event,
+at 60-120 Hz, with a momentum tail — so the same multiply handed the engine tens of notches per
+flick. `Mouse.cpp` (~850) divides by 120 and spends `ZoomHeightPerSecond` (10) camera-height units a
+notch against a range (`m_minCameraHeight` 100 to `m_maxCameraHeight` 300) only ~20 notches wide, so
+a single 5-point trackpad delta moved the camera a quarter of its whole range and zoom behaved like
+a switch. Precise deltas are therefore accumulated in points and converted at **40 points a notch**,
+with the sub-notch remainder carried across events so that slow scrolling is not truncated to zero.
+`isDirectionInvertedFromDevice` is undone on both paths, because `Wheel_Delta` is documented as
+`WM_MOUSEWHEEL`'s sign convention — the device's — and macOS "natural" scrolling would otherwise
+silently invert zoom relative to Windows.
+
+The 40 is **INFERRED, not measured**: one Windows notch is three lines (`SPI_GETWHEELSCROLLLINES`'
+default) and AppKit's own line is about ten points, which puts a notch near thirty; forty is chosen
+coarser because the whole zoom range is those ~20 notches. Nobody has put a trackpad in front of the
+running game yet — see §4.
+
 ### Why SDL2 for the portable backend
 
 Chosen, with a caveat. In favour: it is already an optional dependency of the spike; it covers X11
@@ -300,6 +318,29 @@ finding is written up rather than fixed: `Window_Client_Size()` and mouse coordi
 points while the render target is backing pixels, so on a 2x display the engine sees 800x600 for a
 1600x1200 framebuffer.
 
+### What a human then found, and what it left open
+
+Two things only a person at the machine could find, both fixed in `platform_window_cocoa.mm` and
+both still owing a runtime check:
+
+* **there was no way to quit.** MEASURED on the M1 Pro: the menu bar had exactly two menus, Apple
+  and `zh`, and `zh` was empty, so Cmd-Q had no key equivalent to match and was ignored whether
+  posted through the session event tap or through `CGEventPostToPid`. Force Quit was the only way
+  out. A main menu with a Quit item is now installed, and it — with Cmd-Q, the red close button and
+  the Dock's Quit — raises `WINDOW_EVENT_CLOSE` rather than `-[NSApplication terminate:]`, which
+  would `exit()` from inside the frame loop
+  ([memory-shutdown-order.md](memory-shutdown-order.md), "the fourth mechanism").
+  **UNMEASURED:** that any of the four routes actually reaches exit 0 on the Mac; the Apple Silicon
+  column of that document's quit-path table is UNMEASURED on every row;
+* **zoom behaved like a switch on a trackpad**, because precise scrolling deltas are points and
+  were being multiplied by 120 as if they were notches (human report: "can't zoom out really").
+  Points are now accumulated and converted at 40 points a notch, with the remainder carried.
+  **UNMEASURED:** the number. 40 is INFERRED from the Windows notch-to-lines-to-points arithmetic
+  and from the camera's ~20-notch range; nobody has scrolled the running game on a trackpad or a
+  Magic Mouse and said whether it feels right, and no measurement has been taken of how much
+  momentum a flick actually delivers. `isDirectionInvertedFromDevice` (macOS "natural" scrolling)
+  is now undone so the sign matches Windows; that too is untried by a human.
+
 ### The runner's gaps, as they stood before that Mac session
 
 1. **that anything is visible.** The runner has no attached display. Window ordering, activation
@@ -389,7 +430,7 @@ have.
 
 | `WM_*` case | Single-player? | Off Windows |
 |---|---|---|
-| `WM_CLOSE` | yes (Alt+F4 opens the quit menu) | `WINDOW_EVENT_CLOSE` -> same body: `MSG_META_DEMO_INSTANT_QUIT`, or `setQuitting()` before the message stream is up |
+| `WM_CLOSE` | yes (Alt+F4 opens the quit menu) | `WINDOW_EVENT_CLOSE` -> same body: `MSG_META_DEMO_INSTANT_QUIT`, or `setQuitting()` before the message stream is up. On Cocoa four things raise it, all through one `Request_Quit_From_UI()`: the application menu's Quit item, its Cmd-Q key equivalent, `-windowShouldClose:` (which answers `NO`, so the window outlives the request) and `-applicationShouldTerminate:` (which answers `NSTerminateCancel`). None of them calls `-[NSApplication terminate:]`; see [memory-shutdown-order.md](memory-shutdown-order.md) "the fourth mechanism" for why `exit()` from inside the frame loop aborts |
 | `WM_QUERYENDSESSION` | no (logout/shutdown) | folded into `WINDOW_EVENT_CLOSE`; the seam does not distinguish a session ending from a close, and the Win32 body was identical |
 | `WM_ACTIVATEAPP` | yes | `WINDOW_EVENT_FOCUS_GAINED`/`_LOST` -> `setActive()`: `setIsActive()` and the custom cursor |
 | `WM_ACTIVATE` (`WA_INACTIVE`) | yes | same `setActive()`: audio mute/unmute and `refreshCursorCapture()` |
@@ -399,7 +440,7 @@ have.
 | `WM_SIZE` | yes | `WINDOW_EVENT_RESIZE` -> `refreshCursorCapture()`; `SIZE_MINIMIZED` is `WINDOW_EVENT_MINIMISED`, which the idle loop reads. The `gDoPaint` half is splash-screen only (below) |
 | `WM_MOUSEMOVE` | yes | `WINDOW_EVENT_MOUSE_MOVE`, dropped while inactive as before. The client-rect hit test becomes the backend's enter/leave, which is *more* reliable: `WINDOW_EVENT_MOUSE_LEAVE` fires when the pointer leaves, where Win32 only noticed on the next move inside |
 | `WM_LBUTTON*`, `WM_MBUTTON*`, `WM_RBUTTON*` (9 cases) | yes | `WINDOW_EVENT_MOUSE_DOWN`/`_UP` with `Mouse_Button` and `Click_Count`; the `DBLCLK` cases become `Click_Count == 2` |
-| `WM_MOUSEWHEEL` (`0x020A`) | yes (zoom) | `WINDOW_EVENT_MOUSE_WHEEL`, still dropped when the pointer is outside |
+| `WM_MOUSEWHEEL` (`0x020A`) | yes (zoom) | `WINDOW_EVENT_MOUSE_WHEEL`, still dropped when the pointer is outside. Cocoa has no notch to report: `-[NSEvent scrollingDeltaY]` is in lines only when `hasPreciseScrollingDeltas` is `NO`, and in points otherwise, so the two are converted separately (§2) |
 | `WM_KEYDOWN` | **no** | not reproduced. Its only body is `VK_ESCAPE` -> `PostQuitMessage(0)`, and `serviceWindowsOS()` dispatches `WM_QUIT` to `DefWindowProc` (the `GetMessage` return check is commented out), so pressing Escape does nothing on Windows today. Reproducing it would *add* a quit-on-Escape bug. In-game Escape reaches the engine through DirectInput, not this case |
 | `WM_SETCURSOR` | yes on Windows only | not reproduced, and not needed: the cursor is set from `setActive()`, and the window is created with `Hide_System_Cursor`, which is what the null-cursor window class did |
 | `WM_SYSCOMMAND` (`SC_KEYMENU`, `SC_MOVE`, `SC_SIZE`, `SC_MAXIMIZE`, `SC_MONITORPOWER`) | yes on Windows only | nothing to reproduce: these suppress Windows' own system menu, Alt-halts-the-game and screensaver behaviour. SDL2 does not synthesise them; `SDL_DISABLE_SCREENSAVER` is the equivalent of `SC_MONITORPOWER` and is the backend's business, not the engine's |
