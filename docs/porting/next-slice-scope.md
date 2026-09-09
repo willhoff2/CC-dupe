@@ -37,6 +37,7 @@ MEASURED on Linux only: USA-01 campaign scripts/objectives/triggers execute head
 | #157 cursor confinement (`platform_window_cocoa.mm` only) | open, CI pending | **human trackpad confirmation** on the Mac in both `-win` and fullscreen — the exit criterion. Nobody has done it yet. |
 | Wave 14.2 quit abort (exception out of `OpenALAudio::Library::~Library()` at static destruction → `std::terminate`) | Linux child in flight, no PR | reproduce, bisect #153 vs #155, shim-only non-throwing destruction, red/green test that exits without `AIL_shutdown()`. If no PR exists when you read this, the slice restarts from `docs/porting/memory-shutdown-order.md` and the prompt in this table. |
 | #156 movie audio | merged | Mac human audibility UNMEASURED. |
+| #161 death/veterancy flag shift (`Damage.h`, `GameCommon.h`) | open, CI pending | **`Replay Check GeneralsMD` is the exit criterion** — the fix reproduces the 32-bit bit assignment, so Windows must be byte-identical, and that gate is the only thing that measures it. Nothing dies on LP64 without it: `isDieApplicable` accepted 0 of 66 over a real replay. See `docs/porting/death-flag-shift.md`; it also corrects `combat-probe.md` §5. |
 
 ### Ranked residuals (next slices, in order)
 

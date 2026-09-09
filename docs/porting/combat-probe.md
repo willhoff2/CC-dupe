@@ -161,7 +161,24 @@ of war earlier (5000 → 4985 → 4993.33 → 5000 → 4995 …, frames 13429–
 **Classification: works.** Damage and healing both go through `attemptDamage` →
 `ArmorTemplate::adjustDamage` → `internalChangeHealth`, on a named object, with per-type amounts.
 
-## 5. Do objects die and get removed? Yes — `onDie`, slow death, `destroyObject`, and the counters move
+## 5. Do objects die and get removed? The counters move, but no die module ran
+
+> **Correction, [`death-flag-shift.md`](death-flag-shift.md).** This section originally concluded
+> "works". Its measurements below are unchanged and still stand; the inference drawn from two of them
+> does not. `DieMuxData::isDieApplicable` rejected **every** normal death on this build — the flag for
+> `DEATH_NORMAL` is `1UL << -1`, which lands on bit 31 on 32-bit Windows and on nothing at LP64 — so
+> no die module body ran, and the removals seen here came from other paths. Two rows below read as
+> evidence that it did run, and are not:
+>
+> * the `DestroyDie::onDie` rows are **function-entry** breakpoint hits.
+>   `BreakpointCreateByName("DestroyDie::onDie")` resolves to `DestroyDie.cpp:56`, which is the
+>   `if (!isDieApplicable(damageInfo))` line itself, so a hit records the dispatch and not the body;
+> * `units_lost` / `buildings_lost` are credited by `Object::scoreTheKill` (`Object.cpp:2998`) on the
+>   *killer's* damage path, not by a die module, so they move either way.
+>
+> The 0 hits on `SlowDeathBehavior::beginSlowDeath` / `update` recorded below, and the unexplained
+> 1,248-frame delay, are what the defect predicts. §7.7 asked which module owned that delay; the
+> answer is that none did.
 
 **MAC-REPLAY, G1, `replay-probe.json`:**
 
@@ -193,12 +210,15 @@ while the process was still on the score screen.
 
 The G2 score screen (screenshot, not committed) reads human `Units Lost 1, Buildings Lost 0`, AI
 `Units Destroyed 1, Buildings Destroyed 0`. That is *not* a counter bug in the port: `addObjectDestroyed`
-is credited from `DestroyDie::onDie` at the end of the slow death (shown above in G1, +1248 frames),
-and in G2 `killPlayer` destroyed the player's objects on the frame the CC hit 0, before the slow death
-completed. Whether Windows shows the same 0 was **not** checked against the oracle; it follows from
-shared code, so it is recorded as an observation, not a defect.
+is credited from `Object::scoreTheKill` (`Object.cpp:3035`) on the killer's damage path, and in G2
+`killPlayer` destroyed the player's objects on the frame the CC hit 0. Whether Windows shows the same
+0 was **not** checked against the oracle; it follows from shared code, so it is recorded as an
+observation, not a defect.
 
-**Classification: works.** `units_lost` / `buildings_lost` are finally non-zero, from a measured kill.
+**Classification: partly — corrected.** `units_lost` / `buildings_lost` are non-zero from a measured
+kill, and objects do leave `m_objList`. What this section did *not* show, and what
+[`death-flag-shift.md`](death-flag-shift.md) later measured to be false on this build, is that the
+die modules ran at all.
 
 ## 6. Does the AI choose to attack? Yes — a real team attack-move, then hunt
 

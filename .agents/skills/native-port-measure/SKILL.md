@@ -135,6 +135,7 @@ python3 scripts/native-memory-shutdown-test.py       # allocator critical sectio
 python3 scripts/native-exit-teardown-test.py         # object pools destroyed after the allocator
 python3 scripts/native-lock-failure-test.py
 python3 scripts/native-instance-lock-test.py
+python3 scripts/native-death-veterancy-flags-test.py # zero-valued enumerators keep bit 31 at 64 bits
 python3 scripts/native-stackwalk-test.py             # real symbolised backtrace; also run on macOS
 ```
 
