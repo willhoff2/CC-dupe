@@ -175,7 +175,7 @@
     },
     "window-backend": {
       "evidence_files": 2,
-      "evidence_names": 68,
+      "evidence_names": 73,
       "label": "The window/input backend this configuration does not choose (SDL2, Cocoa)",
       "owner": "platform/macos-window-compile and platform/window-seam-wiring",
       "pile": "library-not-linked",
@@ -193,8 +193,9 @@
     "agrees_with_nm": true,
     "attempted": true,
     "binary": {
-      "bytes": 93070240,
+      "bytes": 93074936,
       "elf_type": "DYN",
+      "file_output": "ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=f44994e27551afd82e5c975693c9161d46fe4d3f, for GNU/Linux 3.2.0, with debug_info, not stripped",
       "format": "ELF",
       "machine": "x86-64",
       "path": "build/native-debug/native_strict_link",
