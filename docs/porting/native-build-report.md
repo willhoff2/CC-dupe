@@ -72,7 +72,7 @@ The linker's list and §3's `nm` scan agree, so the categorised list above is th
 
 Symbol resolution is necessary and not sufficient; `docs/porting/startability.md` defines what else a first launch needs.
 
-The file is `build/native/native_strict_link`, 83.6 MiB, ELF 64-bit x86-64. That it loads and runs is a separate question from whether it links, and one this run does not answer: see `docs/porting/startability.md`.
+The file is `build/native/native_strict_link`, 83.6 MiB, ELF 64-bit x86-64 (`file`: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=10ced400ed6d5dfc219a6ef2463d450433a53e08, for GNU/Linux 3.2.0, with debug_info, not stripped). That it loads and runs is a separate question from whether it links, and one this run does not answer: see `docs/porting/startability.md`.
 
 ## Reproducing
 

@@ -150,7 +150,7 @@
     },
     "window-backend": {
       "evidence_files": 2,
-      "evidence_names": 68,
+      "evidence_names": 73,
       "label": "The window/input backend this configuration does not choose (SDL2, Cocoa)",
       "owner": "platform/macos-window-compile and platform/window-seam-wiring",
       "pile": "library-not-linked",
