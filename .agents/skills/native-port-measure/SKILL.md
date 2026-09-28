@@ -136,6 +136,7 @@ python3 scripts/native-exit-teardown-test.py         # object pools destroyed af
 python3 scripts/native-lock-failure-test.py
 python3 scripts/native-instance-lock-test.py
 python3 scripts/native-death-veterancy-flags-test.py # zero-valued enumerators keep bit 31 at 64 bits
+python3 scripts/native-particle-emitter-strdup-test.py # no ::_strdup(nullptr) in the emitter copies
 python3 scripts/native-stackwalk-test.py             # real symbolised backtrace; also run on macOS
 ```
 

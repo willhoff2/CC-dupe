@@ -103,7 +103,9 @@ class AggregateDefClass
 		virtual WW3DErrorType	Load_W3D (ChunkLoadClass &chunk_load);
 		virtual WW3DErrorType	Save_W3D (ChunkSaveClass &chunk_save);
 		const char *				Get_Name () const					{ return m_pName; }
-		void							Set_Name (const char *pname)			{ SAFE_FREE (m_pName); m_pName = ::_strdup (pname); }
+		// Null-guarded: operator= passes src.Get_Name() here, which is null on a default-constructed
+		// definition, and `_strdup(nullptr)` faults on a POSIX libc. Clone() goes the same way.
+		void							Set_Name (const char *pname)			{ SAFE_FREE (m_pName); m_pName = (pname != nullptr) ? ::_strdup (pname) : nullptr; }
 		RenderObjClass *			Create ();
 		AggregateDefClass *		Clone () const						{ return W3DNEW AggregateDefClass (*this); }
 

@@ -144,8 +144,10 @@ ParticleEmitterClass::ParticleEmitterClass(const ParticleEmitterClass & src) :
 	ParticlesLeft(src.ParticlesLeft),
 	MaxParticles(src.MaxParticles),
 	IsComplete(false),
-	NameString(::_strdup (src.NameString)),
-	UserString(::_strdup (src.UserString)),
+	// `_strdup(nullptr)` reads the null pointer on a POSIX libc; the MSVC CRT returned
+	// nullptr. UserString has no setter, so it is always null and this always faulted.
+	NameString(src.NameString != nullptr ? ::_strdup (src.NameString) : nullptr),
+	UserString(src.UserString != nullptr ? ::_strdup (src.UserString) : nullptr),
 	RemoveOnComplete(src.RemoveOnComplete),
 	IsInScene(false),
 	GroupID(0),
@@ -839,8 +841,8 @@ ParticleEmitterClass::Set_Name (const char *pname)
 		NameString = nullptr;
 	}
 
-	// Copy the provided name
-	NameString = ::_strdup (pname);
+	// Copy the provided name. Null-guarded like the copy constructor's.
+	NameString = (pname != nullptr) ? ::_strdup (pname) : nullptr;
 }
 
 

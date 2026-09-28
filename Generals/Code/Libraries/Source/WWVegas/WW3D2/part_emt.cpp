@@ -156,7 +156,9 @@ ParticleEmitterClass::ParticleEmitterClass(const ParticleEmitterClass & src) :
 	FirstTime = true;
 	IsComplete = false;
 
-	NameString = ::_strdup (src.NameString);
+	// Null-guarded: `_strdup(nullptr)` faults on a POSIX libc, where the MSVC CRT
+	// returned nullptr.
+	NameString = (src.NameString != nullptr) ? ::_strdup (src.NameString) : nullptr;
 }
 
 
@@ -826,8 +828,8 @@ ParticleEmitterClass::Set_Name (const char *pname)
 		NameString = nullptr;
 	}
 
-	// Copy the provided name
-	NameString = ::_strdup (pname);
+	// Copy the provided name. Null-guarded like the copy constructor's.
+	NameString = (pname != nullptr) ? ::_strdup (pname) : nullptr;
 }
 
 
