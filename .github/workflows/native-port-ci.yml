@@ -597,6 +597,22 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # WW3D2 duplicated four owned C strings with an unguarded `::_strdup`, and the pointer is
+      # routinely null. The MSVC CRT returned null; a POSIX libc reads address zero, so cloning a
+      # particle emitter for the fog-of-war ghost segfaulted. A compile and a link both see nothing.
+      # Needs no game data. See docs/porting/particle-emitter-strdup.md.
+      - name: Run the particle emitter null-string test
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Particle emitter null strings'
+            echo '```'
+            python3 scripts/native-particle-emitter-strdup-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The negative control for init-failure reporting: a subsystem whose init() is made to fail
       # must be diagnosable, and the shape it replaces -- detect the failure and return -- must
       # provably not be. Needs no game data. See docs/porting/init-failure-reporting.md.

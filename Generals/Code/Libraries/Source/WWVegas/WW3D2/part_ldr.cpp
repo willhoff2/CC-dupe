@@ -265,7 +265,9 @@ void
 ParticleEmitterDefClass::Set_User_String (const char *pstring)
 {
 	SAFE_FREE (m_pUserString);
-	m_pUserString = ::_strdup (pstring);
+	// operator= passes src.Get_User_String() here, which is null on a default-constructed
+	// definition, and `_strdup(nullptr)` faults on a POSIX libc.
+	m_pUserString = (pstring != nullptr) ? ::_strdup (pstring) : nullptr;
 }
 
 
@@ -277,7 +279,7 @@ void
 ParticleEmitterDefClass::Set_Name (const char *pname)
 {
 	SAFE_FREE (m_pName);
-	m_pName = ::_strdup (pname);
+	m_pName = (pname != nullptr) ? ::_strdup (pname) : nullptr;
 }
 
 
