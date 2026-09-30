@@ -69,8 +69,9 @@ in `interval_ms`.
   confirmed.** The arithmetic premise holds (7.7 Mpx vs 1.9 Mpx for 800x600, or 3.1 Mpx for the
   user's 1024x768 window). But the measured cost of those pixels does not produce a slowdown at the
   start of a skirmish or at the menu.
-- **No aspect stretch** in any case. The engine's back buffer and the swapchain have the same aspect
-  ratio, because `-xres 1728 -yres 1117` is the screen's own point size.
+- **No aspect stretch** in any case. The colour target that `Present` blits and the swapchain it
+  blits into have the same size, and so does the engine's back buffer at the render scale, because
+  `-xres 1728 -yres 1117` is the screen's own point size.
 - **Fullscreen without `-xres/-yres` is still an 800x600 window**: window-server bounds `[0, 32,
   800, 600]`, top-left under the menu-bar strip. This re-measures residual 3 of
   `next-slice-scope.md`, unchanged.

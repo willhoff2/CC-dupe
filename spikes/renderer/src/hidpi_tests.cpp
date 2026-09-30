@@ -24,6 +24,8 @@
 #include "platform/platform_window.h"
 #endif
 
+#include <dirent.h>
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -436,6 +438,50 @@ int Window_Mode(bool validation, float minimum_scale) {
 }
 #endif  // SPIKE_WITH_PLATFORM_WINDOW
 
+// The listing's own descriptor is counted every time, so two counts compare directly.
+int Open_Descriptor_Count() {
+	int count = 0;
+	if (DIR* dir = opendir("/dev/fd")) {
+		while (readdir(dir) != nullptr) ++count;
+		closedir(dir);
+	}
+	return count;
+}
+
+// ZH_RENDER_FRAME_LOG (the fullscreen frame-cost probe's input) is opened by Init, so every
+// renderer reset has to close it in Shutdown or it leaks a descriptor per reset.
+void Case_Frame_Log_Closed_By_Shutdown(bool validation) {
+	const char* temp = std::getenv("TMPDIR");
+	const std::string path = std::string(temp != nullptr ? temp : "/tmp") + "/zh-hidpi-frame-log.csv";
+	setenv("ZH_RENDER_FRAME_LOG", path.c_str(), 1);
+	constexpr int kResets = 3;
+	const int before = Open_Descriptor_Count();
+	for (int reset = 0; reset < kResets; ++reset) {
+		RenderBackend* backend = Create_Vulkan_Backend(validation, true);
+		const bool initialised = backend->Init(nullptr, kWidth, kHeight);
+		backend->Shutdown();
+		delete backend;
+		if (!initialised) {
+			Check(false, "backend Init with ZH_RENDER_FRAME_LOG set");
+			break;
+		}
+	}
+	const int after = Open_Descriptor_Count();
+	unsetenv("ZH_RENDER_FRAME_LOG");
+	Check(after == before, "Shutdown closes the frame log",
+	      std::to_string(kResets) + " resets, descriptors " + std::to_string(before) + " -> " +
+	          std::to_string(after));
+
+	std::string header;
+	if (FILE* log = std::fopen(path.c_str(), "r")) {
+		char line[256] = {};
+		if (std::fgets(line, sizeof(line), log) != nullptr) header = line;
+		std::fclose(log);
+	}
+	std::remove(path.c_str());
+	Check(header.rfind("frame,interval_ms,", 0) == 0, "the last session's log has its header");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -514,6 +560,10 @@ int main(int argc, char** argv) {
 	      std::to_string(backend->Validation_Message_Count()));
 
 	backend->Shutdown();
+
+	std::printf("\n== renderer resets close the frame log ==\n");
+	Case_Frame_Log_Closed_By_Shutdown(validation);
+
 	std::printf("\n%d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;
 }

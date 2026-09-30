@@ -2151,6 +2151,15 @@ bool VulkanBackend::Init(void* window_handle, uint32_t width, uint32_t height) {
 }
 
 void VulkanBackend::Shutdown() {
+	if (trace_ != nullptr) {
+		std::fclose(trace_);
+		trace_ = nullptr;
+	}
+	if (frame_log_ != nullptr) {
+		std::fclose(frame_log_);
+		frame_log_ = nullptr;
+		frame_log_last_present_ = {};
+	}
 	if (device_ == VK_NULL_HANDLE) return;
 	vkDeviceWaitIdle(device_);
 

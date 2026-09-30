@@ -63,6 +63,8 @@ SKIRMISH_ROUTE = [
     ("ButtonStart", 180.5, 530.5),
 ]
 REFERENCE_RESOLUTION = (800, 600)
+# GameLogic::m_gameMode once a skirmish is running (see EngineReader.state in macos-input-drive.py).
+GAME_SKIRMISH = 2
 
 
 def load_input_drive():
@@ -86,8 +88,8 @@ def engine_resolution(arguments):
 
 
 def drive_to_skirmish(input_drive, pid, arguments, settle):
-    """Real clicks through the menus. A click that misses leaves the game in the shell, which the
-    per-case screenshot shows; in fullscreen this doubles as the points hit-testing check."""
+    """Real clicks through the menus; in fullscreen this doubles as the points hit-testing check.
+    A click that misses leaves the game in the shell, which engine_game_mode() catches."""
     width, height = engine_resolution(arguments)
     for name, reference_x, reference_y in SKIRMISH_ROUTE:
         window = input_drive.game_window(pid)
@@ -97,6 +99,20 @@ def drive_to_skirmish(input_drive, pid, arguments, settle):
         client_y = reference_y * height / REFERENCE_RESOLUTION[1]
         input_drive.post_click(*input_drive.client_to_global(window, client_x, client_y, height))
         time.sleep(settle)
+
+
+def engine_game_mode(binary, pid):
+    """The running game's mode, read by `macos-input-drive.py snapshot` in one brief LLDB stop
+    (the binary must be signed for attach, as the input-drive docs describe)."""
+    snapshot = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "macos-input-drive.py"), "snapshot",
+         "--pid", str(pid), "--binary", str(binary)],
+        capture_output=True, text=True, check=True).stdout
+    for line in snapshot.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[0] == "game_mode":
+            return None if fields[1] == "None" else int(fields[1])
+    return None
 
 
 def parse_case(text):
@@ -149,9 +165,9 @@ def summarise(rows, window):
     intervals = [float(row["interval_ms"]) for row in rows if float(row["interval_ms"]) > 0]
     median_interval = statistics.median(intervals)
     window_size = (window["bounds"]["Width"], window["bounds"]["Height"]) if window else None
-    # The swapchain is the drawable, which is the content view's bounds at the render scale, so
-    # its aspect is the on-screen image's; kCGWindowBounds would add a windowed title bar.
-    stretched = abs(aspect(*points) - aspect(*swapchain)) > ASPECT_TOLERANCE
+    # Present blits the rendered colour target into the swapchain's full extent, and the swapchain
+    # is the drawable (the content view at the render scale), so their aspects must agree.
+    stretched = abs(aspect(*target) - aspect(*swapchain)) > ASPECT_TOLERANCE
     return {
         "frames": len(rows),
         "fps_from_median_interval": round(1000.0 / median_interval, 2),
@@ -191,6 +207,15 @@ def run_case(case, args, input_drive, log_dir):
         if args.scene == "skirmish":
             drive_to_skirmish(input_drive, process.pid, case["arguments"], args.click_settle)
             time.sleep(args.load_seconds)
+            game_mode = engine_game_mode(args.run_dir / args.executable, process.pid)
+            if game_mode is None:
+                raise RuntimeError("case %s: could not read the game mode under LLDB; the binary "
+                                   "needs get-task-allow and debug info matching its build "
+                                   "archives" % case["name"])
+            if game_mode != GAME_SKIRMISH:
+                raise RuntimeError("case %s: the menu clicks did not reach a skirmish (game mode "
+                                   "%s, want %d); see %s" % (case["name"], game_mode,
+                                                             GAME_SKIRMISH, stderr_log))
         first_row = len(read_frame_log(frame_log))
         window = input_drive.game_window(process.pid)
         time.sleep(args.seconds)
@@ -257,7 +282,9 @@ def main():
                            text=True).stdout.strip()
     if archs != "arm64":
         raise SystemExit("%s is %r, not a thin arm64 binary" % (binary, archs))
+    # Absolute: the game runs with cwd=--run-dir, so a relative path would name two directories.
     log_dir = args.log_dir or (args.run_dir.parent / "fullscreen-scale-logs")
+    log_dir = log_dir.expanduser().resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
 
     input_drive = load_input_drive()
