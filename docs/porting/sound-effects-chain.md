@@ -697,3 +697,49 @@ still queued at close and is dropped with it; the Bink player had the same cut.
 | Handle released, no leftover audio, music plays after | **MEASURED, Linux / engine + shim state** |
 | Windows bytes unchanged | **INFERRED from the preprocessor** (`MSS_SAMPLE_BUFFER_API` absent, FFmpeg player not built); the CI Windows build + replay gate is the oracle |
 | Apple Silicon audibility of the intro | **UNMEASURED** |
+
+## 10. 3D voices kept their playback rate across files (pitch compounding)
+
+Human report (M1 Pro): "sometimes the audio gets mangled, or the helicopter sound sounds mangled".
+One shim defect that fits it, fixed below the `AIL_*` surface; whether it is *the* mangling the
+report describes is **UNMEASURED** (nobody has listened on the Mac since the fix).
+
+**Mechanism.** `MilesAudioManager::initFilters3D` applies an event's pitch shift as
+`AIL_set_3D_sample_playback_rate(s, REAL_TO_INT(AIL_3D_sample_playback_rate(s) * pitchShift))`,
+after `AIL_set_3D_sample_file`, on every 3D play: each loop of a looping sound
+(`startNextLoop` → `playSample3D`) and each event given a voice from `m_available3DSamples`, which
+are allocated once at `openDevice` and pooled for the session. The 2D path calls `AIL_init_sample`
+before every play, which resets the shim's rate (`OpenALSample.cpp`); the Miles API has no 3D
+counterpart, so `AIL_set_3D_sample_file` is the only point a 3D voice can return to its file's rate.
+The shim's did not: it kept `Voice::playbackRate` (Hz) and re-applied it to the new buffer. So every
+3D play multiplied the previous play's rate: a looping sound with a fixed shift climbed
+geometrically, a pooled voice random-walked across events' shifts, and a 22 050 Hz rate carried onto
+a 44 100 Hz file played it at half speed.
+
+**Evidence.** `scripts/native-audio-3d-rate-test.py` (`tests/openal_3d_playback_rate_test.cpp`,
+OpenAL Soft `null` driver, synthetic WAVs, one voice, shift 1.1; reads `AL_PITCH` off the source).
+Pre-fix shim, same harness:
+
+| case | expected | pre-fix |
+|---|---|---|
+| 22 050 Hz file, rate ×1.1, same file again | 22 050, `AL_PITCH` 1.0 | 24 255, `AL_PITCH` 1.1 |
+| engine per-loop sequence ×10 | 24 255 every loop | 26 680 → 62 905, `AL_PITCH` 2.85 at loop 10 |
+| 22 050 Hz file (×1.1) then 44 100 Hz file | 44 100, `AL_PITCH` 1.0 | 69 195, `AL_PITCH` 1.57 (carried from the loops above) |
+
+Fixed (`AIL_set_3D_sample_file` sets `playbackRate = 0` and `AL_PITCH` 1.0 after binding the new
+buffer): all three rows as expected. `AIL_allocate_3D_sample_handle` already starts a voice at rate
+0 / pitch 1 and `AIL_release_3D_sample_handle` deletes it, so neither needed a change.
+
+| claim | class |
+|---|---|
+| Rate compounds per 3D play on the pre-fix shim; reset by the fix | **MEASURED, shim state + `AL_PITCH`, synthetic input** (macOS, Apple clang 21; CI runs it with clang++-14) |
+| Retail Miles resets a 3D voice's rate when a file is set | **INFERRED** from the engine's read-and-multiply (which only applies one shift if it does) and the absence of any 3D init call; the vendored `mss.h` is a declarations-only stub and says nothing about it |
+| Engine sounds affected in play (helicopters, looping ambients) | **INFERRED** from the code path; no retail pitch-shift ranges were read and no in-game capture was taken |
+| Mac human audibility of the defect or the fix | **UNMEASURED** |
+
+A second suspect, not addressed here: loop restarts wait for the next `AIL_*` call on the main
+thread (§4.1). The render harness's 2D `loop` case, whose "engine" polls every 16 ms and restarts
+from inside the callback, renders 8 inter-loop gaps: six of 11.8 ms, one of 22.5 ms, one of 1.2 ms (≥ 1 ms of
+silence each; reported, not judged). The engine has the same shape (`notifyOfAudioCompletion` →
+`startNextLoop` inside the callback), so its gap is the 10 ms poll plus the wait for the main
+thread's next `AIL_*` call, which follows the game's frame time; in game it is **UNMEASURED**.

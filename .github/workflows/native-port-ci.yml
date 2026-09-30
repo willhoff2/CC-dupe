@@ -1539,6 +1539,22 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Setting a 3D sample file must reset the voice to the file's own rate: initFilters3D
+      # multiplies the rate it reads back, so a kept rate compounds on every loop and every reuse of
+      # a pooled voice (sound-effects-chain.md section 10). null driver, no audio device.
+      - name: Check a 3D voice's playback rate resets when a file is set
+        env:
+          CLANGXX: clang++-14
+          MINIMP3_INCLUDE_DIR: build/native/_deps/minimp3-src
+        run: |
+          set -o pipefail
+          {
+            echo '## OpenAL backend: 3D playback rate per file'
+            echo '```'
+            python3 scripts/native-audio-3d-rate-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # A quit that reaches static destruction without AIL_shutdown must not abort: the shim's
       # Library owns the service thread, and a joinable std::thread destroyed is std::terminate
       # (memory-shutdown-order.md, the OpenAL section). Runs with diagnostics off, to stderr and to

@@ -188,13 +188,16 @@ Windows, builds `core_openalaudiodevice`, checks declared-vs-defined `AIL_*` sym
 `scripts/ci/openal-standalone/` is deleted. jammy's CMake 3.22 is too old for the root
 `CMakeLists.txt` (needs 3.25), so the job pip-installs CMake 4.1.2.
 
-Two shim-level harnesses run in the same job, both built with `clang++-14` straight from the shim
-sources against the system `libopenal` and the fetched `<minimp3.h>`, both on OpenAL Soft's
+The shim-level harnesses run in the same job, all built with `clang++-14` straight from the shim
+sources against the system `libopenal` and the fetched `<minimp3.h>`, all on OpenAL Soft's
 non-device backends so no audio hardware is needed:
 
 - `scripts/native-audio-callback-test.py` (`tests/openal_callback_thread_test.cpp`, `null`
   backend): end-of-sample callbacks reach the engine on the `AIL_*` calling thread, inside one of
   its calls (sound-effects-chain.md §4.1; `ci-baselines/audio-callback-soak.json`).
+- `scripts/native-audio-3d-rate-test.py` (`tests/openal_3d_playback_rate_test.cpp`, `null`
+  backend): `AIL_set_3D_sample_file` resets the voice to the file's own rate and `AL_PITCH` 1, so
+  the engine's per-play pitch shift applies once (sound-effects-chain.md §10).
 - `scripts/native-audio-render-test.py` (`tests/openal_render_test.cpp`, `wave` backend, Wave 13):
   synthesises 440 Hz tones, plays them through `AIL_open_stream`, `AIL_start_sample` and the
   EOS-callback loop restart, and judges the rendered PCM with `scripts/audio-pcm-discontinuity.py`

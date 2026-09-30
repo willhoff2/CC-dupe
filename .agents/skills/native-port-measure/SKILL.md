@@ -222,6 +222,15 @@ from git and must report the defect; `--json` writes the facts for a doc row.
 CLANGXX=clang++-14 python3 scripts/native-audio-callback-test.py
 ```
 
+`scripts/native-audio-3d-rate-test.py` (`tests/openal_3d_playback_rate_test.cpp`, same build and
+`null` driver) gates that `AIL_set_3D_sample_file` resets a 3D voice to the file's own rate, so the
+engine's read-and-multiply pitch shift does not compound across loops and pooled reuse
+(`sound-effects-chain.md` §10).
+
+```sh
+CLANGXX=clang++-14 python3 scripts/native-audio-3d-rate-test.py
+```
+
 The rendered-PCM gate is `scripts/native-audio-render-test.py` (`tests/openal_render_test.cpp`,
 OpenAL Soft `wave` backend, needs `libopenal-dev`, `clang++-14`, NumPy and the minimp3 header —
 `MINIMP3_INCLUDE_DIR=build/native/_deps/minimp3-src` after a native build). It plays synthetic
