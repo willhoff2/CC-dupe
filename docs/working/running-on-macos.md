@@ -162,6 +162,10 @@ and a screenshot never captures the cursor.
 
 ### Fixed since the previous revision of this guide
 
+- **Score screen buttons dead after a skirmish ended naturally.** If the camera was scrolling when
+  the game was won or lost (for example with the pointer resting on a screen edge), the view kept
+  its scroll mouse lock into the shell and every click was dropped. This is original engine code,
+  fixed on every build (`../porting/game-end-mouse-lock.md`).
 - **An Angry Mob that can't be killed and keeps "healing"**, even after its general is eliminated.
   A member that crewed an unmanned vehicle was removed without dying, so the mob nexus counted it
   forever and kept respawning members every 30 s. This is original game logic, fixed on every build
