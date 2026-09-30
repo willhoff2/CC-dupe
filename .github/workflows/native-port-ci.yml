@@ -842,6 +842,22 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # A skirmish won or lost while the camera scrolled left the tactical view mouse-locked, so
+      # WindowTranslator dropped every click on the score screen. This scrolls through the real
+      # LookAtTranslator, runs the end-of-game input reset, and requires the lock to be released.
+      # See docs/porting/game-end-mouse-lock.md.
+      - name: Prove a game that ends mid-scroll releases the tactical view's mouse lock
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## End of game while scrolling'
+            echo '```'
+            python3 scripts/native-lookat-reset-modes-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Reporting a failed lock used to allocate, and the allocator is what holds the lock, so a
       # recoverable errno became an unbounded recursion at both ends of the process lifetime. This
       # makes the lock fail on purpose and requires one bounded diagnostic and an abort, against a
