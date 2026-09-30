@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -819,6 +820,13 @@ private:
 	// frame and a mission frame of one normal run (docs/porting/mission-frame-corruption.md).
 	FILE* trace_ = nullptr;
 	uint32_t trace_every_ = 0;
+	// Diagnostic hook (ZH_RENDER_FRAME_LOG=path): one CSV row per presented frame with where
+	// its wall time went and the sizes it was rendered and presented at, read by
+	// scripts/macos-fullscreen-scale-probe.py (docs/porting/fullscreen-frame-cost.md).
+	FILE* frame_log_ = nullptr;
+	std::chrono::steady_clock::time_point frame_log_scene_begin_{};
+	std::chrono::steady_clock::time_point frame_log_last_present_{};
+	double frame_log_scene_ms_ = 0.0;
 	bool trace_frame_ = false;
 	std::string trace_png_dir_;
 	// ZH_RENDER_TRACE_PERDRAW=1: in a traced frame, submit after every draw and read the
@@ -1800,6 +1808,15 @@ bool VulkanBackend::Create_Descriptor_Machinery() {
 		if (const char* per_draw = std::getenv("ZH_RENDER_TRACE_PERDRAW")) {
 			trace_per_draw_ = std::strtoul(per_draw, nullptr, 10) != 0;
 		}
+	}
+	if (const char* frame_log = std::getenv("ZH_RENDER_FRAME_LOG")) {
+		frame_log_ = std::fopen(frame_log, "w");
+		if (frame_log_ == nullptr) {
+			std::fprintf(stderr, "ZH_RENDER_FRAME_LOG: cannot open %s\n", frame_log);
+			return false;
+		}
+		std::fprintf(frame_log_, "frame,interval_ms,scene_ms,acquire_ms,present_ms,target_w,"
+		                         "target_h,swapchain_w,swapchain_h,points_w,points_h,scale\n");
 	}
 	// One block up front, so the common frame allocates nothing at draw time.
 	if (!Add_Draw_Block()) return false;
@@ -3797,6 +3814,7 @@ VkPipeline VulkanBackend::Get_Or_Create_Pipeline(const PipelineKey& key,
 // ---------------------------------------------------------------------------
 
 void VulkanBackend::Begin_Scene() {
+	if (frame_log_ != nullptr) frame_log_scene_begin_ = std::chrono::steady_clock::now();
 	vkWaitForFences(device_, 1, &frame_fence_, VK_TRUE, UINT64_MAX);
 	vkResetFences(device_, 1, &frame_fence_);
 	// Everything submitted before this point has finished, which is what makes a
@@ -4350,6 +4368,10 @@ void VulkanBackend::End_Scene(bool flip_frame) {
 	si.commandBufferCount = 1;
 	si.pCommandBuffers = &frame_cmd_;
 	vkQueueSubmit(queue_, 1, &si, frame_fence_);
+	if (frame_log_ != nullptr) {
+		frame_log_scene_ms_ = std::chrono::duration<double, std::milli>(
+		    std::chrono::steady_clock::now() - frame_log_scene_begin_).count();
+	}
 
 	in_scene_ = false;
 	Trace("frame %llu end draws=%u dropped=%u ring_overruns=%u pass_breaks=%u "
@@ -4594,6 +4616,8 @@ bool VulkanBackend::Present() {
 		return false;
 	}
 
+	using Clock = std::chrono::steady_clock;
+	const Clock::time_point present_begin = Clock::now();
 	uint32_t index = 0;
 	VK_CHECK(vkResetFences(device_, 1, &acquire_fence_));
 	VkResult acquired = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX,
@@ -4607,6 +4631,7 @@ bool VulkanBackend::Present() {
 	}
 	if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) return false;
 	VK_CHECK(vkWaitForFences(device_, 1, &acquire_fence_, VK_TRUE, UINT64_MAX));
+	const Clock::time_point acquired_at = Clock::now();
 
 	VkCommandBuffer cmd = Begin_One_Shot();
 	if (cmd == VK_NULL_HANDLE) return false;
@@ -4640,6 +4665,23 @@ bool VulkanBackend::Present() {
 	pi.pSwapchains = &swapchain_;
 	pi.pImageIndices = &index;
 	VkResult presented = vkQueuePresentKHR(queue_, &pi);
+	if (frame_log_ != nullptr) {
+		// present_ms is End_One_Shot()'s queue-idle wait for whatever of the frame the GPU has
+		// not finished, plus the blit; GPU time waited on mid-scene lands in scene_ms instead.
+		const Clock::time_point presented_at = Clock::now();
+		using Ms = std::chrono::duration<double, std::milli>;
+		const double interval_ms = frame_log_last_present_ == Clock::time_point{}
+		                               ? 0.0
+		                               : Ms(present_begin - frame_log_last_present_).count();
+		frame_log_last_present_ = present_begin;
+		std::fprintf(frame_log_, "%llu,%.3f,%.3f,%.3f,%.3f,%u,%u,%u,%u,%u,%u,%.3f\n",
+		             static_cast<unsigned long long>(frame_counter_), interval_ms,
+		             frame_log_scene_ms_, Ms(acquired_at - present_begin).count(),
+		             Ms(presented_at - acquired_at).count(), device_width_, device_height_,
+		             swapchain_extent_.width, swapchain_extent_.height, width_, height_,
+		             static_cast<double>(render_scale_));
+		std::fflush(frame_log_);
+	}
 	return presented == VK_SUCCESS || presented == VK_SUBOPTIMAL_KHR;
 }
 
