@@ -814,6 +814,19 @@ void Object::onDestroy()
 #endif
 	}
 
+	// TheSuperHackers @bugfix willhoff2 30/09/2026 A spawn removed without dying (a mob member crewing an unmanned
+	// vehicle) must still leave its spawner's count, or the mob nexus never dies. See docs/porting/mob-nexus-orphaned-spawn.md
+	if (!isEffectivelyDead())
+	{
+		Object* spawner = TheGameLogic->findObjectByID( getProducerID() );
+		SpawnBehaviorInterface* spawnerBehavior = spawner ? spawner->getSpawnBehaviorInterface() : nullptr;
+		if( spawnerBehavior )
+		{
+			DamageInfo noDamage;
+			spawnerBehavior->onSpawnDeath( getID(), &noDamage );
+		}
+	}
+
 	//
 	// run the onDelete on all modules present so they each have an opportunity to cleanup
 	// anything they need to ... including talking to any other modules
