@@ -162,6 +162,11 @@ and a screenshot never captures the cursor.
 
 ### Fixed since the previous revision of this guide
 
+- **An Angry Mob that can't be killed and keeps "healing"**, even after its general is eliminated.
+  A member that crewed an unmanned vehicle was removed without dying, so the mob nexus counted it
+  forever and kept respawning members every 30 s. This is original game logic, fixed on every build
+  (`../porting/mob-nexus-orphaned-spawn.md`).
+
 - **Dead units stayed on the map, kept a live AI and blocked terrain** — a squad dying on a bridge
   walled it off. `getDeathTypeFlag`'s `1UL << (dt - 1)` put `DEATH_NORMAL` on bit 63 at 64 bits
   instead of bit 31, so `DieMuxData::isDieApplicable` rejected every normal death and no die module
