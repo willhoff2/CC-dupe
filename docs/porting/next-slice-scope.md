@@ -25,6 +25,12 @@ MEASURED on the M1 Pro against `main`, real game data (see the per-topic docs an
   (`mouse-cursor-seam.md` §6.2, `cursor-capture-macos-arm64.json`).
 - Human audibility: music and SFX reach the speakers; the constant crackle reported before #155
   was not heard again after #155 (one human listen, not instrumented).
+- Human confirmation, 2026-09-30 (the user, by hand, not instrumented): the #157 cursor capture
+  works, and movie audio is audible on the Mac.
+- Fullscreen frame cost (2026-09-30, `fullscreen-frame-cost.md`): renderer time grows ~1.2 ms per
+  megapixel in a skirmish, but fullscreen at 1728x1117 (3456x2234 px) held the 30 fps cap at the
+  start of a skirmish and at the shell map, with fewer late frames than the user's 1024x768 window.
+  The user's "fullscreen is slow" was not reproduced there.
 
 MEASURED on Linux only: USA-01 campaign scripts/objectives/triggers execute headless
 (`campaign-flow-probe.md`); movie audio decodes and renders through the Miles/AIL sample
@@ -34,9 +40,9 @@ MEASURED on Linux only: USA-01 campaign scripts/objectives/triggers execute head
 
 | Item | State | What is still owed |
 |---|---|---|
-| #157 cursor confinement (`platform_window_cocoa.mm` only) | open, CI pending | **human trackpad confirmation** on the Mac in both `-win` and fullscreen — the exit criterion. Nobody has done it yet. |
+| #157 cursor confinement (`platform_window_cocoa.mm` only) | merged | Human confirmation received 2026-09-30: the user reports cursor capture works. The UNMEASURED cursor rows in residual 2 remain. |
 | Wave 14.2 quit abort (exception out of `OpenALAudio::Library::~Library()` at static destruction → `std::terminate`) | Linux child in flight, no PR | reproduce, bisect #153 vs #155, shim-only non-throwing destruction, red/green test that exits without `AIL_shutdown()`. If no PR exists when you read this, the slice restarts from `docs/porting/memory-shutdown-order.md` and the prompt in this table. |
-| #156 movie audio | merged | Mac human audibility UNMEASURED. |
+| #156 movie audio | merged | Mac human audibility confirmed by the user 2026-09-30 (by ear, no `OPENAL_AUDIO_DIAG` counters captured). |
 | #161 death/veterancy flag shift (`Damage.h`, `GameCommon.h`) | open, CI pending | **`Replay Check GeneralsMD` is the exit criterion** — the fix reproduces the 32-bit bit assignment, so Windows must be byte-identical, and that gate is the only thing that measures it. Nothing dies on LP64 without it: `isDieApplicable` accepted 0 of 66 over a real replay. See `docs/porting/death-flag-shift.md`; it also corrects `combat-probe.md` §5. |
 
 ### Ranked residuals (next slices, in order)
@@ -44,13 +50,22 @@ MEASURED on Linux only: USA-01 campaign scripts/objectives/triggers execute head
 1. **Quit abort** (above) — every clean quit on `main` #155/#156 reportedly aborts; user-observed
    on the Mac, mechanism INFERRED from source (joinable service thread or diagnostics/static
    destruction order), not yet reproduced.
-2. **Cursor human confirmation** for #157, then the UNMEASURED cursor rows: drag across the edge
+2. **Cursor rows still UNMEASURED** after the user confirmed #157 by hand: drag across the edge
    with a button held, multi-display, hide-on-cinematic, seven scroll directions.
-3. **Fullscreen is not fullscreen**: on the Mac "fullscreen" is an 800×600 borderless window at
-   the top-left of the display, not screen-covering. Window-mode seam
-   (`WWLib/platform/platform_window_cocoa.mm`), separate slice.
-4. **Mac audibility of movie audio** (#156) and of the stream/SFX path on the current shim, with
-   `OPENAL_AUDIO_DIAG=<file>` counters captured during the listen.
+3. **Fullscreen is not fullscreen without `-xres/-yres`**: re-MEASURED 2026-09-30, where the window
+   server reports the window at `[0, 32, 800, 600]`. With the screen's point size passed it covers
+   the screen, unstretched. The fix is for fullscreen to default the engine resolution to the
+   screen's point size (window-mode seam, separate slice). Also open under this item: the user's
+   report that fullscreen is **slow**, which was not reproduced (`fullscreen-frame-cost.md`). What is
+   still owed:
+   - what "slow" meant: ask the user for the engine's top-left FPS counter at the slow moment;
+   - a measurement in a heavier scene.
+
+   The candidate render-scale fix (fullscreen at 1 px/pt, `ZH_RENDER_SCALE`) is kept unpushed on
+   the local branch `perf/macos-fullscreen-render-scale-candidate`, and should land only if that
+   measurement shows a miss.
+4. **Stream/SFX audibility on the current shim with counters**: movie audio is now confirmed audible
+   by ear. `OPENAL_AUDIO_DIAG=<file>` counters captured during a listen are still owed.
 5. **Campaign beyond mission entry** on the Mac: natural victory / next-mission transition,
    in-mission movies, EVA (Linux probe exists, Mac UNMEASURED).
 6. Logic FPS without probe overhead; ≥20-min soak on the post-#155 shim.
