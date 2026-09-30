@@ -1,0 +1,231 @@
+{
+  "what": "Frame cost of the native macOS build per window mode, resolution and render scale, in the scene named by `scene`. Produced by scripts/macos-fullscreen-scale-probe.py from the Vulkan backend's ZH_RENDER_FRAME_LOG; see docs/porting/fullscreen-frame-cost.md.",
+  "label": "before, shell map: origin/main ec61b5c07 + ZH_RENDER_FRAME_LOG only",
+  "date_utc": "2026-09-30",
+  "machine": {
+    "model": "Apple M1 Pro",
+    "macos": "26.6.1",
+    "display": [
+      "Resolution: 3456 x 2234 Retina"
+    ]
+  },
+  "binary_archs": "arm64",
+  "scene": "shellmap",
+  "settle_seconds": 30.0,
+  "measured_seconds": 20.0,
+  "cases": [
+    {
+      "name": "windowed-1024",
+      "arguments": [
+        "-win",
+        "-xres",
+        "1024",
+        "-yres",
+        "768"
+      ],
+      "env": {},
+      "frames": 604,
+      "fps_from_median_interval": 29.98,
+      "interval_ms": {
+        "median": 33.353,
+        "p95": 34.817,
+        "mean": 33.347
+      },
+      "scene_record_ms": {
+        "median": 1.61,
+        "p95": 2.638,
+        "mean": 1.858
+      },
+      "acquire_ms": {
+        "median": 0.038,
+        "p95": 0.233,
+        "mean": 0.066
+      },
+      "present_wait_ms": {
+        "median": 10.204,
+        "p95": 11.179,
+        "mean": 9.024
+      },
+      "engine_back_buffer_points": [
+        1024,
+        768
+      ],
+      "colour_target_pixels": [
+        2048,
+        1536
+      ],
+      "colour_target_megapixels": 3.15,
+      "swapchain_pixels": [
+        2048,
+        1536
+      ],
+      "render_scale": 2.0,
+      "sizes_changed_during_window": false,
+      "window_bounds_points": [
+        352.0,
+        145.0,
+        1024.0,
+        800.0
+      ],
+      "aspect_stretched": false
+    },
+    {
+      "name": "windowed-1600x1000",
+      "arguments": [
+        "-win",
+        "-xres",
+        "1600",
+        "-yres",
+        "1000"
+      ],
+      "env": {},
+      "frames": 600,
+      "fps_from_median_interval": 30.01,
+      "interval_ms": {
+        "median": 33.325,
+        "p95": 35.25,
+        "mean": 33.352
+      },
+      "scene_record_ms": {
+        "median": 1.929,
+        "p95": 3.201,
+        "mean": 2.467
+      },
+      "acquire_ms": {
+        "median": 0.044,
+        "p95": 0.198,
+        "mean": 0.065
+      },
+      "present_wait_ms": {
+        "median": 13.654,
+        "p95": 17.401,
+        "mean": 13.694
+      },
+      "engine_back_buffer_points": [
+        1600,
+        1000
+      ],
+      "colour_target_pixels": [
+        3200,
+        2000
+      ],
+      "colour_target_megapixels": 6.4,
+      "swapchain_pixels": [
+        3200,
+        2000
+      ],
+      "render_scale": 2.0,
+      "sizes_changed_during_window": false,
+      "window_bounds_points": [
+        64.0,
+        33.0,
+        1600.0,
+        1032.0
+      ],
+      "aspect_stretched": false
+    },
+    {
+      "name": "fullscreen-1728",
+      "arguments": [
+        "-xres",
+        "1728",
+        "-yres",
+        "1117"
+      ],
+      "env": {},
+      "frames": 600,
+      "fps_from_median_interval": 29.94,
+      "interval_ms": {
+        "median": 33.4,
+        "p95": 35.447,
+        "mean": 33.357
+      },
+      "scene_record_ms": {
+        "median": 2.682,
+        "p95": 3.595,
+        "mean": 2.981
+      },
+      "acquire_ms": {
+        "median": 0.056,
+        "p95": 0.147,
+        "mean": 0.07
+      },
+      "present_wait_ms": {
+        "median": 14.538,
+        "p95": 16.037,
+        "mean": 14.285
+      },
+      "engine_back_buffer_points": [
+        1728,
+        1117
+      ],
+      "colour_target_pixels": [
+        3456,
+        2234
+      ],
+      "colour_target_megapixels": 7.72,
+      "swapchain_pixels": [
+        3456,
+        2234
+      ],
+      "render_scale": 2.0,
+      "sizes_changed_during_window": false,
+      "window_bounds_points": [
+        0.0,
+        0.0,
+        1728.0,
+        1117.0
+      ],
+      "aspect_stretched": false
+    },
+    {
+      "name": "fullscreen-default-res",
+      "arguments": [],
+      "env": {},
+      "frames": 600,
+      "fps_from_median_interval": 29.99,
+      "interval_ms": {
+        "median": 33.343,
+        "p95": 35.346,
+        "mean": 33.372
+      },
+      "scene_record_ms": {
+        "median": 1.234,
+        "p95": 2.602,
+        "mean": 1.628
+      },
+      "acquire_ms": {
+        "median": 0.04,
+        "p95": 0.227,
+        "mean": 0.072
+      },
+      "present_wait_ms": {
+        "median": 7.016,
+        "p95": 7.594,
+        "mean": 6.703
+      },
+      "engine_back_buffer_points": [
+        800,
+        600
+      ],
+      "colour_target_pixels": [
+        1600,
+        1200
+      ],
+      "colour_target_megapixels": 1.92,
+      "swapchain_pixels": [
+        1600,
+        1200
+      ],
+      "render_scale": 2.0,
+      "sizes_changed_during_window": false,
+      "window_bounds_points": [
+        0.0,
+        32.0,
+        800.0,
+        600.0
+      ],
+      "aspect_stretched": false
+    }
+  ]
+}
