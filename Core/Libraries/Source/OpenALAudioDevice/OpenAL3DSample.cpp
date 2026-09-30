@@ -152,7 +152,10 @@ int AIL_set_3D_sample_file(H3DSAMPLE sample, const void* file_image)
 	// A stereo buffer cannot be positioned by OpenAL. The engine's 3D sounds are mono; if a stereo
 	// file arrives it still plays, just without spatialisation.
 	alSourcei(object->voice.source, AL_BUFFER, (ALint)object->voice.audio.buffer);
-	applyPlaybackRate(object->voice.source, object->voice.playbackRate, object->voice.audio.rate);
+	// A new file plays at its own rate, as AIL_init_sample arranges for 2D voices: initFilters3D
+	// multiplies the rate it reads back, so a kept rate compounds on every loop and pooled reuse.
+	object->voice.playbackRate = 0;
+	alSourcef(object->voice.source, AL_PITCH, 1.0f);
 	return 1;
 }
 
