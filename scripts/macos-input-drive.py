@@ -330,6 +330,18 @@ class EngineReader:
             raise RuntimeError("attach to %d failed: %s" % (pid, error))
         self.frame = self.process.GetSelectedThread().GetFrameAtIndex(0)
 
+    @classmethod
+    def over_stopped_process(cls, lldb_module, target, process):
+        """A reader over a process another LLDB session owns and has stopped (for a probe that
+        launched the game under LLDB). Never `detach()` it: the owner resumes the process."""
+        reader = cls.__new__(cls)
+        reader.lldb = lldb_module
+        reader.debugger = None
+        reader.target = target
+        reader.process = process
+        reader.frame = process.GetSelectedThread().GetFrameAtIndex(0)
+        return reader
+
     def value(self, expression):
         result = self.frame.EvaluateExpression(expression)
         if result.GetError().Fail():

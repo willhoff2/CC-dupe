@@ -771,7 +771,10 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 
 void LookAtTranslator::resetModes()
 {
-	m_isScrolling = FALSE;
+	// TheSuperHackers @bugfix Stop a scroll instead of forgetting it: only stopScrolling() releases the
+	// view's mouse lock, which otherwise outlives the game and blocks every button on the score screen.
+	if (m_isScrolling)
+		stopScrolling();
 	m_isRotating = FALSE;
 	m_isPitching = FALSE;
 	m_isPitchingToDefault = FALSE;
