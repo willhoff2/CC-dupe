@@ -333,6 +333,13 @@ tree.
   `check-widechar-wire.py` take `--clangxx` instead.
 - The layout test's 32-bit check needs `g++-multilib`; without it that check is skipped, not failed,
   and the sweep is incomplete until you install it and see the ILP32 assertions actually pass.
+- `native-d3dx8-entrypoints-test.py` builds its suites with clang 14's AddressSanitizer, which
+  segfaults at startup, silently and at random, on a kernel with `vm.mmap_rnd_bits = 32` (6.x AWS
+  kernels): even its own `int main() { return 0; }` sanitizer probe dies in about a third of runs,
+  and the gate then reports a random subset of suites `FAILED ... it does not` right after each one
+  printed `0 failures`. That is the box, not the tree. Check `sysctl vm.mmap_rnd_bits`; if it is
+  32, run the gate as `CLANGXX=clang++-14 setarch -R python3 scripts/native-d3dx8-entrypoints-test.py`
+  (ASLR off for the process tree, sanitizers still on) and read that result as the gate.
 - Opt-in backends (`probe.OPTIONAL_BACKENDS`, currently the SDL2 window backend) are excluded from
   both the probe and the native build. If only one of the two excludes them, their denominators
   drift apart and the native-build gate reports a denominator change that means nothing.
