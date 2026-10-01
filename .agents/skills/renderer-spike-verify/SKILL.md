@@ -78,6 +78,15 @@ spikes/renderer/tools/macos-window-check.sh          # includes zh-hidpi-tests-c
 build/spike/zh-hidpi-tests-cocoa --window --min-scale 2.0    # or on its own
 ```
 
+Key routing through the real Cocoa pump (no spike build needed): Escape, the arrows and the other
+plain keys must reach the seam's queue without AppKit's `noResponderFor:keyDown:` alert sound, and
+Cmd-Q must still quit (`docs/porting/cocoa-key-routing.md`). It needs the window to become key, so
+run it on an unlocked login session; it takes keyboard focus while it runs:
+
+```sh
+python3 scripts/macos-cocoa-key-routing-test.py --require-display
+```
+
 The spike also carries a measured staging ceiling, a draw-capacity floor and two derived counts, all
 gated in the `renderer-spike-linux` job and all part of a measurement sweep. Both binary gates need
 `XDG_RUNTIME_DIR` set to a private directory and no `DISPLAY`, and their `--self-check` additionally
