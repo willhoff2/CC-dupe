@@ -5,8 +5,8 @@ User report, on the M1 Pro (2026-09-30): *"In full screen I can't press Esc. It 
 keys (at any size)."*
 
 That is two symptoms: (1) the alert sound on plain keys, windowed and fullscreen; (2) Escape not
-opening the pause (quit) menu in fullscreen. This document fixes (1). It does **not** explain (2),
-because nothing measured so far reproduces it. See §3.
+opening the pause (quit) menu in fullscreen. The same change fixes both. (1) is MEASURED in §1. (2)
+is MEASURED once per case live in §3; its mechanism is INFERRED.
 
 ## 1. The alert sound: MEASURED
 
@@ -86,52 +86,75 @@ session it reports SKIP rather than PASS.
 | Plain keys reached the beep path before the fix, windowed and fullscreen | MEASURED (NSEvents posted through the real pump, not a human keyboard) |
 | They no longer do after the fix; Cmd-Q still raises `WINDOW_EVENT_CLOSE`; text is still queued | MEASURED, same harness: 0 failures in all three modes; an LLDB breakpoint on `NSBeep` counted 0 hits post-fix against 1 per Escape pre-fix |
 | The sound the user hears is this path | INFERRED. The sound itself has not been heard by anyone since the fix; a human has to confirm it is gone |
-| A `CGEventPost` HID key in the running game hits `NSBeep` before the fix and not after | UNMEASURED: `scripts/macos-key-routing-probe.py` exists for this. The session was locked, and once it unlocked, another session's game held the single-instance lock |
+| A `CGEventPost` HID key in the running game hits `NSBeep` before the fix and not after | MEASURED, n=1 per case (§3): 1 beep per Escape and per arrow before the fix, 0 after, windowed and fullscreen |
+| Escape opens and closes the pause menu in fullscreen after the fix | MEASURED, n=1 (§3); before the fix one press toggled it twice |
 
-## 3. Escape in fullscreen: OPEN
+## 3. Escape in fullscreen: MEASURED once per case, fixed by the same change
 
-`ToggleQuitMenu()` opens the menu only when `canOpenQuitMenu()` allows it, and that requires
-`TheGameEngine->isActive()`, which is the seam's `Window_Is_Active()`: whether the game window is
-the key window. Since the pump queues Escape whatever AppKit does with it afterwards, the beep fix
-does not change whether Escape *reaches* the engine. The candidates, none measured:
+`scripts/macos-key-routing-probe.py` was run in a live skirmish on 2026-10-01. Setup:
+- the M1 Pro, `~/devin-work/cocoa-keys/run`;
+- real `CGEventPost` HID-tap events (synthetic, not a human keyboard);
+- both binaries, `zh-before` (`490f12bca`) and `zh-after` (`5dea77f56`), each run fullscreen
+  (`-xres 1728 -yres 1117`) and windowed (`-win -xres 1024 -yres 768`);
+- one run per case.
 
-- **The window is not key in the user's fullscreen session**, so the engine is inactive and the
-  quit menu is refused. `docs/porting/mouse-cursor-seam.md` §6.2 measured `active=true` in
-  fullscreen after #157, but that was a fullscreen pause menu reached through the control bar's
-  Options button, not Escape.
-- **The user's fullscreen session differed from the probes'** (for example, launched without
-  `-xres/-yres`, which leaves an 800x600 borderless window at the top-left; see
-  `next-slice-scope.md` residual 3), and the key went to another app.
-- **Escape was pressed in a state where the quit menu is gated** (a cinematic, map loading, the
-  game ending).
+Each step pressed one key once, or held an arrow for one second. Hit counts are per step. `NSBeep`
+is the sound; `noResponderFor:` also counts the silent `keyUp:` calls. "Quit menu" is
+`m_isQuitMenuVisible` after the step.
 
-What has been ruled out, MEASURED in the unit test: AppKit swallowing Escape before the pump in a
-borderless window, both as created and after the engine's own fullscreen placement. Escape reached
-the queue in both, and the window stayed key.
+| Case | Step | `NSBeep` | `cancelOperation:` | `ToggleQuitMenu` | Quit menu | Camera pivot moved |
+|---|---|---:|---:|---:|---|---|
+| before, windowed | Escape (open) | 1 | 1 | 1 | open | — |
+| | Escape (close) | 1 | 1 | 1 | closed | — |
+| | each arrow | 1 | 0 | 0 | closed | yes, all four |
+| before, **fullscreen** | Escape (open) | 1 | 1 | 1 | open | — |
+| | **Escape (close)** | **2** | **2** | **2** | **still open** | — |
+| | left arrow (next step) | 2 | **1** | **1** | closed | yes |
+| | other arrows | 1 | 0 | 0 | closed | yes |
+| after, windowed | Escape (open) / (close) | 0 / 0 | 0 / 0 | 1 / 1 | open / closed | — |
+| | each arrow | 0 | 0 | 0 | closed | yes, all four |
+| after, fullscreen | Escape (open) / (close) | 0 / 0 | 0 / 0 | 1 / 1 | open / closed | — |
+| | each arrow | 0 | 0 | 0 | closed | yes, all four |
 
-The next measurement is `scripts/macos-key-routing-probe.py`, on an unlocked session, in fullscreen
-(`-xres 1728 -yres 1117`) and windowed. It clicks into a skirmish, posts Escape and each arrow
-through the HID tap, and records:
-- `NSBeep` and `ToggleQuitMenu` hits;
-- `quit_menu_visible`, `TheGameEngine->m_isActive` and `Window_Is_Active`;
-- the key window and its first responder;
-- the tactical camera's pivot before and after each arrow.
+How much the arrows moved the camera did not change with the fix. Windowed: left 1362.7 →
+269.8, down 1966 → 600. Fullscreen after the fix: left → 714.8, down → 1156.7. Before the fix:
+left → 735.9, down → 1180.4.
 
-If the fullscreen run opens the menu, the user's report needs their exact launch line and the
-moment they pressed Escape.
+What this settles:
 
-## 4. Why the live half is missing
+- **The user's fullscreen symptom reproduces before the fix and is gone after it.** Before the
+  fix, one Escape press in fullscreen produced two `cancelOperation:` calls, two beeps and two
+  toggles. The menu closed and reopened, so to a player Escape "did nothing". A third
+  `cancelOperation:` and toggle then landed during the next step. After the fix, every Escape
+  produced exactly one toggle and no beep, in both modes.
+- **The window was key and the engine active throughout**, in every case:
+  - `[NSApp isActive]` 1 and `TheGameEngine->m_isActive` 1;
+  - the key window was the game window and its first responder `WWGameView`.
+  
+  So the "not key in fullscreen" candidate is ruled out. The extra toggles are not a gating
+  problem in `canOpenQuitMenu()`.
+- The arrows scrolled in every case, before and after the fix. Only the beep differed.
 
-The first red run was taken while the login session was unlocked. Minutes later the session
-locked (`CGSessionCopyCurrentDictionary`: `CGSSessionScreenIsLocked=1`, `CGDisplayIsAsleep=1`).
-From then on, no window from this machine's processes became key:
-- the unit test reported SKIP;
-- the game, launched from the shell in both modes, sat at the main menu with
-  `window_is_active false` and `mouse_x 0`;
-- under LLDB, Accessibility activation left `[NSApp isActive]` at 0.
+The mechanism of the extra Escape is **INFERRED, n=1 per case**. `NSBeep()` is synchronous and
+runs inside `Window_Pump()`'s `sendEvent:`. Before the fix it ran on the pump for every Escape,
+and in fullscreen it stalled the pump long enough for the window server to deliver Escape
+again. The fix removes the beep, and with it the stall. One thing does not fit a plain
+auto-repeat: `PlatformWindowHost::handleEvent()` drops key events whose `Repeat` flag is set, so
+an auto-repeat alone could not toggle the menu. The second and third toggles therefore came from
+key-downs that arrived *without* the repeat flag, or from a second caller of `ToggleQuitMenu()`.
+Which of these it was is UNMEASURED. Settling it needs the `WINDOW_EVENT_KEY_DOWN` stream for
+Escape (with `Repeat` and `Time_Ms`) and the callers of each `ToggleQuitMenu()` hit, recorded in
+a pre-fix fullscreen run. It also needs more than one run per case.
 
-A locked session is a measurement limitation, not a port defect. It also invalidates any key or
-click result taken while it lasts, so none is quoted here. Once the session unlocked, the unit
-results in §1 were re-taken. Even unlocked, the first window a test process opens occasionally
-fails to become key within the test's 3 s wait; the test reports that mode as SKIP rather than
-PASS.
+## 4. The run that could not be measured, and why
+
+The first live attempt was made while the login session was locked
+(`CGSSessionCopyCurrentDictionary`: `CGSSessionScreenIsLocked=1`, `CGDisplayIsAsleep=1`). No window
+became key, and the game sat at the main menu with `window_is_active false` and `mouse_x 0`. A
+locked session is a measurement limitation, not a port defect, and nothing taken under it is
+quoted here. The unit results in §1 and the live table in §3 were taken after it unlocked. Even
+then, the first window a test process opens occasionally fails to become key within the unit
+test's 3 s wait; the test reports that mode as SKIP rather than PASS.
+
+Still owed: the user's confirmation, by ear and by hand, that the sound is gone and that Escape
+opens and closes the pause menu in fullscreen.
