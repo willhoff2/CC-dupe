@@ -39,7 +39,7 @@ namespace
 {
 
 int TheFailures = 0;
-int TheUnhandledKeyCount = 0;			// noResponderFor:keyDown: calls, which is what beeps
+int TheUnhandledKeyCount = 0;			// calls into either AppKit path that ends in NSBeep()
 
 void Check(bool condition, const char * what)
 {
@@ -59,10 +59,23 @@ void Counting_No_Responder_For(id self, SEL selector, SEL event_selector)
 	if (beeps) ++TheUnhandledKeyCount;
 }
 
+// Escape takes the other path: NSWindow's keyDown: turns it into cancelOperation:, which beeps
+// when the window has nothing to cancel (MEASURED: one NSBeep() per Escape before the fix).
+void Counting_Cancel_Operation(id self, SEL selector, id sender)
+{
+	(void)self;
+	(void)selector;
+	(void)sender;
+	std::printf("       -[NSWindow cancelOperation:] reached (AppKit would beep)\n");
+	++TheUnhandledKeyCount;
+}
+
 void Install_Unhandled_Key_Counter()
 {
-	Method method = class_getInstanceMethod([NSResponder class], @selector(noResponderFor:));
-	method_setImplementation(method, reinterpret_cast<IMP>(Counting_No_Responder_For));
+	Method no_responder = class_getInstanceMethod([NSResponder class], @selector(noResponderFor:));
+	method_setImplementation(no_responder, reinterpret_cast<IMP>(Counting_No_Responder_For));
+	Method cancel = class_getInstanceMethod([NSWindow class], @selector(cancelOperation:));
+	method_setImplementation(cancel, reinterpret_cast<IMP>(Counting_Cancel_Operation));
 }
 
 NSWindow * Game_Window()
