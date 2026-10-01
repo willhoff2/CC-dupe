@@ -35,8 +35,8 @@ REPO = Path(__file__).resolve().parent.parent
 XCODE_PYTHON = Path("/Applications/Xcode.app/Contents/Developer/usr/bin/python3")
 KEY_ESCAPE = 53
 ARROWS = {"left": 123, "right": 124, "down": 125, "up": 126}
-BEEP_FUNCTIONS = ["NSBeep", "-[NSResponder noResponderFor:]", "-[NSWindow cancelOperation:]",
-                  "ToggleQuitMenu"]
+BEEP_FUNCTIONS = ["NSBeep", "-[NSResponder noResponderFor:]",
+                  "-[NSWindow(NSEventRouting) cancelOperation:]", "ToggleQuitMenu"]
 
 ENGINE_EXPRESSIONS = {
     "quit_menu_visible": "(int)((W3DInGameUI*)TheInGameUI)->m_isQuitMenuVisible",

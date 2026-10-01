@@ -14,29 +14,45 @@ because nothing measured so far reproduces it. See §3.
 queues `WINDOW_EVENT_KEY_DOWN`/`_UP` and `WINDOW_EVENT_TEXT` for the engine), and then forwards the
 event with `-[NSApplication sendEvent:]` so that the title bar, the menu and Cmd-Q keep working.
 For a plain key, `sendEvent:` hands the event to the key window's first responder. That is the game
-view, which had no `keyDown:`, so the key walked the responder chain (view, window, application)
-unhandled and ended in `-[NSResponder noResponderFor:]`. For `keyDown:`, that method plays the system
-alert sound. The engine had already received the key, so the sound was the only visible effect.
+view, which had no `keyDown:`, so the key went up to `NSWindow`'s own `keyDown:`. That method plays
+the system alert sound: Escape through `cancelOperation:`, every other unconsumed key through
+`-[NSResponder noResponderFor:]`. The engine had already received the key, so the sound was the only visible effect.
 
 The measurement is `scripts/macos-cocoa-key-routing-test.py`. It compiles the real backend with
 `Core/Libraries/Source/WWVegas/WWLib/platform/tests/cocoa_key_routing_test.mm`, which:
 - opens the window through `Window_Create()`;
 - posts key events with `-[NSApplication postEvent:atStart:]`;
 - drains them through `Window_Poll_Event()`, which is the real pump;
-- replaces `-[NSResponder noResponderFor:]` (implemented only on `NSResponder`; `NSView`, `NSWindow`
-  and `NSApplication` inherit it, checked with the ObjC runtime) with a counter that does not beep.
+- replaces both AppKit methods that end in `NSBeep()` with counters that do not beep.
 
-Before the fix, on the M1 Pro (macOS 26.6.1, AppleClang, unlocked login session):
+There are two such paths, and an LLDB breakpoint on `NSBeep` was needed to find the second:
 
-| Mode | Keys | Reached the seam's queue | `noResponderFor:keyDown:` (beeps) |
+- **`-[NSResponder noResponderFor:]` with `keyDown:`.** This is where the arrows, letters, Return
+  and the F-keys end. It is implemented only on `NSResponder`; `NSView`, `NSWindow` and
+  `NSApplication` inherit it (checked with the ObjC runtime).
+- **`-[NSWindow cancelOperation:]`.** `NSWindow`'s own `keyDown:` turns Escape into
+  `cancelOperation:`, which beeps when the window has nothing to cancel. Pre-fix, one Escape gave
+  1 hit on `cancelOperation:`, 1 hit on `NSBeep`, and 0 on `noResponderFor:`. Post-fix, all three
+  were 0.
+
+The test runs three modes:
+- windowed 320x240;
+- fullscreen, as `Window_Create()` makes it (borderless);
+- fullscreen as the engine then places it: `DX8Wrapper`'s `SetWindowPos(HWND_TOPMOST, 0, 0, w,
+  h, 0)`, replayed through the shim's three calls.
+
+It checks nine keys: Escape, the four arrows, A, Return, Tab and F1. It also checks that
+`WINDOW_EVENT_TEXT 'a'` is still queued, and that Cmd-Q still raises `WINDOW_EVENT_CLOSE`. Results
+on the M1 Pro (macOS 26.6.1, AppKit, unlocked login session, 2026-10-01):
+
+| Build | Keys reaching the seam's queue (KEY_DOWN + KEY_UP, set-1 code) | Keys reaching a beep path | Cmd-Q / text |
 |---|---|---|---|
-| windowed 320x240 | Escape, 4 arrows, A, Tab, F1 | KEY_DOWN + KEY_UP, correct set-1 codes, all 8 | **all 8** |
-| windowed | Return | KEY_DOWN + KEY_UP | no; only `noResponderFor:keyUp:`, which is silent |
-| fullscreen (borderless) | same 9 keys | all 9 | same 8 of 9 |
-| both | Cmd-Q | `WINDOW_EVENT_CLOSE` through the main menu | no |
+| pre-fix (`490f12bca`) | 9 of 9, in all 3 modes | **8 of 9 in every mode**: Escape (`cancelOperation:`), the 4 arrows, A, Return, F1 (`noResponderFor:keyDown:`). **24 failures** | both still work |
+| fixed | 9 of 9, in all 3 modes | **0**. 73 PASS, **0 failures** | both still work |
 
-`keyUp:` and `mouseMoved:` also fall off the chain, but AppKit beeps only for `keyDown:`. The test
-logs those two and counts only `keyDown:`.
+Tab does not beep before the fix: `NSWindow` consumes it for key-view navigation. `keyUp:` and
+`mouseMoved:` also fall off the chain, but AppKit does not beep for those, so the test only logs
+them.
 
 Two source-reading inferences turned out wrong under measurement. Both are recorded so that nobody
 repeats them:
@@ -68,9 +84,9 @@ session it reports SKIP rather than PASS.
 | Claim | Status |
 |---|---|
 | Plain keys reached the beep path before the fix, windowed and fullscreen | MEASURED (NSEvents posted through the real pump, not a human keyboard) |
-| They no longer do after the fix; Cmd-Q still raises `WINDOW_EVENT_CLOSE`; text is still queued | UNMEASURED: the session locked before the green run. See §4 |
+| They no longer do after the fix; Cmd-Q still raises `WINDOW_EVENT_CLOSE`; text is still queued | MEASURED, same harness: 0 failures in all three modes; an LLDB breakpoint on `NSBeep` counted 0 hits post-fix against 1 per Escape pre-fix |
 | The sound the user hears is this path | INFERRED. The sound itself has not been heard by anyone since the fix; a human has to confirm it is gone |
-| A `CGEventPost` HID key in the running game hits `NSBeep` before the fix and not after | UNMEASURED: `scripts/macos-key-routing-probe.py` exists for this, but the session was locked |
+| A `CGEventPost` HID key in the running game hits `NSBeep` before the fix and not after | UNMEASURED: `scripts/macos-key-routing-probe.py` exists for this. The session was locked, and once it unlocked, another session's game held the single-instance lock |
 
 ## 3. Escape in fullscreen: OPEN
 
@@ -90,10 +106,8 @@ does not change whether Escape *reaches* the engine. The candidates, none measur
   game ending).
 
 What has been ruled out, MEASURED in the unit test: AppKit swallowing Escape before the pump in a
-borderless window created fullscreen. Escape reached the queue there, and the window was key.
-The test's third case replays the engine's own fullscreen placement after creation
-(`SetWindowPos(HWND_TOPMOST, ...)` through the shim's three calls: always-on-top, position, client
-size). It was added after the session locked and is UNMEASURED.
+borderless window, both as created and after the engine's own fullscreen placement. Escape reached
+the queue in both, and the window stayed key.
 
 The next measurement is `scripts/macos-key-routing-probe.py`, on an unlocked session, in fullscreen
 (`-xres 1728 -yres 1117`) and windowed. It clicks into a skirmish, posts Escape and each arrow
@@ -108,7 +122,7 @@ moment they pressed Escape.
 
 ## 4. Why the live half is missing
 
-The red run above was taken while the login session was unlocked. Minutes later the session
+The first red run was taken while the login session was unlocked. Minutes later the session
 locked (`CGSessionCopyCurrentDictionary`: `CGSSessionScreenIsLocked=1`, `CGDisplayIsAsleep=1`).
 From then on, no window from this machine's processes became key:
 - the unit test reported SKIP;
@@ -117,4 +131,7 @@ From then on, no window from this machine's processes became key:
 - under LLDB, Accessibility activation left `[NSApp isActive]` at 0.
 
 A locked session is a measurement limitation, not a port defect. It also invalidates any key or
-click result taken while it lasts, so none is quoted here.
+click result taken while it lasts, so none is quoted here. Once the session unlocked, the unit
+results in §1 were re-taken. Even unlocked, the first window a test process opens occasionally
+fails to become key within the test's 3 s wait; the test reports that mode as SKIP rather than
+PASS.
