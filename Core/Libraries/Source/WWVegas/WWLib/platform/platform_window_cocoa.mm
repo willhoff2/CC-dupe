@@ -138,6 +138,28 @@
 	}
 }
 
+/*
+**	The keyboard. Window_Pump() has already queued every key for the engine before it forwards
+**	the event to -[NSApplication sendEvent:], which still matches key equivalents (Cmd-Q against
+**	the main menu) before any view sees the key. Unhandled, a plain key reached NSWindow's own
+**	keyDown:, which plays the system alert sound: Escape through cancelOperation:, the arrows and
+**	the rest through -[NSResponder noResponderFor:] (docs/porting/cocoa-key-routing.md).
+*/
+- (void)keyDown:(NSEvent *)event
+{
+	(void)event;
+}
+
+- (void)keyUp:(NSEvent *)event
+{
+	(void)event;
+}
+
+- (void)flagsChanged:(NSEvent *)event
+{
+	(void)event;
+}
+
 @end
 
 /*

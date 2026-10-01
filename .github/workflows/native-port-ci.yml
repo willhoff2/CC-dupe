@@ -1992,6 +1992,19 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Escape and the arrows used to fall off AppKit's responder chain into the system alert
+      # sound after the pump had already queued them. The test needs the window to become key and
+      # reports SKIP (exit 0) when the runner cannot give it that.
+      - name: Route keys through the Cocoa pump without the alert-sound path
+        run: |
+          set -o pipefail
+          {
+            echo '## Cocoa key routing'
+            echo '```'
+            python3 scripts/macos-cocoa-key-routing-test.py 2>&1
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The standalone check a Mac session runs, in the mode that tolerates having no display,
       # so that the script itself is exercised rather than only documented.
       - name: Run the standalone macOS window check (no-display mode)
