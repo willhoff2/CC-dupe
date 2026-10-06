@@ -6,7 +6,9 @@ cocoa_key_routing_test.mm and runs it in a windowed and a fullscreen (borderless
 posts Escape, the arrows and a few other keys as NSEvents through Window_Pump and asserts that each
 reaches the seam's queue and that none falls off AppKit's responder chain into
 -[NSResponder noResponderFor:], which is where the system alert sound comes from. Cmd-Q must still
-reach the main menu. See docs/porting/cocoa-key-routing.md.
+reach the main menu. Each key and mouse event's Time_Ms must be on timeGetTime()'s clock, the one
+Keyboard::checkKeyRepeat() measures a hold against. See docs/porting/cocoa-key-routing.md and
+docs/porting/event-clock.md.
 
 It needs a login session with a display: the window has to become key for AppKit to route keys to
 it at all. Without one the test exits 77 and this script reports SKIP (exit 0), unless
@@ -26,6 +28,7 @@ import tempfile
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLANGXX = os.environ.get("CLANGXX", "clang++")
 PLATFORM_DIR = "Core/Libraries/Source/WWVegas/WWLib/platform"
+UTILITY_DIR = "Dependencies/Utility"
 SOURCES = [
     f"{PLATFORM_DIR}/platform_window_cocoa.mm",
     f"{PLATFORM_DIR}/tests/cocoa_key_routing_test.mm",
@@ -38,6 +41,7 @@ def build(work_dir):
     binary = work_dir / "cocoa_key_routing_test"
     command = [CLANGXX, "-std=c++20", "-ObjC++", "-Wall", "-Wextra",
                "-Wno-missing-field-initializers", f"-I{REPO_ROOT / PLATFORM_DIR}",
+               f"-I{REPO_ROOT / UTILITY_DIR}",
                *[str(REPO_ROOT / source) for source in SOURCES],
                *[flag for name in FRAMEWORKS for flag in ("-framework", name)],
                "-o", str(binary)]
@@ -74,7 +78,8 @@ def main():
         if result.returncode != 0:
             print(f"FAIL: the Cocoa key-routing test exited {result.returncode}")
             return 1
-        print("PASS: keys reach the seam's queue with no AppKit beep path, Cmd-Q still quits")
+        print("PASS: keys reach the seam's queue with no AppKit beep path, Cmd-Q still quits, "
+              "event stamps are on timeGetTime()'s clock")
         return 0
     finally:
         if args.keep:

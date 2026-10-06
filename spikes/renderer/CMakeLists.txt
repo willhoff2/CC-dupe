@@ -211,6 +211,8 @@ endif()
 # The seam under test lives in the engine tree, not here, because it is engine code; the
 # spike just builds it standalone, exactly as it does with the D3D8-shaped backend.
 set(WWLIB_PLATFORM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Libraries/Source/WWVegas/WWLib")
+# Both backends stamp events on timeGetTime()'s clock, which Utility/time_compat.h defines.
+set(UTILITY_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../Dependencies/Utility")
 
 # The presentation variant the window spikes link, and the same configuration the engine's own
 # archive is built with by scripts/native-build.py: the surface comes from the seam
@@ -228,7 +230,7 @@ if(SPIKE_HAVE_SDL2)
         src/window_spike.cpp
         "${WWLIB_PLATFORM_DIR}/platform/platform_window_sdl2.cpp")
     add_dependencies(zh-window-spike spike-shaders)
-    target_include_directories(zh-window-spike PRIVATE "${WWLIB_PLATFORM_DIR}")
+    target_include_directories(zh-window-spike PRIVATE "${WWLIB_PLATFORM_DIR}" "${UTILITY_INCLUDE_DIR}")
     target_link_libraries(zh-window-spike PRIVATE zh-render-backend-window)
     target_compile_definitions(zh-window-spike PRIVATE SPIKE_WITH_PLATFORM_WINDOW)
     if(TARGET SDL2::SDL2)
@@ -252,7 +254,7 @@ if(SPIKE_HAVE_SDL2)
         src/hidpi_tests.cpp
         "${WWLIB_PLATFORM_DIR}/platform/platform_window_sdl2.cpp")
     add_dependencies(zh-hidpi-tests-sdl2 spike-shaders)
-    target_include_directories(zh-hidpi-tests-sdl2 PRIVATE "${WWLIB_PLATFORM_DIR}")
+    target_include_directories(zh-hidpi-tests-sdl2 PRIVATE "${WWLIB_PLATFORM_DIR}" "${UTILITY_INCLUDE_DIR}")
     target_link_libraries(zh-hidpi-tests-sdl2 PRIVATE zh-render-backend-window)
     target_compile_definitions(zh-hidpi-tests-sdl2 PRIVATE SPIKE_WITH_PLATFORM_WINDOW)
     if(TARGET SDL2::SDL2)
@@ -279,7 +281,7 @@ if(APPLE)
             src/window_spike.cpp
             "${WWLIB_PLATFORM_DIR}/platform/platform_window_cocoa.mm")
         add_dependencies(zh-window-spike-cocoa spike-shaders)
-        target_include_directories(zh-window-spike-cocoa PRIVATE "${WWLIB_PLATFORM_DIR}")
+        target_include_directories(zh-window-spike-cocoa PRIVATE "${WWLIB_PLATFORM_DIR}" "${UTILITY_INCLUDE_DIR}")
         target_link_libraries(zh-window-spike-cocoa PRIVATE zh-render-backend-window
             "-framework AppKit" "-framework QuartzCore" "-framework Metal"
             "-framework CoreGraphics" "-framework Foundation" "-framework Carbon")
@@ -298,7 +300,8 @@ if(APPLE)
         add_executable(zh-macos-window-metrics
             src/macos_window_metrics.mm
             "${WWLIB_PLATFORM_DIR}/platform/platform_window_cocoa.mm")
-        target_include_directories(zh-macos-window-metrics PRIVATE src "${WWLIB_PLATFORM_DIR}")
+        target_include_directories(zh-macos-window-metrics PRIVATE
+            src "${WWLIB_PLATFORM_DIR}" "${UTILITY_INCLUDE_DIR}")
         target_link_libraries(zh-macos-window-metrics PRIVATE Vulkan::Vulkan
             "-framework AppKit" "-framework QuartzCore" "-framework Metal"
             "-framework CoreGraphics" "-framework ApplicationServices"
@@ -314,7 +317,7 @@ if(APPLE)
             src/hidpi_tests.cpp
             "${WWLIB_PLATFORM_DIR}/platform/platform_window_cocoa.mm")
         add_dependencies(zh-hidpi-tests-cocoa spike-shaders)
-        target_include_directories(zh-hidpi-tests-cocoa PRIVATE "${WWLIB_PLATFORM_DIR}")
+        target_include_directories(zh-hidpi-tests-cocoa PRIVATE "${WWLIB_PLATFORM_DIR}" "${UTILITY_INCLUDE_DIR}")
         target_link_libraries(zh-hidpi-tests-cocoa PRIVATE zh-render-backend-window
             "-framework AppKit" "-framework QuartzCore" "-framework Metal"
             "-framework CoreGraphics" "-framework Foundation" "-framework Carbon")
