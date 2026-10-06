@@ -97,6 +97,12 @@ nothing in the sweep depends on the absolute value: every site either subtracts 
 compares two readings. The two sites that *store* a reading — the RNG seeds in §3.4 — only need
 entropy.
 
+One site the sweep missed subtracts a reading from a stamp taken on *another* clock:
+`Keyboard::checkKeyRepeat()` measures a key's hold as `timeGetTime()` minus the window event's
+`Time_Ms`. Both window backends stamped events on their toolkit's clock, so on macOS every key
+repeated in the frame it went down. The backends now carry the event's age over to
+`timeGetTime()`'s clock; see `event-clock.md`.
+
 `GetTickCount` on Windows advances in 10–16 ms steps; `timeGetTime` advances in 1 ms steps after
 `timeBeginPeriod(1)`. The POSIX implementations are both ~1 ms or better, i.e. the stand-ins are
 *more* precise than the originals, never less. Nothing in the sweep depends on a coarse tick.
