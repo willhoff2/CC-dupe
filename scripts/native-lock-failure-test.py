@@ -240,8 +240,10 @@ def main():
     try:
         fixed_object = scratch / "lock_failure_test.o"
         control_object = scratch / "lock_failure_test_control.o"
-        for out, extra in ((fixed_object, ()),
-                           (control_object, ("-DLOCK_FAILURE_NEGATIVE_CONTROL",))):
+        # The harness's allocations are the stimulus, so it is -O0 even with the engine at -O2:
+        # optimised, clang may elide a new/delete pair and never enter the allocator under test.
+        for out, extra in ((fixed_object, ("-O0",)),
+                           (control_object, ("-O0", "-DLOCK_FAILURE_NEGATIVE_CONTROL"))):
             output = runner.compile_harness(out, harness=HARNESS, donor=FLAG_DONOR,
                                             extra_arguments=extra)
             if args.verbose and output.strip():

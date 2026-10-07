@@ -179,6 +179,15 @@ def main():
               file=sys.stderr)
         return 2
 
+    # Absent means -O0: every result before docs/porting/optimised-native-build.md was unoptimised.
+    if baseline.get("optimised", False) != results.get("optimised", False):
+        print(f"FAIL: {baseline_path.name} and these results differ in optimisation (baseline "
+              f"optimised={baseline.get('optimised', False)}, results "
+              f"optimised={results.get('optimised', False)}); inlining and dead-code elimination "
+              "change which symbols are undefined, so the counts are not comparable",
+              file=sys.stderr)
+        return 2
+
     if baseline.get("clang_major") != results.get("clang_major"):
         print(f"FAIL: baseline was measured with clang {baseline.get('clang_major')}, these "
               f"results with clang {results.get('clang_major')}; codegen and libstdc++ differ "
