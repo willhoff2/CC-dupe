@@ -380,8 +380,9 @@ CMAKE_SOURCE_RE = re.compile(r"^\s+([\w./-]+\.cpp)\s*$")
 # Backends that are opt-in in CMake because they need a dependency this probe deliberately does
 # not have on its include path (SDL2). They are not part of "how much of the engine compiles
 # natively": the answer for them is "only with their dependency present", which the spike's own
-# build answers instead. See docs/porting/window-event-loop.md.
-OPTIONAL_BACKENDS = {"platform_window_sdl2.cpp"}
+# build answers instead. See docs/porting/window-event-loop.md. The SDL2 backend's own test
+# (platform/tests/, which the WWLib target's source walk reaches) needs <SDL.h> for the same reason.
+OPTIONAL_BACKENDS = {"platform_window_sdl2.cpp", "sdl2_event_clock_test.cpp"}
 
 # Sources CMake compiles only in the *other* branch of a mutually exclusive option, and which
 # therefore cannot compile in the configuration being measured. GameMemoryNull.cpp is the whole
