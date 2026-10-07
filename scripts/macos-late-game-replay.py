@@ -38,9 +38,14 @@ GAME_TIME = re.compile(r"Elapsed Time: (\d+):(\d+) Game Time: (\d+):(\d+)/(\d+):
 
 def other_game_processes():
     proc = subprocess.run(["pgrep", "-fl", "(^|/)zh"], capture_output=True, text=True)
-    # This script's own command line names the binary, so it matches the pattern too.
-    return [line for line in proc.stdout.splitlines()
-            if line.strip() and Path(__file__).name not in line]
+    # Only processes whose executable is a game binary: this script's own command line, and any shell
+    # whose command text mentions one, match the pattern too.
+    games = []
+    for line in proc.stdout.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and Path(fields[1]).name.startswith("zh"):
+            games.append(line)
+    return games
 
 
 def screen_locked():
@@ -151,6 +156,7 @@ def main():
     game_pid = None
     sample_taken = None
     render_enabled = None
+    highest_frame = 0
     ended_by = None
     last_progress = (None, time.time())
     while True:
@@ -176,8 +182,12 @@ def main():
                            capture_output=True)
             sample_taken = {"at_frame": frame, "path": sample_path.name,
                             "end_frame": last_logic_frame(out / "logic.csv")}
-        if args.rendered and frame is not None and frame >= args.last_frame \
-                and time.time() - last_progress[1] > args.idle_seconds:
+        if frame is not None:
+            highest_frame = max(highest_frame, frame)
+        # The finished replay drops back to the shell, whose own logic counts from frame 0 again.
+        # Polled twice a second, so the last few frames before the drop back to the shell can be missed.
+        if args.rendered and highest_frame >= args.last_frame - 60 and (
+                frame < highest_frame or time.time() - last_progress[1] > args.idle_seconds):
             ended_by = "replay-finished"
             break
         time.sleep(0.5)
@@ -200,6 +210,7 @@ def main():
         "returncode": proc.returncode,
         "wall_seconds": round(time.time() - started, 1),
         "last_logic_frame": last_logic_frame(out / "logic.csv"),
+        "highest_logic_frame": highest_frame,
         "recorded_total_frames": recorded_total_frames(out / "stdout.log"),
         "crc_mismatch_lines": [line for line in stdout_text.splitlines() if "CRC Mismatch" in line],
         "elapsed_lines": [line for line in stdout_text.splitlines() if line.startswith("Elapsed Time")],

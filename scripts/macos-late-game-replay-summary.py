@@ -198,7 +198,8 @@ def evaluate_rules(headless, rendered, candidate="B"):
             not run["crc_mismatch_lines"] and run["last_frame"] >= reference_last[recording] - 100
             for run in runs]
     outcomes["played_in_sync_to_end"] = validity
-    valid = all(all(flags) for key, flags in validity.items() if key.startswith(candidate + "/"))
+    candidate_flags = [flags for key, flags in validity.items() if key.startswith(candidate + "/")]
+    valid = all(all(flags) for flags in candidate_flags) if candidate_flags else None
     outcomes["B_valid"] = valid
 
     headless_ratios = {}
@@ -224,8 +225,10 @@ def evaluate_rules(headless, rendered, candidate="B"):
     outcomes["H1_rendered"] = rendered_gain
     rendered_pass = bool(rendered_gain) and all(
         value["gain_ms"] >= H1_RENDERED_MIN_GAIN_MS for value in rendered_gain.values())
-    if not valid:
-        outcomes["H1"] = "B INVALID (desync or incomplete playback)"
+    if valid is None:
+        outcomes["H1"] = f"no headless runs of {candidate}"
+    elif not valid:
+        outcomes["H1"] = f"{candidate} INVALID (desync or incomplete playback)"
     elif not rendered_gain:
         outcomes["H1"] = ("headless part " + ("met" if headless_pass else "NOT met")
                           + "; rendered part not measured")
@@ -288,7 +291,7 @@ def main():
                       f"{run.get('scene_ms_median', float('nan')):.1f} | "
                       f"{run.get('present_ms_median', float('nan')):.1f} | {len(run['crc_mismatch_lines'])} |")
     outcomes = {"pre-registered (B)": evaluate_rules(headless, rendered, "B")}
-    candidates = sorted({binary for binary, _ in headless} - {"A", "B"})
+    candidates = sorted({binary for binary, _ in list(headless) + list(rendered)} - {"A", "B"})
     for candidate in candidates:
         outcomes[f"post hoc, same thresholds ({candidate} as B)"] = evaluate_rules(headless, rendered, candidate)
     print("\n## rules")

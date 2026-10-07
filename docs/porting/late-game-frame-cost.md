@@ -5,7 +5,14 @@ it. I think it's certainly when there's a lot of things to render in the game. I
 original does that on Windows / natively."*
 
 This is stage 1 of a measurement: source reading plus the data earlier probes already recorded. No
-game was launched for it. Stage 2 measures on the Mac, using the plan in §7.
+game was launched for it. Stage 2 measured on the Mac, using the plan in §7: its results are §10.
+
+**Stage 2 in short (§10).** An optimised build makes late-game logic **4x faster** on replayed
+games, and the rendered late median falls from 53 to 37 ms. Plain `-O2` **desyncs replays**: Apple
+clang fuses `sinf`+`cosf` into `__sincosf_stret` in `Locomotor.cpp`; adding `-fmath-errno` plays
+both recordings in sync. Optimised, the late frame is the renderer's GPU waits, and with the
+`perf/text-render-no-flush` backend the replay holds 30 fps. A `-replay` run draws nothing until a
+flag is cleared (§10.6). The "heavier game" rule came out NOT CONFIRMED (1.43x, bar 2x).
 
 Evidence categories, never blended: **MEASURED** (method named, data path given), **INFERRED**
 (from source or from general D3D8/driver knowledge, not run), **UNMEASURED**.
@@ -416,7 +423,8 @@ not removes.
   All were recorded by `6a593e409`-based binaries. Since then only
   `AITNGuard.cpp` changed (#171, a null check on a path that crashed). So they should play on
   `main@030a7c11b` without divergence (INFERRED; the CRC check confirms it either way).
-- **UNVERIFIED.**
+- **UNVERIFIED** (at stage 1; stage 2 ran the rendered path, see §10.6: it draws nothing until
+  `m_breakTheMovie` is cleared, and the camera is the observer's start view).
   - The *rendered* (`-replay` without `-headless`) path on macOS has not been run.
   - What the camera shows during playback: INFERRED to be the local player's start view, which
     matches the probe's base view.
@@ -567,3 +575,285 @@ data.
 - *Rendered late-game frame time.* From `ZH_ENGINE_FRAME_LOG`: the difference between successive
   passes' `start_ms`, over passes whose `logic_frame` ≥ 21,600 (game minute 12) up to the
   recording's last frame. One run per binary; median and p95 reported.
+
+### 10.2 What was built and run
+
+All runs: M1 Pro (10 cores, 16 GB), macOS 26, AppleClang 21 (`clang-2100.3.34.2`), arm64
+(`lipo -archs` = `arm64`, `sysctl.proc_translated` = 0), one game process at a time, each on a
+private copy of the recording's user data. Run data stays outside the repository
+(`~/devin-work/late-game/`).
+
+| binary | flags | commit | `macos-binary-opt-level.py` |
+|---|---|---|---|
+| **A** | as `native-build.py` builds today (`CMAKE_BUILD_TYPE=Debug`, `-g`, no `-O`) | `aa606e0d8` | every probed symbol `O0-like` |
+| **B** (pre-registered) | `-O2 -fno-strict-aliasing` | same | every probed symbol `optimised`; `Pathfinder::getCell` inlined away (no symbol) |
+| **B2** (added after B failed, §10.3) | `-O2 -fno-strict-aliasing -fmath-errno` | same | same as B |
+
+- **How the flags were passed.** `CXXFLAGS`/`OBJCXXFLAGS` in the environment of the first
+  `native-build.py` configure of a fresh `--build-dir`. CMake copies them into `CMAKE_CXX_FLAGS`
+  (checked in `CMakeCache.txt` and in `compile_commands.json`: `-O2 -fno-strict-aliasing -g
+  -ffp-contract=off`). `native-build.py` needs no change. A full build takes ~3.5 min at either
+  level.
+- **Commit.** `030a7c11b` plus two measurement hooks, both dormant unless their variable is set:
+  - `ZH_LOGIC_FRAME_LOG=<csv>`: one row per `GameLogic::update`: `frame`, `start_ms`,
+    `logic_ms`, `ai_ms` (`TheAI->UPDATE()`, i.e. the pathfinder and AI players), `objects`.
+  - `ZH_ENGINE_FRAME_LOG=<csv>`: one row per `GameEngine::update` pass (one rendered frame):
+    `logic_frame`, `start_ms`, `client_ms` (`GameClient::UPDATE`, which draws and presents),
+    `logic_ms`.
+- **Scripts.** `scripts/macos-late-game-replay.py` runs one replay on one binary;
+  `scripts/macos-late-game-replay-summary.py` folds runs into the tables below and applies §10.1
+  (unit-tested by `-test.py`); `scripts/macos-opt-divergence-bisect.py` finds which optimised
+  archive, object file and flag desyncs a replay.
+- **Recordings.** `heavy-before-2` plays to logic frame 32,098 (17:49 of game time) and
+  `heavy-aftersync-1` to 28,148 (15:38), on every in-sync run. Their headers carry no frame count
+  (the probe killed the recording game), so "played to the end" means "reached the frame every A run
+  reaches". Neither covers the probes' full 32 minutes.
+
+### 10.3 B goes out of sync: `__sincosf_stret` in `Locomotor.cpp` (MEASURED)
+
+**B desyncs on both recordings, every time** (MEASURED): `CRC Mismatch in Frame 700` on
+`heavy-before-2` (every one of more than ten runs, including two timed ones) and `in Frame 2600` on
+`heavy-aftersync-1` (one run). A plays both to the end in sync, four
+runs out of four. By the pre-registered rule, **B is invalid and H1 is not landable as-is.**
+
+Finding the cause was cheap, so it was done:
+
+1. **What differs.** `CNC_CRC_DIAG` on A and B, then `CNC_CRC_DIAG_BYTES=700`: checkpoint 600
+   matches. At 700 the first differing record is object 250, a `SupW_AmericaVehicleDozer`.
+   Its position bytes are equal; the rotation elements of its `Matrix3D` differ in the low bits
+   (`0x3F57D5A7` vs `0x3F57D62C`). A turning unit's heading drifts.
+2. **Which code.** `macos-opt-divergence-bisect.py` relinks mixed binaries:
+   - one optimised archive at a time, the rest `-O0`: only `libgeneralsmd_code_gameengine.a`
+     desyncs;
+   - halving its 381 members: **`Locomotor.cpp.o` alone desyncs**, and the other 380 members
+     optimised do not (to frame 800).
+3. **Which optimisation.** `Locomotor.cpp` recompiled with variants, everything else `-O0`:
+
+   | `Locomotor.cpp` flags | frame 700 |
+   |---|---|
+   | `-O2 -fno-strict-aliasing` | mismatch |
+   | `-O1` | mismatch |
+   | `-O2 … -fno-vectorize -fno-slp-vectorize` | mismatch |
+   | `-O2 … -fwrapv` | mismatch |
+   | `-O2 … -ftrivial-auto-var-init=zero` | mismatch |
+   | `-O0 -ftrivial-auto-var-init=pattern` | in sync |
+   | `-O2 … -fno-builtin` | **in sync** |
+   | `-O2 … -fmath-errno` | **in sync** |
+
+4. **Mechanism.** Apple clang defaults to `-fno-math-errno` on Darwin, so `sinf`/`cosf` are pure
+   intrinsics. When `sinf(x)` and `cosf(x)` of the same `x` meet after inlining, the backend
+   fuses them into one call to **`__sincosf_stret`**, whose results are not bit-identical to the
+   separate calls. `nm -u` on the object: `-O0` imports `_sinf`, `_cosf`; `-O2` imports
+   `___sincosf_stret` instead. The two fused sites are `Locomotor::rotateObjAroundLocoPivot`
+   (inlined `Matrix3D::In_Place_Pre_Rotate_Z`) and `tryToRotateVector3D` (inlined
+   `Matrix3D::Set(axis, angle)`). The whole B binary imports `___sincosf_stret`; B2 imports none.
+
+It is a floating-point *library* difference, not undefined behaviour: uninitialised-variable
+patterns, wrap-around and vectorisation each change nothing. It is the same class of problem as
+`-ffp-contract=off` (`crc-divergence.md`), one level up.
+
+**B2 adds `-fmath-errno` and plays both recordings to the end in sync, four runs out of four**
+(MEASURED). B2 was not pre-registered: everything measured on it below is reported against the
+same thresholds, but as a post-hoc result, not a rule outcome. The 380 other archive members passed
+only to frame 800 of one recording in the bisection; B2's full-length runs on both recordings are
+the evidence for the whole binary. Two recordings are not a proof that no other optimisation
+changes the simulation anywhere.
+
+### 10.4 H1, logic only: headless replay (MEASURED)
+
+Wall seconds from logic frame 18,000 (game minute 10) to the end of the recording, from
+`ZH_LOGIC_FRAME_LOG`. The binary's own `Elapsed Time` lines agree to the second (A, `before-2`:
+04:47 → 13:23 = 516 s).
+
+| binary | recording | runs | CRC | wall s, min 10→end | logic ms/frame, min 10→end | of which AI (`TheAI->UPDATE`) | peak RSS MB |
+|---|---|---:|---|---:|---:|---:|---:|
+| A | `before-2` | 2 | in sync to frame 32,098 | 516.1 / 514.8 | 36.5 | 23.9 (65 %) | 285 |
+| A | `aftersync-1` | 2 | in sync to frame 28,148 | 554.8 / 555.5 | 54.6 | 40.7 (75 %) | 285-291 |
+| B | `before-2` | 2 | **mismatch at frame 700** | — | — | — | 237-255 |
+| B | `aftersync-1` | 1 | **mismatch at frame 2,600** | — | — | — | 243 |
+| B2 | `before-2` | 2 | in sync to frame 32,098 | 130.2 / 128.4 | 9.1 | 6.3 (69 %) | 281-284 |
+| B2 | `aftersync-1` | 2 | in sync to frame 28,148 | 136.5 / 137.5 | 13.5 | 10.4 (77 %) | 287 |
+
+**Rule outcomes.**
+
+- **H1 (pre-registered, B): B INVALID.** B desyncs on both recordings, so H1 is not landable as-is
+  (§10.3).
+- **H1 headless part, post hoc on B2:** B2/A = **0.251** (`before-2`) and **0.247**
+  (`aftersync-1`), against the ≤ 0.6 bar. Optimisation makes the logic **~4.0x** faster; the
+  pathfinder-heavy AI share barely moves (65 → 69 %, 75 → 77 %), so the pathfinder speeds up about
+  as much as the rest.
+- **Peak memory** is unchanged by optimisation (~285 MB either way, headless).
+
+A `sample` of the main thread at game minute 12 (10 s) puts the same shape on both builds: A on
+`aftersync-1`: `AI::update` 77.5 %, `processPathfindQueue` 75.7 %, `examineNeighboringCells`
+72.1 %, `checkForMovement` 30.4 %, `Object::getRelationship` 5.3 %. B2 on `before-2`: 67.2 %,
+67.0 %, 63.3 %, 25.7 %, **0.2 %** (inlined away). The pathfinder is still two-thirds of the logic
+at `-O2`; it is the retail algorithm, so it stays the logic floor (§5).
+
+### 10.5 "Heavier game" (pre-registered): NOT CONFIRMED (MEASURED)
+
+A's mean logic cost per frame over game minutes 10-15 (the window both recordings cover):
+`aftersync-1` **53.5 ms**, `before-2` **37.4 ms**: ratio **1.43**, below the 2x bar. Per game
+minute (A, run 1, ms/frame and mean object count):
+
+| minute | 3 | 8 | 10 | 11 | 12 | 13 | 14 | 15 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `before-2` | 9.4 (544) | 39.1 (951) | 29.6 (1,015) | 33.0 (1,036) | 44.1 (1,057) | 42.5 (1,026) | 38.0 (1,048) | 31.9 (984) |
+| `aftersync-1` | 18.8 (573) | 52.0 (998) | 45.3 (1,034) | 48.6 (1,035) | 48.9 (1,063) | 57.2 (1,110) | 67.2 (1,111) | 63.8 (1,069) |
+| ratio | 2.0 | 1.3 | 1.5 | 1.5 | 1.1 | 1.3 | 1.8 | 2.0 |
+
+So the `aftersync-1` game *is* heavier, by 1.1-2.0x minute by minute at similar object counts, but
+not by the pre-registered 2x. What the replay does settle (§4): the same code (A) costs 50-67 ms of
+logic per frame in that game's minutes 12-15. The branch run's late *outside-renderer* median was
+59-77 ms (§3.2), so its logic time is accounted for by the game itself, at the same binary
+optimisation; a branch CPU cost is not needed to explain it (INFERRED from the match, not from a
+rendered A/B of that recording). The recording ends at 15:38, so the branch run's later windows
+are not covered.
+
+### 10.6 H1, rendered: the same recording played on screen (MEASURED)
+
+**A command-line replay does not draw on its own (MEASURED, new finding).** `-replay` without
+`-headless` runs the game loop, but the screen stays blank and the backend presents nothing:
+`ZH_RENDER_FRAME_LOG` stays empty, and a `sample` shows `W3DDisplay::draw` never reaching
+`WW3D::Begin_Render`. LLDB shows why: `TheWritableGlobalData->m_breakTheMovie` is `true`.
+`Intro::doPostIntro()` sets it (`Core/GameEngine/Source/GameClient/Intro.cpp:255`), and only
+`MainMenuInit` and the single-player load screen clear it. A `-replay` run reaches neither, and
+`W3DDisplay::draw` skips the whole render block while it is set (`W3DDisplay.cpp:1981`). The
+runner therefore clears the flag once through LLDB at logic frame ~40 and detaches; the binaries
+are unchanged. This is a bug of its own, and the fix is small (clear the flag when a replay
+simulation starts), but it is a behaviour change and was left for stage 3. Whether Windows has it
+too is UNMEASURED; the code path is not platform-specific.
+
+**Setup.** `heavy-before-2`, fullscreen 1728x1117 points (3456x2234 pixels), one run per binary,
+frame pacer as shipped. The replay camera is the observer's start view, on a supply stash in the
+map centre, with the observer's per-player money overlay (8 lines) on screen (screenshot checked,
+not committed). Both runs stayed in sync to frame 32,098.
+
+Late window: logic frames 21,600-32,097 (game minutes 12-17:49), 10,498 passes each.
+
+| binary | median frame ms | p95 | fps | client (draw + present) median | logic median | backend `scene_ms` median | `present_ms` median |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| A | **53.3** | 144.0 | 13.8 | 33.4 | 17.6 | 30.9 | 1.0 |
+| B2 | **37.0** | 61.0 | 24.0 | 30.9 | 4.9 | 28.8 | 1.0 |
+
+- **Post hoc on B2:** the median falls by **16.3 ms**, against the ≥ 8 ms bar; p95 falls by 83 ms.
+  With §10.4, B2 meets both halves of the H1 thresholds. B (the pre-registered binary) was not
+  played rendered, because it desyncs.
+- A's late median (53.3 ms) matches the live `heavy-before-2` probe's 47-53 ms (§3.2), so the
+  replay reproduces the live late game's frame cost.
+- **Optimisation removes logic, not renderer time.** Logic median 17.6 → 4.9 ms; the client update
+  (drawing and presenting) only 33.4 → 30.9 ms, because most of it is waiting for the GPU.
+
+**Where a late B2 frame goes** (`sample`, 10 s at game minute 14, ms = share × the window's mean
+frame of 48.7 ms; the sampled window is heavier than the median):
+
+| part | share | ms/frame |
+|---|---:|---:|
+| logic (`GameLogic::update`) | 29.8 % | 14.5 |
+| … of which the pathfinder | 20.7 % | 10.1 |
+| client update | 70.0 % | 34.1 |
+| … text: `Render2DSentenceClass::Build_Textures` | 61.3 % | 29.9 |
+| … … mid-frame `Flush_Frame_Commands` (the text flush) | 52.6 % | 25.6 |
+| … … one-shot submits (`End_One_Shot`) | 12.1 % | 5.9 |
+| … all `vkQueueWaitIdle` | 62.2 % | 30.3 |
+| … the 3D scene (`RTS3DScene::*`) | 3.9 % | 1.9 |
+| … per-draw translation (`Prepare_Draw`) | 0.8 % | 0.4 |
+| … `Present` | 2.4 % | 1.1 |
+
+So once the code is optimised, **the late replay frame is the text path's GPU waits**: the
+mid-frame flush that `perf/text-render-no-flush` removes, plus one-shot uploads. Logic is a third
+of the frame; the 3D scene and the draw translation are noise. Caveat: the replay observer shows
+eight players' money, which a live player does not (INFERRED to rebuild text often; the rebuild
+count per frame is UNMEASURED), so this text load is likely above a live game's. The A profile
+of the same minute (mean frame 125.8 ms during the sample, an outlier stretch) puts 68 % in logic
+and 52 % in the pathfinder.
+
+### 10.7 H2 on top of B2: overlapping CPU and GPU (MEASURED, numbers only)
+
+`perf/text-render-no-flush`'s backend (`dc7594b17`: no mid-frame text flush, `Present` does not
+wait) on this commit's engine, built like B2. The branch changed only `spikes/renderer/src/`, and
+`main` has not touched that directory since its base, so `git checkout dc7594b17 --
+spikes/renderer/src/` over this branch is the branch's backend on today's engine. Same replay,
+same window as §10.6, one run each, both in sync to frame 32,098.
+
+| build | median frame ms | p95 | mean fps | client median | logic median | `present_ms` median | one-shot waits / frame | their ms |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| B2, `main` backend (§10.6) | 37.0 | 61.0 | 24.0 | 30.9 | 4.9 | 1.0 | — | — |
+| B2 + branch backend, `ZH_RENDER_SYNC_PRESENT=1` | 33.4 | 57.4 | 25.5 | 27.8 | 4.8 | **21.2** | 12 | 3.4 |
+| B2 + branch backend, pipelined | **33.3** | **38.8** | **29.2** | **6.8** | 6.3 | 0.1 | 12 | 3.5 |
+
+- **Optimised and pipelined, the late replay runs at the 30 fps the logic is capped at.** The
+  median sits on the pacer's 33.3 ms; a `sample` at minute 14 has the pacer sleeping 34 % of the
+  main thread (~12 ms per frame), logic 45 % (16 ms in that heavier window), pathfinder 29 %, text
+  11 %, one-shot waits 13 %, the 3D scene 7 %.
+- **The GPU's frame is ~21 ms** (`present_ms` with synchronous Present, which then waits for the
+  whole frame's GPU work) at 3456x2234 pixels. Serialised, it adds 1:1 to the CPU's ~12-17 ms and
+  the frame misses 30 fps often (p95 57 ms); overlapped, it hides behind the pacer (p95 39 ms).
+- `frame_wait_ms` and `inflight_waits` are 0 in the pipelined run: the CPU never waits for a
+  previous frame's GPU work, so the GPU is not yet the limit at 30 fps.
+- Still present on every build: **12 one-shot submit + `vkQueueWaitIdle` per frame, ~3.5 ms**
+  (H4), now about a tenth of the frame budget.
+
+### 10.8 Hypotheses re-ranked after optimisation
+
+Late `heavy-before-2` replay frame on B2 (`main` backend), median 37 ms; the 30 fps cap is 33.3 ms.
+
+| rank | hypothesis | status after stage 2 | what is left of it |
+|---|---|---|---|
+| 1 | **H1, the `-O0` build** | logic 4.0x faster headless; rendered median −16.3 ms, p95 −83 ms. Not landable as `-O2` alone: it desyncs (§10.3); `-O2 -fmath-errno` plays both recordings in sync | the largest single win, measured |
+| 2 | **H2 + H5 flush, CPU/GPU serialisation** | on B2 it is now the largest remaining cost: the client update is 31 ms median, ~26 ms of it waiting in mid-frame text flushes. With the branch backend, client 31 → 7 ms and the replay holds 30 fps | ~4-24 ms, depending on how much text is rebuilt (median 37 → 33.3, p95 61 → 39) |
+| 3 | **H4, one-shot upload waits** | unchanged by optimisation: 12 per frame, ~3.5 ms | ~3.5 ms |
+| 4 | **H3/H7, GPU per frame** | ~21 ms at 7.7 Mpx; hidden once pipelined, so not on the critical path at 30 fps. Not split into fill vs per-draw (no render-scale run) | 0 ms while pipelined; headroom for heavier scenes is ~12 ms |
+| 5 | **H5 beyond the flush, CPU text rebuild** | `Build_Textures` CPU is a few ms; its size in a live game is unknown because the replay observer shows 8 players' money | ~1-4 ms (INFERRED) |
+| 6 | **H6, per-draw translation** | `Prepare_Draw` 0.4-0.5 ms per frame on B2 (observer camera, not a battle) | < 1 ms |
+| — | pathfinder (retail behaviour) | still 63-77 % of logic at `-O2`; 6-16 ms per frame late | the logic floor; not a port fix |
+
+### 10.9 Recommendation for stage 3
+
+1. **Build the game optimised: `-O2 -fno-strict-aliasing -fmath-errno`, and keep
+   `-ffp-contract=off`.** Expected win: logic ~4x faster (late logic 36-55 → 9-14 ms per frame on
+   these recordings); rendered late median −16 ms, p95 roughly halved.
+   - **How to gate it.** Add an optimisation level to `scripts/native-build.py` (for example
+     `--optimize`, adding the flags in `cmake/native/CMakeLists.txt` rather than through the
+     environment, so the compile database records them), and make it the default for the game
+     binary. Gate on: `macos-binary-opt-level.py` reporting `optimised`; both recordings here
+     played headless to the end with no `CRC Mismatch`; and the existing Linux replay-CRC gate.
+     Ideally add one heavy skirmish recording to CI's replay set: these two found the problem
+     within 700 frames.
+   - **What it can break.** Determinism, in exactly the way §10.3 found: any libm call the
+     optimiser rewrites (fusion into `sincos`, constant folding, `-fno-math-errno` purity)
+     changes simulation floats. `-fmath-errno` covers the one observed. A more robust option is to
+     route the simulation's trigonometry through one out-of-line, explicitly sequenced function
+     (`Sin`/`Cos` in `Trig.cpp` already exist; `Matrix3D`'s inline `sinf`/`cosf` bypass them).
+     Also possible: UB that `-O0` hid. None was seen in two full recordings; the replay CRC check
+     is the guard. Debugging gets harder; keep `-g`.
+   - **Cross-build replays.** Recordings made by `-O0` binaries play in sync on B2, so existing
+     recordings stay valid.
+2. **Land the non-blocking Present and the flush-free text path (`perf/text-render-no-flush`).** On
+   top of item 1 it is what takes this replay from 24 to 29 fps and the p95 from 61 to 39 ms. Its
+   own pre-registered verdict (`present-pipelining.md`) was measured at `-O0`, where logic hid it;
+   re-judge it on an optimised build.
+3. **Fix the command-line replay that does not draw** (§10.6): clear `m_breakTheMovie` when a
+   replay simulation starts. One line, behaviour change, own PR. It makes rendered replays usable
+   as the fixed workload for every later performance A/B.
+4. **Then, in order of what is left:** batch the 12 one-shot upload waits (H4, ~3.5 ms); measure
+   the text rebuild count in a live game before caching strings (H5); leave per-draw translation
+   (H6) alone.
+
+### 10.10 Limits and UNVERIFIED
+
+- **One machine, one rendered run per build, one recording rendered.** Run-to-run spread of the
+  rendered medians is UNMEASURED; headless timings repeat to within 1.4 % (A within 0.3 %).
+- **The recordings stop at 15:38 and 17:49** of the 32-minute probe games. Later minutes, where
+  the branch run's frame time stepped up, are not covered.
+- **The replay camera is not the player's.** It shows the observer's start view and its money
+  overlay, so draw counts and text load differ from a live game. A battle on screen (H6) is still
+  unmeasured.
+- **B2's determinism rests on two recordings** (both skirmish, same map). The bisection checked
+  the other 380 optimised members only to frame 800.
+- **What `-fmath-errno` itself costs is UNMEASURED**: B, the only binary without it, desyncs, so no
+  like-for-like timing exists.
+- **The `sample`-based splits** are single 10 s windows at minute ~14, heavier than the medians.
+- **Windows.** Whether a VC6 or MSVC optimised build has the `__sincosf_stret` problem (it would not
+  use that function, but may have its own fused forms) and the blank `-replay` screen is
+  UNMEASURED.
