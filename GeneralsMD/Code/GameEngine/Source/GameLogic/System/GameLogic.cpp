@@ -3690,6 +3690,64 @@ extern __int64 Total_Create_Render_Obj_Time;
 extern __int64 Total_Load_3D_Assets;
 #endif
 
+// TheSuperHackers @port Measurement hook, dormant unless ZH_LOGIC_FRAME_LOG names an output file:
+// one CSV row per GameLogic::update with its wall time and the AI's share (late-game-frame-cost.md).
+namespace
+{
+FILE *s_logicFrameLog = nullptr;
+Bool s_logicFrameLogChecked = FALSE;
+LARGE_INTEGER s_logicFrameLogFreq;
+LARGE_INTEGER s_logicFrameLogOrigin;
+double s_logicFrameLogAiMs = 0.0;
+
+FILE *logicFrameLog()
+{
+	if (!s_logicFrameLogChecked)
+	{
+		s_logicFrameLogChecked = TRUE;
+		const char *path = getenv("ZH_LOGIC_FRAME_LOG");
+		if (path != nullptr && path[0] != 0 && (s_logicFrameLog = fopen(path, "w")) != nullptr)
+		{
+			QueryPerformanceFrequency(&s_logicFrameLogFreq);
+			QueryPerformanceCounter(&s_logicFrameLogOrigin);
+			fprintf(s_logicFrameLog, "frame,start_ms,logic_ms,ai_ms,objects\n");
+		}
+	}
+	return s_logicFrameLog;
+}
+
+double logicFrameLogMsSince(const LARGE_INTEGER &since)
+{
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+	return static_cast<double>(now.QuadPart - since.QuadPart) * 1000.0 / s_logicFrameLogFreq.QuadPart;
+}
+
+struct LogicFrameLogScope
+{
+	LARGE_INTEGER start;
+	UnsignedInt frame;
+
+	LogicFrameLogScope() : frame(TheGameLogic->getFrame())
+	{
+		if (logicFrameLog() != nullptr)
+			QueryPerformanceCounter(&start);
+		s_logicFrameLogAiMs = 0.0;
+	}
+
+	~LogicFrameLogScope()
+	{
+		if (s_logicFrameLog == nullptr)
+			return;
+		const double startMs = static_cast<double>(start.QuadPart - s_logicFrameLogOrigin.QuadPart) * 1000.0
+			/ s_logicFrameLogFreq.QuadPart;
+		fprintf(s_logicFrameLog, "%u,%.3f,%.3f,%.3f,%u\n", frame, startMs, logicFrameLogMsSince(start),
+			s_logicFrameLogAiMs, TheGameLogic->getObjectCount());
+		fflush(s_logicFrameLog);
+	}
+};
+} // namespace
+
 // ------------------------------------------------------------------------------------------------
 /** Update all objects in the world by invoking their update() methods. */
 // ------------------------------------------------------------------------------------------------
@@ -3697,6 +3755,7 @@ void GameLogic::update()
 {
 	USE_PERF_TIMER(GameLogic_update)
 	PROFILER_SECTION_COLOR(0x4CAF50);
+	LogicFrameLogScope logicFrameLogScope;
 
 	LatchRestore<Bool> inUpdateLatch(m_isInUpdate, TRUE);
 #ifdef DO_UNIT_TIMINGS
@@ -3899,7 +3958,12 @@ void GameLogic::update()
 
 	// update the Artificial Intelligence system
 	{
+		LARGE_INTEGER aiStart;
+		if (s_logicFrameLog != nullptr)
+			QueryPerformanceCounter(&aiStart);
 		TheAI->UPDATE();
+		if (s_logicFrameLog != nullptr)
+			s_logicFrameLogAiMs = logicFrameLogMsSince(aiStart);
 	}
 
 	// production updates
