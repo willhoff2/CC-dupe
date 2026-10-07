@@ -31,6 +31,7 @@
 #include <SDL.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 using namespace WWPlatform;
@@ -38,10 +39,8 @@ using namespace WWPlatform;
 namespace
 {
 
-// Keyboard::KEY_REPEAT_DELAY_MSEC: a key held longer than this on timeGetTime()'s clock repeats.
-const unsigned int KEY_REPEAT_DELAY_MSEC = 333;
-// Slack for the pump and the two clock reads.
-const unsigned int CLOCK_TOLERANCE_MSEC = 50;
+// Both clocks are truncated to whole milliseconds and read a few microseconds apart.
+const int CLOCK_TOLERANCE_MSEC = 2;
 
 int TheFailures = 0;
 
@@ -67,11 +66,18 @@ const WindowEvent * Find_Event(const std::vector<WindowEvent> & events, WindowEv
 	return nullptr;
 }
 
-// The event's age exactly as Keyboard::checkKeyRepeat() computes a hold: timeGetTime() minus the
-// stamp, unsigned.
-unsigned int Engine_Age_Ms(const WindowEvent * event)
+// The event must be stamped with the engine time at which SDL queued it, however late the pump
+// reaches it: that makes checkKeyRepeat()'s hold the real time since the press. Comparing with
+// timeGetTime() after the pump instead would measure the pump's latency too.
+void Check_Stamp(const char * name, const WindowEvent * event, unsigned int pushed_engine_ms)
 {
-	return event != nullptr ? timeGetTime() - event->Time_Ms : ~0u;
+	const int error_ms = event != nullptr ? static_cast<int>(event->Time_Ms - pushed_engine_ms) : 0;
+	char what[200];
+	std::snprintf(what, sizeof(what),
+	              "%s: Time_Ms is %d ms off the engine time it was pushed at (want within %d; "
+	              "the pump reached it %u ms later)",
+	              name, error_ms, CLOCK_TOLERANCE_MSEC, timeGetTime() - pushed_engine_ms);
+	Check(event != nullptr && std::abs(error_ms) <= CLOCK_TOLERANCE_MSEC, what);
 }
 
 // SDL_PushEvent stamps the event with SDL_GetTicks() itself.
@@ -111,36 +117,26 @@ int main()
 	std::printf("       timeGetTime() = %u ms, SDL_GetTicks() = %u ms on this run\n", timeGetTime(),
 	            SDL_GetTicks());
 
-	char what[200];
+	unsigned int pushed_engine_ms = timeGetTime();
 	Push_Key(SDL_KEYDOWN);
 	Push_Key(SDL_KEYUP);
 	std::vector<WindowEvent> events = Drain(window);
-	const unsigned int key_age = Engine_Age_Ms(Find_Event(events, WINDOW_EVENT_KEY_DOWN));
-	std::snprintf(what, sizeof(what),
-	              "fresh KEY_DOWN: checkKeyRepeat() would see it held %u ms (want <= %u; it "
-	              "repeats past %u)", key_age, CLOCK_TOLERANCE_MSEC, KEY_REPEAT_DELAY_MSEC);
-	Check(key_age <= CLOCK_TOLERANCE_MSEC, what);
+	Check_Stamp("KEY_DOWN", Find_Event(events, WINDOW_EVENT_KEY_DOWN), pushed_engine_ms);
 
-	// An event that waited in SDL's queue keeps its age: the stamp is when SDL received it.
-	const unsigned int queued_age_ms = 300;
+	// An event that waited in SDL's queue keeps its age: the stamp is when SDL received it, so a
+	// held key starts repeating 333 ms after the real press, not after the pump.
+	pushed_engine_ms = timeGetTime();
 	Push_Key(SDL_KEYDOWN);
-	SDL_Delay(queued_age_ms);
+	SDL_Delay(300);
 	Push_Key(SDL_KEYUP);
 	events = Drain(window);
-	const unsigned int aged_key_age = Engine_Age_Ms(Find_Event(events, WINDOW_EVENT_KEY_DOWN));
-	std::snprintf(what, sizeof(what),
-	              "KEY_DOWN queued %u ms before the pump: Time_Ms is %u ms before timeGetTime()",
-	              queued_age_ms, aged_key_age);
-	Check(aged_key_age + CLOCK_TOLERANCE_MSEC >= queued_age_ms &&
-	          aged_key_age <= queued_age_ms + CLOCK_TOLERANCE_MSEC,
-	      what);
+	Check_Stamp("KEY_DOWN queued 300 ms before the pump", Find_Event(events, WINDOW_EVENT_KEY_DOWN),
+	            pushed_engine_ms);
 
+	pushed_engine_ms = timeGetTime();
 	Push_Mouse_Down();
 	events = Drain(window);
-	const unsigned int mouse_age = Engine_Age_Ms(Find_Event(events, WINDOW_EVENT_MOUSE_DOWN));
-	std::snprintf(what, sizeof(what), "fresh MOUSE_DOWN: Time_Ms is %u ms before timeGetTime()",
-	              mouse_age);
-	Check(mouse_age <= CLOCK_TOLERANCE_MSEC, what);
+	Check_Stamp("MOUSE_DOWN", Find_Event(events, WINDOW_EVENT_MOUSE_DOWN), pushed_engine_ms);
 
 	Window_Destroy(window);
 	std::printf("%d failure(s)\n", TheFailures);

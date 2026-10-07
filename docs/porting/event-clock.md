@@ -120,7 +120,8 @@ Why this design:
   is also wrap-safe. A negative age (impossible for a delivered event) converts modulo 2^32 too;
   it is not undefined behaviour.
 - The two clock reads in `Engine_Time_Ms` are not atomic, so the result can be off by under a
-  millisecond (INFERRED). The test allows 50 ms.
+  millisecond (INFERRED). The test allows 2 ms against the engine time at which it stamped the
+  event (§5.1).
 
 What it costs: both backends now include `<Utility/time_compat.h>`. `scripts/native-build.py`
 already put `Dependencies/Utility` on the backend's include path, and so did the engine's CMake
@@ -132,6 +133,8 @@ already put `Dependencies/Utility` on the backend's include path, and so did the
 **Cocoa**, `python3 scripts/macos-cocoa-key-routing-test.py --require-display`, M1 Pro, unlocked
 session, all three modes (windowed, borderless fullscreen, fullscreen as the engine places it).
 The test prints `timeGetTime() - systemUptime = 2935519590 ms on this machine` in each mode.
+These are the first version of the test, which compared stamps with `timeGetTime()` after the
+pump; §5.1 replaces that comparison.
 
 | Check (per mode) | Pre-fix (`6a593e409`'s backend) | Fixed |
 |---|---|---|
@@ -160,8 +163,10 @@ installs:
 
 SDL2's gap is not about sleep. `SDL_GetTicks()` counts from `SDL_Init` and `timeGetTime()` counts
 from boot, so the SDL2 test fails on any machine. That makes it the robust red, and it is in CI:
-the `window-seam-linux` job runs it. The Cocoa test runs in `window-seam-macos`, where a runner
-that never slept cannot tell the clocks apart.
+the `window-seam-linux` job runs it. The Cocoa test runs in `window-seam-macos`. A runner that
+never slept would not be able to tell the clocks apart, but the `macos-15` runner of PR #172's
+first run measured `timeGetTime() - systemUptime = -446 ms`, which is outside the 333 ms the
+`NOTE` uses as its threshold.
 
 Gates run on the fixed tree: `window-input-scan.py --check` (759/759, 30/30),
 `check-window-scancodes.py`, `check-window-seam-wiring.py`, `check-skill-coverage.py`,
@@ -169,6 +174,45 @@ Gates run on the fixed tree: `window-input-scan.py --check` (759/759, 30/30),
 `actionlint`. The spike's Cocoa targets (`zh-window-spike-cocoa`, `zh-macos-window-metrics`,
 `zh-hidpi-tests-cocoa`) build on the Mac with AppleClang. Its SDL2 targets (`zh-window-spike`,
 `zh-hidpi-tests-sdl2`) build in the container with clang 18.
+
+### 5.1 What PR #172's first CI run caught, and the two corrections
+
+**The native build counted the SDL2 test as an engine translation unit.** The `WWLib` probe
+target walks `WWLib/**/*.cpp`, so `platform/tests/sdl2_event_clock_test.cpp` joined the build. The
+denominator went from 845 to 846 TUs, and that one TU failed:
+`'platform_window.h' file not found`. It also needs `<SDL.h>`, which the probe deliberately does
+not have.
+
+MEASURED by reproducing the job's exact command in an Ubuntu 22.04 container with clang 14:
+`native-build.py --level 1 --level 2 --level 3 --with-shims --strict-link` gave "845 objects,
+1 failures". The test now sits in `probe.OPTIONAL_BACKENDS` next to the backend it tests, for the
+same reason. With that change the same command compiles 845/845 TUs with 0 failures.
+
+The container ran on the M1 Pro, so it was aarch64. On that host the gate also reports 12
+`__aarch64_*` outline-atomics helpers as undefined, in both the red and the green run. They are an
+artefact of the host architecture, not of this change.
+
+Rerun as `linux/amd64` (emulated), which is what the CI job runs: 845/845 objects, 0 failures,
+393 unresolved (baseline 393), and `check-native-build-baseline.py` reports "OK: no regression
+against the baseline".
+
+**The macOS runner failed `fresh MOUSE_DOWN: Time_Ms is 53 ms before timeGetTime()`, windowed
+mode only.** The conversion was right; the assertion was not. The test compared the stamp with
+`timeGetTime()` read *after* the pump. That measures the event's age at the moment of the check,
+which includes however long the pump took to reach the event and dispatch it.
+
+Reproduced on the M1 Pro by sleeping 60 ms between posting the mouse-down and pumping it. The old
+check failed with "68 ms before timeGetTime()". That the runner's 53 ms is the same kind of latency
+is INFERRED. It hit only the first mouse event of the process (windowed mode), and both other
+modes read 0 ms.
+
+The checks now compare `Time_Ms` with the engine time at which the test stamped the event. That
+time is read back to back with `systemUptime` (Cocoa), or just before `SDL_PushEvent` (SDL2). The
+tolerance is 2 ms, for millisecond truncation. Each check prints the pump's latency separately.
+
+With the 60 ms injected delay, the new check passes: 0 ms off, pump 68 ms late. Run against the
+pre-fix backend, it still fails all 4 Cocoa checks (by about 34 days of sleep) and all 3 SDL2
+checks (by 980,244,456 ms).
 
 ## 6. Still open
 

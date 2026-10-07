@@ -109,14 +109,14 @@ bool Wait_Until_Active(void * window)
 	return false;
 }
 
-void Post_Key(NSWindow * window, NSEventType type, unsigned short key_code, unichar character,
-              NSEventModifierFlags modifiers, double age_seconds = 0.0)
+void Post_Key_At(NSWindow * window, NSEventType type, unsigned short key_code, unichar character,
+                 NSEventModifierFlags modifiers, double timestamp)
 {
 	NSString * characters = [NSString stringWithCharacters:&character length:1];
 	NSEvent * event = [NSEvent keyEventWithType:type
 	                                   location:NSZeroPoint
 	                              modifierFlags:modifiers
-	                                  timestamp:[NSProcessInfo processInfo].systemUptime - age_seconds
+	                                  timestamp:timestamp
 	                               windowNumber:[window windowNumber]
 	                                    context:nil
 	                                 characters:characters
@@ -126,10 +126,31 @@ void Post_Key(NSWindow * window, NSEventType type, unsigned short key_code, unic
 	[NSApp postEvent:event atStart:NO];
 }
 
+void Post_Key(NSWindow * window, NSEventType type, unsigned short key_code, unichar character,
+              NSEventModifierFlags modifiers)
+{
+	Post_Key_At(window, type, key_code, character, modifiers,
+	            [NSProcessInfo processInfo].systemUptime);
+}
+
+void Post_Mouse_At(NSWindow * window, NSEventType type, double timestamp)
+{
+	NSEvent * event = [NSEvent mouseEventWithType:type
+	                                     location:NSMakePoint(10.0, 10.0)
+	                                modifierFlags:0
+	                                    timestamp:timestamp
+	                                 windowNumber:[window windowNumber]
+	                                      context:nil
+	                                  eventNumber:0
+	                                   clickCount:1
+	                                     pressure:type == NSEventTypeLeftMouseDown ? 1.0f : 0.0f];
+	[NSApp postEvent:event atStart:NO];
+}
+
 // Keyboard::KEY_REPEAT_DELAY_MSEC: a key held longer than this on timeGetTime()'s clock repeats.
 const unsigned int KEY_REPEAT_DELAY_MSEC = 333;
-// Slack for the pump and the two clock reads; the stamps are compared at millisecond resolution.
-const unsigned int CLOCK_TOLERANCE_MSEC = 50;
+// Both clocks are truncated or rounded to whole milliseconds and read a few microseconds apart.
+const int CLOCK_TOLERANCE_MSEC = 2;
 
 // Latest timestamp of an event the window server delivered (anything the test did not post), so
 // the test can show which clock AppKit's own stamps are on rather than assume it.
@@ -147,11 +168,19 @@ void Install_Server_Timestamp_Monitor()
 	}];
 }
 
-// The event's age exactly as Keyboard::checkKeyRepeat() computes a hold: timeGetTime() minus the
-// stamp, unsigned, so a stamp from another clock reads as a hold of days (or, wrapped, of weeks).
-unsigned int Engine_Age_Ms(const WindowEvent & event)
+// One instant read on both clocks back to back: the engine time a stamp of Uptime_Seconds means.
+struct PostTime
 {
-	return timeGetTime() - event.Time_Ms;
+	double Uptime_Seconds;
+	unsigned int Engine_Ms;
+};
+
+PostTime Post_Time_Now()
+{
+	PostTime now;
+	now.Uptime_Seconds = [NSProcessInfo processInfo].systemUptime;
+	now.Engine_Ms = timeGetTime();
+	return now;
 }
 
 const WindowEvent * Find_Event(const std::vector<WindowEvent> & events, WindowEventType type)
@@ -162,27 +191,30 @@ const WindowEvent * Find_Event(const std::vector<WindowEvent> & events, WindowEv
 	return nullptr;
 }
 
-void Post_Mouse_Down(NSWindow * window)
+// The event must be stamped with the engine time at which it happened, i.e. when the test stamped
+// it, however late the pump reaches it: that makes checkKeyRepeat()'s hold the real time since the
+// press. Comparing with timeGetTime() after the pump instead measures the pump's latency too.
+void Check_Stamp(const char * name, const WindowEvent * event, const PostTime & posted,
+                 unsigned int age_ms)
 {
-	NSEvent * event = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown
-	                                     location:NSMakePoint(10.0, 10.0)
-	                                modifierFlags:0
-	                                    timestamp:[NSProcessInfo processInfo].systemUptime
-	                                 windowNumber:[window windowNumber]
-	                                      context:nil
-	                                  eventNumber:0
-	                                   clickCount:1
-	                                     pressure:1.0];
-	[NSApp postEvent:event atStart:NO];
+	const unsigned int expected_ms = posted.Engine_Ms - age_ms;
+	const int error_ms = event != nullptr ? static_cast<int>(event->Time_Ms - expected_ms) : 0;
+	const unsigned int pump_latency_ms = timeGetTime() - posted.Engine_Ms;
+	char what[240];
+	std::snprintf(what, sizeof(what),
+	              "%s stamped %u ms before it was posted: Time_Ms is %d ms off that engine time "
+	              "(want within %d; the pump reached it %u ms after posting)",
+	              name, age_ms, error_ms, CLOCK_TOLERANCE_MSEC, pump_latency_ms);
+	Check(event != nullptr && std::abs(error_ms) <= CLOCK_TOLERANCE_MSEC, what);
 }
 
 // Time_Ms has to be on timeGetTime()'s clock: Keyboard::checkKeyRepeat() repeats any key whose
 // down time is more than KEY_REPEAT_DELAY_MSEC before timeGetTime(). See docs/porting/event-clock.md.
 void Check_Event_Clock(void * window, NSWindow * ns_window)
 {
-	const double uptime_ms = [NSProcessInfo processInfo].systemUptime * 1000.0;
+	const PostTime start = Post_Time_Now();
 	const long long engine_minus_uptime_ms =
-		static_cast<long long>(timeGetTime()) - std::llround(uptime_ms);
+		static_cast<long long>(start.Engine_Ms) - std::llround(start.Uptime_Seconds * 1000.0);
 	std::printf("       timeGetTime() - systemUptime = %lld ms on this machine\n",
 	            engine_minus_uptime_ms);
 	if (std::llabs(engine_minus_uptime_ms) <= KEY_REPEAT_DELAY_MSEC) {
@@ -190,60 +222,36 @@ void Check_Event_Clock(void * window, NSWindow * ns_window)
 		            "       Time_Ms checks below cannot tell the clocks apart on this run\n");
 	}
 
-	const double server_age_ms = uptime_ms - TheLatestServerTimestamp * 1000.0;
+	const double server_age_ms = (start.Uptime_Seconds - TheLatestServerTimestamp) * 1000.0;
 	char what[200];
 	std::snprintf(what, sizeof(what),
 	              "AppKit's own event stamps are on systemUptime's clock (latest is %.0f ms old)",
 	              server_age_ms);
 	Check(TheLatestServerTimestamp > 0.0 && server_age_ms >= 0.0 && server_age_ms < 10000.0, what);
 
-	Post_Key(ns_window, NSEventTypeKeyDown, 0x00, 'a', 0);
+	PostTime posted = Post_Time_Now();
+	Post_Key_At(ns_window, NSEventTypeKeyDown, 0x00, 'a', 0, posted.Uptime_Seconds);
 	Post_Key(ns_window, NSEventTypeKeyUp, 0x00, 'a', 0);
 	std::vector<WindowEvent> events = Drain(window);
-	const WindowEvent * key_down = Find_Event(events, WINDOW_EVENT_KEY_DOWN);
-	const WindowEvent * text = Find_Event(events, WINDOW_EVENT_TEXT);
-	const unsigned int key_age = key_down != nullptr ? Engine_Age_Ms(*key_down) : ~0u;
-	std::snprintf(what, sizeof(what),
-	              "fresh KEY_DOWN: checkKeyRepeat() would see it held %u ms (want <= %u; it "
-	              "repeats past %u)", key_age, CLOCK_TOLERANCE_MSEC, KEY_REPEAT_DELAY_MSEC);
-	Check(key_age <= CLOCK_TOLERANCE_MSEC, what);
-	const unsigned int text_age = text != nullptr ? Engine_Age_Ms(*text) : ~0u;
-	std::snprintf(what, sizeof(what), "fresh TEXT: Time_Ms is %u ms before timeGetTime()", text_age);
-	Check(text_age <= CLOCK_TOLERANCE_MSEC, what);
+	Check_Stamp("KEY_DOWN", Find_Event(events, WINDOW_EVENT_KEY_DOWN), posted, 0);
+	Check_Stamp("TEXT", Find_Event(events, WINDOW_EVENT_TEXT), posted, 0);
 
 	// An event that waited in the queue keeps its age: the stamp is when the key went down, not
 	// when the pump got to it, so a held key starts repeating 333 ms after the real press.
 	const unsigned int queued_age_ms = 500;
-	Post_Key(ns_window, NSEventTypeKeyDown, 0x00, 'a', 0, queued_age_ms / 1000.0);
+	posted = Post_Time_Now();
+	Post_Key_At(ns_window, NSEventTypeKeyDown, 0x00, 'a', 0,
+	            posted.Uptime_Seconds - queued_age_ms / 1000.0);
 	Post_Key(ns_window, NSEventTypeKeyUp, 0x00, 'a', 0);
 	events = Drain(window);
-	key_down = Find_Event(events, WINDOW_EVENT_KEY_DOWN);
-	const unsigned int aged_key_age = key_down != nullptr ? Engine_Age_Ms(*key_down) : ~0u;
-	std::snprintf(what, sizeof(what),
-	              "KEY_DOWN stamped %u ms ago: Time_Ms is %u ms before timeGetTime()",
-	              queued_age_ms, aged_key_age);
-	Check(aged_key_age >= queued_age_ms - CLOCK_TOLERANCE_MSEC &&
-	          aged_key_age <= queued_age_ms + CLOCK_TOLERANCE_MSEC,
-	      what);
+	Check_Stamp("KEY_DOWN", Find_Event(events, WINDOW_EVENT_KEY_DOWN), posted, queued_age_ms);
 
-	Post_Mouse_Down(ns_window);
+	posted = Post_Time_Now();
+	Post_Mouse_At(ns_window, NSEventTypeLeftMouseDown, posted.Uptime_Seconds);
 	events = Drain(window);
-	const WindowEvent * mouse_down = Find_Event(events, WINDOW_EVENT_MOUSE_DOWN);
-	const unsigned int mouse_age = mouse_down != nullptr ? Engine_Age_Ms(*mouse_down) : ~0u;
-	std::snprintf(what, sizeof(what), "fresh MOUSE_DOWN: Time_Ms is %u ms before timeGetTime()",
-	              mouse_age);
-	Check(mouse_age <= CLOCK_TOLERANCE_MSEC, what);
+	Check_Stamp("MOUSE_DOWN", Find_Event(events, WINDOW_EVENT_MOUSE_DOWN), posted, 0);
 	// Release the button the test pressed, so the next mode starts with nothing held.
-	NSEvent * mouse_up = [NSEvent mouseEventWithType:NSEventTypeLeftMouseUp
-	                                        location:NSMakePoint(10.0, 10.0)
-	                                   modifierFlags:0
-	                                       timestamp:[NSProcessInfo processInfo].systemUptime
-	                                    windowNumber:[ns_window windowNumber]
-	                                         context:nil
-	                                     eventNumber:0
-	                                      clickCount:1
-	                                        pressure:0.0];
-	[NSApp postEvent:mouse_up atStart:NO];
+	Post_Mouse_At(ns_window, NSEventTypeLeftMouseUp, [NSProcessInfo processInfo].systemUptime);
 	Drain(window);
 }
 
