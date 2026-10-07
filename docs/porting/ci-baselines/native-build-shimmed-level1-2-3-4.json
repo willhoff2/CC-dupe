@@ -106,6 +106,7 @@
   ],
   "link_entry_point_stub": false,
   "objects": 981,
+  "optimised": true,
   "pile_meaning": {
     "compile-blocked": "An in-tree translation unit defines it in its source text but that unit does not compile natively yet. The definition exists; the file is the blocker.",
     "cut-scope-not-linked": "A library defines it and this project will never link that library, because the feature is cut scope. Goes away by excising the call sites, not by defining it.",
@@ -124,18 +125,7 @@
       "reason": "The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route. `fetch-probe-deps.sh` provisions the pinned headers so the code compiles, and nothing installs an FFmpeg runtime for the link.",
       "symbol_names": [],
       "symbols": 0,
-      "system_libraries": [
-        "/lib/x86_64-linux-gnu/libavcodec.so.58",
-        "/lib/x86_64-linux-gnu/libavformat.so.58",
-        "/lib/x86_64-linux-gnu/libavutil.so.56",
-        "/lib/x86_64-linux-gnu/libswresample.so.3",
-        "/lib/x86_64-linux-gnu/libswscale.so.5",
-        "/usr/lib/x86_64-linux-gnu/libavcodec.so.58",
-        "/usr/lib/x86_64-linux-gnu/libavformat.so.58",
-        "/usr/lib/x86_64-linux-gnu/libavutil.so.56",
-        "/usr/lib/x86_64-linux-gnu/libswresample.so.3",
-        "/usr/lib/x86_64-linux-gnu/libswscale.so.5"
-      ],
+      "system_libraries": [],
       "system_library_symbols_matched": []
     },
     "gamespy": {
@@ -151,8 +141,8 @@
       "system_library_symbols_matched": []
     },
     "miles": {
-      "evidence_files": 12,
-      "evidence_names": 228,
+      "evidence_files": 13,
+      "evidence_names": 230,
       "label": "Miles AIL_* API \u2014 the `milesstub`/OpenAL backend",
       "owner": "platform/audio-device (the Miles/OpenAL link)",
       "pile": "library-not-linked",
@@ -171,7 +161,7 @@
     },
     "window-backend": {
       "evidence_files": 2,
-      "evidence_names": 68,
+      "evidence_names": 73,
       "label": "The window/input backend this configuration does not choose (SDL2, Cocoa)",
       "owner": "platform/macos-window-compile and platform/window-seam-wiring",
       "pile": "library-not-linked",
@@ -189,8 +179,9 @@
     "agrees_with_nm": true,
     "attempted": true,
     "binary": {
-      "bytes": 87675936,
+      "bytes": 80291496,
       "elf_type": "DYN",
+      "file_output": "ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=89b99764675eba9c82457a63b8bc74fd3e72a92f, for GNU/Linux 3.2.0, with debug_info, not stripped",
       "format": "ELF",
       "machine": "x86-64",
       "path": "build/native/native_strict_link",

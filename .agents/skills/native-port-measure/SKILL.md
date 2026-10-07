@@ -74,7 +74,7 @@ after classifying the change — writing straight into `docs/porting/ci-baseline
 before-state you are supposed to compare against:
 
 ```sh
-# levels 1-3: the strict link is expected to fail (389 unresolved on main)
+# levels 1-3: the strict link is expected to fail (387 unresolved on main)
 CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims \
   --strict-link --report /tmp/nb123.md --json /tmp/nb123.json
 python3 scripts/ci/check-native-build-baseline.py --results /tmp/nb123.json

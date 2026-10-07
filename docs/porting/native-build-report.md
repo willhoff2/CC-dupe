@@ -10,6 +10,8 @@ Mode: **shimmed** — `scripts/native-port-shims/` supplies declaration-only sta
 
 Configuration: **release** — the engine's assertions and debug logging are compiled out, as in every figure published before `--config debug` existed.
 
+Optimisation: **-O2** (`-O2 -fno-strict-aliasing`; `-fmath-errno` and `-ffp-contract=off` in every configuration, see `docs/porting/optimised-native-build.md`).
+
 ## 1. Compilation
 
 | Library | Objects produced | Translation units | Probe-clean |
@@ -57,7 +59,7 @@ The libraries in the `library-not-linked` and `cut-scope-not-linked` piles, the 
 
 | Library | Pile | Symbols | Evidence files | Why it is not linked | Owner |
 |---|---|---:|---:|---|---|
-| Miles AIL_* API — the `milesstub`/OpenAL backend | `library-not-linked` | 0 | 12 | `cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, and the 32-bit Windows build links the fetched miles-sdk-stub. This harness now builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links libopenal, so what is left here is the part of the Miles surface that backend does not implement rather than the whole API. | platform/audio-device (the Miles/OpenAL link) |
+| Miles AIL_* API — the `milesstub`/OpenAL backend | `library-not-linked` | 0 | 13 | `cmake/openal.cmake` builds an OpenAL-backed implementation of the same AIL_* API, and the 32-bit Windows build links the fetched miles-sdk-stub. This harness now builds `Core/Libraries/Source/OpenALAudioDevice` as a support archive and links libopenal, so what is left here is the part of the Miles surface that backend does not implement rather than the whole API. | platform/audio-device (the Miles/OpenAL link) |
 | FFmpeg (libavcodec / libavformat / libavutil / libswscale) | `library-not-linked` | 0 | 823 | The video path is the engine's own `RTS_BUILD_OPTION_FFMPEG` route. `fetch-probe-deps.sh` provisions the pinned headers so the code compiles, and nothing installs an FFmpeg runtime for the link. | video/bink-excision-and-harness-headers |
 | The window/input backend this configuration does not choose (SDL2, Cocoa) | `library-not-linked` | 0 | 2 | `probe.OPTIONAL_BACKENDS` keeps the SDL2 backend opt-in and the Cocoa backend is Objective-C++, so no target lists either. The definitions are in the tree; a configuration that picks one resolves all of them. | platform/macos-window-compile and platform/window-seam-wiring |
 | GameSpy SDK | `cut-scope-not-linked` | 0 | 279 | Online matchmaking is permanently cut scope (docs/porting/native-port-plan.md). The SDK's own sources are provisioned and define these symbols, so this is a link refused rather than one that is missing: they disappear when the call sites go, which is `online/absent-menu-seam`'s work, and must not be stubbed to make a link pass. | online/absent-menu-seam |
@@ -72,7 +74,7 @@ The linker's list and §3's `nm` scan agree, so the categorised list above is th
 
 Symbol resolution is necessary and not sufficient; `docs/porting/startability.md` defines what else a first launch needs.
 
-The file is `build/native/native_strict_link`, 83.6 MiB, ELF 64-bit x86-64. That it loads and runs is a separate question from whether it links, and one this run does not answer: see `docs/porting/startability.md`.
+The file is `build/native/native_strict_link`, 76.6 MiB, ELF 64-bit x86-64 (`file`: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=89b99764675eba9c82457a63b8bc74fd3e72a92f, for GNU/Linux 3.2.0, with debug_info, not stripped). That it loads and runs is a separate question from whether it links, and one this run does not answer: see `docs/porting/startability.md`.
 
 ## Reproducing
 
