@@ -530,3 +530,40 @@ git diff --stat 6a593e409 030a7c11b -- GeneralsMD Core   # since the recordings:
 ```
 
 The run data, profiles and recordings stay outside the repository.
+
+## 10. Stage 2: measurement on the Mac
+
+### 10.1 Pre-registered decision rules (written before any stage-2 data)
+
+Recorded verbatim as given for stage 2, then applied mechanically. They are not tuned after the
+data.
+
+- **H1 (-O0 build):** B (optimised, `-O2 -fno-strict-aliasing`, same commit `030a7c11b`) is valid
+  only if headless replay playback prints no `CRC Mismatch` / desync on both recordings. H1
+  CONFIRMED if B's headless wall time over game minutes 10→end is ≤ 0.6× A's on both recordings
+  (2 runs each); and, rendered, B's late-game (≥ min 12 of replay) median frame time is ≥ 8 ms
+  lower than A's. If B desyncs: H1 is NOT landable as-is — find the first diverging subsystem if
+  cheap, else report.
+- **H2 (no CPU/GPU overlap):** only meaningful on top of B. Report numbers; no landing decision in
+  this stage.
+- **"Heavier game" explanation of the old branch regression:** CONFIRMED if A's per-logic-frame
+  cost differs ≥ 2× between the two recordings at the same game minute.
+
+**Operational definitions, fixed with the rules:**
+
+- *Same commit.* A and B are built from `030a7c11b` plus two off-by-default measurement hooks
+  (`ZH_LOGIC_FRAME_LOG`, `ZH_ENGINE_FRAME_LOG`, §10.2). With the variables unset neither hook
+  reads the clock or writes anything; both A and B carry them, so the pair differs only in flags.
+- *Headless wall time, minutes 10→end.* From `ZH_LOGIC_FRAME_LOG`: the end of the last logic
+  frame (`start_ms + logic_ms`) minus `start_ms` of logic frame 18,000 (10 × 60 × 30). The
+  binary's own `Elapsed Time` lines (1 s resolution) are the cross-check. Per recording, the mean
+  of B's two runs is compared with the mean of A's two runs; all four runs are reported.
+- *Desync.* Any `CRC Mismatch` line on stdout/stderr, or a run that stops short of the recording's
+  last frame for any reason other than the known post-last-frame `SIGSEGV`.
+- *Per-logic-frame cost at the same game minute.* Mean `logic_ms` per logic frame on A (both runs
+  pooled), over the game minutes both recordings cover from minute 10 on. CONFIRMED if the larger
+  recording's mean is ≥ 2× the smaller's over that common window. Per-minute ratios are reported
+  too but do not decide.
+- *Rendered late-game frame time.* From `ZH_ENGINE_FRAME_LOG`: the difference between successive
+  passes' `start_ms`, over passes whose `logic_frame` ≥ 21,600 (game minute 12) up to the
+  recording's last frame. One run per binary; median and p95 reported.
