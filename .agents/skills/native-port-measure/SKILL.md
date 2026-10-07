@@ -74,7 +74,7 @@ after classifying the change — writing straight into `docs/porting/ci-baseline
 before-state you are supposed to compare against:
 
 ```sh
-# levels 1-3: the strict link is expected to fail (389 unresolved on main)
+# levels 1-3: the strict link is expected to fail (387 unresolved on main)
 CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3 --with-shims \
   --strict-link --report /tmp/nb123.md --json /tmp/nb123.json
 python3 scripts/ci/check-native-build-baseline.py --results /tmp/nb123.json
@@ -94,7 +94,16 @@ python3 scripts/ci/check-audio-backend-linked.py --results /tmp/nb1234.json
 python3 scripts/ci/check-video-headers.py --results /tmp/nb1234.json
 # reads the archive the levels 1-4 build just produced in build/native, so after it, not before
 python3 scripts/ci/check-swapchain-compiled.py
+# release is -O2: every compile has -fmath-errno and -ffp-contract=off, no archive imports a fused
+# sincos (it desyncs replays; docs/porting/optimised-native-build.md); the self-check is its control
+CLANGXX=clang++-14 python3 scripts/ci/check-native-build-flags.py --self-check
+python3 scripts/ci/check-native-build-flags.py --build-dir build/native --expect-optimised
 ```
+
+The release configuration is compiled at `-O2 -fno-strict-aliasing` and the debug configuration at
+`-O0`; `--unoptimised` builds release at `-O0`, as every figure before
+`docs/porting/optimised-native-build.md` was. Results record `optimised`, and
+`check-native-build-baseline.py` refuses to compare across it, as across configurations.
 
 The debug configuration is a measured configuration of its own (CI job `native-build-debug`) with
 its own baseline: it compiles different code (`-DRTS_DEBUG -DWWDEBUG -DDEBUG`), so its numbers are
@@ -110,6 +119,7 @@ CLANGXX=clang++-14 python3 scripts/native-build.py --level 1 --level 2 --level 3
   --with-shims --config debug --strict-link --build-dir build/native-debug \
   --report /tmp/nbdebug.md --json /tmp/nbdebug.json
 python3 scripts/ci/check-native-build-baseline.py --results /tmp/nbdebug.json
+python3 scripts/ci/check-native-build-flags.py --build-dir build/native-debug   # still -O0
 CLANGXX=clang++-14 python3 scripts/native-sim-probe.py --build-dir build/native-debug --build
 python3 scripts/ci/check-assert-fires.py --build-dir build/native-debug
 python3 scripts/ci/check-path-separator-keys.py --build-dir build/native-debug
@@ -134,6 +144,7 @@ python3 scripts/native-base-game-install-test.py
 python3 scripts/native-memory-shutdown-test.py       # allocator critical sections outlive statics
 python3 scripts/native-exit-teardown-test.py         # object pools destroyed after the allocator
 python3 scripts/native-lookat-reset-modes-test.py    # game ended mid-scroll releases the mouse lock
+python3 scripts/native-tunnel-guard-null-attack-state-test.py # no null attack state in tunnel guard
 python3 scripts/native-lock-failure-test.py
 python3 scripts/native-instance-lock-test.py
 python3 scripts/native-death-veterancy-flags-test.py # zero-valued enumerators keep bit 31 at 64 bits

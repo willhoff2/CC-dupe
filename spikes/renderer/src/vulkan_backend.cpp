@@ -1574,11 +1574,30 @@ VkRenderPass VulkanBackend::Get_Or_Create_Render_Pass(bool has_depth, bool load_
 	// buffer at all; in Vulkan that is a different render pass.
 	subpass.pDepthStencilAttachment = has_depth ? &depth_ref : nullptr;
 
+	// The pass's own transition out of UNDEFINED is a write, and the attachment's previous
+	// pass stored to it with no barrier in between (a pass break keeps the tracked layout, so
+	// Transition_Surface records none). The implicit external dependency starts at
+	// TOP_OF_PIPE and orders nothing, which synchronization validation reports as a WAW.
+	VkSubpassDependency after_previous_pass{};
+	after_previous_pass.srcSubpass = VK_SUBPASS_EXTERNAL;
+	after_previous_pass.dstSubpass = 0;
+	after_previous_pass.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+	                                   VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+	                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+	after_previous_pass.dstStageMask = after_previous_pass.srcStageMask;
+	after_previous_pass.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+	                                    VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	after_previous_pass.dstAccessMask =
+	    VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+	    VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
 	VkRenderPassCreateInfo rpci{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
 	rpci.attachmentCount = has_depth ? 2 : 1;
 	rpci.pAttachments = attachments;
 	rpci.subpassCount = 1;
 	rpci.pSubpasses = &subpass;
+	rpci.dependencyCount = 1;
+	rpci.pDependencies = &after_previous_pass;
 	VkRenderPass pass = VK_NULL_HANDLE;
 	if (vkCreateRenderPass(device_, &rpci, nullptr, &pass) != VK_SUCCESS) {
 		return VK_NULL_HANDLE;

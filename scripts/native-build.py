@@ -122,6 +122,14 @@ CONFIG_DEFINES = {
     "debug": ("RTS_DEBUG", "WWDEBUG", "DEBUG"),
 }
 
+# Whether each configuration is compiled optimised (cmake/native/CMakeLists.txt owns the flags). The
+# debug configuration stays at -O0 so it steps cleanly in a debugger; `--unoptimised` gives release
+# at -O0, which is what every build before docs/porting/optimised-native-build.md was.
+CONFIG_OPTIMISED = {
+    "release": True,
+    "debug": False,
+}
+
 
 def slug(target_name):
     return re.sub(r"[^A-Za-z0-9]+", "_", target_name).strip("_").lower()
@@ -1162,13 +1170,14 @@ def ffmpeg_libraries(deps_dir):
     return found if len(found) == len(FFMPEG_LIB_STEMS) else []
 
 
-def configure(build_dir, manifest_dir, targets, extra_slugs=()):
+def configure(build_dir, manifest_dir, targets, optimise, extra_slugs=()):
     slugs = ";".join([slug(t.name) for t in targets] + list(extra_slugs))
     cmd = [
         "cmake", "-S", str(NATIVE_CMAKE_DIR), "-B", str(build_dir),
         f"-DCMAKE_CXX_COMPILER={CXX}",
         f"-DNATIVE_MANIFEST_DIR={manifest_dir}",
         f"-DNATIVE_TARGETS={slugs}",
+        f"-DNATIVE_OPTIMISE={'ON' if optimise else 'OFF'}",
         "-DCMAKE_BUILD_TYPE=Debug",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     ]
@@ -1904,6 +1913,13 @@ def render_report(data, examples):
          "Configuration: **release** — the engine's assertions and debug logging are compiled "
          "out, as in every figure published before `--config debug` existed."),
         "",
+        ("Optimisation: **-O2** (`-O2 -fno-strict-aliasing`; `-fmath-errno` and "
+         "`-ffp-contract=off` in every configuration, see "
+         "`docs/porting/optimised-native-build.md`)."
+         if data.get("optimised") else
+         "Optimisation: **-O0**, as in every figure published before "
+         "`docs/porting/optimised-native-build.md`."),
+        "",
         "## 1. Compilation",
         "",
         "| Library | Objects produced | Translation units | Probe-clean |",
@@ -2075,6 +2091,8 @@ def render_report(data, examples):
         f"python3 scripts/native-build.py {' '.join(f'--level {n}' for n in data['levels'])}"
         + (" --with-shims" if data["with_shims"] else "")
         + (f" --config {data['config']}" if data.get("config", "release") != "release" else "")
+        + (" --unoptimised" if data.get("config", "release") == "release"
+           and not data.get("optimised") else "")
         + (" --strict-link" if strict.get("attempted") else "")
         + " --report docs/porting/native-build-report.md --json native-build.json",
         "```",
@@ -2098,6 +2116,9 @@ def main():
                         help="build configuration, spelled as cmake/config-build.cmake spells it: "
                              "`debug` adds RTS_DEBUG/WWDEBUG/DEBUG, so the engine's own assertions "
                              "and debug logging are compiled (default: release)")
+    parser.add_argument("--unoptimised", action="store_true",
+                        help="compile the release configuration at -O0, as every build before "
+                             "docs/porting/optimised-native-build.md did (debug is always -O0)")
     parser.add_argument("--strict-link", action="store_true",
                         help="also attempt a link with no tolerance for unresolved symbols, i.e. "
                              "an actual executable, and exit non-zero when it fails")
@@ -2108,6 +2129,7 @@ def main():
 
     levels = sorted(set(args.level or [1]))
     config_defines = CONFIG_DEFINES[args.config]
+    optimise = CONFIG_OPTIMISED[args.config] and not args.unoptimised
     wanted = [name for level in levels for name in LEVELS[level]]
     # ALL_TARGETS, not npt.TARGETS: level 3's device and entry-point libraries live in the probe's
     # RENDERER_TARGETS list, which is where the probe keeps everything never compiled off Windows.
@@ -2128,7 +2150,8 @@ def main():
     manifest_dir = build_dir / "manifests"
 
     print(f"== generating manifests ({args.config} configuration"
-          + (f": -D{' -D'.join(config_defines)}" if config_defines else "") + ")")
+          + (f": -D{' -D'.join(config_defines)}" if config_defines else "")
+          + (", optimised" if optimise else ", -O0") + ")")
     generated_dirs = write_generated_headers(build_dir)
     sources_by_target = write_manifests(targets, manifest_dir, deps_dir,
                                         with_shims=args.with_shims,
@@ -2183,7 +2206,7 @@ def main():
     extra_slugs = [s for s in (lzhl_slug, audio_slug, window_slug, render_slug, gitinfo_slug) if s]
 
     print(f"== compiling {len(all_sources)} translation units")
-    configure(build_dir, manifest_dir, targets, extra_slugs)
+    configure(build_dir, manifest_dir, targets, optimise, extra_slugs)
     failed, compile_diagnostics = build(build_dir, args.jobs)
     # The support archives are built alongside but are not part of the measurement, so a failure
     # there is a provisioning problem rather than a translation unit this port cannot compile.
@@ -2226,7 +2249,7 @@ def main():
         stale.unlink()
     write_manifests(link_targets, manifest_dir, deps_dir, skip=skip, with_shims=args.with_shims,
                     generated_dirs=generated_dirs, extra_defines=config_defines)
-    configure(build_dir, manifest_dir, link_targets, extra_slugs)
+    configure(build_dir, manifest_dir, link_targets, optimise, extra_slugs)
     second_failed, _ = build(build_dir, args.jobs)
     second_failed = {s for s in second_failed if s in target_by_source}
     if second_failed:
@@ -2398,6 +2421,9 @@ def main():
         # release build never sees, so it has a larger surface and its own failure list.
         "config": args.config,
         "config_defines": list(config_defines),
+        # -O2 or -O0. Unresolved symbols can differ between the two (inlining, dead-code
+        # elimination), so the baseline check refuses to compare across them as across configs.
+        "optimised": optimise,
         "compiled": compiled,
         "translation_units": len(all_sources),
         "objects": len(all_sources) - len(failed),

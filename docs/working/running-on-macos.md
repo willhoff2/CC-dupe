@@ -74,8 +74,13 @@ python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
 ```
 
 A good run ends with `981 objects, 0 failures`, `strict link succeeded: 0 unresolved symbol(s)` and
-a ~26.8 MiB binary at `<build-dir>/native_strict_link`. Confirm it is really arm64 — `lipo -archs`
+a ~14.7 MiB binary at `<build-dir>/native_strict_link`. Confirm it is really arm64 — `lipo -archs`
 should say `arm64` and nothing else.
+
+The release build is optimised (`-O2`, with `-fmath-errno` so replays stay in sync); before
+`docs/porting/optimised-native-build.md` it was `-O0`, ~26.8 MiB, and its late-game logic ran
+~4x slower. To step through the code in LLDB, add `--unoptimised` (release at `-O0`)
+or use `--config debug` (also `-O0`, with the engine's assertions compiled in).
 
 Do not write macOS figures over `docs/porting/ci-baselines/*.json`; those are the clang-14 Linux
 ratchet and a different compiler's numbers are not comparable.

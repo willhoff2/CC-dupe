@@ -768,6 +768,23 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The release build is -O2, and at -O2 a fused sinf+cosf (`__sincosf_stret`) desyncs replays
+      # unless -fmath-errno is set. Retail replays cannot run here, so this gates the flags and the
+      # fused import instead; the self-check proves the scan still sees the defect on this host.
+      # See docs/porting/optimised-native-build.md.
+      - name: Gate the optimisation flags and the absence of a fused sincos
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## The release build is optimised and keeps replay determinism'
+            echo '```'
+            python3 scripts/ci/check-native-build-flags.py --self-check
+            python3 scripts/ci/check-native-build-flags.py --build-dir build/native --expect-optimised
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The renderer libraries are where a new Win32 dependency is most likely to appear, and the
       # total is only a ratchet. Same budget file as levels 1-3: it is a set of names, and the
       # three in it are the mouse cursor path, which level 4 does not change.
@@ -855,6 +872,23 @@ jobs:
             echo '## End of game while scrolling'
             echo '```'
             python3 scripts/native-lookat-reset-modes-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The tunnel guard's states returned from onEnter() without an attack state when there was no
+      # nemesis, and update() dereferenced it: a read at 0x38 in AITNGuardOuterState::update() in a
+      # real skirmish. This leaves OUTER current the way the state machine does and updates it, and
+      # scans both game trees for unguarded dereferences.
+      # See docs/porting/tunnel-guard-null-attack-state.md.
+      - name: Prove a tunnel guard state without an attack state updates without faulting
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Tunnel guard with no attack state'
+            echo '```'
+            python3 scripts/native-tunnel-guard-null-attack-state-test.py
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -962,6 +996,11 @@ jobs:
             python3 scripts/ci/check-native-build-baseline.py --results native-build-debug.json
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The debug configuration stays -O0 so it steps cleanly in a debugger, and keeps -fmath-errno.
+      - name: Gate the debug configuration's flags
+        run: |
+          python3 scripts/ci/check-native-build-flags.py --build-dir build/native-debug
 
       # The negative control, and the reason the job exists: a debug build whose asserts are
       # compiled out or swallowed by the portable dialog stub would pass every check above. The
@@ -1725,6 +1764,9 @@ jobs:
             echo '```'
             build/spike/zh-feature-probe
             build/spike/zh-fixedfunc-tests
+            # Synchronization validation: any hazard is a validation message, which fails the run
+            # (docs/porting/render-pass-external-dependency.md).
+            VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true build/spike/zh-fixedfunc-tests
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -1751,6 +1793,7 @@ jobs:
             echo '## D3D8 Lock/Unlock usage classes (macOS arm64, MoltenVK)'
             echo '```'
             build/spike/zh-resource-lock-tests
+            VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true build/spike/zh-resource-lock-tests
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
