@@ -1764,6 +1764,9 @@ jobs:
             echo '```'
             build/spike/zh-feature-probe
             build/spike/zh-fixedfunc-tests
+            # Synchronization validation: any hazard is a validation message, which fails the run
+            # (docs/porting/render-pass-external-dependency.md).
+            VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true build/spike/zh-fixedfunc-tests
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -1790,6 +1793,7 @@ jobs:
             echo '## D3D8 Lock/Unlock usage classes (macOS arm64, MoltenVK)'
             echo '```'
             build/spike/zh-resource-lock-tests
+            VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true build/spike/zh-resource-lock-tests
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
