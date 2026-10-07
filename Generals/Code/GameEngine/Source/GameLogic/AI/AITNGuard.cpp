@@ -402,6 +402,10 @@ StateReturnType AITNGuardInnerState::update()
 			}
 		}
 
+		// TheSuperHackers @bugfix willhoff2 05/10/2026 onEnter() leaves m_attackState null when there is no
+		// nemesis, and every path below dereferenced it. AIGuardInnerState::update() has always checked.
+		if (m_attackState == nullptr) return STATE_SUCCESS;
+
 		if (m_scanForEnemy) {
 			m_scanForEnemy = false; // we just do 1 scan.
 			nemesis = TunnelNetworkScan(owner);
@@ -421,6 +425,8 @@ StateReturnType AITNGuardInnerState::update()
 			getGuardMachine()->setNemesisID(teamVictim->getID());
 		}
 	}
+	// TheSuperHackers @bugfix willhoff2 05/10/2026 Same null attack state, reached with a nemesis.
+	if (m_attackState == nullptr) return STATE_SUCCESS;
 	return m_attackState->update();
 }
 
@@ -501,6 +507,10 @@ StateReturnType AITNGuardOuterState::onEnter()
 //--------------------------------------------------------------------------------------
 StateReturnType AITNGuardOuterState::update()
 {
+	// TheSuperHackers @bugfix willhoff2 05/10/2026 onEnter() returns before creating m_attackState in
+	// GUARDMODE_GUARD_WITHOUT_PURSUIT or with no nemesis. AIGuardOuterState::update() has always checked.
+	if (m_attackState == nullptr) return STATE_SUCCESS;
+
 	Object *owner = getMachineOwner();
 	Object* goalObj = m_attackState->getMachineGoalObject();
 	if (goalObj)
@@ -826,6 +836,10 @@ StateReturnType AITNGuardAttackAggressorState::onEnter()
 //-------------------------------------------------------------------------------------------------
 StateReturnType AITNGuardAttackAggressorState::update()
 {
+	// TheSuperHackers @bugfix willhoff2 05/10/2026 onEnter() returns before creating m_attackState with no
+	// nemesis. AIGuardAttackAggressorState::update() has always checked.
+	if (m_attackState == nullptr) return STATE_SUCCESS;
+
 	if (m_attackState->getMachine()->getCurrentStateID() == AttackStateMachine::FIRE_WEAPON) {
 		Object *nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID());
 		Player *ownerPlayer = getMachineOwner()->getControllingPlayer();

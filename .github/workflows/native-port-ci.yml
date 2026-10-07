@@ -858,6 +858,23 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The tunnel guard's states returned from onEnter() without an attack state when there was no
+      # nemesis, and update() dereferenced it: a read at 0x38 in AITNGuardOuterState::update() in a
+      # real skirmish. This leaves OUTER current the way the state machine does and updates it, and
+      # scans both game trees for unguarded dereferences.
+      # See docs/porting/tunnel-guard-null-attack-state.md.
+      - name: Prove a tunnel guard state without an attack state updates without faulting
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Tunnel guard with no attack state'
+            echo '```'
+            python3 scripts/native-tunnel-guard-null-attack-state-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Reporting a failed lock used to allocate, and the allocator is what holds the lock, so a
       # recoverable errno became an unbounded recursion at both ends of the process lifetime. This
       # makes the lock fail on purpose and requires one bounded diagnostic and an abort, against a
