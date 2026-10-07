@@ -14,7 +14,8 @@ run writes OUT/logic.csv (ZH_LOGIC_FRAME_LOG), and when rendered OUT/engine.csv
 A headless run ends by itself; the binary may then crash in shutdown (the known ObjectPoolClass
 SIGSEGV), so the exit code is recorded but the printed lines and logic.csv are the verdict. A
 rendered replay returns to the shell when the recording ends, so the run is stopped once logic.csv
-has not advanced for --idle-seconds after the last recorded frame. Refuses to start while another
+has not advanced for --idle-seconds after the last recorded frame. A rendered run needs LLDB to
+clear one flag before anything is drawn; see enable_render(). Refuses to start while another
 `zh` process runs, or, rendered, while the screen is locked. See docs/porting/late-game-frame-cost.md
 section 10.
 """
@@ -64,6 +65,22 @@ def last_logic_frame(path):
     return None
 
 
+def enable_render(pid, out):
+    """Clear m_breakTheMovie in the running game, so a command-line replay draws at all.
+
+    Intro::doPostIntro() sets it and only the main menu or the single-player load screen clear it,
+    neither of which a `-replay` run reaches, so W3DDisplay::draw() never calls Begin_Render and
+    nothing is presented. LLDB writes the flag once and detaches, so the binary stays unmodified.
+    The binary must carry get-task-allow.
+    """
+    proc = subprocess.run(["lldb", "-p", str(pid), "-b", "-o",
+                           "expr TheWritableGlobalData->m_breakTheMovie = 0", "-o", "detach"],
+                          capture_output=True, text=True, timeout=120)
+    (out / "enable-render.log").write_text(proc.stdout + proc.stderr)
+    return {"returncode": proc.returncode, "at_frame": last_logic_frame(out / "logic.csv"),
+            "cleared": "= false" in proc.stdout}
+
+
 def recorded_total_frames(stdout_path):
     """The replay's length in logic frames, from the first `Game Time: a/b` line headless prints."""
     match = GAME_TIME.search(Path(stdout_path).read_text(errors="replace"))
@@ -86,6 +103,8 @@ def main():
     parser.add_argument("--idle-seconds", type=float, default=15.0)
     parser.add_argument("--sample-at-frame", type=int)
     parser.add_argument("--sample-seconds", type=int, default=10)
+    parser.add_argument("--enable-render-at-frame", type=int, default=30,
+                        help="rendered: logic frame at which LLDB clears m_breakTheMovie (see below)")
     parser.add_argument("--env", action="append", default=[], help="extra NAME=VALUE for the game")
     parser.add_argument("--timeout", type=float, default=3600.0)
     args = parser.parse_args()
@@ -131,6 +150,7 @@ def main():
 
     game_pid = None
     sample_taken = None
+    render_enabled = None
     ended_by = None
     last_progress = (None, time.time())
     while True:
@@ -146,6 +166,9 @@ def main():
         frame = last_logic_frame(out / "logic.csv")
         if frame != last_progress[0]:
             last_progress = (frame, time.time())
+        if (args.rendered and render_enabled is None and game_pid is not None and frame is not None
+                and frame >= args.enable_render_at_frame):
+            render_enabled = enable_render(game_pid, out)
         if (args.sample_at_frame is not None and sample_taken is None and game_pid is not None
                 and frame is not None and frame >= args.sample_at_frame):
             sample_path = out / f"sample-frame{frame}.txt"
@@ -181,6 +204,7 @@ def main():
         "crc_mismatch_lines": [line for line in stdout_text.splitlines() if "CRC Mismatch" in line],
         "elapsed_lines": [line for line in stdout_text.splitlines() if line.startswith("Elapsed Time")],
         "sample": sample_taken,
+        "render_enabled": render_enabled,
     }
     (out / "run.json").write_text(json.dumps(record, indent=2) + "\n")
     print(json.dumps(record, indent=2))
