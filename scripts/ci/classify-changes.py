@@ -75,6 +75,9 @@ AREAS = {
         "*/Win32Device/*",
         "scripts/window-input-scan.py",
         "scripts/macos-cocoa-key-routing-test.py",
+        "scripts/native-sdl2-event-clock-test.py",
+        # Both backends stamp events on the clock this header defines.
+        "*/Utility/time_compat.h",
     ),
     # The OpenAL replacement for Miles and its WWAudio consumers. CMakeLists.txt is in because the
     # non-Windows branch of the root build is what supplies `milesstub`.

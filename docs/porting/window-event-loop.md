@@ -159,9 +159,9 @@ by name, so if a fourth appears it fails.
 
 **Mouse events keep the fields `MouseIO` needs**: client-area coordinates with a top-left origin,
 `Wheel_Delta` in `WHEEL_DELTA` (120) units with `WM_MOUSEWHEEL`'s sign (because `Win32Mouse.cpp`
-already divides by 120), a `Click_Count` of 2 for the `WM_?BUTTONDBLCLK` case, and a monotonic
-`Time_Ms` replacing `MSG::time`, which the engine currently smuggles through the global
-`TheMessageTime` into `MouseIO::time`.
+already divides by 120), a `Click_Count` of 2 for the `WM_?BUTTONDBLCLK` case, and a `Time_Ms`
+on `timeGetTime()`'s clock replacing `MSG::time`, which the engine currently smuggles through the
+global `TheMessageTime` into `MouseIO::time` (the clock matters: see `event-clock.md`).
 
 **`Wheel_Delta` on Cocoa is unit-dependent, and the two units are converted separately.** A classic
 notched wheel answers `hasPreciseScrollingDeltas` `NO` and reports lines: one line is one notch is

@@ -55,6 +55,8 @@
 // CoreGraphics/CGRemoteOperation.h, which AppKit does not promise to pull in.
 #import <CoreGraphics/CoreGraphics.h>
 
+#include <Utility/time_compat.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -620,10 +622,13 @@ WindowState * State(void * window)
 	return TheWindow;
 }
 
-unsigned int Now_Ms()
+// Time_Ms is on timeGetTime()'s clock, which Keyboard::checkKeyRepeat() measures a hold against.
+// NSEvent.timestamp stops while the Mac sleeps and timeGetTime() does not, so only the event's age
+// is carried over (docs/porting/event-clock.md).
+unsigned int Engine_Time_Ms(NSEvent * event)
 {
-	// Same clock the events are stamped with: NSEvent.timestamp is seconds since boot.
-	return static_cast<unsigned int>([NSProcessInfo processInfo].systemUptime * 1000.0);
+	const double age_seconds = [NSProcessInfo processInfo].systemUptime - [event timestamp];
+	return timeGetTime() - static_cast<unsigned int>(std::llround(age_seconds * 1000.0));
 }
 
 /*
@@ -699,7 +704,7 @@ void Request_Quit_From_UI(void)
 	if (state == nullptr) return;
 	WindowEvent out;
 	out.Type = WINDOW_EVENT_CLOSE;
-	out.Time_Ms = Now_Ms();
+	out.Time_Ms = timeGetTime();
 	Push(state, out);
 }
 
@@ -876,7 +881,7 @@ void Translate_Flags_Changed(WindowState * state, NSEvent * event, unsigned int 
 
 void Translate(WindowState * state, NSEvent * event)
 {
-	const unsigned int time_ms = static_cast<unsigned int>([event timestamp] * 1000.0);
+	const unsigned int time_ms = Engine_Time_Ms(event);
 	WindowEvent out;
 	out.Time_Ms = time_ms;
 
@@ -969,7 +974,7 @@ void Sync_Window_State(WindowState * state)
 		state->Active = active;
 		WindowEvent out;
 		out.Type = active ? WINDOW_EVENT_FOCUS_GAINED : WINDOW_EVENT_FOCUS_LOST;
-		out.Time_Ms = Now_Ms();
+		out.Time_Ms = timeGetTime();
 		Push(state, out);
 	}
 	const bool minimised = [state->Window isMiniaturized] ? true : false;
@@ -977,7 +982,7 @@ void Sync_Window_State(WindowState * state)
 		state->Minimised = minimised;
 		WindowEvent out;
 		out.Type = minimised ? WINDOW_EVENT_MINIMISED : WINDOW_EVENT_RESTORED;
-		out.Time_Ms = Now_Ms();
+		out.Time_Ms = timeGetTime();
 		Push(state, out);
 	}
 	// The close button used to be inferred here, from the window no longer being visible. It is
@@ -999,7 +1004,7 @@ void Sync_Window_State(WindowState * state)
 		out.Type = WINDOW_EVENT_RESIZE;
 		out.Width = width;
 		out.Height = height;
-		out.Time_Ms = Now_Ms();
+		out.Time_Ms = timeGetTime();
 		Push(state, out);
 	}
 }

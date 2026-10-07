@@ -1909,6 +1909,13 @@ jobs:
           cmake -S spikes/renderer -B build/spike -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/spike --target zh-window-spike
 
+      # Keyboard::checkKeyRepeat() measures a hold as timeGetTime() minus the event's stamp, so a
+      # stamp on SDL_GetTicks()'s clock repeats every key at once (docs/porting/event-clock.md).
+      - name: SDL2 event stamps are on timeGetTime()'s clock
+        env:
+          CLANGXX: clang++-18
+        run: python3 scripts/native-sdl2-event-clock-test.py --require-display
+
       - name: Present 240 frames to a real X11 window and check the readback
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json

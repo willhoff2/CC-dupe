@@ -46,6 +46,8 @@
 #include <SDL.h>
 #include <SDL_vulkan.h>
 
+#include <Utility/time_compat.h>
+
 #include <cstring>
 #include <deque>
 #include <string>
@@ -283,18 +285,26 @@ void Push(WindowState * state, const WindowEvent & event)
 	state->Queue.push_back(event);
 }
 
+// Time_Ms is on timeGetTime()'s clock, which Keyboard::checkKeyRepeat() measures a hold against.
+// SDL stamps events with SDL_GetTicks(), counted from SDL_Init, so only the event's age is
+// carried over (docs/porting/event-clock.md).
+unsigned int Engine_Time_Ms(Uint32 sdl_timestamp)
+{
+	return timeGetTime() - (SDL_GetTicks() - sdl_timestamp);
+}
+
 void Translate(WindowState * state, const SDL_Event & in)
 {
 	WindowEvent out;
 	switch (in.type) {
 		case SDL_QUIT:
 			out.Type = WINDOW_EVENT_CLOSE;
-			out.Time_Ms = in.quit.timestamp;
+			out.Time_Ms = Engine_Time_Ms(in.quit.timestamp);
 			Push(state, out);
 			return;
 
 		case SDL_WINDOWEVENT:
-			out.Time_Ms = in.window.timestamp;
+			out.Time_Ms = Engine_Time_Ms(in.window.timestamp);
 			switch (in.window.event) {
 				case SDL_WINDOWEVENT_CLOSE:
 					out.Type = WINDOW_EVENT_CLOSE;
@@ -346,7 +356,7 @@ void Translate(WindowState * state, const SDL_Event & in)
 			out.Scan_Code = Set1_From_Sdl(in.key.keysym.scancode);
 			out.Repeat = in.key.repeat != 0;
 			out.Modifiers = Modifiers_From_Sdl(static_cast<SDL_Keymod>(in.key.keysym.mod));
-			out.Time_Ms = in.key.timestamp;
+			out.Time_Ms = Engine_Time_Ms(in.key.timestamp);
 			// A key with no set-1 code (the GUI/"super" keys, the media keys) is dropped
 			// rather than delivered as key 0, which KeyDefType would read as KEY_NONE.
 			if (out.Scan_Code != 0) Push(state, out);
@@ -361,7 +371,7 @@ void Translate(WindowState * state, const SDL_Event & in)
 				out.Type = WINDOW_EVENT_TEXT;
 				out.Character = code_point;
 				out.Modifiers = Modifiers_From_Sdl(SDL_GetModState());
-				out.Time_Ms = in.text.timestamp;
+				out.Time_Ms = Engine_Time_Ms(in.text.timestamp);
 				Push(state, out);
 				text += consumed;
 				consumed = Decode_Utf8(text, code_point);
@@ -374,7 +384,7 @@ void Translate(WindowState * state, const SDL_Event & in)
 			out.Mouse_X = in.motion.x;
 			out.Mouse_Y = in.motion.y;
 			out.Modifiers = Modifiers_From_Sdl(SDL_GetModState());
-			out.Time_Ms = in.motion.timestamp;
+			out.Time_Ms = Engine_Time_Ms(in.motion.timestamp);
 			Push(state, out);
 			return;
 
@@ -387,7 +397,7 @@ void Translate(WindowState * state, const SDL_Event & in)
 			out.Mouse_Button = Button_From_Sdl(in.button.button);
 			out.Click_Count = in.button.clicks;
 			out.Modifiers = Modifiers_From_Sdl(SDL_GetModState());
-			out.Time_Ms = in.button.timestamp;
+			out.Time_Ms = Engine_Time_Ms(in.button.timestamp);
 			Push(state, out);
 			return;
 
@@ -402,7 +412,7 @@ void Translate(WindowState * state, const SDL_Event & in)
 			// divides by it, so the notch count is scaled back up here.
 			out.Wheel_Delta = in.wheel.y * 120;
 			out.Modifiers = Modifiers_From_Sdl(SDL_GetModState());
-			out.Time_Ms = in.wheel.timestamp;
+			out.Time_Ms = Engine_Time_Ms(in.wheel.timestamp);
 			Push(state, out);
 			return;
 		}

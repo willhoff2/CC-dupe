@@ -80,11 +80,21 @@ build/spike/zh-hidpi-tests-cocoa --window --min-scale 2.0    # or on its own
 
 Key routing through the real Cocoa pump (no spike build needed): Escape, the arrows and the other
 plain keys must reach the seam's queue without AppKit's `noResponderFor:keyDown:` alert sound, and
-Cmd-Q must still quit (`docs/porting/cocoa-key-routing.md`). It needs the window to become key, so
-run it on an unlocked login session; it takes keyboard focus while it runs:
+Cmd-Q must still quit (`docs/porting/cocoa-key-routing.md`). It also checks that every event's
+`Time_Ms` is on `timeGetTime()`'s clock (`docs/porting/event-clock.md`); that half can only fail on
+a Mac that has slept since boot, and the test prints the two clocks' offset so a run says whether it
+could tell them apart. It needs the window to become key, so run it on an unlocked login session; it
+takes keyboard focus while it runs:
 
 ```sh
 python3 scripts/macos-cocoa-key-routing-test.py --require-display
+```
+
+The SDL2 backend's half of the same clock check, which the `window-seam-linux` job runs under Xvfb
+(it needs `libsdl2-dev`, a loadable `libvulkan` and an X server, or `xvfb-run`):
+
+```sh
+CLANGXX=clang++-18 python3 scripts/native-sdl2-event-clock-test.py --require-display
 ```
 
 The spike also carries a measured staging ceiling, a draw-capacity floor and two derived counts, all

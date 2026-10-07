@@ -111,8 +111,10 @@ enum WindowModifierFlags
 **	Wheel_Delta is in WHEEL_DELTA (120) units with the same sign convention as
 **	WM_MOUSEWHEEL, because Win32Mouse.cpp already divides by 120.
 **
-**	Time_Ms is a monotonic millisecond stamp for the event, replacing MSG::time, which the
-**	engine plumbs through the global TheMessageTime into MouseIO::time.
+**	Time_Ms is when the event happened, in milliseconds on timeGetTime()'s clock, replacing
+**	MSG::time (the engine plumbs it into MouseIO::time and KeyboardIO::keyDownTimeMsec).
+**	It must be that clock: Keyboard::checkKeyRepeat() subtracts it from timeGetTime(). Each
+**	backend carries the event's age over from its own clock (docs/porting/event-clock.md).
 */
 struct WindowEvent
 {
