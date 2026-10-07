@@ -34,7 +34,8 @@ transfer):
   and B2 run reached in stage 2.
 - *Headless wall time, minutes 10→end.* From `ZH_LOGIC_FRAME_LOG`: end of the last logic frame minus
   `start_ms` of logic frame 18,000; the mean of the two runs per recording, divided by the mean of
-  A's two runs in `summary-headless.txt` (A: 515.45 s on `before-2`, 555.15 s on `aftersync-1`; 0.6× is 309.3 s and 333.1 s).
+  A's two runs in `summary-headless.txt` (A: 515.45 s on `before-2`, 555.15 s on `aftersync-1`;
+  0.6× is 309.3 s and 333.1 s).
 - *Rendered late-game frame time.* From `ZH_ENGINE_FRAME_LOG`: successive passes' `start_ms`
   differences over passes with `logic_frame` ≥ 21,600 up to the last frame; one run; median and p95.
   "p95 not worse" means ≤ A's 144.0 ms.
@@ -43,3 +44,189 @@ transfer):
   two hook commits (`0c964298b`, `aa606e0d8`) applied on top in a scratch checkout, built by this
   branch's `native-build.py` with no flag set in the environment. A carried the same hooks, so the
   pair differs only in how it was compiled. The hooks are dormant unless their variable is set.
+
+## 2. What changed
+
+| where | before | after |
+|---|---|---|
+| `cmake/native/CMakeLists.txt` | `-ffp-contract=off`; no `-O` (`CMAKE_BUILD_TYPE=Debug` adds only `-g`) | `-ffp-contract=off -fmath-errno` in every configuration; `-O2 -fno-strict-aliasing` when `NATIVE_OPTIMISE` is on; configuring without `NATIVE_OPTIMISE` is a fatal error |
+| `scripts/native-build.py` | one compile mode | release is optimised, debug (`--config debug`) stays `-O0`; `--unoptimised` builds release at `-O0` as before; results record `optimised` and the report says which |
+| `scripts/ci/check-native-build-baseline.py` | compares any two results of one configuration | also refuses to compare an optimised result with an unoptimised baseline (absent = unoptimised) |
+| `scripts/ci/check-native-build-flags.py` (new) | — | every compile command carries the flags; no archive imports a fused sine/cosine; `--self-check` compiles a control at `-O2` with and without `-fmath-errno` and requires the scan to tell them apart |
+| `native-port-ci.yml` | — | the levels 1-4 job runs the new gate (self-check + `--expect-optimised`), the debug job runs it on `build/native-debug` (still `-O0`) |
+
+Why each flag:
+
+- **`-O2`**: what the measurements below were taken at, and what stage 2's B2 was. `-O3` and LTO
+  were not tried.
+- **`-fmath-errno`**: Apple clang defaults to `-fno-math-errno` on Darwin, which makes `sinf`/`cosf`
+  pure, so the optimiser fuses `sinf(x)` and `cosf(x)` of one `x` into `__sincosf_stret`, whose
+  results are not bit-identical to the separate calls. Two sites in `Locomotor.cpp` (inlined
+  `Matrix3D::In_Place_Pre_Rotate_Z` and `Matrix3D::Set(axis, angle)`) do this, and a turning
+  dozer's heading drifts until the replay's CRC check fails at frame 700 (stage 2 §10.3,
+  MEASURED). Linux clang 14 already defaults to `-fmath-errno` (MEASURED: `clang++-14 -###` in the
+  CI container passes it to `cc1`), so the flag changes nothing there. It is set in every
+  configuration because it is a determinism flag like `-ffp-contract=off`, not an optimisation.
+- **`-fno-strict-aliasing`**: the engine was written for MSVC, which never assumes strict aliasing,
+  and stage 2 measured with it. Its own effect is UNMEASURED.
+- **`-g`** stays, so backtraces and LLDB keep their symbols.
+
+Nothing in the engine changed. Windows is untouched: `cmake/native/` is a separate project nothing
+in the Windows build includes, and none of the changed files is read by it (INFERRED from the
+project's own header comment and the diff; no Windows build was run).
+
+## 3. Results
+
+All Mac runs: M1 Pro (10 cores, 16 GB), macOS 26, AppleClang 21 (`clang-2100.3.34.2`), one game
+process at a time, each on a private copy of the recording's user data, run data outside the
+repository (`~/devin-work/optimised-build/`). The measured binary ("NB") is
+`~/devin-work/optimised-build/build-hooks/native_strict_link`, built by this branch's
+`native-build.py --level 1 --level 2 --level 3 --level 4 --with-shims --strict-link` with
+`CXXFLAGS`/`OBJCXXFLAGS` unset, from a throwaway local branch holding this branch plus stage 2's two
+hook commits; 981 objects, 0 failures, strict link 0 unresolved. It was re-signed ad hoc with
+`get-task-allow` only so the rendered runner's LLDB step could attach (as stage 2's were).
+A is stage 2's `-O0` binary and its recorded runs; it was not re-measured.
+
+### Rule 1: optimised, arm64, native (MEASURED) — PASS
+
+- `macos-binary-opt-level.py --self-check`: PASS (control at `-O0` → `O0-like`, `-O2` →
+  `optimised`). On NB: `examineNeighboringCells`, `getRelationship`, `checkForMovement`,
+  `Apply_Render_State_Changes`, `Prepare_Draw` all `optimised` (0 branch-to-next each);
+  `Pathfinder::getCell` not found, i.e. inlined away, as on B2.
+- `lipo -archs` = `arm64` (and `strict_link.binary.lipo_archs = ["arm64"]` in the build JSON);
+  `sysctl -n sysctl.proc_translated` = 0.
+- `check-native-build-flags.py --expect-optimised` on that build directory: every compile command
+  has `-O2 -fno-strict-aliasing -ffp-contract=off -fmath-errno`; none of the 19 archives imports a
+  fused sine/cosine. `nm -u` on the binary imports `_sinf` and `_cosf` and no `___sincosf_stret`.
+- The same branch built without the hooks (`build-branch`, the binary a user gets) gives the same
+  verdicts: 5 symbols `optimised`, `getCell` inlined away, `lipo -archs` arm64.
+
+### Rules 2 and 3: headless replays (MEASURED) — PASS
+
+Wall seconds from logic frame 18,000 to the end of the recording, from `ZH_LOGIC_FRAME_LOG`; the
+binary's own `Elapsed Time` lines agree (NB `before-2` run 1: 01:09 → 03:19 = 130 s).
+
+| binary | recording | run | last frame | `CRC Mismatch` lines | wall s, min 10→end | logic ms/frame, min 10→end | AI ms/frame | peak RSS MB |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| A | `before-2` | 1 / 2 | 32,098 / 32,098 | 0 / 0 | 516.1 / 514.8 | 36.5 | 23.9 | 285 |
+| A | `aftersync-1` | 1 / 2 | 28,148 / 28,148 | 0 / 0 | 554.8 / 555.5 | 54.6 | 40.7 | 285-291 |
+| **NB** | `before-2` | 1 / 2 | 32,098 / 32,098 | 0 / 0 | 129.4 / 127.9 | 9.1 | 6.3 | 281-284 |
+| **NB** | `aftersync-1` | 1 / 2 | 28,148 / 28,148 | 0 / 0 | 136.8 / 136.5 | 13.4 | 10.4 | 285-287 |
+
+- Rule 2: both recordings play to their last frame with no `CRC Mismatch`, 2 runs each (4/4).
+- Rule 3: NB/A = 128.67 / 515.47 = **0.250** (`before-2`) and 136.66 / 555.13 = **0.246**
+  (`aftersync-1`), against ≤ 0.6. (The means are the summary script's, from the CSVs at full
+  precision; the table rounds.) Logic is ~4.0x faster, the same as B2's 0.251 / 0.247.
+
+### Rule 4: rendered replay (MEASURED) — PASS
+
+`heavy-before-2`, fullscreen `-xres 1728 -yres 1117` (3456x2234 pixels), one run, frame pacer as
+shipped, `m_breakTheMovie` cleared through LLDB at logic frame 45 as in stage 2 (§10.6 there; the
+binary is unchanged). In sync (0 `CRC Mismatch` lines); highest logic frame seen 32,095 (the runner
+polls twice a second and stops when the replay drops back to the shell). Late window: logic frames
+21,600 to the end, 10,498 passes, the same count as A's.
+
+| binary | median frame ms | p95 | fps | client (draw + present) median | logic median | backend `scene_ms` median | `present_ms` median |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| A (stage 2) | 53.3 | 144.0 | 13.8 | 33.4 | 17.6 | 30.9 | 1.0 |
+| **NB** | **35.7** | **59.4** | 24.6 | 29.9 | 4.8 | 27.9 | 1.0 |
+
+Median −17.6 ms (bar: ≥ 8 ms lower); p95 59.4 ms ≤ 144.0 ms. B2's single run was 37.0 / 61.0;
+with one rendered run per binary, whether that 1.3 ms difference is real is UNMEASURED.
+
+### Rule 5: repository gates (MEASURED) — PASS
+
+**Linux, as CI runs them.** Each of the three native-build jobs of `native-port-ci.yml` was run step
+by step (every `run:` step, `bash -e`, as the runner does) in the job's own pinned container,
+`ubuntu:22.04@sha256:3b06811b…`, amd64 under Docker on the M1 Pro, after the job's own
+`Install toolchain` step, from a fresh clone of this branch (`native-build` and `native-build-debug`
+at `92574bd22`, `native-build-renderer` again at `19b92b4d5` after the harness fix below; the
+commits between them touch neither job's build):
+
+| job | steps | result |
+|---|---|---|
+| `native-build` (levels 1-3, release) | 19 | all pass except the baseline gate, which refuses as designed (`optimised` differs); regenerated, below |
+| `native-build-renderer` (levels 1-4, release) | 15 | all pass (after the harness fix below) except the baseline gate, which refuses as designed; regenerated, below. The new flags gate passes: self-check, then `--expect-optimised` over 19 archives |
+| `native-build-debug` (levels 1-4, debug + negative controls) | 9 | **all pass, against the unchanged debug baseline**: still `-O0` (`check-native-build-flags.py` on `build/native-debug`), the assertion, map-cache, save-path and shroud negative controls pass |
+
+What `-O2` moves in the release baselines (clang 14, levels 1-3): **unresolved symbols 393 → 391**
+(strict link 389 → 387): `DX8Wrapper::ZNear` and `DX8Wrapper::ZFar` are no longer referenced from
+`W3DSmudge.cpp.o` (that the optimiser dropped a dead use is INFERRED; the two names' absence is
+MEASURED); 845/845 objects either way. Levels 1-4: 981/981 objects and 0 unresolved, unchanged;
+the executable is 76.6 MiB instead of 83.6 MiB. The new figures were written with
+`check-native-build-baseline.py --update` from those runs (and the gate then re-run on both results
+against them: no regression), `porting-status.py` regenerated `STATUS.md` (unchanged), and the
+one prose figure `check-doc-figures.py` tracks (the skill's "389 unresolved") moved to 387. The baselines' provider
+fields (`evidence_names`, `system_libraries`) also changed; they are informational and moved with
+the tree since the last sweep and with the box, not with this change.
+
+**One gate needed a fix, in a test harness, not the engine.** `native-lock-failure-test.py`
+compiles its harness with the allocator's own compile flags, so at `-O2` the harness was optimised
+too, and its destroyed-section case failed ("the allocation returned; this platform accepts a
+destroyed section"): `main` keeps 2 of its 3 `operator new[]` calls at `-O2` (`objdump -dr`, 3 at
+`-O0`), so the stimulus never reached the engine's allocator. The harness is now compiled `-O0`
+(appended last, so the engine archives stay `-O2`). On the Mac the test then reports exactly what
+it reports on an `--unoptimised` build of this branch: only the pre-main case fails, on both,
+because on macOS the memory manager is already up before the probe's static runs (a pre-existing
+macOS-only difference; CI runs this test on Linux only). The pre-main failure is not this slice's:
+`main`'s own copy of the test against stage 2's `-O0` build of `main` fails the same case on the
+Mac. On Linux, in the CI container, the whole test passes at `-O2` with the fix.
+
+**`--unoptimised` reproduces the old build.** Levels 1-3 with `--unoptimised` in the same container,
+checked against the old (`-O0`) baseline: 393 unresolved (strict link 389), equal to the baseline
+in every category; `check-native-build-flags.py` reports `-O0` with `-fmath-errno`. So adding
+`-fmath-errno` everywhere moves no Linux count (it is already clang's default there).
+
+**Mac.** On this branch, `native-build.py` levels 1-4 release (981 objects, 0 failures, strict link
+0 unresolved, 14.7 MiB, `lipo` arm64), debug (981/0/0, 30.4 MiB) and `--unoptimised` (981/0/0)
+all build; `check-native-build-flags.py` passes on all three (`--expect-optimised` on release,
+`-O0` on the other two) and its `--self-check` passes (the control imports `___sincosf_stret`
+without `-fmath-errno` and nothing with it; on Linux clang 14 the control imports `sincosf`, and
+`clang++-14 -###` shows `-fmath-errno` is already the GNU driver's default). The fifteen harness
+tests CI runs after a release build (`native-memory-shutdown`, `-exit-teardown`,
+`-lookat-reset-modes`, `-tunnel-guard-null-attack-state`, `-lock-failure`, `-instance-lock`,
+`-init-failure`, `-base-game-install`, `-win32-file`, `-win32-runtime`, `-win32-user32`,
+`-d3dx8math`, `-d3dx8-entrypoints`, `-death-veterancy-flags`, `-particle-emitter-strdup`) give
+identical results against the `-O2` and the `-O0` build: 14 pass, `native-lock-failure-test.py`
+fails its pre-main case on both (above). `native-stackwalk-test.py` passes. The debug job's
+`native-sim-probe.py` does not link on macOS (`ld: unknown options: --start-group`; a Linux-only
+harness, unchanged by this slice), so its four negative controls were run on Linux only.
+
+Source-only gates on the Mac: `flake8 scripts/`, `actionlint` (`SHELLCHECK_OPTS=--severity=error`),
+`check-skill-coverage.py` (71 gates, all named in a skill), `classify-changes.py --self-check`,
+`native-build-categorise-test.py` (46/46), `check-generated-baselines.py`, `check-doc-figures.py`,
+`porting-status.py --check`: all pass.
+
+## 4. Rule outcome
+
+| rule | outcome | numbers |
+|---|---|---|
+| 1. optimised, arm64, not translated | **PASS** | 5 of 6 probed symbols `optimised`, the sixth inlined away; `lipo -archs` arm64; `proc_translated` 0 |
+| 2. both recordings to the last frame, no `CRC Mismatch`, 2 runs each | **PASS** | 4/4: 32,098 and 28,148, 0 mismatch lines |
+| 3. headless min 10→end ≤ 0.6× A on both | **PASS** | 0.250 (`before-2`), 0.246 (`aftersync-1`) |
+| 4. rendered late median ≥ 8 ms lower, p95 not worse | **PASS** | 53.3 → 35.7 ms (−17.6); p95 144.0 → 59.4 ms |
+| 5. gates pass; changed baselines regenerated as documented; debug job still builds | **PASS** | three CI jobs run in their pinned container: every step passes against the regenerated release baselines and the unchanged debug one; one harness made optimisation-proof (§3, rule 5); on the Mac the same harness's pre-main case fails before and after, as it does on `main` |
+
+All five hold, so by the rule this slice opens a PR.
+
+## 5. What this does not show
+
+- **Determinism rests on two recordings**, both skirmishes on one map, played to 17:49 and 15:38.
+  `-fmath-errno` closes the one fusion that was observed; any other libm rewrite the optimiser
+  makes (constant folding, a different fused form on another compiler) is guarded only by the
+  replay CRC. CI cannot play retail replays, so `check-native-build-flags.py` guards the flags and
+  the observed import, not determinism itself.
+- **A more robust fix is a follow-up, not done here** (it changes engine code): route the
+  simulation's trigonometry through one out-of-line, explicitly sequenced function. `Sin`/`Cos` in
+  `Trig.cpp` already exist; `Matrix3D`'s inline `sinf`/`cosf` bypass them.
+- **Windows is untouched** (INFERRED, §2): no Windows build or `Replay Check` was run for this
+  slice.
+- **What `-fmath-errno` and `-fno-strict-aliasing` cost on their own is UNMEASURED**; `-O3`, LTO
+  and PGO were not tried.
+- **One rendered run per binary**, one recording rendered, one machine. Run-to-run spread of the
+  rendered median is UNMEASURED.
+- **CI compile time.** Under amd64 emulation each job took 17-20 minutes end to end; the GitHub
+  runner's time at `-O2` is UNMEASURED until this branch's CI runs (the jobs' limits are 45 and
+  60 minutes; the levels 1-3 compile step took ~8 minutes at `-O0` on the last `main` run).
+- **The `m_breakTheMovie` replay quirk** (a command-line replay draws nothing until cleared) is
+  untouched; the rendered run cleared it through LLDB exactly as stage 2 did.
