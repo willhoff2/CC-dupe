@@ -919,12 +919,53 @@ Bool GameEngine::canUpdateRegularGameLogic(UnsignedInt logicTimeQueryFlags)
 /// -----------------------------------------------------------------------------------------------
 DECLARE_PERF_TIMER(GameEngine_update)
 
+// TheSuperHackers @port Measurement hook, dormant unless ZH_ENGINE_FRAME_LOG names an output file:
+// one CSV row per engine pass (one rendered frame) splitting it into client and logic wall time.
+// The pass-to-pass difference of start_ms is the frame time (late-game-frame-cost.md).
+namespace
+{
+struct EngineFrameLog
+{
+	FILE *file;
+	LARGE_INTEGER freq;
+	LARGE_INTEGER origin;
+
+	EngineFrameLog() : file(nullptr)
+	{
+		const char *path = getenv("ZH_ENGINE_FRAME_LOG");
+		if (path == nullptr || path[0] == 0 || (file = fopen(path, "w")) == nullptr)
+			return;
+		QueryPerformanceFrequency(&freq);
+		QueryPerformanceCounter(&origin);
+		fprintf(file, "logic_frame,start_ms,client_ms,logic_ms\n");
+	}
+
+	double msSinceOrigin() const
+	{
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		return static_cast<double>(now.QuadPart - origin.QuadPart) * 1000.0 / freq.QuadPart;
+	}
+};
+
+EngineFrameLog &engineFrameLog()
+{
+	static EngineFrameLog log;
+	return log;
+}
+} // namespace
+
 /** -----------------------------------------------------------------------------------------------
  * Update the game engine by updating the GameClient and GameLogic singletons.
  */
 void GameEngine::update()
 {
 	USE_PERF_TIMER(GameEngine_update)
+	EngineFrameLog &frameLog = engineFrameLog();
+	const UnsignedInt frameLogLogicFrame = (frameLog.file != nullptr) ? TheGameLogic->getFrame() : 0;
+	const double frameLogStartMs = (frameLog.file != nullptr) ? frameLog.msSinceOrigin() : 0.0;
+	double frameLogClientMs = 0.0;
+	double frameLogLogicMs = 0.0;
 	{
 		{
 			// VERIFY CRC needs to be in this code block.  Please to not pull TheGameLogic->update() inside this block.
@@ -935,7 +976,11 @@ void GameEngine::update()
 			/// @todo Move audio init, update, etc, into GameClient update
 
 			TheAudio->UPDATE();
+			if (frameLog.file != nullptr)
+				frameLogClientMs = frameLog.msSinceOrigin();
 			TheGameClient->UPDATE();
+			if (frameLog.file != nullptr)
+				frameLogClientMs = frameLog.msSinceOrigin() - frameLogClientMs;
 			TheMessageStream->propagateMessages();
 
 			if (TheNetwork != nullptr)
@@ -947,13 +992,24 @@ void GameEngine::update()
 		// TheSuperHackers @info Ignores frozen time because the script engine needs updating in the logic update regardless.
 		if (canUpdateGameLogic(FramePacer::IgnoreFrozenTime))
 		{
+			if (frameLog.file != nullptr)
+				frameLogLogicMs = frameLog.msSinceOrigin();
 			TheGameLogic->UPDATE();
+			if (frameLog.file != nullptr)
+				frameLogLogicMs = frameLog.msSinceOrigin() - frameLogLogicMs;
 
 			if (!TheFramePacer->isTimeFrozen())
 			{
 				TheGameClient->step();
 			}
 		}
+	}
+
+	if (frameLog.file != nullptr)
+	{
+		fprintf(frameLog.file, "%u,%.3f,%.3f,%.3f\n", frameLogLogicFrame, frameLogStartMs, frameLogClientMs,
+			frameLogLogicMs);
+		fflush(frameLog.file);
 	}
 }
 
