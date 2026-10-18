@@ -29,6 +29,12 @@ paths with a 3-way apply. Every result is then read and compiled with the probe'
 | `dddda24c5` | loud startup failures | `GameEngine.cpp` |
 | `1e1da326c` (#26) | filesystem/path seam | `GlobalData.cpp`, `GameStateMap.cpp`, `ReplayMenu.cpp` |
 | `4868d22ab` (#23) | `<windows.h>` for `VK_RETURN` | `KeyboardOptionsMenu.cpp` |
+| none | `<limits.h>` for `UINT_MAX`; Zero Hour's header does not use it | `StealthUpdate.h` |
+
+`StealthUpdate.h` is the one fix with no Zero Hour commit behind it. Generals'
+`StealthUpdateModuleData()` defaults a delay to `UINT_MAX`, which MSVC's headers supply indirectly and
+libstdc++'s do not. It failed 14 device-layer files under clang 14 on Linux; Apple's libc++ hid it,
+which is why the macOS figures below did not show it.
 
 `GlobalData.cpp` is the one that is not a copy. Generals builds its user data directory from the INI
 leaf name in `parseGameDataDefinition()`; Zero Hour reads it from the registry in the constructor.
@@ -44,15 +50,26 @@ directory walk, which now lists the directory before deleting rather than interl
 
 ## 2. Result
 
-**Measured 2026-10-18 on macOS, Apple clang 21.0.0**, base `ec7caf52f`. These are not comparable with
-the clang 14 CI baselines.
+**clang 14, Ubuntu 22.04, x86-64**: the CI probe job's image and compiler, run locally under
+emulation. The same container reproduced the committed Zero Hour baseline exactly (675 / 763 native),
+which is what makes its Generals figures usable as baselines. These are the figures in
+`ci-baselines/native-port-probe-generals-*.json`.
+
+| Generals | After | Zero Hour, same mode |
+|---|---:|---:|
+| shimmed, with renderer | **928 / 973** | 964 / 1009 |
+| native | **641 / 729** | 675 / 763 |
+
+**Apple clang 21.0.0, macOS**, base `ec7caf52f`, before and after. "After" was measured before the
+`StealthUpdate.h` fix; the 14 files it fixes on Linux were already clean on this compiler.
 
 | Generals | Before | After | Zero Hour, same mode |
 |---|---:|---:|---:|
 | shimmed, with renderer | 916 / 973 | **928 / 973** | 964 / 1009 |
 | native | 574 / 729 | **636 / 729** | 670 / 763 |
 
-Files that fail for Generals and not for their Zero Hour twin:
+Files that fail for Generals and not for their Zero Hour twin. The "after" column holds on both
+compilers:
 
 | | Before | After |
 |---|---:|---:|
@@ -74,6 +91,11 @@ The CI probe job also probes the Generals tree (native, and shimmed with the ren
 with `check-probe-baseline.py` against `ci-baselines/native-port-probe-generals-*.json`. It is a
 ratchet on Generals' own counts. It does **not** require parity with Zero Hour, so a Zero Hour slice
 still lands first and is replicated afterwards, as `port-slice-workflow` says.
+
+Both steps run only when `classify-changes.py`'s `generals` area is true. That covers `Generals/`,
+the shared `Core/`, `Dependencies/`, `resources/`, the renderer interface in `spikes/renderer/src`, the
+dependency pins in `cmake/`, the probe and its shims, and the CI plumbing. A `GeneralsMD/`-only pull
+request skips them; a push to `main` runs them, as it runs every area.
 
 ## 4. Still open
 
