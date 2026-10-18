@@ -89,6 +89,7 @@ jobs:
       renderer: ${{ steps.classify.outputs.renderer == 'true' || github.event_name != 'pull_request' }}
       window: ${{ steps.classify.outputs.window == 'true' || github.event_name != 'pull_request' }}
       audio: ${{ steps.classify.outputs.audio == 'true' || github.event_name != 'pull_request' }}
+      generals: ${{ steps.classify.outputs.generals == 'true' || github.event_name != 'pull_request' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -113,6 +114,7 @@ jobs:
           RENDERER: ${{ steps.classify.outputs.renderer }}
           WINDOW: ${{ steps.classify.outputs.window }}
           AUDIO: ${{ steps.classify.outputs.audio }}
+          GENERALS: ${{ steps.classify.outputs.generals }}
           EVENT: ${{ github.event_name }}
         run: |
           {
@@ -127,6 +129,7 @@ jobs:
               echo "| renderer | $RENDERER |"
               echo "| window | $WINDOW |"
               echo "| audio | $AUDIO |"
+              echo "| generals (base game probe) | $GENERALS |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -339,6 +342,20 @@ jobs:
           python3 scripts/native-port-probe.py --with-shims \
             --report native-port-probe-shimmed.md --json probe-shimmed.json
 
+      # The base game's tree, ratcheted on its own baselines so a Zero Hour-only change never moves
+      # them. Shimmed includes the renderer targets because the device layer is where Generals
+      # differed. See docs/porting/generals-compile.md.
+      - name: Probe Generals (native, and shimmed with the renderer)
+        if: needs.changes.outputs.generals == 'true'
+        env:
+          CLANGXX: clang++-14
+        run: |
+          python3 scripts/native-port-probe.py --game generals \
+            --report native-port-probe-generals-native.md --json probe-generals-native.json
+          python3 scripts/native-port-probe.py --game generals --with-shims --include-renderer \
+            --report native-port-probe-generals-shimmed-renderer.md \
+            --json probe-generals-shimmed-renderer.json
+
       - name: Gate against the checked-in baselines
         run: |
           set -o pipefail
@@ -347,6 +364,20 @@ jobs:
             echo '```'
             python3 scripts/ci/check-probe-baseline.py --results probe-native.json
             python3 scripts/ci/check-probe-baseline.py --results probe-shimmed.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Gate Generals against its checked-in baselines
+        if: needs.changes.outputs.generals == 'true'
+        run: |
+          set -o pipefail
+          {
+            echo '## Native probe, Generals'
+            echo '```'
+            python3 scripts/ci/check-probe-baseline.py --results probe-generals-native.json \
+              --baseline docs/porting/ci-baselines/native-port-probe-generals-native.json
+            python3 scripts/ci/check-probe-baseline.py --results probe-generals-shimmed-renderer.json \
+              --baseline docs/porting/ci-baselines/native-port-probe-generals-shimmed-renderer.json
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -372,6 +403,8 @@ jobs:
             native-port-probe-shimmed.md
             probe-native.json
             probe-shimmed.json
+            native-port-probe-generals-*.md
+            probe-generals-*.json
 
   # 2. The same translation units, compiled to object files and linked. The probe above answers
   #    "does it parse"; this answers "does it produce code, and what does that code reference that

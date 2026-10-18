@@ -1,0 +1,81 @@
+{
+  "mode": "shimmed+renderer",
+  "clang_major": "14",
+  "deps_present": [
+    "dx8-src",
+    "ffmpeg-src",
+    "gamespy-src/include",
+    "lzhl-src",
+    "miles-src",
+    "miles-src/mss",
+    "stb-src"
+  ],
+  "clean": 928,
+  "total": 973,
+  "targets": {
+    "Core/Libraries/Source/Compression": {
+      "clean": 11,
+      "total": 11
+    },
+    "Core/Libraries/Source/WWVegas/WWMath": {
+      "clean": 37,
+      "total": 37
+    },
+    "Core/Libraries/Source/WWVegas/WWLib": {
+      "clean": 80,
+      "total": 80
+    },
+    "Core/Libraries/Source/WWVegas/WWDebug": {
+      "clean": 3,
+      "total": 3
+    },
+    "Core/Libraries/Source/WWVegas/WWSaveLoad": {
+      "clean": 12,
+      "total": 12
+    },
+    "Core/Libraries/Source/debug": {
+      "clean": 13,
+      "total": 22
+    },
+    "Core/Libraries/Source/profile": {
+      "clean": 5,
+      "total": 6
+    },
+    "Core/GameEngine": {
+      "clean": 197,
+      "total": 211
+    },
+    "Generals/Code/GameEngine": {
+      "clean": 326,
+      "total": 347
+    },
+    "Core/Libraries/Source/WWVegas/WW3D2": {
+      "clean": 78,
+      "total": 78
+    },
+    "Core/Libraries/Source/WWVegas/WWAudio": {
+      "clean": 19,
+      "total": 19
+    },
+    "Core/Libraries/Source/WWVegas/WWDownload": {
+      "clean": 4,
+      "total": 4
+    },
+    "Generals/Code/Libraries/Source/WWVegas": {
+      "clean": 34,
+      "total": 34
+    },
+    "Core/GameEngineDevice": {
+      "clean": 70,
+      "total": 70
+    },
+    "Generals/Code/GameEngineDevice": {
+      "clean": 39,
+      "total": 39
+    },
+    "Generals/Code/Main": {
+      "clean": 0,
+      "total": 0
+    }
+  }
+}
