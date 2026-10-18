@@ -35,7 +35,7 @@ def main():
 
     results = load(args.results)
     mode = results["mode"]
-    baseline_path = pathlib.Path(args.baseline) if args.baseline else \
+    baseline_path = pathlib.Path(args.baseline).resolve() if args.baseline else \
         BASELINE_DIR / f"native-port-probe-{mode}.json"
 
     if args.update:
