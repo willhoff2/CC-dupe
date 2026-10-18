@@ -1,7 +1,9 @@
 # Native macOS/Linux port — phased plan
 
 Target: **single-player Zero Hour (skirmish + campaign) running natively on Apple Silicon
-macOS**, 64-bit, no Wine.
+macOS**, 64-bit, no Wine. The base game's single-player campaign follows as a second target,
+decided 2026-10-18, by replicating Zero Hour's slices to `Generals/`; see
+[`generals-compile.md`](generals-compile.md).
 
 Explicitly out of scope: the Win32/MFC tools (WorldBuilder, W3DView, GUIEdit, ImagePacker,
 ParticleEditor), GameSpy online matchmaking, and binary/replay/save compatibility with retail
