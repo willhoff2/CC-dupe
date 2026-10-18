@@ -99,11 +99,9 @@ request skips them; a push to `main` runs them, as it runs every area.
 
 ## 4. Still open
 
-- **No native entry point.** `Generals/Code/Main` has only `WinMain.cpp`; `PlatformMain.cpp` and
-  `9342cad50`'s Main wiring are the next slice, with `989d71170`'s `Main/CMakeLists.txt` `binkstub`
-  guard.
-- **Not built or linked.** `scripts/native-build.py` builds `Core/` and `GeneralsMD/` only. The probe
-  answers "does it parse"; nothing here has produced a Generals object file.
+- ~~**No native entry point**~~ and ~~**not built or linked**~~: done in
+  [`generals-native-build.md`](generals-native-build.md), which also lists the runtime fixes still
+  to replicate.
 - **Save/replay 64-bit layout.** #27's other half (enum widths, `XferLayout.cpp`) and the save/load
   path boundary (`d50fcfdc6`, `Open_Stream` in `GameStateMap.cpp`) are runtime correctness, needed
   before a Generals save or replay is trusted off Windows.
