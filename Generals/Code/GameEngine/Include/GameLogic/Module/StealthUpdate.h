@@ -30,6 +30,10 @@
 #pragma once
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
+// TheSuperHackers @port For UINT_MAX in StealthUpdateModuleData(). MSVC's headers supply it
+// transitively; libstdc++'s do not. Zero Hour's copy of this header does not use it.
+#include <limits.h>
+
 #include "GameLogic/Module/UpdateModule.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
