@@ -34,7 +34,12 @@ native entry point and builds and links it through `scripts/native-build.py`.
 | executable | 14.0 MiB, Mach-O 64-bit arm64 |
 | entry point | `libgenerals_code_main` (`_main`, no stub) |
 
-The Linux clang 14 figure is CI's: `native-build-generals` writes it, and
+**Probe, clang 14** (the CI image): the new `PlatformMain.cpp` makes the shimmed-with-renderer
+count **928 / 974** (was 928 / 973). It fails the probe on `'BuildVersion.h' file not found`, a header
+the build generates and the probe never has, as Zero Hour's `PlatformMain.cpp` does. Native mode does
+not include `Code/Main` and is unchanged at 641 / 729.
+
+The Linux clang 14 build figure is CI's: `native-build-generals` writes it, and
 `ci-baselines/native-build-generals-shimmed-level1-2-3-4.json` is that job's own output.
 
 ## 3. Gate

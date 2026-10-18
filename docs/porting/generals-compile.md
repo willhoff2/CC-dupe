@@ -52,8 +52,9 @@ directory walk, which now lists the directory before deleting rather than interl
 
 **clang 14, Ubuntu 22.04, x86-64**: the CI probe job's image and compiler, run locally under
 emulation. The same container reproduced the committed Zero Hour baseline exactly (675 / 763 native),
-which is what makes its Generals figures usable as baselines. These are the figures in
-`ci-baselines/native-port-probe-generals-*.json`.
+which is what makes its Generals figures usable as baselines. These were the figures in
+`ci-baselines/native-port-probe-generals-*.json` until
+[`generals-native-build.md`](generals-native-build.md) added `PlatformMain.cpp` (shimmed total 974).
 
 | Generals | After | Zero Hour, same mode |
 |---|---:|---:|

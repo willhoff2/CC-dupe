@@ -11,7 +11,7 @@
     "stb-src"
   ],
   "clean": 928,
-  "total": 973,
+  "total": 974,
   "targets": {
     "Core/Libraries/Source/Compression": {
       "clean": 11,
@@ -75,7 +75,7 @@
     },
     "Generals/Code/Main": {
       "clean": 0,
-      "total": 0
+      "total": 1
     }
   }
 }
