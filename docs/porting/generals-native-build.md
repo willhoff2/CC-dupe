@@ -39,8 +39,10 @@ count **928 / 974** (was 928 / 973). It fails the probe on `'BuildVersion.h' fil
 the build generates and the probe never has, as Zero Hour's `PlatformMain.cpp` does. Native mode does
 not include `Code/Main` and is unchanged at 641 / 729.
 
-The Linux clang 14 build figure is CI's: `native-build-generals` writes it, and
-`ci-baselines/native-build-generals-shimmed-level1-2-3-4.json` is that job's own output.
+**Linux, clang 14** (CI's `native-build-generals`, run 39175881754): **946 / 946** objects, strict
+link **0** unresolved, a 73.4 MiB ELF 64-bit x86-64 PIE. That run's own JSON is
+`ci-baselines/native-build-generals-shimmed-level1-2-3-4.json`; its first run failed only because the
+file did not exist yet.
 
 ## 3. Gate
 
