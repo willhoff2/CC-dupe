@@ -571,7 +571,7 @@
       "mode_change": 16,
       "placement": 9,
       "polled_input": 3,
-      "window_handle": 47,
+      "window_handle": 46,
       "wndproc": 217
     },
     "libraries": {
@@ -717,7 +717,7 @@
       "GetWindowRect": 174,
       "HWND": 774,
       "InvalidateRect": 71,
-      "IsIconic": 27,
+      "IsIconic": 26,
       "LPARAM": 643,
       "LRESULT": 256,
       "LoadCursor": 66,
@@ -768,7 +768,7 @@
       "mode_change": 26,
       "placement": 576,
       "polled_input": 101,
-      "window_handle": 1333,
+      "window_handle": 1332,
       "wndproc": 2163
     }
   }
