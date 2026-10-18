@@ -30,9 +30,9 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
-#include <windows.h>
-#include <shlobj.h>
+// TheSuperHackers @port File deletion, copying and the desktop folder lookup moved behind the
+// platform path API; see docs/porting/filesystem-and-registry.md
+#include "WWLib/platform/platform_path.h"
 
 #include "Lib/BaseType.h"
 #include "Common/FileSystem.h"
@@ -826,10 +826,10 @@ void deleteReplay()
 	filename = TheRecorder->getReplayDir();
 	translate.translate(GetReplayFilenameFromListbox(listboxReplayFiles, selected));
 	filename.concat(translate);
-	if(DeleteFile(filename.str()) == 0)
+	if(!WWPlatform::Path::Delete_File(filename.str()))
 	{
 		char buffer[1024];
-		FormatMessage ( FORMAT_MESSAGE_FROM_SYSTEM, nullptr, GetLastError(), 0, buffer, sizeof(buffer), nullptr);
+		WWPlatform::Path::Get_Last_Error_Text(buffer, sizeof(buffer));
 		UnicodeString errorStr;
 		translate.set(buffer);
 		errorStr.translate(translate);
@@ -856,20 +856,21 @@ void copyReplay()
 	translate.translate(GetReplayFilenameFromListbox(listboxReplayFiles, selected));
 	filename.concat(translate);
 
-	char path[1024];
-	LPITEMIDLIST pidl;
-	SHGetSpecialFolderLocation(nullptr, CSIDL_DESKTOPDIRECTORY, &pidl);
-	SHGetPathFromIDList(pidl,path);
+	StringClass desktop;
+	WWPlatform::Path::Get_Desktop_Directory(desktop);
 	AsciiString newFilename;
-	newFilename.set(path);
-	newFilename.concat("\\");
+	newFilename.set(desktop.str());
+	newFilename.concat(WWPlatform::Path::SEPARATOR);
 	newFilename.concat(translate);
-	if(CopyFile(filename.str(),newFilename.str(), FALSE) == 0)
+	if(!WWPlatform::Path::Copy_File(filename.str(), newFilename.str(), false))
 	{
-		wchar_t buffer[1024];
-		FormatMessageW( FORMAT_MESSAGE_FROM_SYSTEM, nullptr, GetLastError(), 0, buffer, ARRAY_SIZE(buffer), nullptr);
+		// TheSuperHackers @port The message now arrives narrow rather than wide, because the
+		// portable source of it is strerror(); the text itself is unchanged on Windows.
+		char buffer[1024];
+		WWPlatform::Path::Get_Last_Error_Text(buffer, sizeof(buffer));
 		UnicodeString errorStr;
-		errorStr.set(buffer);
+		translate.set(buffer);
+		errorStr.translate(translate);
 		errorStr.trim();
 		MessageBoxOk(TheGameText->fetch("GUI:Error"),errorStr, nullptr);
 	}
