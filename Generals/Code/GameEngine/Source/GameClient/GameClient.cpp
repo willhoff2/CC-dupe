@@ -29,6 +29,10 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+
+// TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md.
+// This file used to get it by accident through GameState.h / Recorder.h.
+#include <windows.h>
 #include "GameClient/GameClient.h"
 
 // USER INCLUDES //////////////////////////////////////////////////////////////

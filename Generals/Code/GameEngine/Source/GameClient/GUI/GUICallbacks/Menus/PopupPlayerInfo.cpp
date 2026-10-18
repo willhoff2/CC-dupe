@@ -31,6 +31,11 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port For GetVersionEx/OSVERSIONINFO, which used to arrive through PreRTS.h.
+// The call is a Windows-98-versus-NT test; deleting it is a behaviour change to a shipped screen,
+// so it stays.
+#include <windows.h>
+
 #include "Common/PlayerTemplate.h"
 #include "Common/BattleHonors.h"
 #include "Common/CustomMatchPreferences.h"

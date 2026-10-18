@@ -24,6 +24,10 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// TheSuperHackers @port For CopyFile, which used to arrive through PreRTS.h. Replacing it belongs
+// to the filesystem seam.
+#include <windows.h>
+
 #include "Common/Recorder.h"
 #include "Common/file.h"
 #include "Common/WideCharWire.h"
@@ -88,7 +92,10 @@ static void writeAtOffset(File* file, Int offset, const void* data, Int dataSize
 #if defined(RTS_DEBUG)
 static FILE* openStatsLogFile()
 {
-	unsigned long bufSize = MAX_COMPUTERNAME_LENGTH + 1;
+	// TheSuperHackers @port DWORD, the type GetComputerName() documents, rather than the
+	// `unsigned long` it happens to be on 32-bit Windows. Identical there; off Windows DWORD is
+	// 32 bits wide while `unsigned long` is 64.
+	DWORD bufSize = MAX_COMPUTERNAME_LENGTH + 1;
 	char computerName[MAX_COMPUTERNAME_LENGTH + 1];
 	if (!GetComputerName(computerName, &bufSize))
 	{
@@ -565,8 +572,7 @@ void RecorderClass::startRecording(GameDifficulty diff, Int originalGameMode, In
 	m_file->writeChar(L"\0");
 
 	// Date and Time
-	SYSTEMTIME systemTime;
-	GetLocalTime( &systemTime );
+	const SerializedDateTime systemTime = getLocalSerializedDateTime();
 	m_file->write(&systemTime, sizeof(systemTime));
 
 	// write out version info
@@ -714,12 +720,11 @@ void RecorderClass::stopRecording() {
  */
 void RecorderClass::archiveReplay(AsciiString fileName)
 {
-	SYSTEMTIME st;
-	GetLocalTime(&st);
+	const SerializedDateTime st = getLocalSerializedDateTime();
 
 	AsciiString archiveFileName;
 	// Use a standard YYYYMMDD_HHMMSS format for simplicity and to avoid conflicts.
-	archiveFileName.format("%04d%02d%02d_%02d%02d%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	archiveFileName.format("%04d%02d%02d_%02d%02d%02d", st.year, st.month, st.day, st.hour, st.minute, st.second);
 
 	AsciiString extension = getReplayExtention();
 	AsciiString sourcePath = getReplayDir();

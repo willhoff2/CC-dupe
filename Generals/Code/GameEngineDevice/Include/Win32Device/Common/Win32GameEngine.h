@@ -108,7 +108,13 @@ inline Radar *Win32GameEngine::createRadar(Bool dummy)
 		return NEW RadarDummy;
 	return NEW W3DRadar;
 }
+#ifdef RTS_HAS_EMBEDDED_BROWSER
 inline WebBrowser *Win32GameEngine::createWebBrowser() { return NEW CComObject<W3DWebBrowser>; }
+#else
+// No embedded browser in this configuration, so the factory hands out nothing; the WOL screens
+// already treat a null TheWebBrowser as "no browser". See docs/porting/embedded-browser-seam.md.
+inline WebBrowser *Win32GameEngine::createWebBrowser() { return nullptr; }
+#endif
 inline AudioManager *Win32GameEngine::createAudioManager(Bool dummy)
 {
 	if (dummy)

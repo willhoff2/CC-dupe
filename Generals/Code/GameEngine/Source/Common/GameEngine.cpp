@@ -110,6 +110,12 @@
 
 #include "Common/version.h"
 
+#ifndef _WIN32
+// TheSuperHackers @port The window title goes through the window seam off Windows: there is no
+// HWND and no SetWindowText(). See docs/porting/win32-file-api-seam.md.
+#include "GameClient/PlatformWindowHost.h"
+#endif
+
 
 //-------------------------------------------------------------------------------------------------
 
@@ -171,7 +177,11 @@ void initSubsystem(
 
 //-------------------------------------------------------------------------------------------------
 extern HINSTANCE ApplicationHInstance;  ///< our application instance
+#ifdef RTS_HAS_EMBEDDED_BROWSER
+// TheSuperHackers @port The ATL module exists to host the embedded browser's in-process COM
+// server, which only the Windows configuration builds. See docs/porting/embedded-browser-seam.md.
 extern CComModule _Module;
+#endif
 
 //-------------------------------------------------------------------------------------------------
 static void updateTGAtoDDS();
@@ -236,12 +246,22 @@ static void updateWindowTitle()
 		AsciiString titleA;
 		titleA.translate(title);	//get ASCII version for Win 9x
 
+#ifdef _WIN32
 		extern HWND ApplicationHWnd;  ///< our application window handle
 		if (ApplicationHWnd) {
 			//Set it twice because Win 9x does not support SetWindowTextW.
 			::SetWindowText(ApplicationHWnd, titleA.str());
 			::SetWindowTextW(ApplicationHWnd, title.str());
 		}
+#else
+		// TheSuperHackers @port The window seam's title entry point takes narrow text, so the
+		// wide title goes out as the ASCII translation above; there is no Win 9x here to need
+		// both, and no wide entry point to follow it with. See
+		// docs/porting/window-event-loop.md.
+		if (ApplicationHWnd != NULL) {
+			WWPlatform::Window_Set_Title(ApplicationHWnd, titleA.str());
+		}
+#endif
 	}
 }
 
@@ -253,7 +273,9 @@ GameEngine::GameEngine()
 	m_quitting = FALSE;
 	m_isActive = FALSE;
 
+#ifdef RTS_HAS_EMBEDDED_BROWSER
 	_Module.Init(nullptr, ApplicationHInstance, nullptr);
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -295,7 +317,9 @@ GameEngine::~GameEngine()
 
 	Drawable::killStaticImages();
 
+#ifdef RTS_HAS_EMBEDDED_BROWSER
 	_Module.Term();
+#endif
 
 #ifdef PERF_TIMERS
 	PerfGather::termPerfDump();
@@ -585,6 +609,11 @@ void GameEngine::init()
 		{
 			RELEASE_CRASHLOCALIZED("ERROR:D3DFailurePrompt", "ERROR:D3DFailureMessage");
 		}
+		// TheSuperHackers @port Any other ErrorCode used to be swallowed here, and initialization
+		// continued into the main loop having skipped whatever came after the throw.
+		AsciiString reason;
+		reason.format("Error code %d during initialization.", (Int)ec);
+		RELEASE_CRASH((reason.str()));
 	}
 	catch (INIException e)
 	{
@@ -763,7 +792,11 @@ void GameEngine::update()
 
 // Horrible reference, but we really, really need to know if we are windowed.
 extern bool DX8Wrapper_IsWindowed;
+#ifdef _WIN32
 extern HWND ApplicationHWnd;
+#else
+// TheSuperHackers @port ApplicationHWnd is declared by the window seam off Windows, as a void *.
+#endif
 
 /** -----------------------------------------------------------------------------------------------
  * The "main loop" of the game engine. It will not return until the game exits.

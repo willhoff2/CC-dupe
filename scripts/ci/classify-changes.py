@@ -96,6 +96,20 @@ AREAS = {
         "scripts/native-audio-static-destruction-test.py",
         "scripts/audio-pcm-discontinuity.py",
     ),
+    # What the base game's probe compiles or reads: its own tree, the shared Core, the headers both
+    # trees include, the probe and its shims, and the pins fetch-probe-deps.sh reads its SDKs from.
+    # A GeneralsMD-only change cannot move the Generals counts.
+    # See docs/porting/generals-compile.md.
+    "generals": (
+        "Generals/*",
+        "Core/*",
+        "Dependencies/*",
+        "resources/*",
+        "spikes/renderer/src/*",
+        "cmake/*",
+        "scripts/native-port-probe.py",
+        "scripts/native-port-shims/*",
+    ),
 }
 
 # The CI plumbing moves every measurement by definition: it is what runs them, and -- for the
@@ -130,7 +144,7 @@ def classify(paths):
 # Paths lifted from real commits on this repository, with the classification they must get. The
 # renderer/window/audio expectations are the interesting half: each of these landed as a slice whose
 # gate had to run, and the docs commits are the ones that were paying for all twelve jobs.
-NOTHING = {"code": False, "renderer": False, "window": False, "audio": False}
+NOTHING = {"code": False, "renderer": False, "window": False, "audio": False, "generals": False}
 
 SELF_CHECK = (
     (["docs/porting/STATUS.md"], NOTHING),
@@ -140,58 +154,72 @@ SELF_CHECK = (
     ),
     (
         ["GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp"],
-        {"code": True, "renderer": True, "window": False, "audio": False},
+        {"code": True, "renderer": True, "window": False, "audio": False, "generals": False},
     ),
     (
         ["Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_cocoa.mm"],
-        {"code": True, "renderer": False, "window": True, "audio": False},
+        {"code": True, "renderer": False, "window": True, "audio": False, "generals": True},
     ),
     (
         ["Core/Libraries/Source/OpenALAudioDevice/OpenALAudioManager.cpp"],
-        {"code": True, "renderer": False, "window": False, "audio": True},
+        {"code": True, "renderer": False, "window": False, "audio": True, "generals": True},
     ),
     (
         ["spikes/renderer/src/backend_vulkan.cpp"],
-        {"code": True, "renderer": True, "window": True, "audio": False},
+        {"code": True, "renderer": True, "window": True, "audio": False, "generals": True},
     ),
     # The plumbing case: a change to a gate script runs every area's gate.
     (
         ["scripts/ci/check-probe-baseline.py"],
-        {"code": True, "renderer": True, "window": True, "audio": True},
+        {"code": True, "renderer": True, "window": True, "audio": True, "generals": True},
     ),
     # A baseline lives under docs/ but is a gate input, not prose: loosening a recorded number runs
     # everything that compares against one.
     (
         ["docs/porting/ci-baselines/window-input-scan.json"],
-        {"code": True, "renderer": True, "window": True, "audio": True},
+        {"code": True, "renderer": True, "window": True, "audio": True, "generals": True},
     ),
     # The seam's engine-side wiring: the subjects of check-window-seam-wiring.py.
     (
         ["Core/GameEngine/Source/GameClient/PlatformWindowHost.cpp"],
-        {"code": True, "renderer": False, "window": True, "audio": False},
+        {"code": True, "renderer": False, "window": True, "audio": False, "generals": True},
     ),
     (
         ["Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp"],
-        {"code": True, "renderer": False, "window": True, "audio": False},
+        {"code": True, "renderer": False, "window": True, "audio": False, "generals": True},
     ),
     (
         ["GeneralsMD/Code/Main/PlatformMain.cpp"],
-        {"code": True, "renderer": False, "window": True, "audio": False},
+        {"code": True, "renderer": False, "window": True, "audio": False, "generals": False},
     ),
     # Docs plus one source file is a source change: the prose does not dilute it.
     (
         ["docs/porting/audio-device-seam.md", "cmake/openal.cmake"],
-        {"code": True, "renderer": False, "window": False, "audio": True},
+        {"code": True, "renderer": False, "window": False, "audio": True, "generals": True},
     ),
     # Repinning the MPEG decoder changes what the audio backend links, so the audio gate must run.
     (
         ["cmake/minimp3.cmake"],
-        {"code": True, "renderer": False, "window": False, "audio": True},
+        {"code": True, "renderer": False, "window": False, "audio": True, "generals": True},
     ),
     # A file in no area still builds and still moves the probe and build counts.
     (
         ["GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/AIUpdate.cpp"],
-        {"code": True, "renderer": False, "window": False, "audio": False},
+        {"code": True, "renderer": False, "window": False, "audio": False, "generals": False},
+    ),
+    # The base game's tree moves only the Generals probe and the code-gated jobs.
+    (
+        ["Generals/Code/GameEngine/Source/Common/GlobalData.cpp"],
+        {"code": True, "renderer": False, "window": False, "audio": False, "generals": True},
+    ),
+    # The probe and its shims decide what the Generals counts mean, so they run its gate.
+    (
+        ["scripts/native-port-probe.py"],
+        {"code": True, "renderer": False, "window": False, "audio": False, "generals": True},
+    ),
+    (
+        ["scripts/native-port-shims/windows.h"],
+        {"code": True, "renderer": False, "window": False, "audio": False, "generals": True},
     ),
     # No files at all (an empty diff) must not claim everything changed.
     ([], NOTHING),
@@ -230,7 +258,7 @@ def main():
 
     paths = [line.strip() for line in sys.stdin if line.strip()]
     result = classify(paths)
-    for area in ("code", "renderer", "window", "audio"):
+    for area in ("code", "renderer", "window", "audio", "generals"):
         print(f"{area}={'true' if result[area] else 'false'}")
     print(f"{len(paths)} changed path(s):", file=sys.stderr)
     for path in paths:

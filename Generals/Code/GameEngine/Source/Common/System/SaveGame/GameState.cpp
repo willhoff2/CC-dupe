@@ -31,6 +31,8 @@
 #include "PreRTS.h"
 
 // TheSuperHackers @port Win32 header pushed down from PreRTS.h; see docs/porting/prerts-win32-surgery.md
+// It is also no longer pulled in by GameState.h; see docs/porting/xfer-64bit-audit.md
+#include <windows.h>
 #include <io.h>
 
 #include "Common/file.h"
@@ -206,10 +208,29 @@ GameState::SnapshotBlock *GameState::findBlockInfoByToken( AsciiString token, Sn
 
 }
 
+// TheSuperHackers @port The date formatting below is Win32 locale code with no portable
+// equivalent yet. It takes the on-disk record and converts here, so that the header, and the 71
+// translation units that include it, no longer name a Windows type.
+static SYSTEMTIME toSystemTime( const SerializedDateTime &dateTime )
+{
+	SYSTEMTIME systemTime;
+	systemTime.wYear = dateTime.year;
+	systemTime.wMonth = dateTime.month;
+	systemTime.wDayOfWeek = dateTime.dayOfWeek;
+	systemTime.wDay = dateTime.day;
+	systemTime.wHour = dateTime.hour;
+	systemTime.wMinute = dateTime.minute;
+	systemTime.wSecond = dateTime.second;
+	systemTime.wMilliseconds = dateTime.milliseconds;
+	return systemTime;
+}
+
 // TheSuperHackers @tweak Use the user's default locale instead of the system default to match Windows regional settings.
 // This allows regional formats such as Europe (English) to use 24-hour and DD/MM/YYYY formats in-game.
-UnicodeString getUnicodeDateBuffer(SYSTEMTIME timeVal)
+UnicodeString getUnicodeDateBuffer(const SerializedDateTime &dateTime)
 {
+	SYSTEMTIME timeVal = toSystemTime( dateTime );
+
 	// setup date buffer for local region date format
 	#define DATE_BUFFER_SIZE 256
 	OSVERSIONINFO	osvi;
@@ -240,8 +261,10 @@ UnicodeString getUnicodeDateBuffer(SYSTEMTIME timeVal)
 	//displayDateBuffer.format( L"%ls", dateBuffer );
 }
 
-UnicodeString getUnicodeTimeBuffer(SYSTEMTIME timeVal)
+UnicodeString getUnicodeTimeBuffer(const SerializedDateTime &dateTime)
 {
+	SYSTEMTIME timeVal = toSystemTime( dateTime );
+
 	// setup time buffer for local region time format
 	UnicodeString displayTimeBuffer;
 	OSVERSIONINFO	osvi;
@@ -1174,7 +1197,7 @@ void GameState::populateSaveGameListbox( GameWindow *listbox, SaveLoadLayoutType
 	// add all games found to the list box
 	AvailableGameInfo *info;
 	SaveGameInfo *saveGameInfo;
-	SYSTEMTIME systemTime;
+	SerializedDateTime systemTime;
 	UnsignedInt count = 0;
 	for( info = m_availableGames; info; info = info->next, count++ )
 	{
@@ -1183,14 +1206,14 @@ void GameState::populateSaveGameListbox( GameWindow *listbox, SaveLoadLayoutType
 		saveGameInfo = &info->saveGameInfo;
 
 		// setup a system time structure given the data we saved in the file
-		systemTime.wYear = saveGameInfo->date.year;
-		systemTime.wMonth = saveGameInfo->date.month;
-		systemTime.wDayOfWeek = saveGameInfo->date.dayOfWeek;
-		systemTime.wDay = saveGameInfo->date.day;
-		systemTime.wHour = saveGameInfo->date.hour;
-		systemTime.wMinute = saveGameInfo->date.minute;
-		systemTime.wSecond = saveGameInfo->date.second;
-		systemTime.wMilliseconds = saveGameInfo->date.milliseconds;
+		systemTime.year = saveGameInfo->date.year;
+		systemTime.month = saveGameInfo->date.month;
+		systemTime.dayOfWeek = saveGameInfo->date.dayOfWeek;
+		systemTime.day = saveGameInfo->date.day;
+		systemTime.hour = saveGameInfo->date.hour;
+		systemTime.minute = saveGameInfo->date.minute;
+		systemTime.second = saveGameInfo->date.second;
+		systemTime.milliseconds = saveGameInfo->date.milliseconds;
 
 		// setup date buffer for local region date format
 		UnicodeString displayDateBuffer = getUnicodeDateBuffer(systemTime);
@@ -1579,25 +1602,24 @@ void GameState::xfer( Xfer *xfer )
 	}
 
 	// current system time
-	SYSTEMTIME systemTime;
-	GetLocalTime( &systemTime );
+	const SerializedDateTime systemTime = getLocalSerializedDateTime();
 
 	// date and time
-	saveGameInfo->date.year = systemTime.wYear;
+	saveGameInfo->date.year = systemTime.year;
 	xfer->xferUnsignedShort( &saveGameInfo->date.year );
-	saveGameInfo->date.month = systemTime.wMonth;
+	saveGameInfo->date.month = systemTime.month;
 	xfer->xferUnsignedShort( &saveGameInfo->date.month );
-	saveGameInfo->date.day = systemTime.wDay;
+	saveGameInfo->date.day = systemTime.day;
 	xfer->xferUnsignedShort( &saveGameInfo->date.day );
-	saveGameInfo->date.dayOfWeek = systemTime.wDayOfWeek;
+	saveGameInfo->date.dayOfWeek = systemTime.dayOfWeek;
 	xfer->xferUnsignedShort( &saveGameInfo->date.dayOfWeek );
-	saveGameInfo->date.hour = systemTime.wHour;
+	saveGameInfo->date.hour = systemTime.hour;
 	xfer->xferUnsignedShort( &saveGameInfo->date.hour );
-	saveGameInfo->date.minute = systemTime.wMinute;
+	saveGameInfo->date.minute = systemTime.minute;
 	xfer->xferUnsignedShort( &saveGameInfo->date.minute );
-	saveGameInfo->date.second = systemTime.wSecond;
+	saveGameInfo->date.second = systemTime.second;
 	xfer->xferUnsignedShort( &saveGameInfo->date.second );
-	saveGameInfo->date.milliseconds = systemTime.wMilliseconds;
+	saveGameInfo->date.milliseconds = systemTime.milliseconds;
 	xfer->xferUnsignedShort( &saveGameInfo->date.milliseconds );
 
 	// user description

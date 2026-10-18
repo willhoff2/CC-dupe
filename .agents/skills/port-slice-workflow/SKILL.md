@@ -8,13 +8,14 @@ description: How a native-port slice is scoped, branched, verified and landed in
 ## Scope
 
 Target: single-player **Zero Hour** (skirmish + campaign) natively on Apple Silicon, 64-bit, no Wine.
-Out of scope, permanently: the Win32/MFC tools (WorldBuilder, W3DView, GUIEdit, ImagePacker,
-ParticleEditor — 140 of the repo's `HWND` files), GameSpy online play, retail save/replay binary
-compatibility, and `Generals/Code` for port purposes. If a build error leads you into any of those,
-stop and re-read `docs/porting/native-port-plan.md`.
+The base game (`Generals/Code`) follows as a second target, decided 2026-10-18: its single-player
+campaign, by replicating what has landed for Zero Hour. Out of scope, permanently: the Win32/MFC
+tools (WorldBuilder, W3DView, GUIEdit, ImagePacker, ParticleEditor — 140 of the repo's `HWND` files),
+GameSpy online play and retail save/replay binary compatibility. If a build error leads you into any
+of those, stop and re-read `docs/porting/native-port-plan.md`.
 
 Zero Hour first: land the change in `GeneralsMD`, replicate to `Generals` afterwards as identically as
-possible.
+possible. `docs/porting/generals-compile.md` records how replication is done and what is still open.
 
 ## The seam pattern
 

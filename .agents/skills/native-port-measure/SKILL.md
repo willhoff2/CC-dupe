@@ -36,12 +36,28 @@ CLANGXX=clang++-14 python3 scripts/native-port-probe.py --with-shims --json prob
 `--with-shims` adds `scripts/native-port-shims/`. Report both: native is the honest portability
 figure, shimmed is the one that moves as seams land.
 
+The base game's tree is probed the same way, with the renderer targets in the shimmed run because the
+device layer is where it differed from Zero Hour (`docs/porting/generals-compile.md`):
+
+```sh
+CLANGXX=clang++-14 python3 scripts/native-port-probe.py --game generals --json probe-generals-native.json
+CLANGXX=clang++-14 python3 scripts/native-port-probe.py --game generals --with-shims --include-renderer \
+  --json probe-generals-shimmed-renderer.json
+```
+
 ## 4. Gate against the baselines
 
 ```sh
 python3 scripts/ci/check-probe-baseline.py --results probe-native.json
 python3 scripts/ci/check-probe-baseline.py --results probe-shimmed.json
+python3 scripts/ci/check-probe-baseline.py --results probe-generals-native.json \
+  --baseline docs/porting/ci-baselines/native-port-probe-generals-native.json
+python3 scripts/ci/check-probe-baseline.py --results probe-generals-shimmed-renderer.json \
+  --baseline docs/porting/ci-baselines/native-port-probe-generals-shimmed-renderer.json
 ```
+
+The Generals baselines need `--baseline`: the default is chosen from the probe mode alone, and that
+would pick a Zero Hour file.
 
 A count *below* the baseline is a regression — find the commit, do not update the baseline. A count
 *above* it is progress: copy the JSON over `docs/porting/ci-baselines/` in the same PR that earned it.

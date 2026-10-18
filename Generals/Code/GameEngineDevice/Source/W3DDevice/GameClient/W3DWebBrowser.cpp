@@ -26,6 +26,9 @@
 // July 2002 Bryan Cleveland
 
 #include "W3DDevice/GameClient/W3DWebBrowser.h"
+
+#ifdef RTS_HAS_EMBEDDED_BROWSER
+
 #include "WW3D2/texture.h"
 #include "WW3D2/textureloader.h"
 #include "WW3D2/surfaceclass.h"
@@ -76,3 +79,5 @@ void W3DWebBrowser::closeBrowserWindow(GameWindow *win)
 {
 	DX8WebBrowser::DestroyBrowser(win->winGetInstanceData()->m_decoratedNameString.str());
 }
+
+#endif // RTS_HAS_EMBEDDED_BROWSER
