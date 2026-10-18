@@ -28,8 +28,10 @@ by humans as facts about the port rather than about the harness:
 Run: python3 scripts/native-build-categorise-test.py
 """
 import importlib.util
+import json
 import pathlib
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -305,12 +307,15 @@ def test_entry_point_anchor(build):
         entry_point_anchor_cases(build)
 
 
+ENTRY_TARGET = "GeneralsMD/Code/Main"
+
+
 def entry_point_anchor_cases(build):
-    text, stub_used = build.entry_point_anchor(["libgeneralsmd_code_main"], True)
+    text, stub_used = build.entry_point_anchor(["libgeneralsmd_code_main"], ENTRY_TARGET, True)
     check("the game's own main() anchors the link", stub_used, False)
     check("...and nothing is generated to compete with it", "int main" in text, False)
 
-    text, stub_used = build.entry_point_anchor([], False)
+    text, stub_used = build.entry_point_anchor([], ENTRY_TARGET, False)
     check("a levels 1-2 build has no entry point of its own to link", stub_used, True)
     check("...so a stub anchors it, and says why", "int main" in text, True)
 
@@ -318,8 +323,34 @@ def entry_point_anchor_cases(build):
     # `main()` was in the archive under a name the scan did not know, and the harness quietly linked
     # three lines of generated code instead of the game.
     check_raises("the entry-point target built with no entry point found stops the run",
-                 lambda: build.entry_point_anchor([], True),
+                 lambda: build.entry_point_anchor([], ENTRY_TARGET, True),
                  "Refusing to substitute a generated stub main()")
+
+
+def test_game_selection(build):
+    print()
+    print("== --game picks one tree's targets, generated headers and entry point")
+
+    for game_name, directory in (("zerohour", "GeneralsMD"), ("generals", "Generals")):
+        game = build.GAMES[game_name]
+        selected = [name for level in sorted(build.LEVELS)
+                    for name in build.level_targets(level, game)]
+        known = {t.name for t in build.all_targets(game)}
+        check(f"{game_name}: every level target has a probe definition",
+              sorted(set(selected) - known), [])
+        check(f"{game_name}: no level target is from the other game's tree",
+              [n for n in selected if n.split("/")[0] not in ("Core", directory)], [])
+        entry_target = build.game_entry_target(game)
+        check(f"{game_name}: the entry point is the game's own Code/Main",
+              entry_target, f"{directory}/Code/Main")
+        check(f"{game_name}: the entry point is built at level 3",
+              entry_target in build.level_targets(3, game), True)
+        check(f"{game_name}: its version headers are generated",
+              sorted(build.GENERATED_HEADERS.get(entry_target, {})),
+              ["BuildVersion.h", "GeneratedVersion.h"])
+        main_target = next(t for t in build.all_targets(game) if t.name == entry_target)
+        check(f"{game_name}: off Windows the entry point is PlatformMain.cpp, not WinMain.cpp",
+              [s.name for s in build.npt.target_sources(main_target)], ["PlatformMain.cpp"])
 
 
 def test_entry_point_gate(gate):
@@ -352,6 +383,26 @@ def test_entry_point_gate(gate):
                    "Rosetta 2")
 
 
+def test_game_gate():
+    print()
+    print("== the baseline gate refuses to compare one game's build with the other's")
+
+    gate_path = REPO_ROOT / "scripts" / "ci" / "check-native-build-baseline.py"
+    results = {"with_shims": True, "levels": [1, 2, 3, 4], "game": "generals"}
+    with tempfile.TemporaryDirectory() as tmp:
+        results_path = pathlib.Path(tmp) / "results.json"
+        results_path.write_text(json.dumps(results))
+        # A Zero Hour baseline predates the `game` field, so it has none.
+        zero_hour_baseline = (REPO_ROOT / "docs/porting/ci-baselines"
+                              / "native-build-shimmed-level1-2-3-4.json")
+        run = subprocess.run([sys.executable, str(gate_path), "--results", str(results_path),
+                              "--baseline", str(zero_hour_baseline)],
+                             capture_output=True, text=True)
+    check("generals results against a zerohour baseline are refused", run.returncode, 2)
+    check_contains("...naming both games", [run.stderr],
+                   "measures zerohour, these results measure generals")
+
+
 def main():
     build = load("scripts/native-build.py", "native_build_under_test")
     gate = load("scripts/ci/check-native-build-baseline.py", "native_build_gate_under_test")
@@ -360,7 +411,9 @@ def main():
     test_describe_binary(build)
     test_symbol_namespace(build)
     test_entry_point_anchor(build)
+    test_game_selection(build)
     test_entry_point_gate(gate)
+    test_game_gate()
     print()
     print(f"{CHECKS} checks, {len(FAILURES)} failures")
     return 1 if FAILURES else 0

@@ -153,8 +153,11 @@ def main():
     config = results.get("config", "release")
     mode_key = mode if config == "release" else f"{mode}-{config}"
     levels = "-".join(str(x) for x in results["levels"])
+    # Absent means Zero Hour, the only game measured before native-build.py had --game.
+    game = results.get("game", "zerohour")
+    game_prefix = "" if game == "zerohour" else f"{game}-"
     baseline_path = pathlib.Path(args.baseline) if args.baseline else \
-        BASELINE_DIR / f"native-build-{mode_key}-level{levels}.json"
+        BASELINE_DIR / f"native-build-{game_prefix}{mode_key}-level{levels}.json"
 
     if args.update:
         baseline_path.parent.mkdir(parents=True, exist_ok=True)
@@ -168,6 +171,11 @@ def main():
         print(f"FAIL: no baseline at {baseline_path}; create one with --update", file=sys.stderr)
         return 2
     baseline = load(baseline_path)
+
+    if baseline.get("game", "zerohour") != game:
+        print(f"FAIL: {baseline_path.name} measures {baseline.get('game', 'zerohour')}, these "
+              f"results measure {game}; the two games' trees are not comparable", file=sys.stderr)
+        return 2
 
     # A debug result compared against a release baseline would read as hundreds of new compile
     # failures, and a release result against a debug baseline as an improvement. Neither is a
