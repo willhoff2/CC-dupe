@@ -83,16 +83,6 @@ WWVEGAS_INCLUDES = [
     "Core/Libraries/Source/Compression",
 ]
 
-# The two GameEngine libraries are one logical library split across two directories: every
-# translation unit of either is compiled with both include trees on the path and with
-# `Include/Precompiled/PreRTS.h` reachable, exactly as the CMake targets arrange it.
-GAMEENGINE_INCLUDES = WWVEGAS_INCLUDES + [
-    "Core/GameEngine/Include",
-    "GeneralsMD/Code/GameEngine/Include",
-    "GeneralsMD/Code/GameEngine/Include/Precompiled",
-    "GeneralsMD/Code/Libraries/Source/WWVegas",
-]
-
 
 @dataclasses.dataclass(frozen=True)
 class Target:
@@ -111,170 +101,204 @@ class Target:
     defines: tuple = ()
 
 
-TARGETS = [
-    Target(
-        name="Core/Libraries/Source/Compression",
-        includes=tuple(WWVEGAS_INCLUDES),
-        source_dirs=("Core/Libraries/Source/Compression",),
-    ),
-    Target(
-        name="Core/Libraries/Source/WWVegas/WWMath",
-        includes=tuple(WWVEGAS_INCLUDES),
-        source_dirs=("Core/Libraries/Source/WWVegas/WWMath",),
-    ),
-    Target(
-        name="Core/Libraries/Source/WWVegas/WWLib",
-        includes=tuple(WWVEGAS_INCLUDES),
-        source_dirs=("Core/Libraries/Source/WWVegas/WWLib",),
-    ),
-    Target(
-        name="Core/Libraries/Source/WWVegas/WWDebug",
-        includes=tuple(WWVEGAS_INCLUDES),
-        source_dirs=("Core/Libraries/Source/WWVegas/WWDebug",),
-    ),
-    Target(
-        name="Core/Libraries/Source/WWVegas/WWSaveLoad",
-        includes=tuple(WWVEGAS_INCLUDES),
-        source_dirs=("Core/Libraries/Source/WWVegas/WWSaveLoad",),
-    ),
-    Target(
-        name="Core/Libraries/Source/debug",
-        includes=tuple(WWVEGAS_INCLUDES),
-        source_dirs=("Core/Libraries/Source/debug",),
-    ),
-    Target(
-        name="Core/Libraries/Source/profile",
-        includes=tuple(WWVEGAS_INCLUDES),
-        source_dirs=("Core/Libraries/Source/profile",),
-    ),
-    Target(
-        name="Core/GameEngine",
-        includes=tuple(GAMEENGINE_INCLUDES),
-        cmake_lists="Core/GameEngine/CMakeLists.txt",
-        cmake_root="Core/GameEngine",
-        # `IG_DEBUG_STACKTRACE` is what Core/GameEngine/CMakeLists.txt defines on
-        # `corei_gameengine_private`, whose INTERFACE sources are these files and whose consumer is
-        # the game-engine library both source sets compile into. Missing it here was not a harmless
-        # omission: StackDump.h *self*-defines the macro if nothing else has, so every caller saw
-        # the real declarations while StackDump.cpp -- which tests the macro above its own include
-        # of that header -- compiled to nothing, and `FillStackAddresses`,
-        # `StackDumpFromAddresses` and `g_LastErrorDump` were unresolved because the harness's flags
-        # disagreed with the real build's, not because the port lacks the code.
-        defines=("RTS_ZEROHOUR=1", "IG_DEBUG_STACKTRACE"),
-    ),
-    Target(
-        name="GeneralsMD/Code/GameEngine",
-        includes=tuple(GAMEENGINE_INCLUDES),
-        cmake_lists="GeneralsMD/Code/GameEngine/CMakeLists.txt",
-        cmake_root="GeneralsMD/Code/GameEngine",
-        # `z_gameengine` links `corei_gameengine_private`, so these files get IG_DEBUG_STACKTRACE
-        # from it in the real build exactly as Core/GameEngine's do.
-        defines=("RTS_ZEROHOUR=1", "IG_DEBUG_STACKTRACE"),
-    ),
-]
+@dataclasses.dataclass(frozen=True)
+class Game:
+    """Which game's code tree a probe run measures; `Core/` is shared by both."""
 
-# Renderer, audio, device and entry-point code. Kept out of the default target list on purpose:
-# the numbers above are tracked over time, and silently widening their scope would make the
-# history meaningless. Enable with --include-renderer and read the figure as its own thing.
-#
-# These translation units have never been compiled off Windows. They are the code most likely to
-# be unportable (Direct3D 8, DirectSound/Miles, Bink, WinMain), so a bad number here is expected
-# and is still worth having measured.
+    directory: str
+    define: str
 
-# `corei_ww3d2` and the other Core renderer/device libraries are CMake INTERFACE libraries: their
-# sources are compiled as part of the game-specific targets, with the game-specific include tree
-# ahead of the Core one (that is how the game copies of e.g. `w3d_file.h`, which Core has no copy
-# of, get found). The probe mirrors that ordering rather than compiling Core in isolation.
-GAME_RENDERER_INCLUDES = [
-    "GeneralsMD/Code/Libraries/Source/WWVegas",
-    "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2",
-    "GeneralsMD/Code/Libraries/Source/WWVegas/WWAudio",
-    "GeneralsMD/Code/Libraries/Source/WWVegas/WWDownload",
-]
 
-RENDERER_INCLUDES = GAME_RENDERER_INCLUDES + WWVEGAS_INCLUDES + [
-    "Core/Libraries/Source/WWVegas/WW3D2",
-    "Core/Libraries/Source/WWVegas/WWAudio",
-    "Core/Libraries/Source/WWVegas/WWDownload",
-]
+GAMES = {
+    "zerohour": Game(directory="GeneralsMD", define="RTS_ZEROHOUR=1"),
+    "generals": Game(directory="Generals", define="RTS_GENERALS=1"),
+}
 
-DEVICE_INCLUDES = GAME_RENDERER_INCLUDES + GAMEENGINE_INCLUDES + [
-    "Core/Libraries/Source/WWVegas/WW3D2",
-    "Core/Libraries/Source/WWVegas/WWAudio",
-    "Core/GameEngineDevice/Include",
-    "GeneralsMD/Code/GameEngineDevice/Include",
-]
 
-# `corei_wwdownload`'s sources are compiled into `z_wwdownload`, which links `zi_gameengine_include`
-# and `zi_always` -- so the patch downloader sees the GameEngine include tree (it includes
-# "Common/Debug.h") and RTS_ZEROHOUR=1, neither of which the renderer targets get. Probing it with
-# the renderer's configuration reported two diagnostics that the real build cannot produce.
-DOWNLOAD_INCLUDES = GAME_RENDERER_INCLUDES + GAMEENGINE_INCLUDES + [
-    "Core/Libraries/Source/WWVegas/WWDownload",
-]
+def game_targets(game):
+    """The (default, renderer) target lists for one game's tree."""
+    # The two GameEngine libraries are one logical library split across two directories: every
+    # translation unit of either is compiled with both include trees on the path and with
+    # `Include/Precompiled/PreRTS.h` reachable, exactly as the CMake targets arrange it.
+    gameengine_includes = WWVEGAS_INCLUDES + [
+        "Core/GameEngine/Include",
+        f"{game.directory}/Code/GameEngine/Include",
+        f"{game.directory}/Code/GameEngine/Include/Precompiled",
+        f"{game.directory}/Code/Libraries/Source/WWVegas",
+    ]
 
-RENDERER_TARGETS = [
-    Target(
-        name="Core/Libraries/Source/WWVegas/WW3D2",
-        # vulkanrenderbackend.cpp -- the non-Windows RenderBackendClass -- includes the renderer's
-        # own interface header, "render_backend.h", from spikes/renderer/src. That directory is the
-        # one place the Vulkan backend lives; the engine implements the D3D8-shaped seam over it
-        # rather than carrying a second copy of it. Only this target gets the directory, because
-        # only this file may talk to the backend interface.
-        includes=tuple(RENDERER_INCLUDES) + ("spikes/renderer/src",),
-        cmake_dirs=("Core/Libraries/Source/WWVegas/WW3D2",),
-    ),
-    Target(
-        name="Core/Libraries/Source/WWVegas/WWAudio",
-        includes=tuple(RENDERER_INCLUDES),
-        cmake_dirs=("Core/Libraries/Source/WWVegas/WWAudio",),
-    ),
-    Target(
-        name="Core/Libraries/Source/WWVegas/WWDownload",
-        includes=tuple(DOWNLOAD_INCLUDES),
-        cmake_dirs=("Core/Libraries/Source/WWVegas/WWDownload",),
-        defines=("RTS_ZEROHOUR=1",),
-    ),
-    Target(
-        name="GeneralsMD/Code/Libraries/Source/WWVegas",
-        includes=tuple(RENDERER_INCLUDES),
-        cmake_dirs=(
-            "GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2",
-            "GeneralsMD/Code/Libraries/Source/WWVegas/WWAudio",
-            "GeneralsMD/Code/Libraries/Source/WWVegas/WWDownload",
+    targets = [
+        Target(
+            name="Core/Libraries/Source/Compression",
+            includes=tuple(WWVEGAS_INCLUDES),
+            source_dirs=("Core/Libraries/Source/Compression",),
         ),
-    ),
-    Target(
-        name="Core/GameEngineDevice",
-        includes=tuple(DEVICE_INCLUDES),
-        cmake_lists="Core/GameEngineDevice/CMakeLists.txt",
-        cmake_root="Core/GameEngineDevice",
-        # `RTS_HAS_FFMPEG` is what Core/GameEngineDevice/CMakeLists.txt puts on
-        # `corei_gameenginedevice_public` when RTS_BUILD_OPTION_FFMPEG is on, which is the video
-        # route this port takes. Without it the FFmpeg translation units still compile and
-        # libavcodec still links, but `W3DGameClient::createVideoPlayer()` returns
-        # `NullVideoPlayer` -- so the linked binary could not open a movie at all.
-        defines=("RTS_ZEROHOUR=1", "RTS_HAS_FFMPEG"),
-    ),
-    Target(
-        name="GeneralsMD/Code/GameEngineDevice",
-        # `GeneralsMD/Code/Main` is on this library's include path in the real build too:
-        # GameEngineDevice links `zi_main`, whose only content is that directory
-        # (`GeneralsMD/Code/CMakeLists.txt`). W3DDisplay.cpp's `#include "WinMain.h"` needs it, and
-        # without it the file reports a missing header rather than its real portability state.
-        includes=tuple(DEVICE_INCLUDES) + ("GeneralsMD/Code/Main",),
-        cmake_lists="GeneralsMD/Code/GameEngineDevice/CMakeLists.txt",
-        cmake_root="GeneralsMD/Code/GameEngineDevice",
-        # Ditto: this is the target holding W3DGameClient.cpp, which picks the video player.
-        defines=("RTS_ZEROHOUR=1", "RTS_HAS_FFMPEG"),
-    ),
-    Target(
-        name="GeneralsMD/Code/Main",
-        includes=tuple(DEVICE_INCLUDES) + ("GeneralsMD/Code/Main",),
-        source_dirs=("GeneralsMD/Code/Main",),
-        defines=("RTS_ZEROHOUR=1",),
-    ),
-]
+        Target(
+            name="Core/Libraries/Source/WWVegas/WWMath",
+            includes=tuple(WWVEGAS_INCLUDES),
+            source_dirs=("Core/Libraries/Source/WWVegas/WWMath",),
+        ),
+        Target(
+            name="Core/Libraries/Source/WWVegas/WWLib",
+            includes=tuple(WWVEGAS_INCLUDES),
+            source_dirs=("Core/Libraries/Source/WWVegas/WWLib",),
+        ),
+        Target(
+            name="Core/Libraries/Source/WWVegas/WWDebug",
+            includes=tuple(WWVEGAS_INCLUDES),
+            source_dirs=("Core/Libraries/Source/WWVegas/WWDebug",),
+        ),
+        Target(
+            name="Core/Libraries/Source/WWVegas/WWSaveLoad",
+            includes=tuple(WWVEGAS_INCLUDES),
+            source_dirs=("Core/Libraries/Source/WWVegas/WWSaveLoad",),
+        ),
+        Target(
+            name="Core/Libraries/Source/debug",
+            includes=tuple(WWVEGAS_INCLUDES),
+            source_dirs=("Core/Libraries/Source/debug",),
+        ),
+        Target(
+            name="Core/Libraries/Source/profile",
+            includes=tuple(WWVEGAS_INCLUDES),
+            source_dirs=("Core/Libraries/Source/profile",),
+        ),
+        Target(
+            name="Core/GameEngine",
+            includes=tuple(gameengine_includes),
+            cmake_lists="Core/GameEngine/CMakeLists.txt",
+            cmake_root="Core/GameEngine",
+            # `IG_DEBUG_STACKTRACE` is what Core/GameEngine/CMakeLists.txt defines on
+            # `corei_gameengine_private`, whose INTERFACE sources are these files and whose consumer
+            # is the game-engine library both source sets compile into. Missing it here was not a
+            # harmless omission: StackDump.h *self*-defines the macro if nothing else has, so every
+            # caller saw the real declarations while StackDump.cpp -- which tests the macro above
+            # its own include of that header -- compiled to nothing, and `FillStackAddresses`,
+            # `StackDumpFromAddresses` and `g_LastErrorDump` were unresolved because the harness's
+            # flags disagreed with the real build's, not because the port lacks the code.
+            defines=(game.define, "IG_DEBUG_STACKTRACE"),
+        ),
+        Target(
+            name=f"{game.directory}/Code/GameEngine",
+            includes=tuple(gameengine_includes),
+            cmake_lists=f"{game.directory}/Code/GameEngine/CMakeLists.txt",
+            cmake_root=f"{game.directory}/Code/GameEngine",
+            # `z_gameengine` links `corei_gameengine_private`, so these files get
+            # IG_DEBUG_STACKTRACE from it in the real build exactly as Core/GameEngine's do.
+            defines=(game.define, "IG_DEBUG_STACKTRACE"),
+        ),
+    ]
+
+    # Renderer, audio, device and entry-point code. Kept out of the default target list on purpose:
+    # the numbers above are tracked over time, and silently widening their scope would make the
+    # history meaningless. Enable with --include-renderer and read the figure as its own thing.
+    #
+    # These translation units have never been compiled off Windows. They are the code most likely to
+    # be unportable (Direct3D 8, DirectSound/Miles, Bink, WinMain), so a bad number here is expected
+    # and is still worth having measured.
+
+    # `corei_ww3d2` and the other Core renderer/device libraries are CMake INTERFACE libraries:
+    # their sources are compiled as part of the game-specific targets, with the game-specific
+    # include tree ahead of the Core one (that is how the game copies of e.g. `w3d_file.h`, which
+    # Core has no copy of, get found). The probe mirrors that ordering rather than compiling Core in
+    # isolation.
+    game_renderer_includes = [
+        f"{game.directory}/Code/Libraries/Source/WWVegas",
+        f"{game.directory}/Code/Libraries/Source/WWVegas/WW3D2",
+        f"{game.directory}/Code/Libraries/Source/WWVegas/WWAudio",
+        f"{game.directory}/Code/Libraries/Source/WWVegas/WWDownload",
+    ]
+
+    renderer_includes = game_renderer_includes + WWVEGAS_INCLUDES + [
+        "Core/Libraries/Source/WWVegas/WW3D2",
+        "Core/Libraries/Source/WWVegas/WWAudio",
+        "Core/Libraries/Source/WWVegas/WWDownload",
+    ]
+
+    device_includes = game_renderer_includes + gameengine_includes + [
+        "Core/Libraries/Source/WWVegas/WW3D2",
+        "Core/Libraries/Source/WWVegas/WWAudio",
+        "Core/GameEngineDevice/Include",
+        f"{game.directory}/Code/GameEngineDevice/Include",
+    ]
+
+    # `corei_wwdownload`'s sources are compiled into `z_wwdownload`, which links
+    # `zi_gameengine_include` and `zi_always` -- so the patch downloader sees the GameEngine include
+    # tree (it includes "Common/Debug.h") and RTS_ZEROHOUR=1, neither of which the renderer targets
+    # get. Probing it with the renderer's configuration reported two diagnostics that the real build
+    # cannot produce.
+    download_includes = game_renderer_includes + gameengine_includes + [
+        "Core/Libraries/Source/WWVegas/WWDownload",
+    ]
+
+    renderer_targets = [
+        Target(
+            name="Core/Libraries/Source/WWVegas/WW3D2",
+            # vulkanrenderbackend.cpp -- the non-Windows RenderBackendClass -- includes the
+            # renderer's own interface header, "render_backend.h", from spikes/renderer/src. That
+            # directory is the one place the Vulkan backend lives; the engine implements the
+            # D3D8-shaped seam over it rather than carrying a second copy of it. Only this target
+            # gets the directory, because only this file may talk to the backend interface.
+            includes=tuple(renderer_includes) + ("spikes/renderer/src",),
+            cmake_dirs=("Core/Libraries/Source/WWVegas/WW3D2",),
+        ),
+        Target(
+            name="Core/Libraries/Source/WWVegas/WWAudio",
+            includes=tuple(renderer_includes),
+            cmake_dirs=("Core/Libraries/Source/WWVegas/WWAudio",),
+        ),
+        Target(
+            name="Core/Libraries/Source/WWVegas/WWDownload",
+            includes=tuple(download_includes),
+            cmake_dirs=("Core/Libraries/Source/WWVegas/WWDownload",),
+            defines=(game.define,),
+        ),
+        Target(
+            name=f"{game.directory}/Code/Libraries/Source/WWVegas",
+            includes=tuple(renderer_includes),
+            cmake_dirs=(
+                f"{game.directory}/Code/Libraries/Source/WWVegas/WW3D2",
+                f"{game.directory}/Code/Libraries/Source/WWVegas/WWAudio",
+                f"{game.directory}/Code/Libraries/Source/WWVegas/WWDownload",
+            ),
+        ),
+        Target(
+            name="Core/GameEngineDevice",
+            includes=tuple(device_includes),
+            cmake_lists="Core/GameEngineDevice/CMakeLists.txt",
+            cmake_root="Core/GameEngineDevice",
+            # `RTS_HAS_FFMPEG` is what Core/GameEngineDevice/CMakeLists.txt puts on
+            # `corei_gameenginedevice_public` when RTS_BUILD_OPTION_FFMPEG is on, which is the video
+            # route this port takes. Without it the FFmpeg translation units still compile and
+            # libavcodec still links, but `W3DGameClient::createVideoPlayer()` returns
+            # `NullVideoPlayer` -- so the linked binary could not open a movie at all.
+            defines=(game.define, "RTS_HAS_FFMPEG"),
+        ),
+        Target(
+            name=f"{game.directory}/Code/GameEngineDevice",
+            # `GeneralsMD/Code/Main` is on this library's include path in the real build too:
+            # GameEngineDevice links `zi_main`, whose only content is that directory
+            # (`GeneralsMD/Code/CMakeLists.txt`). W3DDisplay.cpp's `#include "WinMain.h"` needs it,
+            # and without it the file reports a missing header rather than its real portability
+            # state.
+            includes=tuple(device_includes) + (f"{game.directory}/Code/Main",),
+            cmake_lists=f"{game.directory}/Code/GameEngineDevice/CMakeLists.txt",
+            cmake_root=f"{game.directory}/Code/GameEngineDevice",
+            # Ditto: this is the target holding W3DGameClient.cpp, which picks the video player.
+            defines=(game.define, "RTS_HAS_FFMPEG"),
+        ),
+        Target(
+            name=f"{game.directory}/Code/Main",
+            includes=tuple(device_includes) + (f"{game.directory}/Code/Main",),
+            source_dirs=(f"{game.directory}/Code/Main",),
+            defines=(game.define,),
+        ),
+    ]
+    return targets, renderer_targets
+
+
+# The tracked baselines measure Zero Hour; importers read these.
+TARGETS, RENDERER_TARGETS = game_targets(GAMES["zerohour"])
 
 CLANG_FLAGS = [
     "-fsyntax-only",
@@ -406,8 +430,9 @@ def is_measured_source(path):
     return path.name not in OPTIONAL_BACKENDS and path.name not in EXCLUSIVE_ALTERNATIVES
 
 
-def targets(include_renderer):
-    return TARGETS + RENDERER_TARGETS if include_renderer else TARGETS
+def targets(include_renderer, game=GAMES["zerohour"]):
+    default, renderer = game_targets(game)
+    return default + renderer if include_renderer else default
 
 
 def cmake_source_lists(target):
@@ -432,10 +457,10 @@ def cmake_sources(target):
     return sorted(set(sources))
 
 
-def collect_jobs(deps_dir, with_shims, include_renderer=False):
+def collect_jobs(deps_dir, with_shims, include_renderer=False, game=GAMES["zerohour"]):
     extra = tuple(dep_includes(deps_dir))
     jobs = []
-    for target in targets(include_renderer):
+    for target in targets(include_renderer, game):
         if target.cmake_lists or target.cmake_dirs:
             sources = cmake_sources(target)
         else:
@@ -447,7 +472,8 @@ def collect_jobs(deps_dir, with_shims, include_renderer=False):
     return jobs
 
 
-def render_report(results, with_shims, deps_dir, deps_present, include_renderer=False):
+def render_report(results, with_shims, deps_dir, deps_present, include_renderer=False,
+                  game=GAMES["zerohour"]):
     total = len(results)
     clean = [r for r in results if r.ok]
     by_category = collections.Counter()
@@ -468,7 +494,7 @@ def render_report(results, with_shims, deps_dir, deps_present, include_renderer=
         "",
     ]
     if include_renderer:
-        renderer_names = {t.name for t in RENDERER_TARGETS}
+        renderer_names = {t.name for t in game_targets(game)[1]}
         renderer = [r for r in results if r.target in renderer_names]
         renderer_clean = sum(1 for r in renderer if r.ok)
         lines += [
@@ -522,7 +548,8 @@ def render_report(results, with_shims, deps_dir, deps_present, include_renderer=
 
     lines += ["", "## Per-target breakdown", "",
               "| Target | Clean | Total | Clean % |", "|---|---:|---:|---:|"]
-    per_target = collections.OrderedDict((t.name, [0, 0]) for t in targets(include_renderer))
+    per_target = collections.OrderedDict(
+        (t.name, [0, 0]) for t in targets(include_renderer, game))
     for result in results:
         per_target[result.target][1] += 1
         if result.ok:
@@ -552,10 +579,11 @@ def clang_version():
     return out.strip().split(".")[0] or "unknown"
 
 
-def render_json(results, with_shims, deps_present, include_renderer=False):
+def render_json(results, with_shims, deps_present, include_renderer=False,
+                game=GAMES["zerohour"]):
     """Machine-readable summary, for the CI baseline gate."""
     per_target = collections.OrderedDict(
-        (t.name, {"clean": 0, "total": 0}) for t in targets(include_renderer))
+        (t.name, {"clean": 0, "total": 0}) for t in targets(include_renderer, game))
     for result in results:
         per_target[result.target]["total"] += 1
         if result.ok:
@@ -585,14 +613,18 @@ def main():
     parser.add_argument("--deps-dir", default=str(DEFAULT_DEPS_DIR),
                         help="CMake FetchContent _deps directory to take dx8/gamespy/miles/lzhl "
                              "headers from")
+    parser.add_argument("--game", choices=sorted(GAMES), default="zerohour",
+                        help="which game's tree to probe alongside Core/; the CI baselines "
+                             "measure zerohour")
     args = parser.parse_args()
+    game = GAMES[args.game]
 
     deps_dir = pathlib.Path(args.deps_dir) if args.deps_dir else None
     if deps_dir and not deps_dir.is_dir():
         deps_dir = None
     deps_present = [d for d in FETCHED_DEP_INCLUDES if deps_dir and (deps_dir / d).is_dir()]
 
-    jobs = collect_jobs(deps_dir, args.with_shims, args.include_renderer)
+    jobs = collect_jobs(deps_dir, args.with_shims, args.include_renderer, game)
     if not jobs:
         print("No sources found", file=sys.stderr)
         return 1
@@ -601,12 +633,12 @@ def main():
         results = list(pool.map(probe, jobs))
 
     report = render_report(results, args.with_shims, deps_dir, deps_present,
-                           args.include_renderer)
+                           args.include_renderer, game)
     pathlib.Path(args.report).write_text(report)
     if args.json_out:
         pathlib.Path(args.json_out).write_text(
             json.dumps(render_json(results, args.with_shims, deps_present,
-                                   args.include_renderer), indent=2) + "\n")
+                                   args.include_renderer, game), indent=2) + "\n")
     clean = sum(1 for r in results if r.ok)
     print(f"{clean} / {len(results)} translation units clean; report written to {args.report}")
     return 0

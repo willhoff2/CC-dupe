@@ -191,6 +191,18 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The probe builds each game's targets from one template; a half-substituted path or define
+      # would measure the wrong headers and report a number for neither game.
+      - name: Check the probe's per-game targets
+        run: |
+          set -o pipefail
+          {
+            echo '## Probe per-game targets'
+            echo '```'
+            python3 scripts/native-port-probe-game-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The rules that decide which jobs this workflow skips, checked against paths from real
       # commits. A wrong answer here does not fail anything by itself -- it silently does not run a
       # gate -- so it is asserted rather than trusted.

@@ -184,11 +184,12 @@ couple of minutes with no output until it finishes. `check-font-metrics.py` buil
 with `scripts/ci/font-metrics-reference.json`; it needs the `fonts-dejavu-core` font both sides are
 pointed at and the stb headers `fetch-probe-deps.sh` provisions.
 
-Two self-checks of the measurement harness itself, which a sweep runs because a broken categoriser
-makes every number above unattributable:
+Three self-checks of the measurement harness itself, which a sweep runs because a broken categoriser
+or a probe target that reads the wrong game's tree makes every number above unattributable:
 
 ```sh
 python3 scripts/native-build-categorise-test.py
+python3 scripts/native-port-probe-game-test.py
 python3 scripts/ci/classify-changes.py --self-check
 ```
 
