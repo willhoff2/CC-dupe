@@ -177,7 +177,11 @@ void initSubsystem(
 
 //-------------------------------------------------------------------------------------------------
 extern HINSTANCE ApplicationHInstance;  ///< our application instance
+#ifdef RTS_HAS_EMBEDDED_BROWSER
+// TheSuperHackers @port The ATL module exists to host the embedded browser's in-process COM
+// server, which only the Windows configuration builds. See docs/porting/embedded-browser-seam.md.
 extern CComModule _Module;
+#endif
 
 //-------------------------------------------------------------------------------------------------
 static void updateTGAtoDDS();
@@ -269,7 +273,9 @@ GameEngine::GameEngine()
 	m_quitting = FALSE;
 	m_isActive = FALSE;
 
+#ifdef RTS_HAS_EMBEDDED_BROWSER
 	_Module.Init(nullptr, ApplicationHInstance, nullptr);
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -311,7 +317,9 @@ GameEngine::~GameEngine()
 
 	Drawable::killStaticImages();
 
+#ifdef RTS_HAS_EMBEDDED_BROWSER
 	_Module.Term();
+#endif
 
 #ifdef PERF_TIMERS
 	PerfGather::termPerfDump();

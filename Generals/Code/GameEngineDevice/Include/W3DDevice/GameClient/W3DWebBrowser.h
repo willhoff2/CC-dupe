@@ -29,6 +29,11 @@
 
 #include "GameNetwork/WOLBrowser/WebBrowser.h"
 
+// The W3D browser is the embedded Internet Explorer control drawn into a D3D8 surface; it exists
+// only where the BrowserDispatch COM server does. Off Windows this header declares nothing rather
+// than declaring a browser that cannot render. See docs/porting/embedded-browser-seam.md.
+#ifdef RTS_HAS_EMBEDDED_BROWSER
+
 class TextureClass;
 class Image;
 class GameWindow;
@@ -42,3 +47,5 @@ class W3DWebBrowser : public WebBrowser
 		virtual void closeBrowserWindow(GameWindow *win) override;
 
 };
+
+#endif // RTS_HAS_EMBEDDED_BROWSER
