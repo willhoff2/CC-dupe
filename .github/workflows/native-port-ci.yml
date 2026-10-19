@@ -77,6 +77,9 @@ jobs:
   #    job runs, so the classification is asserted against paths from real commits before a branch
   #    is ever pushed.
   #
+  #    `zerohour` is `code` without the base game's own tree (`Generals/`), which no Zero Hour job
+  #    reads; it gates the Zero Hour builds and seams, so a Generals-only diff runs only its gates.
+  #
   #    Off pull_request (push to main, workflow_dispatch) every output is forced true: main is the
   #    branch every number in docs/porting/ is quoted from and it is held to the whole suite.
   changes:
@@ -86,6 +89,7 @@ jobs:
     outputs:
       # `github.event_name != 'pull_request'` is the "run everything on main" clause.
       code: ${{ steps.classify.outputs.code == 'true' || github.event_name != 'pull_request' }}
+      zerohour: ${{ steps.classify.outputs.zerohour == 'true' || github.event_name != 'pull_request' }}
       renderer: ${{ steps.classify.outputs.renderer == 'true' || github.event_name != 'pull_request' }}
       window: ${{ steps.classify.outputs.window == 'true' || github.event_name != 'pull_request' }}
       audio: ${{ steps.classify.outputs.audio == 'true' || github.event_name != 'pull_request' }}
@@ -111,6 +115,7 @@ jobs:
       - name: Summary
         env:
           CODE: ${{ steps.classify.outputs.code }}
+          ZEROHOUR: ${{ steps.classify.outputs.zerohour }}
           RENDERER: ${{ steps.classify.outputs.renderer }}
           WINDOW: ${{ steps.classify.outputs.window }}
           AUDIO: ${{ steps.classify.outputs.audio }}
@@ -125,7 +130,8 @@ jobs:
               echo
               echo "| area | can this diff move it? |"
               echo "| --- | --- |"
-              echo "| code (probe, build, seams) | $CODE |"
+              echo "| code (any source) | $CODE |"
+              echo "| zerohour (code outside the base game's tree: builds, seams) | $ZEROHOUR |"
               echo "| renderer | $RENDERER |"
               echo "| window | $WINDOW |"
               echo "| audio | $AUDIO |"
@@ -329,6 +335,7 @@ jobs:
           ./scripts/ci/fetch-probe-deps.sh
 
       - name: Probe (native, no Windows SDK)
+        if: needs.changes.outputs.zerohour == 'true'
         env:
           CLANGXX: clang++-14
         run: |
@@ -336,6 +343,7 @@ jobs:
             --report native-port-probe-native.md --json probe-native.json
 
       - name: Probe (shimmed)
+        if: needs.changes.outputs.zerohour == 'true'
         env:
           CLANGXX: clang++-14
         run: |
@@ -357,6 +365,7 @@ jobs:
             --json probe-generals-shimmed-renderer.json
 
       - name: Gate against the checked-in baselines
+        if: needs.changes.outputs.zerohour == 'true'
         run: |
           set -o pipefail
           {
@@ -382,6 +391,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Check the CRT/wide-character compat layer
+        if: needs.changes.outputs.zerohour == 'true'
         env:
           CLANGXX: clang++-14
         run: |
@@ -417,7 +427,7 @@ jobs:
   native-build:
     name: Native build (Linux, clang 14, 64-bit)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.zerohour == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
@@ -731,7 +741,7 @@ jobs:
   native-build-renderer:
     name: Native build + renderer (Linux, clang 14, 64-bit)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.zerohour == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
@@ -1078,7 +1088,7 @@ jobs:
   native-build-debug:
     name: Native build, debug configuration + assert negative control (Linux, clang 14)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.zerohour == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
@@ -1210,7 +1220,7 @@ jobs:
   debug-profile-seam:
     name: Debug/profile seam (Linux, clang 14)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.zerohour == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
@@ -1259,7 +1269,7 @@ jobs:
   debug-profile-seam-macos:
     name: Debug/profile seam (macOS arm64)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.zerohour == 'true'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -1297,7 +1307,7 @@ jobs:
   lanmessage-layout:
     name: LAN packet layout (32/64-bit)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.zerohour == 'true'
     runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
