@@ -112,6 +112,21 @@ AREAS = {
     ),
 }
 
+# The base game's own tree. Nothing Zero Hour builds, scans or runs reads it, so a diff confined to
+# it skips the Zero Hour jobs and the renderer/window/audio ones, which build spikes/, Core/ and
+# GeneralsMD/ only. See docs/porting/generals-native-build.md.
+GENERALS_ONLY = (
+    "Generals/*",
+)
+
+# ...except the files native-build.py's Zero Hour symbol attribution reads from both trees
+# (`excluded_backend_sources()`: the opt-in and mutually exclusive backends, and every .mm).
+READ_BY_BOTH_GAMES = (
+    "*/WinMain.cpp",
+    "*/GameMemoryNull.cpp",
+    "*.mm",
+)
+
 # The CI plumbing moves every measurement by definition: it is what runs them, and -- for the
 # baselines -- what they are compared against.
 PLUMBING = (
@@ -129,14 +144,21 @@ def is_prose(path):
     return _matches(path, PROSE) and not _matches(path, NOT_PROSE)
 
 
+def is_generals_only(path):
+    return _matches(path, GENERALS_ONLY) and not _matches(path, READ_BY_BOTH_GAMES)
+
+
 def classify(paths):
     """Map area name -> whether any of `paths` can move that area's measurements."""
-    result = {"code": any(not is_prose(path) for path in paths)}
+    code = [path for path in paths if not is_prose(path)]
+    # `zerohour` is `code` without the base game's tree: still a complement, so a new top-level
+    # directory runs the Zero Hour jobs the day it appears.
+    zero_hour = [path for path in code if not is_generals_only(path)]
+    result = {"code": bool(code), "zerohour": bool(zero_hour)}
     for area, patterns in AREAS.items():
+        candidates = code if area == "generals" else zero_hour
         result[area] = any(
-            _matches(path, patterns) or _matches(path, PLUMBING)
-            for path in paths
-            if not is_prose(path)
+            _matches(path, patterns) or _matches(path, PLUMBING) for path in candidates
         )
     return result
 
@@ -144,7 +166,8 @@ def classify(paths):
 # Paths lifted from real commits on this repository, with the classification they must get. The
 # renderer/window/audio expectations are the interesting half: each of these landed as a slice whose
 # gate had to run, and the docs commits are the ones that were paying for all twelve jobs.
-NOTHING = {"code": False, "renderer": False, "window": False, "audio": False, "generals": False}
+NOTHING = {"code": False, "zerohour": False, "renderer": False, "window": False, "audio": False,
+           "generals": False}
 
 SELF_CHECK = (
     (["docs/porting/STATUS.md"], NOTHING),
@@ -154,72 +177,114 @@ SELF_CHECK = (
     ),
     (
         ["GeneralsMD/Code/Libraries/Source/WWVegas/WW3D2/dx8wrapper.cpp"],
-        {"code": True, "renderer": True, "window": False, "audio": False, "generals": False},
+        {"code": True, "zerohour": True, "renderer": True, "window": False,
+         "audio": False, "generals": False},
     ),
     (
         ["Core/Libraries/Source/WWVegas/WWLib/platform/platform_window_cocoa.mm"],
-        {"code": True, "renderer": False, "window": True, "audio": False, "generals": True},
+        {"code": True, "zerohour": True, "renderer": False, "window": True,
+         "audio": False, "generals": True},
     ),
     (
         ["Core/Libraries/Source/OpenALAudioDevice/OpenALAudioManager.cpp"],
-        {"code": True, "renderer": False, "window": False, "audio": True, "generals": True},
+        {"code": True, "zerohour": True, "renderer": False, "window": False,
+         "audio": True, "generals": True},
     ),
     (
         ["spikes/renderer/src/backend_vulkan.cpp"],
-        {"code": True, "renderer": True, "window": True, "audio": False, "generals": True},
+        {"code": True, "zerohour": True, "renderer": True, "window": True,
+         "audio": False, "generals": True},
     ),
     # The plumbing case: a change to a gate script runs every area's gate.
     (
         ["scripts/ci/check-probe-baseline.py"],
-        {"code": True, "renderer": True, "window": True, "audio": True, "generals": True},
+        {"code": True, "zerohour": True, "renderer": True, "window": True,
+         "audio": True, "generals": True},
     ),
     # A baseline lives under docs/ but is a gate input, not prose: loosening a recorded number runs
     # everything that compares against one.
     (
         ["docs/porting/ci-baselines/window-input-scan.json"],
-        {"code": True, "renderer": True, "window": True, "audio": True, "generals": True},
+        {"code": True, "zerohour": True, "renderer": True, "window": True,
+         "audio": True, "generals": True},
     ),
     # The seam's engine-side wiring: the subjects of check-window-seam-wiring.py.
     (
         ["Core/GameEngine/Source/GameClient/PlatformWindowHost.cpp"],
-        {"code": True, "renderer": False, "window": True, "audio": False, "generals": True},
+        {"code": True, "zerohour": True, "renderer": False, "window": True,
+         "audio": False, "generals": True},
     ),
     (
         ["Core/GameEngineDevice/Source/Win32Device/GameClient/Win32Mouse.cpp"],
-        {"code": True, "renderer": False, "window": True, "audio": False, "generals": True},
+        {"code": True, "zerohour": True, "renderer": False, "window": True,
+         "audio": False, "generals": True},
     ),
     (
         ["GeneralsMD/Code/Main/PlatformMain.cpp"],
-        {"code": True, "renderer": False, "window": True, "audio": False, "generals": False},
+        {"code": True, "zerohour": True, "renderer": False, "window": True,
+         "audio": False, "generals": False},
     ),
     # Docs plus one source file is a source change: the prose does not dilute it.
     (
         ["docs/porting/audio-device-seam.md", "cmake/openal.cmake"],
-        {"code": True, "renderer": False, "window": False, "audio": True, "generals": True},
+        {"code": True, "zerohour": True, "renderer": False, "window": False,
+         "audio": True, "generals": True},
     ),
     # Repinning the MPEG decoder changes what the audio backend links, so the audio gate must run.
     (
         ["cmake/minimp3.cmake"],
-        {"code": True, "renderer": False, "window": False, "audio": True, "generals": True},
+        {"code": True, "zerohour": True, "renderer": False, "window": False,
+         "audio": True, "generals": True},
     ),
     # A file in no area still builds and still moves the probe and build counts.
     (
         ["GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/AIUpdate.cpp"],
-        {"code": True, "renderer": False, "window": False, "audio": False, "generals": False},
+        {"code": True, "zerohour": True, "renderer": False, "window": False,
+         "audio": False, "generals": False},
     ),
-    # The base game's tree moves only the Generals probe and the code-gated jobs.
+    # The base game's tree moves only the Generals jobs: no Zero Hour build or scan reads it.
     (
         ["Generals/Code/GameEngine/Source/Common/GlobalData.cpp"],
-        {"code": True, "renderer": False, "window": False, "audio": False, "generals": True},
+        {"code": True, "zerohour": False, "renderer": False, "window": False, "audio": False,
+         "generals": True},
+    ),
+    # #179's diff: Generals' twins of renderer and window-pattern files, plus prose. The renderer
+    # spike and window seam jobs build spikes/ and Core/, never this tree.
+    (
+        [
+            "Generals/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DDisplay.cpp",
+            "Generals/Code/Libraries/Source/WWVegas/WW3D2/ww3d.cpp",
+            "docs/porting/generals-renderer-routing.md",
+        ],
+        {"code": True, "zerohour": False, "renderer": False, "window": False, "audio": False,
+         "generals": True},
+    ),
+    # Generals' WinMain.cpp is read by native-build.py's Zero Hour symbol attribution.
+    (
+        ["Generals/Code/Main/WinMain.cpp"],
+        {"code": True, "zerohour": True, "renderer": False, "window": False, "audio": False,
+         "generals": True},
+    ),
+    # A Generals file alongside a shared one is a Zero Hour change, but only the shared file decides
+    # the other areas: Generals' PlatformMain.cpp is in no window job.
+    (
+        [
+            "Generals/Code/Main/PlatformMain.cpp",
+            "Core/Libraries/Source/WWVegas/WWLib/cpudetect.cpp",
+        ],
+        {"code": True, "zerohour": True, "renderer": False, "window": False, "audio": False,
+         "generals": True},
     ),
     # The probe and its shims decide what the Generals counts mean, so they run its gate.
     (
         ["scripts/native-port-probe.py"],
-        {"code": True, "renderer": False, "window": False, "audio": False, "generals": True},
+        {"code": True, "zerohour": True, "renderer": False, "window": False,
+         "audio": False, "generals": True},
     ),
     (
         ["scripts/native-port-shims/windows.h"],
-        {"code": True, "renderer": False, "window": False, "audio": False, "generals": True},
+        {"code": True, "zerohour": True, "renderer": False, "window": False,
+         "audio": False, "generals": True},
     ),
     # No files at all (an empty diff) must not claim everything changed.
     ([], NOTHING),
@@ -258,7 +323,7 @@ def main():
 
     paths = [line.strip() for line in sys.stdin if line.strip()]
     result = classify(paths)
-    for area in ("code", "renderer", "window", "audio", "generals"):
+    for area in ("code", "zerohour", "renderer", "window", "audio", "generals"):
         print(f"{area}={'true' if result[area] else 'false'}")
     print(f"{len(paths)} changed path(s):", file=sys.stderr)
     for path in paths:
