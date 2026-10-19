@@ -121,6 +121,18 @@ The release configuration is compiled at `-O2 -fno-strict-aliasing` and the debu
 `docs/porting/optimised-native-build.md` was. Results record `optimised`, and
 `check-native-build-baseline.py` refuses to compare across it, as across configurations.
 
+The base game builds through the same levels with `--game generals` (CI job
+`native-build-generals`, run only when `classify-changes.py`'s `generals` area is true). It defaults
+to `build/native-generals`, its results record `game`, and the gate picks
+`native-build-generals-shimmed-level1-2-3-4.json` and refuses a Zero Hour baseline
+(`docs/porting/generals-native-build.md`):
+
+```sh
+CLANGXX=clang++-14 python3 scripts/native-build.py --game generals --level 1 --level 2 --level 3 \
+  --level 4 --with-shims --strict-link --report /tmp/nbg.md --json /tmp/nbg.json
+python3 scripts/ci/check-native-build-baseline.py --results /tmp/nbg.json
+```
+
 The debug configuration is a measured configuration of its own (CI job `native-build-debug`) with
 its own baseline: it compiles different code (`-DRTS_DEBUG -DWWDEBUG -DDEBUG`), so its numbers are
 not comparable with release's and `check-native-build-baseline.py` refuses to compare them. Use
