@@ -22,7 +22,7 @@ This script measures both, and the divergence between them and the probe:
 A playable binary is not a goal. An honest, reproducible blocker list is.
 
 Usage:
-    python3 scripts/native-build.py [--level 1|2|3|4] [--with-shims]
+    python3 scripts/native-build.py [--level 1|2|3|4] [--with-shims] [--game zerohour|generals]
                                     [--report docs/porting/native-build-report.md]
                                     [--json out.json] [--jobs N] [--build-dir DIR]
 """
@@ -75,6 +75,7 @@ CXX = os.environ.get("CLANGXX", "clang++")
 # WinInet consumers, the code least likely to build off Windows. New compile failures here are the
 # deliverable, not a regression. Level 4 has its own baseline file
 # (`native-build-shimmed-level1-2-3-4.json`), so the smaller build's ratchet is untouched.
+# `{game}` is the selected game's tree (`--game`); `Core/` is shared by both.
 LEVELS = {
     1: [
         "Core/Libraries/Source/Compression",
@@ -85,23 +86,34 @@ LEVELS = {
     ],
     2: [
         "Core/GameEngine",
-        "GeneralsMD/Code/GameEngine",
+        "{game}/Code/GameEngine",
     ],
     3: [
         "Core/GameEngineDevice",
-        "GeneralsMD/Code/GameEngineDevice",
-        "GeneralsMD/Code/Main",
+        "{game}/Code/GameEngineDevice",
+        "{game}/Code/Main",
     ],
     4: [
         "Core/Libraries/Source/WWVegas/WW3D2",
         "Core/Libraries/Source/WWVegas/WWAudio",
         "Core/Libraries/Source/WWVegas/WWDownload",
-        "GeneralsMD/Code/Libraries/Source/WWVegas",
+        "{game}/Code/Libraries/Source/WWVegas",
     ],
 }
 
-# Every target the probe knows about, in the probe's own definitions. Levels index into this.
-ALL_TARGETS = npt.TARGETS + npt.RENDERER_TARGETS
+GAMES = npt.probe.GAMES
+
+
+def level_targets(level, game):
+    """The target names one build level selects for `game`."""
+    return [name.format(game=game.directory) for name in LEVELS[level]]
+
+
+def all_targets(game):
+    """Every target the probe knows about for `game`, in the probe's own definitions."""
+    default, renderer = npt.probe.game_targets(game)
+    return default + renderer
+
 
 # The build configurations, spelled the way the real build spells them.
 #
@@ -680,6 +692,19 @@ GENERATED_HEADERS = {
                           "#define VERSION_MINOR 4\n"
                           "#define VERSION_BUILDNUM 601\n",
         # GeneralsMD/Code/Main/CMakeLists.txt, `file(WRITE ... GeneratedVersion.h)`.
+        "GeneratedVersion.h": (
+            "#pragma once\n\n"
+            "#define VERSION_LOCALBUILDNUM 0\n"
+            "#define VERSION_BUILDUSER \"\"\n"
+            "#define VERSION_BUILDLOC \"\"\n"),
+    },
+    "Generals/Code/Main": {
+        # Generals/Code/Main/CMakeLists.txt, the non-VS6 `file(WRITE ... BuildVersion.h)`.
+        "BuildVersion.h": "#pragma once\n\n"
+                          "#define VERSION_MAJOR 1\n"
+                          "#define VERSION_MINOR 8\n"
+                          "#define VERSION_BUILDNUM 601\n",
+        # Generals/Code/Main/CMakeLists.txt, `file(WRITE ... GeneratedVersion.h)`.
         "GeneratedVersion.h": (
             "#pragma once\n\n"
             "#define VERSION_LOCALBUILDNUM 0\n"
@@ -1570,11 +1595,12 @@ def archives_defining_main(archives):
             if ENTRY_SYMBOL in nm_symbols(a, "--defined-only", "--extern-only")]
 
 
-# The one library whose `main()` is the game's: GeneralsMD/Code/Main. Everything else that defines
+# The one library whose `main()` is the game's: `{game}/Code/Main`. Everything else that defines
 # one is a standalone test tool that happens to live inside a measured directory
 # (WWLib/platform/tests/gdi_font_metrics_dump.cpp, win32_file_api_test.cpp), so it is compiled and
 # counted as an object but must not be linked into the game binary.
-GAME_ENTRY_TARGET = "GeneralsMD/Code/Main"
+def game_entry_target(game):
+    return f"{game.directory}/Code/Main"
 
 
 def objects_defining_main(archive):
@@ -1605,16 +1631,17 @@ def drop_rival_entry_points(archives, keep):
     return sorted(removed)
 
 
-def entry_point_anchor(entry_archives, game_target_built):
+def entry_point_anchor(entry_archives, entry_target, game_target_built):
     """The source of the link's anchor translation unit, and why it is what it is.
 
     Returns (text, stub_used). A generated `int main() { return 0; }` is legitimate in exactly one
     situation: the entry-point *target* is not in the selected levels, as in a levels 1-2 build,
     which measures libraries and has no entry point of its own to link.
 
-    Once `GeneralsMD/Code/Main` is in the build and no archive defines the entry point, a stub is a
-    lie in the shape of a measurement -- the link succeeds, `binary_produced` goes true, and the
-    file is a program that returns 0 while every figure still carries the game's name. That is
+    Once `entry_target` (the game's `Code/Main`) is in the build and no archive defines the entry
+    point, a stub is a lie in the shape of a measurement -- the link succeeds, `binary_produced`
+    goes true, and the file is a program that returns 0 while every figure still carries the
+    game's name. That is
     precisely what happened on Darwin in #87, where the scan looked for the ELF spelling of `main`
     in a Mach-O archive: the substitution was silent and the only visible symptom was 17 duplicate
     symbols from the test tools whose entry points had not been dropped. So it stops the run.
@@ -1625,7 +1652,7 @@ def entry_point_anchor(entry_archives, game_target_built):
             False
     if game_target_built:
         raise SystemExit(
-            f"FAIL: {GAME_ENTRY_TARGET} is in this build, but no archive defines the entry point "
+            f"FAIL: {entry_target} is in this build, but no archive defines the entry point "
             f"`{platform_symbol(ENTRY_SYMBOL)}`, so there is nothing to link the game through. "
             "Refusing to substitute a generated stub main(): that would report a link of a "
             "three-line program as a link of the game, which is the failure mode this harness "
@@ -1634,13 +1661,14 @@ def entry_point_anchor(entry_archives, game_target_built):
             f"`{NM} --defined-only --extern-only` over the archives says which.")
     return ("// Generated by scripts/native-build.py: an entry point so the linker has something\n"
             "// to anchor to, because the game's own entry-point target is not in the selected\n"
-            f"// levels ({GAME_ENTRY_TARGET} is level 3). The archives are pulled in whole, so\n"
+            f"// levels ({entry_target} is level 3). The archives are pulled in whole, so\n"
             "// what matters is what they reference.\n"
             "int main() { return 0; }\n"), True
 
 
 def link_probe(build_dir, archives, support_archives=(), link_zlib=False, openal_path=None,
-               extra_libraries=(), extra_link_args=(), game_target_built=False):
+               extra_libraries=(), extra_link_args=(), *, entry_target,
+               game_target_built=False):
     """Run the linker over every archive, so "no linker has ever run" stops being true.
 
     `--whole-archive` forces every object in, since a trivial main() otherwise pulls in nothing,
@@ -1653,7 +1681,7 @@ def link_probe(build_dir, archives, support_archives=(), link_zlib=False, openal
     """
     entry_point = archives_defining_main(archives)
     stub = build_dir / "native_link_probe.cpp"
-    text, stub_used = entry_point_anchor(entry_point, game_target_built)
+    text, stub_used = entry_point_anchor(entry_point, entry_target, game_target_built)
     stub.write_text(text)
     out = build_dir / "native_link_probe"
     if sys.platform == "darwin":
@@ -1727,7 +1755,7 @@ def parse_strict_link_log(log):
 
 def strict_link(build_dir, archives, support_archives=(), link_zlib=False,
                 openal_path=None, extra_libraries=(), extra_link_args=(),
-                game_target_built=False):
+                *, entry_target, game_target_built=False):
     """Link with no tolerance for unresolved symbols, i.e. attempt an actual executable.
 
     `link_probe` above passes `--warn-unresolved-symbols`, which is why it produces a file: the
@@ -1744,7 +1772,7 @@ def strict_link(build_dir, archives, support_archives=(), link_zlib=False,
     """
     entry_point = archives_defining_main(archives)
     stub = build_dir / "native_strict_link.cpp"
-    text, _ = entry_point_anchor(entry_point, game_target_built)
+    text, _ = entry_point_anchor(entry_point, entry_target, game_target_built)
     stub.write_text("// Generated by scripts/native-build.py for the strict link.\n" + text)
     out = build_dir / "native_strict_link"
     if out.exists():
@@ -2090,6 +2118,7 @@ def render_report(data, examples):
         "bash scripts/ci/fetch-probe-deps.sh",
         f"python3 scripts/native-build.py {' '.join(f'--level {n}' for n in data['levels'])}"
         + (" --with-shims" if data["with_shims"] else "")
+        + (f" --game {data['game']}" if data.get("game", "zerohour") != "zerohour" else "")
         + (f" --config {data['config']}" if data.get("config", "release") != "release" else "")
         + (" --unoptimised" if data.get("config", "release") == "release"
            and not data.get("optimised") else "")
@@ -2105,7 +2134,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--level", action="append", type=int, choices=sorted(LEVELS),
                         help="build order level to include; repeatable (default: 1)")
-    parser.add_argument("--build-dir", default=str(REPO_ROOT / "build" / "native"))
+    parser.add_argument("--game", choices=sorted(GAMES), default="zerohour",
+                        help="which game's tree to build; Core/ is shared (default: zerohour)")
+    parser.add_argument("--build-dir",
+                        help="default: build/native, or build/native-generals for --game generals")
     parser.add_argument("--deps-dir", default=str(npt.DEFAULT_DEPS_DIR))
     parser.add_argument("--report")
     parser.add_argument("--json", dest="json_out")
@@ -2127,13 +2159,16 @@ def main():
                         help="how many example symbols to list per category")
     args = parser.parse_args()
 
+    game = GAMES[args.game]
+    entry_target = game_entry_target(game)
     levels = sorted(set(args.level or [1]))
     config_defines = CONFIG_DEFINES[args.config]
     optimise = CONFIG_OPTIMISED[args.config] and not args.unoptimised
-    wanted = [name for level in levels for name in LEVELS[level]]
-    # ALL_TARGETS, not npt.TARGETS: level 3's device and entry-point libraries live in the probe's
-    # RENDERER_TARGETS list, which is where the probe keeps everything never compiled off Windows.
-    targets = [t for t in ALL_TARGETS if t.name in wanted]
+    wanted = [name for level in levels for name in level_targets(level, game)]
+    # all_targets, not the default list: level 3's device and entry-point libraries live in the
+    # probe's renderer list, which is where the probe keeps everything never compiled off Windows.
+    game_all_targets = all_targets(game)
+    targets = [t for t in game_all_targets if t.name in wanted]
     missing = set(wanted) - {t.name for t in targets}
     if missing:
         raise SystemExit(f"probe has no target definition for: {', '.join(sorted(missing))}")
@@ -2146,7 +2181,8 @@ def main():
             f"{deps_dir} does not exist. Run scripts/ci/fetch-probe-deps.sh first: without the "
             "fetched SDK headers the result is not comparable with the probe baselines.")
 
-    build_dir = pathlib.Path(args.build_dir).resolve()
+    default_build_dir = "native" if args.game == "zerohour" else f"native-{args.game}"
+    build_dir = pathlib.Path(args.build_dir or REPO_ROOT / "build" / default_build_dir).resolve()
     manifest_dir = build_dir / "manifests"
 
     print(f"== generating manifests ({args.config} configuration"
@@ -2261,7 +2297,7 @@ def main():
     support_archives = [a for a in all_archives if a.stem.endswith(support_slugs)]
     archives = [a for a in all_archives if a not in support_archives]
     game_archive = next(
-        (a for a in archives if a.stem == f"lib{slug(GAME_ENTRY_TARGET)}"), None)
+        (a for a in archives if a.stem == f"lib{slug(entry_target)}"), None)
     dropped_entry_points = (drop_rival_entry_points(archives, game_archive)
                             if game_archive is not None else [])
     if dropped_entry_points:
@@ -2283,16 +2319,17 @@ def main():
     # Whether the game's own entry-point target is in this build at all. It decides whether a
     # generated stub `main()` is a legitimate anchor or a silent substitution the run must refuse:
     # see `entry_point_anchor`.
-    game_target_built = any(t.name == GAME_ENTRY_TARGET for t in link_targets)
+    game_target_built = any(t.name == entry_target for t in link_targets)
     link_ok, binary_produced, _, entry_archives, stub_main = link_probe(
         build_dir, archives, support_archives, link_zlib=zlib_path is not None,
         openal_path=openal_path, extra_libraries=link_extra,
-        extra_link_args=platform_link_args, game_target_built=game_target_built)
+        extra_link_args=platform_link_args, entry_target=entry_target,
+        game_target_built=game_target_built)
     if entry_archives:
         print(f"   entry point from {', '.join(entry_archives)} "
               f"(`{platform_symbol(ENTRY_SYMBOL)}`, no stub main)")
     else:
-        print(f"   entry point: this script's stub main(), because {GAME_ENTRY_TARGET} is not in "
+        print(f"   entry point: this script's stub main(), because {entry_target} is not in "
               "this build")
     strict_referenced_by = None
     strict_ok = strict_binary = False
@@ -2302,7 +2339,8 @@ def main():
         strict_ok, strict_binary, strict_referenced_by, strict_log = strict_link(
             build_dir, archives, support_archives, link_zlib=zlib_path is not None,
             openal_path=openal_path, extra_libraries=link_extra,
-            extra_link_args=platform_link_args, game_target_built=game_target_built)
+            extra_link_args=platform_link_args, entry_target=entry_target,
+            game_target_built=game_target_built)
         # Kept, because a link can fail with zero *unresolved* symbols -- a duplicate definition, a
         # missing framework, a linker crash -- and then the parsed symbol list says nothing at all
         # about why there is no executable.
@@ -2328,7 +2366,7 @@ def main():
     built_sources = [s for s in all_sources if s not in failed]
     # Everything the probe knows about but this build does not include: the renderer and audio
     # layers, plus any level not selected. A symbol they define is out of scope here, not missing.
-    unbuilt = [t for t in ALL_TARGETS if t not in targets]
+    unbuilt = [t for t in game_all_targets if t not in targets]
     unbuilt_sources = [s for t in unbuilt for s in npt.target_sources(t)]
     keys_owner = well_known_keys_owner()
     attribution = Attribution(
@@ -2420,6 +2458,7 @@ def main():
         # the debug build compiles code -- assertions, debug logging, profiling hooks -- that the
         # release build never sees, so it has a larger surface and its own failure list.
         "config": args.config,
+        "game": args.game,
         "config_defines": list(config_defines),
         # -O2 or -O0. Unresolved symbols can differ between the two (inlining, dead-code
         # elimination), so the baseline check refuses to compare across them as across configs.
