@@ -1,7 +1,8 @@
 # Running the native macOS build
 
-How to get the game on screen on an Apple Silicon Mac, start to finish. Everything here was run on
-2026-09-11 against `main` at `097101125`; the numbers are what that run produced, not estimates.
+How to get Zero Hour, or the base game Generals, on screen on an Apple Silicon Mac, start to
+finish. Everything here was run on 2026-10-18 against `main` at `0047fd94f`; the numbers are what
+that run produced, not estimates.
 
 The build takes ~20 minutes from cold. Section 0 is once per machine; after that, playing again is
 section 3 alone.
@@ -43,12 +44,16 @@ A release build says *nothing* when this mount fails; you just get a magenta bac
 STRING_InstallPath=/Users/willhoff/devin-work/zh-data/ZH_Generals
 ```
 
+The base game needs none of this: Generals is self-contained and runs from its own archives
+(§2).
+
 Do **not** symlink the two archive sets into one directory — the names collide and
 `Data\INI\Weapon.ini` fails to parse. See [`../porting/base-game-install-path.md`](../porting/base-game-install-path.md).
 
 **0.3 Optional: edge scrolling in windowed mode.** The engine disables screen-edge camera scroll
 outside fullscreen by default, which makes a windowed game feel like the camera is stuck. In
-`~/Library/Application Support/Command and Conquer Generals Zero Hour Data/Options.ini`:
+`~/Library/Application Support/Command and Conquer Generals Zero Hour Data/Options.ini` (Zero Hour)
+or `~/Library/Application Support/Command and Conquer Generals Data/Options.ini` (Generals):
 
 ```ini
 ScreenEdgeScrollEnabledInWindowedApp = yes
@@ -56,7 +61,13 @@ ScreenEdgeScrollEnabledInWindowedApp = yes
 
 Camera drag is the **right** mouse button; left-drag is the selection box and middle-drag rotates.
 
-**0.4 Grants, only if you want to script input or screenshots.** The terminal needs Accessibility
+**0.4 Check the detail level once.** Before #180 the engine read the machine's RAM as 0, so it
+auto-detected the detail level as Low and wrote `IdealStaticGameLOD = Low` to `Options.ini`. It
+never re-detects a saved level, so an install that ran an older build stays Low, with Low textures
+and no trees, until you pick a level in Options. See
+[`../porting/physical-memory.md`](../porting/physical-memory.md).
+
+**0.5 Grants, only if you want to script input or screenshots.** The terminal needs Accessibility
 (to post input) and Screen Recording (to capture). Playing by hand needs neither.
 
 ```sh
@@ -66,16 +77,26 @@ python3 scripts/macos-input-drive.py capabilities   # all three must be True
 ## 1. Build
 
 ```sh
+# Zero Hour
 python3 scripts/native-build.py --level 1 --level 2 --level 3 --level 4 \
     --with-shims --strict-link --jobs 8 \
-    --build-dir build/native-macos-arm64-$(date +%m%d) \
-    --report ~/devin-work/run$(date +%m%d)/build.md \
-    --json   ~/devin-work/run$(date +%m%d)/build.json
+    --build-dir build/native-macos-arm64-$(date +%m%d)
+
+# Generals (the base game): the same levels with --game generals
+python3 scripts/native-build.py --game generals --level 1 --level 2 --level 3 --level 4 \
+    --with-shims --strict-link --jobs 8 \
+    --build-dir build/native-generals-macos-arm64-$(date +%m%d)
 ```
 
-A good run ends with `981 objects, 0 failures`, `strict link succeeded: 0 unresolved symbol(s)` and
-a ~14.7 MiB binary at `<build-dir>/native_strict_link`. Confirm it is really arm64 — `lipo -archs`
-should say `arm64` and nothing else.
+Add `--report <file>.md --json <file>.json` to either for the full report.
+
+| | Objects | Strict link | Binary |
+|---|---:|---|---:|
+| Zero Hour | 981 / 981 | 0 unresolved | 14.7 MiB |
+| Generals | 946 / 946 | 0 unresolved | 14.0 MiB |
+
+The binary is `<build-dir>/native_strict_link`. Confirm it is really arm64: `lipo -archs` should say
+`arm64` and nothing else.
 
 The release build is optimised (`-O2`, with `-fmath-errno` so replays stay in sync); before
 `docs/porting/optimised-native-build.md` it was `-O0`, ~26.8 MiB, and its late-game logic ran
@@ -91,27 +112,40 @@ The game runs from a directory of symlinks into the retail install, so nothing r
 nothing retail lands in the repo:
 
 ```sh
-RUN=~/devin-work/run0911/run
+# Zero Hour: every entry of the Zero Hour install
+RUN=~/devin-work/run1018/zh
 mkdir -p "$RUN"
 for entry in ~/devin-work/zh-data/*; do ln -sfn "$entry" "$RUN/$(basename "$entry")"; done
-cp build/native-macos-arm64-0911/native_strict_link "$RUN/zh"
+cp build/native-macos-arm64-1018/native_strict_link "$RUN/zh"
+
+# Generals: every entry of the base game's install
+RUN=~/devin-work/run1018/generals
+mkdir -p "$RUN"
+for entry in ~/devin-work/zh-data/ZH_Generals/*; do ln -sfn "$entry" "$RUN/$(basename "$entry")"; done
+cp build/native-generals-macos-arm64-1018/native_strict_link "$RUN/generals"
 ```
 
-That is 53 symlinks, `Data/` among them — which is how the loose `Data/Cursors/*.ani` reach the
-mouse seam. A tree with no `Data/Cursors` gets the platform's default arrow, silently.
+That is 53 symlinks for Zero Hour and 18 for Generals, `Data/` among them in each. That is how the
+loose `Data/Cursors/*.ani` reach the mouse seam. A tree with no `Data/Cursors` gets the platform's
+default arrow, silently.
 
 ## 3. Play
 
-```sh
-cd ~/devin-work/run0911/run && arch -arm64 ./zh -win
-```
-
-Fullscreen is a window sized to the display, not a mode switch, so it needs the size passed
-explicitly — on the project's M1 Pro (1728x1117 points):
+Fullscreen is a window sized to the display, not a mode switch, so it needs the display's size in
+points passed explicitly. On the project's M1 Pro that is 1728x1117:
 
 ```sh
-cd ~/devin-work/run0911/run && arch -arm64 ./zh -xres 1728 -yres 1117
+cd ~/devin-work/run1018/zh       && arch -arm64 ./zh       -xres 1728 -yres 1117
+cd ~/devin-work/run1018/generals && arch -arm64 ./generals -xres 1728 -yres 1117
 ```
+
+Your display's size in points, if it is not 1728x1117:
+
+```sh
+osascript -l JavaScript -e 'ObjC.import("AppKit"); var f = $.NSScreen.mainScreen.frame; f.size.width + "x" + f.size.height'
+```
+
+In a window instead, replace the size with `-win`.
 
 Without `-xres/-yres` the fullscreen path leaves an 800x600 window at the top-left: `Apply_Fullscreen()`
 sizes the window to the screen, then `DX8Wrapper::Resize_And_Position_Window()` shrinks it back to
@@ -121,7 +155,8 @@ off Windows there is no mode switch. See §"Known" below.
 Other useful flags: `-noshellmap` (skip the animated menu background), `-nologo` (skip the intro
 movie; Escape also skips it).
 
-**To quit:** the `zh` menu's **Quit zh** item, Cmd-Q, or the window's close button. All three run
+**To quit:** the app menu's **Quit** item (named after the binary, `zh` or `generals`), Cmd-Q, or
+the window's close button. All three run
 the engine's own shutdown and exit 0. (Before #160 the menu was empty and Cmd-Q did nothing, so the
 only way out was Force Quit — which then aborted in static destruction.)
 
@@ -162,10 +197,22 @@ and a screenshot never captures the cursor.
   `ThreadClass::Switch_Thread()` -> `EventClass::Wait()` (`platform_thread.cpp:76`), a mutex
   destroyed under a live thread. #159 fixed the OpenAL instance of this family and #160 stopped the
   quit path reaching it; this one is open and unowned.
-- The intro `.bik` shows a corrupted column down the left edge. The menu render immediately after is
-  clean, so it is confined to the video path.
+- The intro `.bik` shows a corrupted band down the left edge. The menu render immediately after is
+  clean, so it is confined to the video path. Since #180 the full-size `Sizzle` movie plays instead
+  of `Sizzle640`, and the band is wider: about a third of the frame at 1728x1117, MEASURED on
+  2026-10-18. `-nologo` or Escape skips it.
+- **Generals: `macos-input-drive.py buttons` prints no window names.** The positions are right and
+  `click --client x,y` works; the names do not resolve against the Generals binary. OBSERVED.
 
 ### Fixed since the previous revision of this guide
+
+- **The base game runs.** Generals builds with `--game generals` (#178), renders through DX8Wrapper
+  instead of crashing on a null D3D8 device (#179), and reaches the menu and the USA campaign
+  (`../porting/generals-native-build.md`, `../porting/generals-renderer-routing.md`).
+- **Every Mac was treated as below minimum spec.** The engine read 0 bytes of RAM, so both games
+  played the 640 intro movies, turned off trees and forced Low textures at the preset levels,
+  skipped the Generals briefing video and auto-detected Low detail. Fixed in #180
+  (`../porting/physical-memory.md`). See §0.4 for existing installs.
 
 - **Score screen buttons dead after a skirmish ended naturally.** If the camera was scrolling when
   the game was won or lost (for example with the pointer resting on a screen edge), the view kept
