@@ -8,7 +8,6 @@ else()
 endif()
 
 target_link_libraries(g_generals PRIVATE
-    binkstub
     comctl32
     d3d8
     d3dx8
@@ -22,6 +21,11 @@ target_link_libraries(g_generals PRIVATE
     vfw32
     winmm
 )
+
+# Windows-only dependency; see docs/porting/video-and-harness-headers.md.
+if(TARGET binkstub)
+    target_link_libraries(g_generals PRIVATE binkstub)
+endif()
 
 # TODO Originally referred to build host and user, replace with git info perhaps?
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/GeneratedVersion.h
@@ -64,10 +68,18 @@ target_include_directories(g_generals PRIVATE
     ${CMAKE_BINARY_DIR}/Code/Libraries
 )
 
-target_sources(g_generals PRIVATE
-    WinMain.cpp
-    WinMain.h
-)
+if(WIN32)
+    target_sources(g_generals PRIVATE
+        WinMain.cpp
+        WinMain.h
+    )
+else()
+    # TheSuperHackers @port WinMain.cpp is a WndProc and a WinMain; neither exists here. See
+    # docs/porting/window-event-loop.md.
+    target_sources(g_generals PRIVATE
+        PlatformMain.cpp
+    )
+endif()
 
 # RC files are optional for MinGW builds
 # Icon: LoadIcon() handles missing resource gracefully (uses default system icon)
