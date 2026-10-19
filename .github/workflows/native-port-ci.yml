@@ -955,6 +955,20 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Off Windows the engine recorded 0 bytes of RAM, so GameLODManager judged every machine under
+      # its 256 MB minimum. This requires the total to be the OS's. See docs/porting/physical-memory.md.
+      - name: Prove the engine reads the machine's physical memory
+        env:
+          CLANGXX: clang++-14
+        run: |
+          set -o pipefail
+          {
+            echo '## Physical memory as the engine records it'
+            echo '```'
+            python3 scripts/native-physical-memory-test.py
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # A leftover process holding the instance lock made every launch return from main in silence.
       # This holds the lock and requires the refusal to name the file and the holder, and requires
       # the successful path to stay quiet. See docs/porting/init-failure-reporting.md.
