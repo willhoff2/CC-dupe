@@ -26,6 +26,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include "platform/platform_win32_compat.h"
 #endif
 
 #ifdef _UNIX
@@ -918,6 +920,18 @@ void CPUDetectClass::Init_Memory()
    AvailableVirtualMemory  = mem.ullAvailVirtual;
 #endif // defined(_MSC_VER) && _MSC_VER < 1300
 
+#elif defined(WWPLATFORM_WIN32_COMPAT)
+	// TheSuperHackers @port The platform layer's GlobalMemoryStatus() reads sysctl/sysinfo. Left at 0,
+	// GameLODManager judged every machine under its 256 MB minimum; see docs/porting/physical-memory.md.
+	MEMORYSTATUS mem;
+	GlobalMemoryStatus(&mem);
+
+	TotalPhysicalMemory     = mem.dwTotalPhys;
+	AvailablePhysicalMemory = mem.dwAvailPhys;
+	TotalPageMemory         = mem.dwTotalPageFile;
+	AvailablePageMemory     = mem.dwAvailPageFile;
+	TotalVirtualMemory      = mem.dwTotalVirtual;
+	AvailableVirtualMemory  = mem.dwAvailVirtual;
 #else
 #warning FIX Init_Memory()
 #endif // WIN32
