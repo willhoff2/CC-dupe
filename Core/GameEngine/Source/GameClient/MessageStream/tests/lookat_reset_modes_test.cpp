@@ -26,6 +26,13 @@
 // therefore reached the score screen locked, with InGameUI::reset() clearing the one exception --
 // and no shell button answered a click. Measured on the Mac: docs/porting/game-end-mouse-lock.md.
 //
+//
+// A campaign cinematic is the same disable with the game going on afterwards. WindowTranslator
+// drops every key but ESC while input is disabled, so an arrow released during the cinematic never
+// reaches LookAtTranslator, whose held-arrow record then made the next key event after
+// ENABLE_INPUT scroll the camera in that direction until the arrow was pressed again.
+// Measured on the Mac: docs/porting/campaign-cinematic-camera-drift.md.
+//
 // Real code throughout: LookAtTranslator, InGameUI (a subclass supplying its two pure virtuals),
 // the engine's ViewDummy and MouseDummy, linked from the archives scripts/native-build.py builds.
 // Scrolling is started through translateGameMessage() with the raw messages a player produces.
@@ -160,6 +167,42 @@ void startRightDragScroll(LookAtTranslator &translator)
 	sendRightButton(translator, GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN);
 }
 
+void sendKey(LookAtTranslator &translator, Int key, Bool down)
+{
+	send(translator, down ? GameMessage::MSG_RAW_KEY_DOWN : GameMessage::MSG_RAW_KEY_UP, key,
+		down ? KEY_STATE_DOWN : KEY_STATE_UP);
+}
+
+// The player is scrolling with an arrow key when a cinematic's DISABLE_INPUT runs. The key-up for
+// that arrow arrives during the cinematic and WindowTranslator drops it, so it is not sent here.
+void arrowReleasedDuringCinematic(LookAtTranslator &translator)
+{
+	TheInGameUI->setInputEnabled(true);
+	sendKey(translator, KEY_LEFT, TRUE);
+	Check("  the held arrow scrolls (precondition)", TheInGameUI->isScrolling());
+	disableInputAsTheGameEnds();
+	TheInGameUI->setInputEnabled(true);	// ScriptActions::doEnableInput()
+}
+
+void cinematicReleasedArrow()
+{
+	std::printf("-- arrow released during a cinematic, another arrow tapped afterwards\n");
+	arrowReleasedDuringCinematic(*TheLookAtTranslator);
+	sendKey(*TheLookAtTranslator, KEY_RIGHT, TRUE);
+	sendKey(*TheLookAtTranslator, KEY_RIGHT, FALSE);
+	Check("  no scroll once the tapped arrow is released", !TheInGameUI->isScrolling());
+	Check("  the tactical view is unlocked", !TheTacticalView->isMouseLocked());
+
+	std::printf("-- arrow held through a whole cinematic\n");
+	arrowReleasedDuringCinematic(*TheLookAtTranslator);
+	// Keyboard::checkKeyRepeat() keeps sending key-downs for a key that is still held.
+	send(*TheLookAtTranslator, GameMessage::MSG_RAW_KEY_DOWN, KEY_LEFT,
+		KEY_STATE_DOWN | KEY_STATE_AUTOREPEAT);
+	Check("  its repeat scrolls again once input is back", TheInGameUI->isScrolling());
+	sendKey(*TheLookAtTranslator, KEY_LEFT, FALSE);
+	Check("  and releasing it stops the scroll", !TheInGameUI->isScrolling());
+}
+
 }	// namespace
 
 int main()
@@ -199,6 +242,8 @@ int main()
 	Check("  a new key scroll locks the view again", TheTacticalView->isMouseLocked());
 	send(*translator, GameMessage::MSG_RAW_KEY_UP, KEY_RIGHT, KEY_STATE_UP);
 	Check("  releasing the key unlocks it", !TheTacticalView->isMouseLocked());
+
+	cinematicReleasedArrow();
 
 	std::printf("%d failed checks\n", Failures);
 	std::fflush(stdout);

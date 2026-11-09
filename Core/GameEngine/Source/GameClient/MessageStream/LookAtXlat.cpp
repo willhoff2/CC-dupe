@@ -775,6 +775,10 @@ void LookAtTranslator::resetModes()
 	// view's mouse lock, which otherwise outlives the game and blocks every button on the score screen.
 	if (m_isScrolling)
 		stopScrolling();
+	// TheSuperHackers @bugfix Forget the held arrow keys too: WindowTranslator drops their key-ups while
+	// input is disabled, and a stale one kept the camera scrolling after a cinematic until pressed again.
+	for (Int i = 0; i < ARRAY_SIZE(scrollDir); ++i)
+		scrollDir[i] = false;
 	m_isRotating = FALSE;
 	m_isPitching = FALSE;
 	m_isPitchingToDefault = FALSE;
