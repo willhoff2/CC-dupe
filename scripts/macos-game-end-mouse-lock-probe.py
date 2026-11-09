@@ -231,8 +231,7 @@ class GameSession:
             state = self.state()
             count = reader.integer("TheShell->m_screenCount") or 0
             state["shell_top"] = reader.text(
-                "(const char*)TheShell->m_screenStack[%d]->m_filenameString.str()" % (count - 1)
-            ) if count else None
+                self.drive.SHELL_SCREEN_NAME % (count - 1)) if count else None
             return state
         return self.stopped(work)
 
