@@ -313,6 +313,11 @@ def screenshot(window, out_path):
 MENU_BUTTON_PREFIXES = ("Button", "Radio", "Check", "Combo", "List", "Text", "Static")
 
 
+# AsciiString::str() is inline and the optimised build emits no out-of-line copy for LLDB to call;
+# the characters follow the AsciiStringData header that m_data points at.
+SHELL_SCREEN_NAME = "(const char*)(TheShell->m_screenStack[%d]->m_filenameString.m_data + 1)"
+
+
 class EngineReader:
     """A short-lived LLDB attachment. The process is stopped for the duration and resumed by
     `detach()`, so the game keeps running between subcommands."""
@@ -389,7 +394,7 @@ class EngineReader:
         }
         count = report["shell_screen_count"] or 0
         report["shell_stack"] = [
-            self.text("(const char*)TheShell->m_screenStack[%d]->m_filenameString.str()" % index)
+            self.text(SHELL_SCREEN_NAME % index)
             for index in range(count)]
         if report["shell_stack"]:
             report["shell_top"] = report["shell_stack"][-1]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End a game mid-scroll through the real LookAtTranslator and check the tactical view unlocks.
+"""Disable input mid-scroll through the real LookAtTranslator and check the scroll is forgotten.
 
 `Core/GameEngine/Source/GameClient/MessageStream/tests/lookat_reset_modes_test.cpp` starts a key
 scroll and a right-drag scroll with the raw messages a player produces, runs what
@@ -8,6 +8,11 @@ scroll and a right-drag scroll with the raw messages a player produces, runs wha
 `WindowTranslator` drops every message before the score screen's buttons see it. Before the fix
 `LookAtTranslator::resetModes()` cleared the scroll flag without `stopScrolling()`, the lock stayed
 set, and the checks fail. See docs/porting/game-end-mouse-lock.md.
+
+The same file plays a campaign cinematic that disables input while an arrow key scrolls, the
+key coming up during the cinematic (where `WindowTranslator` drops it), and asserts that the next
+arrow tapped after `ENABLE_INPUT` does not leave the camera scrolling towards the released one.
+See docs/porting/campaign-cinematic-camera-drift.md.
 
 The harness is linked against the archives scripts/native-build.py produced, with the compile flags
 and the link recipe read out of scripts/native-render-backend-run.py, as
@@ -72,11 +77,11 @@ def main():
             print(f"\nFAILED: the harness died on signal {-proc.returncode} before answering")
             return 1
         if proc.returncode != 0:
-            print("\nFAILED: a game that ends while the camera scrolls leaves the tactical view "
-                  "mouse-locked, and every shell button on the score screen is dead")
+            print("\nFAILED: disabling input mid-scroll leaves scroll state behind: a mouse-locked "
+                  "score screen, or a camera that drifts after a campaign cinematic")
             return 1
-        print("\nOK: ending the game mid-scroll unlocks the tactical view, and scrolling still "
-              "locks and unlocks it afterwards")
+        print("\nOK: disabling input mid-scroll unlocks the tactical view and forgets the held "
+              "arrows, and scrolling still locks and unlocks it afterwards")
         return 0
     finally:
         if args.keep:

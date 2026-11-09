@@ -55,7 +55,10 @@ MEASURED on Linux only: USA-01 campaign scripts/objectives/triggers execute head
    on the Mac, mechanism INFERRED from source (joinable service thread or diagnostics/static
    destruction order), not yet reproduced.
 2. **Cursor rows still UNMEASURED** after the user confirmed #157 by hand: drag across the edge
-   with a button held, multi-display, hide-on-cinematic, seven scroll directions.
+   with a button held, multi-display, hide-on-cinematic, seven scroll directions. Hide-on-cinematic
+   is half measured: the engine's `TheMouse->m_visible` is 0 during USA-01's cinematics and 1 after,
+   with the pointer captured throughout (`campaign-cinematic-camera-drift.md`); the `NSCursor` side
+   is still UNMEASURED.
 3. **Fullscreen is not fullscreen without `-xres/-yres`**: re-MEASURED 2026-09-30, where the window
    server reports the window at `[0, 32, 800, 600]`. With the screen's point size passed it covers
    the screen, unstretched. The fix is for fullscreen to default the engine resolution to the
@@ -73,7 +76,14 @@ MEASURED on Linux only: USA-01 campaign scripts/objectives/triggers execute head
 5. **Campaign beyond mission entry** on the Mac: natural victory / next-mission transition,
    in-mission movies, EVA (Linux probe exists, Mac UNMEASURED).
 6. Logic FPS without probe overhead; ≥20-min soak on the post-#155 shim.
-7. **Mid-scroll input disable in campaign cinematics** (`DISABLE_INPUT` while scrolling): the same `resetModes` defect as the dead score screen, fixed by the same change but UNMEASURED live.
+7. **Mid-scroll input disable in campaign cinematics** (`DISABLE_INPUT` while scrolling): MEASURED
+   live on USA-01's train cinematic, with the cinematic forced by setting `Go Train Go`. #168's
+   `stopScrolling()` releases the lock as intended. A second defect remained: an arrow released
+   during the cinematic left its `scrollDir[]` flag set, because #2621's `WindowTranslator` drops the
+   key-up, and the camera then scrolled after `ENABLE_INPUT` until that arrow was pressed again (the
+   user's "drags left" report). Fixed in `resetModes()` on `fix/campaign-cinematic-camera-drift`
+   (`campaign-cinematic-camera-drift.md`). Still owed: a natural run from a save made just before
+   the depot capture, and the user's confirmation.
 
 ### Process rules that were learned the hard way
 

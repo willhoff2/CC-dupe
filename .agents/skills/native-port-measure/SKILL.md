@@ -171,7 +171,7 @@ python3 scripts/native-init-failure-test.py
 python3 scripts/native-base-game-install-test.py
 python3 scripts/native-memory-shutdown-test.py       # allocator critical sections outlive statics
 python3 scripts/native-exit-teardown-test.py         # object pools destroyed after the allocator
-python3 scripts/native-lookat-reset-modes-test.py    # game ended mid-scroll releases the mouse lock
+python3 scripts/native-lookat-reset-modes-test.py    # input disabled mid-scroll: mouse lock released, arrows forgotten
 python3 scripts/native-tunnel-guard-null-attack-state-test.py # no null attack state in tunnel guard
 python3 scripts/native-lock-failure-test.py
 python3 scripts/native-physical-memory-test.py   # engine's RAM total is the OS's, not 0
