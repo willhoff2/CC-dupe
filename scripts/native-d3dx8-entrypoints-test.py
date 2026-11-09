@@ -36,6 +36,7 @@ import argparse
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -81,6 +82,11 @@ COMPILE_FLAGS = [
 SANITIZER_FLAGS = ["-O1", "-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
 PLAIN_FLAGS = ["-O0"]
 
+# Above 28 bits of mmap entropy, clang 14's AddressSanitizer can segfault at startup, silently and
+# only on some runs (actions/runner-images#9491), so the sanitized binaries run with ASLR off.
+MMAP_RND_BITS = pathlib.Path("/proc/sys/vm/mmap_rnd_bits")
+SANITIZER_SAFE_RND_BITS = 28
+
 SUITES = {
     # dx8fvf.cpp is linked in as the second oracle: it derives the same layout from the same bits
     # without calling the function under test. wwstring.cpp is what dx8fvf.cpp's debug-only
@@ -124,7 +130,24 @@ def run(command, verbose, **kwargs):
     return subprocess.run(command, **kwargs)
 
 
-def sanitizers_work(build_dir, verbose):
+def sanitized_launcher():
+    """The prefix that runs a sanitized binary with an address layout ASan can start in."""
+    if not MMAP_RND_BITS.is_file():
+        return []
+    rnd_bits = int(MMAP_RND_BITS.read_text())
+    if rnd_bits <= SANITIZER_SAFE_RND_BITS:
+        return []
+    launcher = ["setarch", os.uname().machine, "--addr-no-randomize"]
+    refusal = subprocess.run(launcher + ["true"], capture_output=True, text=True)
+    if refusal.returncode != 0:
+        sys.exit(f"FAILED: vm.mmap_rnd_bits is {rnd_bits}, too high for the sanitizers, and ASLR "
+                 f"cannot be turned off for the test binaries ({refusal.stderr.strip()}). Set "
+                 "vm.mmap_rnd_bits=28 on the host, or pass --no-sanitizers.")
+    print(f"NOTE: vm.mmap_rnd_bits is {rnd_bits}, so the sanitized binaries run with ASLR off")
+    return launcher
+
+
+def sanitizers_work(build_dir, launcher, verbose):
     """Whether this toolchain can build and run a sanitized binary at all."""
     source = build_dir / "sanitizer-probe.cpp"
     source.write_text("int main() { return 0; }\n")
@@ -132,10 +155,10 @@ def sanitizers_work(build_dir, verbose):
     command = [CLANGXX] + SANITIZER_FLAGS + [str(source), "-o", str(binary)]
     if run(command, verbose, capture_output=True).returncode != 0:
         return False
-    return run([str(binary)], verbose, capture_output=True).returncode == 0
+    return run(launcher + [str(binary)], verbose, capture_output=True).returncode == 0
 
 
-def build_and_run(name, suite, build_dir, flags, verbose):
+def build_and_run(name, suite, build_dir, flags, launcher, verbose):
     binary = build_dir / f"d3dx8_{name}_test"
     command = [CLANGXX] + COMPILE_FLAGS + flags
     for include in INCLUDES:
@@ -147,7 +170,12 @@ def build_and_run(name, suite, build_dir, flags, verbose):
         print(f"FAILED: the {name} suite did not compile or link")
         return False
 
-    if run([str(binary)], verbose).returncode != 0:
+    returncode = run(launcher + [str(binary)], verbose).returncode
+    if returncode < 0:
+        print(f"FAILED: the {name} suite died on {signal.Signals(-returncode).name} before it "
+              "could report")
+        return False
+    if returncode != 0:
         print(f"FAILED: {suite['description']} -- it does not")
         return False
 
@@ -179,18 +207,21 @@ def main():
 
     build_dir = pathlib.Path(tempfile.mkdtemp(prefix="d3dx8-entrypoints-test-"))
     try:
+        launcher = []
         if args.no_sanitizers:
             flags = PLAIN_FLAGS
-        elif sanitizers_work(build_dir, args.verbose):
-            flags = SANITIZER_FLAGS
         else:
-            flags = PLAIN_FLAGS
-            print("NOTE: this toolchain cannot build sanitized binaries, so the strided-memory "
-                  "checks are the guard bytes only")
+            launcher = sanitized_launcher()
+            if sanitizers_work(build_dir, launcher, args.verbose):
+                flags = SANITIZER_FLAGS
+            else:
+                flags = PLAIN_FLAGS
+                print("NOTE: this toolchain cannot build sanitized binaries, so the strided-memory "
+                      "checks are the guard bytes only")
 
         failures = 0
         for name in (args.suite or sorted(SUITES)):
-            if not build_and_run(name, SUITES[name], build_dir, flags, args.verbose):
+            if not build_and_run(name, SUITES[name], build_dir, flags, launcher, args.verbose):
                 failures += 1
 
         return 1 if failures else 0
